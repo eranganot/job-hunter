@@ -125,6 +125,10 @@ def _migrate(conn: sqlite3.Connection):
         ("user_profiles", "schedule_frequency TEXT DEFAULT 'weekly'"),
         ("user_profiles", "search_day_of_week INTEGER DEFAULT 1"),
         ("user_profiles", "apply_day_of_week INTEGER DEFAULT 1"),
+        ("jobs",          "match_score INTEGER DEFAULT NULL"),
+        ("jobs",          "candidate_score INTEGER DEFAULT NULL"),
+        ("jobs",          "status_check TEXT DEFAULT NULL"),
+        ("jobs",          "status_checked_date TEXT DEFAULT NULL"),
     ]
     for table, col_def in additions:
         col_name = col_def.split()[0]
