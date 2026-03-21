@@ -158,6 +158,168 @@ def file_watcher():
         check_notifications()
         time.sleep(30)
 
+
+def run_job_search(user_id: int):
+    """Search for new jobs via Anthropic web-search and insert into DB."""
+    try:
+        conn = database.get_db()
+        profile = conn.execute(
+            "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        conn.close()
+
+        if not profile:
+            print(f"[run-search] No profile for user {user_id}")
+            return
+
+        import urllib.request as _ur
+        import urllib.error  as _ue
+
+        try:
+            titles    = json.loads(profile["job_titles"] or "[]")
+            keywords  = json.loads(profile["keywords"]   or "[]")
+            locations = json.loads(profile["locations"]  or "[]")
+        except Exception:
+            titles, keywords, locations = [], [], ["Tel Aviv"]
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        prompt = (
+            "You are a job-search assistant for an Israeli tech professional. "
+            "Search the web for 6-8 REAL, currently open job listings that match this profile:\n\n"
+            f"Target titles: {', '.join(titles[:6])}\n"
+            f"Key skills: {', '.join(keywords[:10])}\n"
+            f"Locations: {', '.join(locations)} (or remote)\n"
+            f"Seniority: Senior / Director / VP\n\n"
+            "Search LinkedIn Jobs, Glassdoor, AllJobs.co.il, and company career pages. "
+            "Return ONLY a JSON array (no markdown, no explanation) with this exact shape:\n"
+            '[\n'
+            '  {\n'
+            '    "job_title": "exact title from posting",\n'
+            '    "company": "company name",\n'
+            '    "location": "city or Remote",\n'
+            '    "url": "direct link to the job posting",\n'
+            '    "description": "2-3 sentence summary",\n'
+            '    "source": "LinkedIn / Glassdoor / AllJobs / etc",\n'
+            f'    "found_date": "{today}",\n'
+            '    "match_score": <0-100>,\n'
+            '    "candidate_score": <0-100>,\n'
+            '    "fit_reason": "1-2 sentence explanation"\n'
+            '  }\n'
+            ']'
+        )
+
+        body = json.dumps({
+            "model": "claude-opus-4-5-20251101",
+            "max_tokens": 4096,
+            "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+            "messages": [{"role": "user", "content": prompt}]
+        }).encode()
+
+        req = _ur.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body, method="POST",
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "web-search-2025-03-05",
+                "content-type": "application/json"
+            }
+        )
+
+        with _ur.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+
+        text = ""
+        for block in result.get("content", []):
+            if block.get("type") == "text":
+                text = block["text"].strip()
+                break
+
+        # Strip possible markdown code fences
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+
+        jobs_data = json.loads(text)
+
+        conn = database.get_db()
+        inserted = 0
+        for j in jobs_data:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO jobs "
+                    "(user_id,title,company,location,url,description,why_relevant,source,"
+                    "found_date,match_score,candidate_score,status) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new')",
+                    (user_id, j.get("job_title",""), j.get("company",""),
+                     j.get("location",""), j.get("url",""), j.get("description",""),
+                     j.get("fit_reason",""), j.get("source",""), j.get("found_date",today),
+                     j.get("match_score",0), j.get("candidate_score",0)))
+                inserted += 1
+            except Exception as e:
+                print(f"[run-search] insert error: {e}")
+        conn.commit()
+        conn.close()
+
+        database.log_activity(user_id, "jobs_searched",
+                              f"Run Search Now found {inserted} new job(s)")
+        if inserted > 0:
+            deliver_notification(
+                user_id,
+                f"🔍 Job Hunter found {inserted} new match{'es' if inserted != 1 else ''}! "
+                "Check your dashboard."
+            )
+        print(f"[run-search] user {user_id}: inserted {inserted} jobs")
+
+    except Exception as e:
+        print(f"[run-search] Error: {e}")
+        database.log_activity(user_id, "jobs_searched", f"Run Search error: {e}")
+
+
+def run_job_apply(user_id: int) -> int:
+    """Immediately mark all approved jobs for user as applied."""
+    try:
+        conn = database.get_db()
+        jobs = conn.execute(
+            "SELECT id, title, company FROM jobs WHERE user_id=? AND status='approved'",
+            (user_id,)
+        ).fetchall()
+
+        if not jobs:
+            conn.close()
+            return 0
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        for j in jobs:
+            conn.execute(
+                "UPDATE jobs SET status='applied', applied_date=?, notes=? "
+                "WHERE id=? AND user_id=?",
+                (today, "Applied via Apply Now", j["id"], user_id)
+            )
+        conn.commit()
+        count = len(jobs)
+        database.log_activity(user_id, "job_applied",
+                              f"Applied to {count} job(s) via Apply Now")
+        conn.close()
+
+        companies = ", ".join(j["company"] for j in jobs[:3])
+        if count > 3:
+            companies += f" +{count - 3} more"
+        deliver_notification(
+            user_id,
+            f"🚀 Applied to {count} job{'s' if count != 1 else ''}! "
+            f"({companies})"
+        )
+        print(f"[run-apply] user {user_id}: applied to {count} jobs")
+        return count
+
+    except Exception as e:
+        print(f"[run-apply] Error: {e}")
+        return 0
+
+
 # ── Multipart parser ──────────────────────────────────────────────────────────
 
 def parse_multipart(headers, body: bytes) -> dict:
@@ -1909,7 +2071,7 @@ async function loadJobs(status) {
   } else {
     empty.classList.add('hidden');
     let html = '';
-    if (status === 'approved') html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><span class="text-3xl">🚀</span></div>`;
+    if (status === 'approved') html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">🚀 Apply Now</button></div>`;
     html += jobs.map(renderJob).join('');
     list.innerHTML = html;
   }
@@ -1937,6 +2099,8 @@ function setTab(t) {
   document.getElementById('empty-state').classList.toggle('hidden', true);
   const bulkToggle = document.getElementById('bulk-toggle');
   if (bulkToggle) bulkToggle.classList.toggle('hidden', !isNew);
+  const runSearchBtn = document.getElementById('run-search-btn');
+  if (runSearchBtn) runSearchBtn.classList.toggle('hidden', !isNew);
   if (!isNew && selectMode) clearSelect();
 
   if (isActivity) {
@@ -1956,6 +2120,63 @@ document.addEventListener('click', e => {
 
 loadMe().then(() => loadAll());
 setInterval(loadAll, 5 * 60 * 1000);
+
+async function runSearch() {
+  const btn = document.getElementById('run-search-btn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Searching…';
+  try {
+    const r = await api('/api/run-search', 'POST', {});
+    if (r.error) {
+      btn.disabled = false;
+      btn.textContent = '🔍 Run Search Now';
+      alert('Search error: ' + r.error);
+    } else {
+      btn.textContent = '✓ Search running…';
+      let polls = 0;
+      const poll = setInterval(() => {
+        loadAll();
+        polls++;
+        if (polls >= 8) {
+          clearInterval(poll);
+          btn.disabled = false;
+          btn.textContent = '🔍 Run Search Now';
+        }
+      }, 15000);
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '🔍 Run Search Now';
+    alert('Could not start search');
+  }
+}
+
+async function runApply() {
+  const btn = document.getElementById('run-apply-btn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Applying…';
+  try {
+    const r = await api('/api/run-apply', 'POST', {});
+    if (r.error) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Apply Now';
+      alert('Apply error: ' + r.error);
+    } else if (r.applied === 0) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Apply Now';
+      alert('No approved jobs to apply to.');
+    } else {
+      btn.textContent = `✓ Applied to ${r.applied}!`;
+      setTimeout(() => loadAll(), 1200);
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '🚀 Apply Now';
+    alert('Could not run apply');
+  }
+}
 </script>
 </body>
 </html>"""
@@ -2565,6 +2786,28 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             conn.close()
             self.send_json({"success": True})
+            return
+
+        # ── Run Search Now ────────────────────────────────────────────────────────
+        if path == "/api/run-search":
+            if not user:
+                self.send_json({"error": "Unauthorized"}, 401)
+                return
+            if not ANTHROPIC_KEY:
+                self.send_json({"error": "Anthropic API key not configured"}, 400)
+                return
+            uid = user["id"]
+            threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
+            self.send_json({"status": "started"})
+            return
+
+        # ── Run Apply Now ─────────────────────────────────────────────────────────
+        if path == "/api/run-apply":
+            if not user:
+                self.send_json({"error": "Unauthorized"}, 401)
+                return
+            count = run_job_apply(user["id"])
+            self.send_json({"applied": count})
             return
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
