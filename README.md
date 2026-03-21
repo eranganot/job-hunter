@@ -1,25 +1,25 @@
-# ð¯ Job Hunter
+# 🎯 Job Hunter
 
-An AI-powered personal job search assistant that runs entirely on **Railway** (cloud). It automatically finds relevant positions, lets you review and approve them, then applies on your behalf â and notifies you via WhatsApp every step of the way.
+An AI-powered personal job search assistant that runs entirely on **Railway** (cloud). It automatically finds relevant positions, lets you review and approve them, then applies on your behalf — and notifies you via WhatsApp every step of the way.
 
 ---
 
 ## Features
 
-- **AI job search** â Claude scans job boards daily and surfaces roles matching your CV, job titles, and keywords
-- **Smart scoring** â every job card shows a **match %** (how well the role fits your skills) and a **candidate score** (how strong a candidate you are)
-- **Job status check** â one-click ð button fetches the original posting and asks Claude if the role is still open
-- **Review queue** â approve, pass, or defer jobs from a clean mobile-friendly dashboard
-- **Auto-apply** â approved jobs are applied to automatically at your scheduled apply time
-- **Run Search Now** â trigger an immediate AI job search from the New tab without waiting for the next scheduled run
-- **Apply Now** â instantly apply to all approved jobs from the Approved tab, overriding the schedule
-- **WhatsApp / Telegram notifications** â get notified when new jobs land, and when applications go out
-- **Multi-user** â supports multiple accounts; the admin user's schedule drives all searches
-- **Sort bar** â sort your job list by Date, Match score, or Company name
-- **Bulk actions** â select multiple jobs and Approve All or Pass All in one click
-- **Pass reason** â when passing on a job, optionally record why (Overqualified, Underqualified, Not interesting, Wrong location, Wrong salary, Already applied)
-- **Activity log** â a dedicated Activity tab tracks all your actions: approvals, rejections, searches, CV uploads, and application updates
-- **Admin panel** â admins can view all users, their pipeline stats, and activate/deactivate accounts at `/admin`
+- **AI job search** — Claude scans job boards daily and surfaces roles matching your CV, job titles, and keywords
+- **Smart scoring** — every job card shows a **match %** (how well the role fits your skills) and a **candidate score** (how strong a candidate you are)
+- **Job status check** — one-click 🔍 button fetches the original posting and asks Claude if the role is still open
+- **Review queue** — approve, pass, or defer jobs from a clean mobile-friendly dashboard
+- **Auto-apply** — approved jobs are applied to automatically at your scheduled apply time
+- **Run Search Now** — trigger an immediate AI job search from the New tab without waiting for the next scheduled run
+- **Apply Now** — instantly apply to all approved jobs from the Approved tab, overriding the schedule
+- **WhatsApp / Telegram notifications** — get notified when new jobs land, and when applications go out
+- **Multi-user** — supports multiple accounts; the admin user's schedule drives all searches
+- **Sort bar** — sort your job list by Date, Match score, or Company name
+- **Bulk actions** — select multiple jobs and Approve All or Pass All in one click
+- **Pass reason** — when passing on a job, optionally record why (Overqualified, Underqualified, Not interesting, Wrong location, Wrong salary, Already applied)
+- **Activity log** — a dedicated Activity tab tracks all your actions: approvals, rejections, searches, CV uploads, and application updates
+- **Admin panel** — admins can view all users, their pipeline stats, and activate/deactivate accounts at `/admin`
 
 ---
 
@@ -27,24 +27,24 @@ An AI-powered personal job search assistant that runs entirely on **Railway** (c
 
 ```
 Railway (cloud)
-  âââ app.py              â web app + REST API
-       âââ /data/jobs.db  â SQLite on persistent volume
-       âââ /data/uploads/ â CVs on persistent volume
+  └── app.py              ← web app + REST API
+       ├── /data/jobs.db  ← SQLite on persistent volume
+       └── /data/uploads/ ← CVs on persistent volume
 
-Mac (optional â for local search/apply automation)
-  âââ search_jobs.py      â Claude searches job boards, writes pending_jobs.json
-  âââ apply_jobs.py       â Claude fills in applications, writes applied_updates.json
-  âââ relay.py            â bridges local JSON files to Railway every 30 seconds
-  âââ config.json         â RAILWAY_URL + SYNC_API_KEY + ANTHROPIC_API_KEY
+Mac (optional — for local search/apply automation)
+  ├── search_jobs.py      ← Claude searches job boards, writes pending_jobs.json
+  ├── apply_jobs.py       ← Claude fills in applications, writes applied_updates.json
+  ├── relay.py            ← bridges local JSON files to Railway every 30 seconds
+  └── config.json         ← RAILWAY_URL + SYNC_API_KEY + ANTHROPIC_API_KEY
 ```
 
-Railway hosts the dashboard and persists all data. If you want fully automated searching and applying, the Mac-side scripts handle the heavy AI work and `relay.py` bridges between the two. The app is fully functional without the Mac side â you can manually trigger searches and manage jobs entirely from the dashboard.
+Railway hosts the dashboard and persists all data. If you want fully automated searching and applying, the Mac-side scripts handle the heavy AI work and `relay.py` bridges between the two. The app is fully functional without the Mac side — you can manually trigger searches and manage jobs entirely from the dashboard.
 
 ---
 
 ## Tech Stack
 
-- **Backend**: pure Python `http.server` (no Flask/Django) â zero extra dependencies
+- **Backend**: pure Python `http.server` (no Flask/Django) — zero extra dependencies
 - **Database**: SQLite via Python stdlib `sqlite3`
 - **Frontend**: vanilla JS + CSS (no framework, no build step)
 - **AI**: Claude via the Anthropic API
@@ -77,7 +77,7 @@ Edit `config.json`:
 python3 app.py
 ```
 
-Open http://localhost:5001 â register with your admin email, upload your CV, and configure your preferences.
+Open http://localhost:5001 → register with your admin email, upload your CV, and configure your preferences.
 
 ---
 
@@ -86,7 +86,7 @@ Open http://localhost:5001 â register with your admin email, upload your CV
 Full instructions are in [DEPLOY.md](DEPLOY.md). Quick summary:
 
 1. Push this repo to GitHub
-2. New Railway project â Deploy from GitHub repo
+2. New Railway project → Deploy from GitHub repo
 3. Add a persistent volume mounted at `/data`
 4. Set environment variables:
 
@@ -98,7 +98,7 @@ Full instructions are in [DEPLOY.md](DEPLOY.md). Quick summary:
 | `DATABASE_PATH` | `/data/jobs.db` |
 | `UPLOADS_DIR` | `/data/uploads` |
 
-5. Copy your Railway URL into `config.json` â `railway_url`
+5. Copy your Railway URL into `config.json` → `railway_url`
 
 ---
 
@@ -110,7 +110,7 @@ Full instructions are in [DEPLOY.md](DEPLOY.md). Quick summary:
 python3 relay.py
 ```
 
-Polls every 30 seconds â syncs pending jobs up to Railway, pulls approved jobs down for the apply task.
+Polls every 30 seconds → syncs pending jobs up to Railway, pulls approved jobs down for the apply task.
 
 ### Scheduled tasks
 
@@ -121,7 +121,7 @@ Set up two daily Claude Code tasks (or cron jobs):
 | Job search | `search_jobs.py` | 11 AM (configurable) |
 | Auto-apply | `apply_jobs.py` | 2 PM (configurable) |
 
-Configure times in Settings â Schedule inside the web app.
+Configure times in Settings → Schedule inside the web app.
 
 ---
 
@@ -142,7 +142,7 @@ All sync endpoints are authenticated with `SYNC_API_KEY` (passed as `?api_key=..
 
 | Tab | Contents |
 |---|---|
-| **New** | Freshly found jobs â Approve, Pass, or Later |
+| **New** | Freshly found jobs — Approve, Pass, or Later |
 | **Approved** | Queued for auto-apply at scheduled time |
 | **Applied** | Submitted applications with timestamp and notes |
 | **Passed** | Jobs you skipped (with optional reason) |
@@ -155,9 +155,9 @@ Every tab with jobs shows three sort options:
 
 | Button | Sorts by |
 |---|---|
-| ð Date | Most recently found (default) |
-| ð¯ Match | Highest match percentage first |
-| ð¢ Company | Alphabetical by company name |
+| 📅 Date | Most recently found (default) |
+| 🎯 Match | Highest match percentage first |
+| 🏢 Company | Alphabetical by company name |
 
 
 The **New** tab also shows a **🔍 Run Search Now** button in the sort bar to trigger an immediate AI search on demand. The **Approved** tab banner includes an **🚀 Apply Now** button to apply to all approved jobs instantly.
@@ -176,15 +176,15 @@ When passing on a job, a modal prompts you to choose a reason:
 - Wrong location
 - Wrong salary
 - Already applied
-- (Skip â no reason)
+- (Skip — no reason)
 
 The reason is stored and shown in the Passed tab.
 
 Each job card shows:
-- **Match %** â keyword/title/seniority overlap with your profile (green â¥ 70%, amber â¥ 45%, red below)
-- **Candidate score** â how competitive you are for the specific role
-- **Status badge** â one-click ð check if role is still open
-- **Why this fits you** â AI explanation of relevance
+- **Match %** — keyword/title/seniority overlap with your profile (green ≥ 70%, amber ≥ 45%, red below)
+- **Candidate score** — how competitive you are for the specific role
+- **Status badge** — one-click 🔍 check if role is still open
+- **Why this fits you** — AI explanation of relevance
 
 ---
 
