@@ -1558,7 +1558,46 @@ function actionBar(job) {
   return '';
 }
 
+function matchBadge(pct) {
+  if (pct == null) return '';
+  const cls = pct >= 70 ? 'bg-green-100 text-green-700 border-green-200'
+            : pct >= 45 ? 'bg-amber-100 text-amber-700 border-amber-200'
+                        : 'bg-red-50 text-red-600 border-red-200';
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border ${cls}" title="Match between this role and your profile">${pct}% match</span>`;
+}
+
+function candidateBadge(score) {
+  if (score == null) return '';
+  const cls = score >= 70 ? 'bg-blue-100 text-blue-700 border-blue-200'
+            : score >= 45 ? 'bg-indigo-50 text-indigo-600 border-indigo-200'
+                          : 'bg-slate-100 text-slate-500 border-slate-200';
+  const icon = score >= 70 ? '⭐' : score >= 45 ? '✦' : '◇';
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border ${cls}" title="Your candidate strength score for this role">${icon} ${score} score</span>`;
+}
+
+function statusCheckBadge(job) {
+  if (job.status_check === 'open')    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">✅ Still open</span>`;
+  if (job.status_check === 'closed')  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200">❌ Closed</span>`;
+  if (job.status_check === 'unknown') return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">❓ Unknown</span>`;
+  return '';
+}
+
+async function checkStatus(id) {
+  const btn = document.getElementById('verify-btn-'+id);
+  if (btn) { btn.innerHTML = '⏳'; btn.disabled = true; btn.title = 'Checking…'; }
+  try {
+    await api('/api/jobs/'+id+'/check-status', 'POST', {});
+    loadJobs(tab);
+  } catch(e) {
+    if (btn) { btn.innerHTML = '🔍'; btn.disabled = false; btn.title = 'Verify if still open'; }
+  }
+}
+
 function renderJob(job) {
+  const badges = [matchBadge(job.match_score), candidateBadge(job.candidate_score), statusCheckBadge(job)].filter(Boolean).join('');
+  const verifyBtn = job.url
+    ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
+    : '';
   return `
   <div class="card bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-5 fade" id="job-${job.id}">
     <div class="flex items-start justify-between gap-2">
@@ -1572,8 +1611,12 @@ function renderJob(job) {
         ${job.company_info ? `<p class="text-slate-500 text-sm mt-0.5 leading-snug">${job.company_info}</p>` : ''}
         <p class="text-slate-400 text-xs mt-1.5">📍 ${job.location||'Tel Aviv'}</p>
       </div>
-      ${job.url ? `<a href="${job.url}" target="_blank" class="btn-touch shrink-0 text-xs text-blue-600 font-medium border border-blue-200 px-3 rounded-lg hover:bg-blue-50 whitespace-nowrap">View ↗</a>` : ''}
+      <div class="flex items-center gap-1.5 shrink-0">
+        ${verifyBtn}
+        ${job.url ? `<a href="${job.url}" target="_blank" class="btn-touch text-xs text-blue-600 font-medium border border-blue-200 px-3 rounded-lg hover:bg-blue-50 whitespace-nowrap">View ↗</a>` : ''}
+      </div>
     </div>
+    ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
     ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.description ? `<p class="clamp3 text-sm text-slate-600 leading-relaxed mt-3">${job.description}</p>` : ''}
     ${actionBar(job)}
@@ -1793,8 +1836,35 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY found_date DESC",
                     (user["id"], status)
                 ).fetchall()
+            jobs_list = [dict(r) for r in rows]
+
+            # Auto-compute match/candidate scores for any unscored jobs
+            try:
+                from ai_analysis import compute_match_score, compute_candidate_score
+                profile = conn.execute(
+                    "SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)
+                ).fetchone()
+                if profile and profile["cv_analyzed"]:
+                    profile_dict = dict(profile)
+                    updated = False
+                    for job in jobs_list:
+                        if job.get("match_score") is None:
+                            ms = compute_match_score(job, profile_dict)
+                            cs = compute_candidate_score(job, profile_dict)
+                            conn.execute(
+                                "UPDATE jobs SET match_score=?, candidate_score=? WHERE id=?",
+                                (ms, cs, job["id"])
+                            )
+                            job["match_score"]     = ms
+                            job["candidate_score"] = cs
+                            updated = True
+                    if updated:
+                        conn.commit()
+            except Exception as e:
+                print(f"[score] Error computing scores: {e}")
+
             conn.close()
-            self.send_json([dict(r) for r in rows])
+            self.send_json(jobs_list)
             return
 
         if path == "/api/patterns":
@@ -2068,6 +2138,42 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             database.write_approved_jobs(BASE_DIR)
             self.send_json({"success": True})
+            return
+
+        # ── Check if job is still open (calls Claude + fetches URL) ──────────
+        m = re.match(r"^/api/jobs/(\d+)/check-status$", path)
+        if m:
+            user = self.require_auth()
+            if not user:
+                return
+            job_id = int(m.group(1))
+            conn = database.get_db()
+            job = conn.execute(
+                "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user["id"])
+            ).fetchone()
+            if not job:
+                conn.close()
+                self.send_json({"error": "Job not found"}, 404)
+                return
+            if not job["url"]:
+                conn.close()
+                self.send_json({"error": "No URL for this job"}, 400)
+                return
+            try:
+                from ai_analysis import check_job_status
+                result = check_job_status(
+                    job["url"], job["title"], job["company"], ANTHROPIC_KEY
+                )
+                status_str = result.get("status_check", "unknown")
+                conn.execute(
+                    "UPDATE jobs SET status_check=?, status_checked_date=? WHERE id=?",
+                    (status_str, datetime.now().isoformat(), job_id)
+                )
+                conn.commit()
+            except Exception as e:
+                result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
+            conn.close()
+            self.send_json(result)
             return
 
         # ── Sync endpoints — called by relay.py on Mac, no session needed ──────
