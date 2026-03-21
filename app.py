@@ -2580,14 +2580,13 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     conn.execute(
                         "INSERT OR IGNORE INTO jobs "
-                        "(user_id,job_title,company,location,url,description,source,"
-                        "found_date,match_score,candidate_score,fit_reason,status) "
+                        "(user_id,title,company,location,url,description,why_relevant,source,"
+                        "found_date,match_score,candidate_score,status) "
                         "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new')",
                         (user["id"], j.get("job_title",""), j.get("company",""),
                          j.get("location",""), j.get("url",""), j.get("description",""),
-                         j.get("source",""), j.get("found_date",""),
-                         j.get("match_score",0), j.get("candidate_score",0),
-                         j.get("fit_reason","")))
+                         j.get("fit_reason",""), j.get("source",""), j.get("found_date",""),
+                         j.get("match_score",0), j.get("candidate_score",0)))
                     inserted += 1
                 except Exception as e:
                     print(f"[inject] {e}")
