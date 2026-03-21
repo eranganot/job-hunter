@@ -11,8 +11,10 @@ An AI-powered personal job search assistant that runs entirely on **Railway** (c
 - **Job status check** — one-click 🔍 button fetches the original posting and asks Claude if the role is still open
 - **Review queue** — approve, pass, or defer jobs from a clean mobile-friendly dashboard
 - **Auto-apply** — approved jobs are applied to automatically at your scheduled apply time
+- **Interview pipeline** — track applied jobs through Screening, Interviewing, Offer, and Rejected stages directly from the Applied tab
 - **Run Search Now** — trigger an immediate AI job search from the New tab without waiting for the next scheduled run
 - **Apply Now** — instantly apply to all approved jobs from the Approved tab, overriding the schedule
+- **Weekdays-only mode** — opt in to skip weekend searches and applies via the Schedule settings
 - **WhatsApp / Telegram notifications** — get notified when new jobs land, and when applications go out
 - **Multi-user** — supports multiple accounts; the admin user's schedule drives all searches
 - **Sort bar** — sort your job list by Date, Match score, or Company name
@@ -144,7 +146,7 @@ All sync endpoints are authenticated with `SYNC_API_KEY` (passed as `?api_key=..
 |---|---|
 | **New** | Freshly found jobs — Approve, Pass, or Later |
 | **Approved** | Queued for auto-apply at scheduled time |
-| **Applied** | Submitted applications with timestamp and notes |
+| **Applied** | Submitted applications with timestamp, notes, and interview stage tracking |
 | **Passed** | Jobs you skipped (with optional reason) |
 | **Expired** | Old jobs past their window |
 | **Activity** | Full history of all your actions |
@@ -176,6 +178,7 @@ When passing on a job, a modal prompts you to choose a reason:
 - Wrong location
 - Wrong salary
 - Already applied
+- Not relevant to my search
 - (Skip — no reason)
 
 The reason is stored and shown in the Passed tab.
