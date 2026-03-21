@@ -46,7 +46,7 @@ def _cfg(env_key: str, json_key: str, default="") -> str:
 
 ANTHROPIC_KEY = _cfg("ANTHROPIC_API_KEY", "anthropic_api_key")
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
-SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay���server calls
+SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
 
 # Persistent paths — override with env vars on Railway (point to a mounted volume)
@@ -2159,8 +2159,8 @@ if __name__ == "__main__":
     print(f"🗄️   Database:      jobs.db")
     print(f"🤖  Anthropic AI:  {ai_status}")
     print(f"\n🖥️   Desktop:       http://localhost:{PORT}")
-    print(f"📱  Mobile:        {MOBILE_URL}   open on your phone")
-    print(f"⌨��8�   Ctrl+C to stop\n")
+    print(f"📱  Mobile:        {MOBILE_URL}   ← open on your phone")
+    print(f"⌨️   Ctrl+C to stop\n")
 
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     try:
