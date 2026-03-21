@@ -1733,7 +1733,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button onclick="setSort('date')"    id="sort-date"    class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">📅 Date</button>
   <button onclick="setSort('match')"   id="sort-match"   class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🎯 Match</button>
   <button onclick="setSort('company')" id="sort-company" class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🏢 Company</button>
-  <button onclick="toggleSelect()" id="bulk-toggle" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">☐ Select</button>
+  <button onclick="toggleSelect()" id="bulk-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">☐ Select</button>
+  <button onclick="runSearch()" id="run-search-btn" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-600 font-semibold bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1">🔍 Run Search Now</button>
 </div>
 
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
