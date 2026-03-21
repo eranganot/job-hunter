@@ -1409,6 +1409,90 @@ loadUser();
 </body>
 </html>"""
 
+# ── Admin Panel ───────────────────────────────────────────────────────────────
+
+ADMIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>""" + _COMMON_HEAD + """
+  <title>Job Hunter — Admin</title>
+</head>
+<body class="bg-slate-50 min-h-screen">
+<header class="bg-gradient-to-r from-slate-900 via-blue-900 to-blue-800 text-white shadow-xl sticky top-0 z-30">
+  <div class="max-w-5xl mx-auto px-5 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-xl">🎯</span>
+      <span class="font-bold">Job Hunter</span>
+      <span class="text-xs bg-amber-500 text-white px-2 py-0.5 rounded-full font-bold ml-1">ADMIN</span>
+    </div>
+    <a href="/dashboard" class="btn btn-secondary text-sm px-4 py-2 min-h-0 h-9">← Dashboard</a>
+  </div>
+</header>
+
+<div class="max-w-5xl mx-auto px-5 py-8">
+  <h1 class="text-2xl font-bold text-slate-900 mb-1">Admin Panel</h1>
+  <p class="text-slate-500 text-sm mb-6">All users and their pipeline status.</p>
+  <div id="users-grid" class="space-y-4">
+    <div class="text-center py-10 text-slate-400 animate-pulse text-sm">Loading users…</div>
+  </div>
+</div>
+
+<script>
+async function loadUsers() {
+  const r = await fetch('/api/admin/users');
+  if (r.status === 403 || r.status === 401) {
+    document.getElementById('users-grid').innerHTML = '<p class="text-red-600 text-center py-8">Access denied — admins only.</p>';
+    return;
+  }
+  const users = await r.json();
+  if (!users || users.length === 0) {
+    document.getElementById('users-grid').innerHTML = '<p class="text-slate-400 text-center py-8">No users found.</p>';
+    return;
+  }
+  document.getElementById('users-grid').innerHTML = users.map(u => `
+    <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+      <div class="flex items-start justify-between gap-3 flex-wrap">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0">
+            ${(u.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()}
+          </div>
+          <div>
+            <p class="font-bold text-slate-900">${u.name}</p>
+            <p class="text-sm text-slate-500">${u.email}</p>
+            <p class="text-xs text-slate-400 mt-0.5">Joined ${new Date(u.created_date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          ${u.role==='admin'?'<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">admin</span>':''}
+          <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${u.is_active?'bg-green-100 text-green-700':'bg-red-100 text-red-600'}">${u.is_active?'Active':'Inactive'}</span>
+        </div>
+      </div>
+      <div class="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 text-center">
+        <div><div class="text-xl font-bold text-slate-800">${u.stats_new||0}</div><div class="text-xs text-slate-400">New</div></div>
+        <div><div class="text-xl font-bold text-green-600">${u.stats_approved||0}</div><div class="text-xs text-slate-400">Approved</div></div>
+        <div><div class="text-xl font-bold text-purple-600">${u.stats_applied||0}</div><div class="text-xs text-slate-400">Applied</div></div>
+        <div><div class="text-xl font-bold text-slate-600">${u.stats_total||0}</div><div class="text-xs text-slate-400">Total</div></div>
+      </div>
+      ${u.role !== 'admin' ? `
+      <div class="mt-3 flex gap-2">
+        <button onclick="toggleUser(${u.id}, ${u.is_active})"
+          class="text-xs px-4 py-2 rounded-lg border font-medium transition-all ${u.is_active?'border-red-200 text-red-600 hover:bg-red-50':'border-green-200 text-green-600 hover:bg-green-50'}">
+          ${u.is_active?'🚫 Deactivate':'✅ Activate'}
+        </button>
+      </div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function toggleUser(id, currentActive) {
+  await fetch('/api/admin/users/'+id+'/toggle', {method:'POST'});
+  loadUsers();
+}
+
+loadUsers();
+</script>
+</body>
+</html>"""
+
 # ── Dashboard (user-aware) ────────────────────────────────────────────────────
 
 DASHBOARD_HTML = """<!DOCTYPE html>
@@ -1438,6 +1522,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .dropdown-item { display:block;padding:.65rem 1rem;font-size:.875rem;color:#374151;
                      text-decoration:none;transition:background .12s; }
     .dropdown-item:hover { background:#f8fafc;color:#1d4ed8; }
+    .sort-btn { transition:all .15s; }
+    .sort-btn.active-sort { background:#2563eb;color:#fff;border-color:#2563eb; }
+    .reason-btn:hover { border-color:#2563eb;background:#eff6ff;color:#1d4ed8; }
   </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -1457,6 +1544,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           class="btn-touch w-9 h-9 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">?</button>
         <div class="dropdown-menu">
           <a href="/settings" class="dropdown-item">⚙️ Settings</a>
+          <a href="/admin"    class="dropdown-item hidden" id="admin-link">🛡️ Admin</a>
           <a href="/logout"   class="dropdown-item">← Sign out</a>
         </div>
       </div>
@@ -1472,8 +1560,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <button onclick="setTab('applied')"  id="tab-applied"  class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Applied</button>
     <button onclick="setTab('rejected')" id="tab-rejected" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Passed</button>
     <button onclick="setTab('expired')"  id="tab-expired"  class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Expired</button>
+    <button onclick="setTab('activity')" id="tab-activity" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Activity</button>
   </div>
   <p id="schedule-hint" class="text-xs text-slate-400 italic text-right mt-2"></p>
+</div>
+
+<!-- Sort + Bulk controls -->
+<div id="sort-bar" class="max-w-4xl mx-auto px-4 mt-2 flex items-center gap-2 flex-wrap">
+  <span class="text-xs text-slate-400 font-medium shrink-0">Sort:</span>
+  <button onclick="setSort('date')"    id="sort-date"    class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">📅 Date</button>
+  <button onclick="setSort('match')"   id="sort-match"   class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🎯 Match</button>
+  <button onclick="setSort('company')" id="sort-company" class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🏢 Company</button>
+  <button onclick="toggleSelect()" id="bulk-toggle" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">☐ Select</button>
 </div>
 
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
@@ -1483,9 +1581,41 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <p class="text-slate-400 text-sm mt-1">New jobs appear at your daily search time</p>
 </div>
 
+<!-- Activity panel -->
+<div id="activity-panel" class="hidden max-w-4xl mx-auto px-4 py-4 space-y-2"></div>
+
+<!-- Bulk action bar (floating) -->
+<div id="bulk-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-2xl text-sm whitespace-nowrap">
+  <span id="bulk-count" class="font-medium">0 selected</span>
+  <button onclick="bulkAction('approve')" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl font-semibold transition-all">✅ Approve</button>
+  <button onclick="bulkAction('reject')"  class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl font-semibold transition-all">❌ Pass</button>
+  <button onclick="clearSelect()" class="text-slate-400 hover:text-white px-2 transition-all text-xl leading-none">✕</button>
+</div>
+
+<!-- Pass reason modal -->
+<div id="pass-modal" class="hidden fixed inset-0 z-50 bg-black/40 items-end justify-center p-4" onclick="if(event.target===this)skipReason()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 fade">
+    <h3 class="font-bold text-slate-900 mb-0.5">Why are you passing?</h3>
+    <p class="text-xs text-slate-400 mb-4">Helps improve future matches</p>
+    <div class="space-y-2 mb-3">
+      <button onclick="selectReason('Not a good fit')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🤔 Not a good fit</button>
+      <button onclick="selectReason('Wrong seniority level')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📊 Wrong seniority level</button>
+      <button onclick="selectReason('Salary too low')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">💰 Salary too low</button>
+      <button onclick="selectReason('Bad company')"           class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🏢 Bad company</button>
+      <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📍 Wrong location</button>
+      <button onclick="selectReason('Already applied')"       class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
+    </div>
+    <button onclick="skipReason()" class="w-full text-sm text-slate-400 hover:text-slate-600 py-2 transition-all">Skip — no reason</button>
+  </div>
+</div>
+
 <script>
 let tab = 'new';
 let me = {};
+let sortBy = 'date';
+let selectMode = false;
+let selectedIds = new Set();
+let _pendingPassId = null;
 
 async function api(path, method='GET', body=null) {
   const opts = {method, headers:{'Content-Type':'application/json'}};
@@ -1506,6 +1636,140 @@ async function loadMe() {
   const ah = me.apply_hour || 14;
   const fmt = h => h < 12 ? h+' AM' : h===12 ? '12 PM' : (h-12)+' PM';
   document.getElementById('schedule-hint').textContent = '🔍 '+fmt(sh)+' · 🚀 '+fmt(ah);
+  if (me.role === 'admin') {
+    const al = document.getElementById('admin-link');
+    if (al) al.classList.remove('hidden');
+  }
+}
+
+// ── Sort ──────────────────────────────────────────────────────────────────────
+function setSort(s) {
+  sortBy = s;
+  document.querySelectorAll('.sort-btn').forEach(b => {
+    const active = b.id === 'sort-' + s;
+    b.classList.toggle('active-sort', active);
+    b.classList.toggle('border-slate-200', !active);
+    b.classList.toggle('text-slate-600', !active);
+  });
+  loadJobs(tab);
+}
+
+// ── Bulk select ───────────────────────────────────────────────────────────────
+function toggleSelect() {
+  selectMode = !selectMode;
+  selectedIds.clear();
+  const btn = document.getElementById('bulk-toggle');
+  btn.textContent = selectMode ? '✕ Cancel' : '☐ Select';
+  if (selectMode) {
+    btn.classList.add('bg-slate-900','text-white','border-slate-900');
+    btn.classList.remove('text-slate-500','border-slate-200');
+  } else {
+    btn.classList.remove('bg-slate-900','text-white','border-slate-900');
+    btn.classList.add('text-slate-500','border-slate-200');
+    document.getElementById('bulk-bar').classList.add('hidden');
+  }
+  loadJobs(tab);
+}
+
+function clearSelect() {
+  selectMode = false;
+  selectedIds.clear();
+  const btn = document.getElementById('bulk-toggle');
+  if (btn) {
+    btn.textContent = '☐ Select';
+    btn.classList.remove('bg-slate-900','text-white','border-slate-900');
+    btn.classList.add('text-slate-500','border-slate-200');
+  }
+  document.getElementById('bulk-bar').classList.add('hidden');
+  loadJobs(tab);
+}
+
+function toggleJobSelect(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  const cb = document.getElementById('cb-'+id);
+  if (cb) cb.checked = selectedIds.has(id);
+  const card = document.getElementById('job-'+id);
+  if (card) {
+    card.classList.toggle('ring-2', selectedIds.has(id));
+    card.classList.toggle('ring-blue-400', selectedIds.has(id));
+  }
+  const bar = document.getElementById('bulk-bar');
+  bar.classList.toggle('hidden', selectedIds.size === 0);
+  const cnt = document.getElementById('bulk-count');
+  if (cnt) cnt.textContent = selectedIds.size + ' selected';
+}
+
+async function bulkAction(action) {
+  if (selectedIds.size === 0) return;
+  const ids = [...selectedIds];
+  clearSelect();
+  await api('/api/jobs/bulk', 'POST', {action, ids});
+  loadAll();
+}
+
+// ── Pass reason modal ─────────────────────────────────────────────────────────
+function openPassModal(id) {
+  _pendingPassId = id;
+  const m = document.getElementById('pass-modal');
+  m.classList.remove('hidden');
+  m.classList.add('flex');
+}
+
+function closePassModal() {
+  const m = document.getElementById('pass-modal');
+  m.classList.add('hidden');
+  m.classList.remove('flex');
+}
+
+function skipReason() {
+  const id = _pendingPassId;
+  _pendingPassId = null;
+  closePassModal();
+  doReject(id, '');
+}
+
+function selectReason(reason) {
+  const id = _pendingPassId;
+  _pendingPassId = null;
+  closePassModal();
+  doReject(id, reason);
+}
+
+async function doReject(id, reason) {
+  const card = document.getElementById('job-'+id);
+  if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
+  await api('/api/jobs/'+id+'/reject', 'POST', {reason});
+  loadAll();
+}
+
+// ── Activity log ──────────────────────────────────────────────────────────────
+async function loadActivity() {
+  const panel = document.getElementById('activity-panel');
+  if (!panel) return;
+  panel.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">Loading…</div>';
+  const items = await api('/api/activity');
+  if (!items || items.length === 0) {
+    panel.innerHTML = '<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-3 opacity-30">📋</div><p class="font-medium">No activity yet</p><p class="text-sm mt-1">Actions like approving jobs and running searches appear here</p></div>';
+    return;
+  }
+  const icons = {jobs_searched:'🔍',job_approved:'✅',job_rejected:'❌',job_applied:'🚀',
+    cv_uploaded:'📄',cv_analyzed:'✨',job_status_checked:'🔎',bulk_approve:'✅',bulk_reject:'❌'};
+  panel.innerHTML = items.map(item => {
+    const icon = icons[item.event_type] || '📋';
+    const dt = new Date(item.created_date);
+    const dateStr = dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'}) + ' ' +
+      dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const label = item.event_type.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+    return `<div class="bg-white rounded-xl border border-slate-100 px-4 py-3 flex items-center gap-3 fade">
+      <span class="text-xl w-8 text-center shrink-0">${icon}</span>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-semibold text-slate-800">${label}</p>
+        ${item.details ? `<p class="text-xs text-slate-500 mt-0.5 truncate">${item.details}</p>` : ''}
+      </div>
+      <span class="text-xs text-slate-400 shrink-0">${dateStr}</span>
+    </div>`;
+  }).join('');
 }
 
 async function loadStats() {
@@ -1598,9 +1862,16 @@ function renderJob(job) {
   const verifyBtn = job.url
     ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
     : '';
+  const isSelectable = selectMode && job.status === 'new';
+  const isSelected   = selectedIds.has(job.id);
+  const checkbox = isSelectable
+    ? `<input type="checkbox" id="cb-${job.id}" ${isSelected?'checked':''} onclick="event.stopPropagation();toggleJobSelect(${job.id})" class="w-5 h-5 rounded accent-blue-600 cursor-pointer shrink-0 mt-0.5"/>`
+    : '';
   return `
-  <div class="card bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-5 fade" id="job-${job.id}">
+  <div class="card bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-5 fade ${isSelected?'ring-2 ring-blue-400':''}" id="job-${job.id}"
+       ${isSelectable ? `onclick="toggleJobSelect(${job.id})" style="cursor:pointer"` : ''}>
     <div class="flex items-start justify-between gap-2">
+      ${checkbox ? `<div class="pt-0.5">${checkbox}</div>` : ''}
       <div class="flex-1 min-w-0">
         <div class="flex flex-wrap items-center gap-2 mb-1.5">
           ${sourceBadge(job.source)}
@@ -1613,13 +1884,13 @@ function renderJob(job) {
       </div>
       <div class="flex items-center gap-1.5 shrink-0">
         ${verifyBtn}
-        ${job.url ? `<a href="${job.url}" target="_blank" class="btn-touch text-xs text-blue-600 font-medium border border-blue-200 px-3 rounded-lg hover:bg-blue-50 whitespace-nowrap">View ↗</a>` : ''}
+        ${job.url ? `<a href="${job.url}" target="_blank" onclick="event.stopPropagation()" class="btn-touch text-xs text-blue-600 font-medium border border-blue-200 px-3 rounded-lg hover:bg-blue-50 whitespace-nowrap">View ↗</a>` : ''}
       </div>
     </div>
     ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
     ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.description ? `<p class="clamp3 text-sm text-slate-600 leading-relaxed mt-3">${job.description}</p>` : ''}
-    ${actionBar(job)}
+    ${isSelectable ? '' : actionBar(job)}
   </div>`;
 }
 
@@ -1627,7 +1898,7 @@ async function loadJobs(status) {
   const list  = document.getElementById('jobs-list');
   const empty = document.getElementById('empty-state');
   list.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">Loading…</div>';
-  const jobs = await api('/api/jobs?status=' + status);
+  const jobs = await api('/api/jobs?status=' + status + '&sort=' + sortBy);
   if (!jobs || jobs.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
@@ -1645,6 +1916,7 @@ async function loadJobs(status) {
 }
 
 async function act(id, action) {
+  if (action === 'reject') { openPassModal(id); return; }
   const card = document.getElementById('job-'+id);
   if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
   await api('/api/jobs/'+id+'/'+action, 'POST', {});
@@ -1656,10 +1928,27 @@ function setTab(t) {
   document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('tab-active'); b.classList.add('text-slate-600'); });
   document.getElementById('tab-'+t).classList.add('tab-active');
   document.getElementById('tab-'+t).classList.remove('text-slate-600');
-  loadJobs(t);
+
+  const isActivity = t === 'activity';
+  const isNew = t === 'new';
+  document.getElementById('sort-bar').classList.toggle('hidden', isActivity);
+  document.getElementById('activity-panel').classList.toggle('hidden', !isActivity);
+  document.getElementById('jobs-list').classList.toggle('hidden', isActivity);
+  document.getElementById('empty-state').classList.toggle('hidden', true);
+  const bulkToggle = document.getElementById('bulk-toggle');
+  if (bulkToggle) bulkToggle.classList.toggle('hidden', !isNew);
+  if (!isNew && selectMode) clearSelect();
+
+  if (isActivity) {
+    loadActivity();
+  } else {
+    loadJobs(t);
+  }
 }
 
-async function loadAll() { await Promise.all([loadStats(), loadJobs(tab)]); }
+async function loadAll() {
+  await Promise.all([loadStats(), tab === 'activity' ? loadActivity() : loadJobs(tab)]);
+}
 
 document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
@@ -1802,6 +2091,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(SETTINGS_HTML)
             return
 
+        if path in ("/admin", "/admin/"):
+            user = self.require_auth()
+            if not user:
+                return
+            if user.get("role") != "admin":
+                self.redirect("/dashboard")
+                return
+            self.send_html(ADMIN_HTML)
+            return
+
         # API routes (all require auth)
         if path == "/api/me":
             user = self.require_auth()
@@ -1823,17 +2122,24 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user:
                 return
-            status = qs.get("status", ["new"])[0]
-            conn   = database.get_db()
+            status  = qs.get("status", ["new"])[0]
+            sort_by = qs.get("sort",   ["date"])[0]
+            order_map = {
+                "match":   "COALESCE(match_score, -1) DESC",
+                "company": "company ASC",
+                "date":    "found_date DESC",
+            }
+            order = order_map.get(sort_by, "found_date DESC")
+            conn  = database.get_db()
             database.expire_old_jobs(conn, user["id"])
             if status == "all":
                 rows = conn.execute(
-                    "SELECT * FROM jobs WHERE user_id=? ORDER BY found_date DESC",
+                    f"SELECT * FROM jobs WHERE user_id=? ORDER BY {order}",
                     (user["id"],)
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY found_date DESC",
+                    f"SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY {order}",
                     (user["id"], status)
                 ).fetchall()
             jobs_list = [dict(r) for r in rows]
@@ -1865,6 +2171,32 @@ class Handler(BaseHTTPRequestHandler):
 
             conn.close()
             self.send_json(jobs_list)
+            return
+
+        if path == "/api/activity":
+            user = self.require_auth()
+            if not user:
+                return
+            items = database.get_activity(user["id"], limit=100)
+            self.send_json(items)
+            return
+
+        if path == "/api/admin/users":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            conn = database.get_db()
+            rows = conn.execute("""
+                SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_date,
+                       (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='new')      AS stats_new,
+                       (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='approved') AS stats_approved,
+                       (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='applied')  AS stats_applied,
+                       (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id)                          AS stats_total
+                FROM users u ORDER BY u.created_date DESC
+            """).fetchall()
+            conn.close()
+            self.send_json([dict(r) for r in rows])
             return
 
         if path == "/api/patterns":
@@ -1974,6 +2306,7 @@ class Handler(BaseHTTPRequestHandler):
             with open(cv_path, "wb") as f:
                 f.write(cv_part["data"])
             auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0)
+            database.log_activity(user_id, "cv_uploaded", "Uploaded new CV PDF")
             print(f"[cv] Saved CV for user {user_id}: {cv_path}")
             self.send_json({"success": True, "path": cv_path})
             return
@@ -2007,6 +2340,9 @@ class Handler(BaseHTTPRequestHandler):
                     seniority=data.get("seniority", ""),
                 )
                 database.write_users_config(BASE_DIR)
+                database.log_activity(user_id, "cv_analyzed",
+                    f"AI extracted {len(data.get('job_titles',[]))} job titles, "
+                    f"{len(data.get('keywords',[]))} keywords")
                 self.send_json(data)
             except Exception as e:
                 print(f"[analyze] Error: {e}")
@@ -2115,24 +2451,31 @@ class Handler(BaseHTTPRequestHandler):
             status_map = {"approve":"approved","reject":"rejected",
                           "later":"new","applied":"applied","failed":"failed"}
             new_status = status_map[action]
-            notes      = data.get("notes", "")
+            reason     = data.get("reason", "") or data.get("notes", "")
 
             if action == "later":
                 conn.execute("UPDATE jobs SET found_date=?, notes=? WHERE id=?",
-                             (datetime.now().isoformat(), notes, job_id))
+                             (datetime.now().isoformat(), reason, job_id))
             elif action in ("applied", "failed"):
                 conn.execute("UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
-                             (new_status, datetime.now().isoformat(), notes, job_id))
+                             (new_status, datetime.now().isoformat(), reason, job_id))
             else:
                 conn.execute("UPDATE jobs SET status=?, notes=? WHERE id=?",
-                             (new_status, notes, job_id))
+                             (new_status, reason, job_id))
 
             if action == "reject":
                 conn.execute(
                     "INSERT INTO rejected_patterns (user_id,company,title,notes,created_date) VALUES (?,?,?,?,?)",
                     (user_id, job["company"], job["title"],
-                     notes or "No reason given", datetime.now().isoformat())
+                     reason or "No reason given", datetime.now().isoformat())
                 )
+                detail = f"Passed on {job['title']} at {job['company']}"
+                if reason:
+                    detail += f" — {reason}"
+                database.log_activity(user_id, "job_rejected", detail)
+            elif action == "approve":
+                database.log_activity(user_id, "job_approved",
+                    f"Approved {job['title']} at {job['company']}")
 
             conn.commit()
             conn.close()
@@ -2170,10 +2513,58 @@ class Handler(BaseHTTPRequestHandler):
                     (status_str, datetime.now().isoformat(), job_id)
                 )
                 conn.commit()
+                database.log_activity(user["id"], "job_status_checked",
+                    f"{job['title']} at {job['company']} — {status_str}")
             except Exception as e:
                 result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
             conn.close()
             self.send_json(result)
+            return
+
+        # ── Bulk job actions ──────────────────────────────────────────────────────
+        if path == "/api/jobs/bulk":
+            data   = self.read_json()
+            action = data.get("action", "")
+            ids    = [int(i) for i in data.get("ids", []) if str(i).isdigit()]
+            if not ids or action not in ("approve", "reject"):
+                self.send_json({"error": "Invalid"}, 400)
+                return
+            conn       = database.get_db()
+            new_status = "approved" if action == "approve" else "rejected"
+            done       = 0
+            for job_id in ids:
+                job = conn.execute(
+                    "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+                ).fetchone()
+                if not job:
+                    continue
+                conn.execute("UPDATE jobs SET status=? WHERE id=?", (new_status, job_id))
+                if action == "reject":
+                    conn.execute(
+                        "INSERT INTO rejected_patterns (user_id,company,title,notes,created_date) VALUES (?,?,?,?,?)",
+                        (user_id, job["company"], job["title"], "Bulk pass", datetime.now().isoformat())
+                    )
+                done += 1
+            conn.commit()
+            conn.close()
+            label = "Approved" if action == "approve" else "Passed on"
+            database.log_activity(user_id, f"bulk_{action}", f"{label} {done} job(s) at once")
+            database.write_approved_jobs(BASE_DIR)
+            self.send_json({"success": True, "updated": done})
+            return
+
+        # ── Admin: toggle user active state ───────────────────────────────────
+        m = re.match(r"^/api/admin/users/(\d+)/toggle$", path)
+        if m:
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            target_id = int(m.group(1))
+            conn = database.get_db()
+            conn.execute("UPDATE users SET is_active = 1 - is_active WHERE id=?", (target_id,))
+            conn.commit()
+            conn.close()
+            self.send_json({"success": True})
             return
 
         # ── Sync endpoints — called by relay.py on Mac, no session needed ──────
@@ -2205,6 +2596,10 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             conn.commit()
             conn.close()
+            if inserted > 0:
+                for uid in set(j.get("user_id", 1) for j in jobs):
+                    cnt = sum(1 for j in jobs if j.get("user_id", 1) == uid)
+                    database.log_activity(uid, "jobs_searched", f"Relay synced {cnt} new job(s)")
             print(f"[sync] {inserted} new jobs ingested via API")
             self.send_json({"success": True, "inserted": inserted})
             return
@@ -2224,6 +2619,17 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             conn.close()
+            if updates:
+                # Log activity per user — look up user_id for each updated job
+                conn2 = database.get_db()
+                uid_counts: dict = {}
+                for u in updates:
+                    row = conn2.execute("SELECT user_id FROM jobs WHERE id=?", (u["id"],)).fetchone()
+                    if row:
+                        uid_counts[row["user_id"]] = uid_counts.get(row["user_id"], 0) + 1
+                conn2.close()
+                for uid, cnt in uid_counts.items():
+                    database.log_activity(uid, "job_applied", f"Auto-applied to {cnt} job(s)")
             print(f"[sync] {len(updates)} job statuses updated via API")
             self.send_json({"success": True, "updated": len(updates)})
             return
