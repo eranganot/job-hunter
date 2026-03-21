@@ -111,6 +111,17 @@ def init_db():
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            event_type   TEXT NOT NULL,
+            details      TEXT DEFAULT '',
+            created_date TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
     conn.commit()
     _migrate(conn)
     count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -138,6 +149,33 @@ def _migrate(conn: sqlite3.Connection):
             print(f"[db] Migration: added {col_name} to {table}")
         except Exception:
             pass  # Column already exists — that's fine
+
+
+# ── Activity log ──────────────────────────────────────────────────────────────
+
+def log_activity(user_id: int, event_type: str, details: str = ""):
+    """Append an entry to the activity log for a user."""
+    try:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO activity_log (user_id, event_type, details) VALUES (?,?,?)",
+            (user_id, event_type, details)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[activity] Log error: {e}")
+
+
+def get_activity(user_id: int, limit: int = 100):
+    """Return recent activity entries for a user, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM activity_log WHERE user_id=? ORDER BY created_date DESC LIMIT ?",
+        (user_id, limit)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ── Job helpers ───────────────────────────────────────────────────────────────
@@ -200,6 +238,10 @@ def import_pending_jobs(base_dir: str):
         conn.commit()
         conn.close()
         os.remove(path)
+        if inserted > 0:
+            for uid in set(j.get("user_id", 1) for j in jobs):
+                cnt = sum(1 for j in jobs if j.get("user_id", 1) == uid)
+                log_activity(uid, "jobs_searched", f"Found {cnt} new job(s)")
         print(f"[import] {inserted} new jobs imported from pending_jobs.json")
     except Exception as e:
         print(f"[import] Error: {e}")
