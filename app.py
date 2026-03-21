@@ -2567,6 +2567,37 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        # ── Admin job inject — session-authenticated, admin only ────────────────
+        if path == "/api/admin/inject-jobs":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload = self.read_json()
+            jobs = payload.get("jobs", [])
+            conn = database.get_db()
+            inserted = 0
+            for j in jobs:
+                try:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO jobs "
+                        "(user_id,job_title,company,location,url,description,source,"
+                        "found_date,match_score,candidate_score,fit_reason,status) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new')",
+                        (user["id"], j.get("job_title",""), j.get("company",""),
+                         j.get("location",""), j.get("url",""), j.get("description",""),
+                         j.get("source",""), j.get("found_date",""),
+                         j.get("match_score",0), j.get("candidate_score",0),
+                         j.get("fit_reason","")))
+                    inserted += 1
+                except Exception as e:
+                    print(f"[inject] {e}")
+            conn.commit()
+            conn.close()
+            database.log_activity(user["id"], "jobs_injected",
+                                  f"{inserted} jobs added via admin inject")
+            self.send_json({"inserted": inserted})
+            return
+
         # ── Sync endpoints — called by relay.py on Mac, no session needed ──────
 
         if path == "/api/sync/jobs":
