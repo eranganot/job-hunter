@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 """
-Job Hunter — Standalone Multi-User App
+Job Hunter — St
+            if path == "/api/set-stage":
+                if not user: self.send_json({"error": "Unauthorized"}, 401); return
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                job_id = body.get("id"); stage = body.get("stage")
+                if not job_id: self.send_json({"error": "Missing id"}, 400); return
+                conn = database.get_db()
+                conn.execute("UPDATE jobs SET stage=? WHERE id=? AND user_id=?", (stage, job_id, user["id"]))
+                conn.commit(); conn.close()
+                if stage: database.log_activity(user["id"], "job_stage_updated", f"Interview stage: {stage}")
+                self.send_json({"ok": True}); return
+
+            if path == "/api/dismiss-onboarding":
+                if not user: self.send_json({"error": "Unauthorized"}, 401); return
+                conn = database.get_db()
+                conn.execute("UPDATE user_profiles SET onboarding_complete=1 WHERE user_id=?", (user["id"],))
+                conn.commit(); conn.close()
+                self.send_json({"ok": True}); return
+
+andalone Multi-User App
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Local development:
     python3 app.py           → http://localhost:5001
@@ -159,8 +178,14 @@ def file_watcher():
         time.sleep(30)
 
 
+_search_running: set = set()
+
+
 def run_job_search(user_id: int):
     """Search for new jobs via Anthropic web-search and insert into DB."""
+    if user_id in _search_running:
+        return
+    _search_running.add(user_id)
     try:
         conn = database.get_db()
         profile = conn.execute(
@@ -275,7 +300,9 @@ def run_job_search(user_id: int):
 
     except Exception as e:
         print(f"[run-search] Error: {e}")
-        database.log_activity(user_id, "jobs_searched", f"Run Search error: {e}")
+        database.log_activity(user_id, "jobs_searched", "Job search failed — will retry at next scheduled time")
+    finally:
+        _search_running.discard(user_id)
 
 
 def run_job_apply(user_id: int) -> int:
@@ -1287,6 +1314,10 @@ SETTINGS_HTML = """<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="mt-5 flex items-center gap-3">
+      <input type="checkbox" id="s-weekdays-only" class="w-4 h-4 rounded accent-blue-600">
+      <label for="s-weekdays-only" class="text-sm text-slate-700 cursor-pointer">📅 Weekdays only — skip Saturday &amp; Sunday</label>
+    </div>
     <button onclick="saveSchedule()" class="btn btn-primary mt-6">Save schedule</button>
   </div>
 
@@ -1370,6 +1401,8 @@ async function loadUser() {
   const ah = document.getElementById('s-apply-hour');
   if (userData.search_hour) { for(let o of sh.options) if(parseInt(o.value)===userData.search_hour) o.selected=true; }
   if (userData.apply_hour)  { for(let o of ah.options) if(parseInt(o.value)===userData.apply_hour)  o.selected=true; }
+  const woChk = document.getElementById('s-weekdays-only');
+  if (woChk) woChk.checked = !!userData.weekdays_only;
 
   // Set days
   selectDay('search', userData.search_day_of_week || 1);
@@ -1501,6 +1534,7 @@ async function saveSchedule() {
       apply_hour:         parseInt(document.getElementById('s-apply-hour').value),
       search_day_of_week: parseInt(document.getElementById('s-search-day').value || 1),
       apply_day_of_week:  parseInt(document.getElementById('s-apply-day').value  || 1),
+      weekdays_only:      document.getElementById('s-weekdays-only')?.checked ? 1 : 0,
     })});
   showToast();
 }
@@ -1702,7 +1736,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="flex items-center gap-2 shrink-0">
       <button onclick="loadAll()" class="btn-touch text-blue-300 hover:text-white text-xl transition-colors" title="Refresh">↻</button>
       <div class="dropdown">
-        <button id="avatar-btn" onclick="this.closest('.dropdown').classList.toggle('open')"
+        <button id="avatar-btn" aria-label="Account menu" aria-haspopup="true" onclick="this.closest('.dropdown').classList.toggle('open')"
           class="btn-touch w-9 h-9 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">?</button>
         <div class="dropdown-menu">
           <a href="/settings" class="dropdown-item">⚙️ Settings</a>
@@ -1717,9 +1751,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- TABS -->
 <div class="max-w-4xl mx-auto px-4 mt-4">
   <div class="tab-scroll flex gap-1 bg-slate-200 p-1 rounded-xl w-full">
-    <button onclick="setTab('new')"      id="tab-new"      class="tab-btn tab-active flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">New</button>
-    <button onclick="setTab('approved')" id="tab-approved" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Approved</button>
-    <button onclick="setTab('applied')"  id="tab-applied"  class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Applied</button>
+    <button onclick="setTab('new')"      id="tab-new"      role="tab" aria-selected="true"  class="tab-btn tab-active flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">New</button>
+    <button onclick="setTab('approved')" id="tab-approved" role="tab" aria-selected="false" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Approved</button>
+    <button onclick="setTab('applied')"  id="tab-applied"  role="tab" aria-selected="false" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Applied</button>
     <button onclick="setTab('rejected')" id="tab-rejected" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Passed</button>
     <button onclick="setTab('expired')"  id="tab-expired"  class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Expired</button>
     <button onclick="setTab('activity')" id="tab-activity" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Activity</button>
@@ -1742,6 +1776,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="text-5xl mb-3 opacity-30">🔍</div>
   <p id="empty-msg" class="text-slate-500 font-medium">Nothing here yet</p>
   <p class="text-slate-400 text-sm mt-1">New jobs appear at your daily search time</p>
+  <button id="empty-search-cta" onclick="runSearch()" class="hidden mt-5 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">🔍 Run Search Now</button>
 </div>
 
 <!-- Activity panel -->
@@ -1766,7 +1801,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <button onclick="selectReason('Salary too low')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">💰 Salary too low</button>
       <button onclick="selectReason('Bad company')"           class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🏢 Bad company</button>
       <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📍 Wrong location</button>
-      <button onclick="selectReason('Already applied')"       class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
+      <button onclick="selectReason('Already applied elsewhere')"       class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
+      <button onclick="selectReason('Not relevant to my search')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🔍 Not relevant to my search</button>
     </div>
     <button onclick="skipReason()" class="w-full text-sm text-slate-400 hover:text-slate-600 py-2 transition-all">Skip — no reason</button>
   </div>
@@ -1917,13 +1953,14 @@ async function loadActivity() {
     return;
   }
   const icons = {jobs_searched:'🔍',job_approved:'✅',job_rejected:'❌',job_applied:'🚀',
-    cv_uploaded:'📄',cv_analyzed:'✨',job_status_checked:'🔎',bulk_approve:'✅',bulk_reject:'❌'};
+    cv_uploaded:'📄',cv_analyzed:'✨',job_status_checked:'🔎',bulk_approve:'✅',bulk_reject:'❌',jobs_injected:'📥',job_stage_updated:'📊'};
   panel.innerHTML = items.map(item => {
     const icon = icons[item.event_type] || '📋';
     const dt = new Date(item.created_date);
     const dateStr = dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'}) + ' ' +
       dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    const label = item.event_type.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+    const labels = {'jobs_searched':'Job Search','job_approved':'Job Approved','job_rejected':'Job Rejected','job_applied':'Applied','cv_uploaded':'CV Uploaded','cv_analyzed':'CV Analyzed','job_status_checked':'Status Check','bulk_approve':'Bulk Approve','bulk_reject':'Bulk Reject','jobs_injected':'Jobs Imported','job_stage_updated':'Stage Updated'};
+    const label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
     return `<div class="bg-white rounded-xl border border-slate-100 px-4 py-3 flex items-center gap-3 fade">
       <span class="text-xl w-8 text-center shrink-0">${icon}</span>
       <div class="flex-1 min-w-0">
@@ -1971,13 +2008,23 @@ function actionBar(job) {
     </div>`;
   if (job.status === 'approved') return `
     <div class="flex items-center gap-3 mt-4 pt-4 border-t border-slate-100">
-      <div class="flex-1 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2.5 font-medium">✅ Queued — applies at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</div>
+      <div class="flex-1 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2.5 font-medium">📋 Queued — marks as applied at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</div>
       <button onclick="act(${job.id},'reject')" class="btn-touch text-xs text-slate-400 hover:text-red-500 px-2">Undo</button>
     </div>`;
-  if (job.status === 'applied') return `
+  if (job.status === 'applied') {
+    return `
     <div class="mt-4 pt-4 border-t border-slate-100">
-      <span class="inline-flex items-center gap-2 text-sm text-purple-700 bg-purple-50 px-4 py-2.5 rounded-xl font-medium">🚀 Applied ${ago(job.applied_date)}</span>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="inline-flex items-center gap-2 text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-xl font-medium">🚀 Applied ${ago(job.applied_date)}</span>
+        <div class="flex gap-1.5 flex-wrap">
+          <button onclick="setStage(${job.id},'screening')"    class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='screening'   ?'bg-blue-100 text-blue-700 border-blue-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">📞 Screening</button>
+          <button onclick="setStage(${job.id},'interviewing')" class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='interviewing'?'bg-amber-100 text-amber-700 border-amber-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">👥 Interviewing</button>
+          <button onclick="setStage(${job.id},'offer')"        class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='offer'       ?'bg-green-100 text-green-700 border-green-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">🎉 Offer!</button>
+          <button onclick="setStage(${job.id},'rejected')"     class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='rejected'    ?'bg-red-100 text-red-600 border-red-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">❌ Rejected</button>
+        </div>
+      </div>
     </div>`;
+  }
   if (job.status === 'failed') return `
     <div class="mt-4 pt-4 border-t border-slate-100">
       <span class="inline-flex items-center gap-2 text-sm text-red-600 bg-red-50 px-4 py-2.5 rounded-xl font-medium">⚠️ Failed — ${job.notes||'see notes'}</span>
@@ -2069,6 +2116,8 @@ async function loadJobs(status) {
       approved:'No approved jobs. Go to New and click Approve.',
       applied:'No applications yet.',rejected:'Nothing passed on yet.',expired:'No expired listings.'};
     document.getElementById('empty-msg').textContent = msgs[status]||'Nothing here.';
+    const emCta = document.getElementById('empty-search-cta');
+    if (emCta) emCta.classList.toggle('hidden', status !== 'new');
   } else {
     empty.classList.add('hidden');
     let html = '';
@@ -2151,6 +2200,11 @@ async function runSearch() {
     btn.textContent = '🔍 Run Search Now';
     alert('Could not start search');
   }
+}
+
+async function setStage(id, stage) {
+  const r = await api('/api/set-stage', 'POST', {id, stage});
+  if (r && r.ok) loadJobs('applied');
 }
 
 async function runApply() {
@@ -2628,7 +2682,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self.read_json()
             kwargs = {}
             for int_field in ("search_hour", "apply_hour", "search_day_of_week",
-                              "apply_day_of_week", "onboarding_complete"):
+                              "apply_day_of_week", "onboarding_complete", "weekdays_only"):
                 if int_field in data:
                     kwargs[int_field] = int(data[int_field])
             if "schedule_frequency" in data:
