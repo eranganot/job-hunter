@@ -18,6 +18,7 @@ def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -98,6 +99,16 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+
+    # Migrations — safe to re-run on every start
+    for _migration in [
+        "ALTER TABLE jobs ADD COLUMN stage TEXT DEFAULT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN weekdays_only INTEGER DEFAULT 0",
+    ]:
+        try:
+            conn.execute(_migration)
+        except Exception:
+            pass  # column already exists
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS rejected_patterns (
