@@ -4,6 +4,7 @@ ai_analysis.py — CV analysis via Claude API for Job Hunter
 import base64
 import json
 import os
+import re
 import urllib.request
 import urllib.error
 
@@ -119,4 +120,186 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
     data.setdefault("summary", "")
     data.setdefault("recommendations", [])
 
+    return data
+
+
+# ── Local scoring (no API needed) ─────────────────────────────────────────────
+
+def _parse_json_list(raw) -> list:
+    """Safely parse a JSON list stored as a string, or return raw list."""
+    if isinstance(raw, list):
+        return raw
+    try:
+        return json.loads(raw or "[]")
+    except Exception:
+        return []
+
+
+def compute_match_score(job: dict, user_profile: dict) -> int:
+    """
+    Compute 0-100 match score: what % of the user's skills appear in the job.
+
+    Weights:
+      60% — keyword overlap (user's skills/tools found in job text)
+      30% — job title relevance (does job title relate to user's target titles)
+      10% — seniority alignment
+
+    Returns 0 if the user has no profile data yet.
+    """
+    user_keywords = _parse_json_list(user_profile.get("keywords"))
+    user_titles   = _parse_json_list(user_profile.get("job_titles"))
+
+    if not user_keywords and not user_titles:
+        return 0
+
+    job_text = " ".join(filter(None, [
+        job.get("title", ""),
+        job.get("description", ""),
+        job.get("why_relevant", ""),
+    ])).lower()
+
+    # 60% — keyword overlap
+    if user_keywords:
+        hits = sum(1 for kw in user_keywords if kw.lower() in job_text)
+        kw_score = (hits / len(user_keywords)) * 60
+    else:
+        kw_score = 0
+
+    # 30% — title relevance
+    title_score = 0
+    job_title_lower = job.get("title", "").lower()
+    for ut in user_titles:
+        words = [w for w in re.split(r"\W+", ut.lower()) if len(w) > 3]
+        if any(w in job_title_lower for w in words):
+            title_score = 30
+            break
+
+    # 10% — seniority alignment
+    seniority = (user_profile.get("seniority") or "").lower()
+    seniority_keywords = {
+        "junior":    ["junior", "associate", "entry"],
+        "mid":       ["mid", "intermediate"],
+        "senior":    ["senior", "sr.", "lead", "principal", "staff"],
+        "director":  ["director", "head of"],
+        "executive": ["vp", "vice president", "cpo", "cto", "ceo", "chief"],
+    }
+    seniority_score = 0
+    for kw in seniority_keywords.get(seniority, []):
+        if kw in job_title_lower:
+            seniority_score = 10
+            break
+
+    return min(100, max(0, int(kw_score + title_score + seniority_score)))
+
+
+def compute_candidate_score(job: dict, user_profile: dict) -> int:
+    """
+    Compute 0-100 candidate strength score for this specific role.
+
+    Builds on match_score and adds profile-quality bonuses:
+      +5  if the user has a filled CV summary
+      +5  if experience_years >= 5
+      -10 if experience_years < 2 and job title contains 'senior'/'lead'
+    """
+    base = compute_match_score(job, user_profile)
+
+    if user_profile.get("cv_summary"):
+        base = min(100, base + 5)
+
+    exp = int(user_profile.get("experience_years") or 0)
+    if exp >= 5:
+        base = min(100, base + 5)
+
+    job_title_lower = job.get("title", "").lower()
+    senior_keywords = ["senior", "sr.", "lead", "principal", "director", "head of", "vp"]
+    if exp < 3 and any(kw in job_title_lower for kw in senior_keywords):
+        base = max(0, base - 10)
+
+    return min(100, max(0, base))
+
+
+# ── Job status check (Claude API + URL fetch) ──────────────────────────────────
+
+def check_job_status(job_url: str, job_title: str, job_company: str, api_key: str) -> dict:
+    """
+    Fetch the job URL and ask Claude (Haiku) whether the role is still open.
+
+    Returns a dict:
+        is_open    bool | None  — True=open, False=closed, None=unclear
+        reason     str          — one-sentence explanation
+        confidence str          — 'high' | 'medium' | 'low'
+        status_check str        — 'open' | 'closed' | 'unknown'
+    """
+    if not api_key:
+        raise ValueError("Anthropic API key not configured.")
+    if not job_url:
+        return {"is_open": None, "reason": "No URL provided.", "confidence": "low", "status_check": "unknown"}
+
+    # Fetch the page
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0 Safari/537.36"
+            )
+        }
+        req = urllib.request.Request(job_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw_html = resp.read().decode("utf-8", errors="replace")
+        # Strip HTML tags and truncate
+        page_text = re.sub(r"<[^>]+>", " ", raw_html)
+        page_text = re.sub(r"\s+", " ", page_text).strip()
+        page_text = page_text[:6000]
+    except Exception as e:
+        return {
+            "is_open": None,
+            "reason": f"Could not fetch URL: {e}",
+            "confidence": "low",
+            "status_check": "unknown",
+        }
+
+    prompt = (
+        f'You are checking whether a job posting is still active.\n'
+        f'Job: "{job_title}" at "{job_company}"\n'
+        f'URL: {job_url}\n\n'
+        f'Page content (truncated):\n{page_text}\n\n'
+        'Return ONLY a JSON object with these exact fields:\n'
+        '{"is_open": true/false/null, "reason": "one sentence", "confidence": "high/medium/low"}\n\n'
+        'is_open: true if the job is still accepting applications, false if closed/filled/expired, '
+        'null if the page does not contain enough info to decide.\n'
+        'confidence: high=clear signal found, medium=indirect signal, low=could not determine.'
+    )
+
+    payload = {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        method="POST",
+    )
+    req.add_header("Content-Type", "application/json")
+    req.add_header("x-api-key", api_key)
+    req.add_header("anthropic-version", "2023-06-01")
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        raise RuntimeError(f"Claude API error {e.code}: {error_body}")
+
+    raw = result["content"][0]["text"].strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        raw = "\n".join(lines[1:-1])
+
+    data = json.loads(raw)
+    is_open = data.get("is_open")
+    data["status_check"] = "open" if is_open is True else ("closed" if is_open is False else "unknown")
     return data
