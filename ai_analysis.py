@@ -97,7 +97,7 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
             result = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
-        raise RuntimeError(‰šClaude API error {e.code}: {error_body}")
+        raise RuntimeError(f"Claude API error {e.code}: {error_body}")
 
     raw = result["content"][0]["text"].strip()
 
