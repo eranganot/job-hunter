@@ -8,237 +8,122 @@ An AI-powered personal job search assistant that runs entirely on **Railway** (c
 
 - **AI job search** — Claude scans job boards daily and surfaces roles matching your CV, job titles, and keywords
 - **Smart scoring** — every job card shows a **match %** (how well the role fits your skills) and a **candidate score** (how strong a candidate you are)
+- **🔗 URL verification** — every job URL is automatically checked on import; dead links are flagged with a ⚠️ badge before you ever review them
 - **Job status check** — one-click 🔍 button fetches the original posting and asks Claude if the role is still open
 - **Review queue** — approve, pass, or defer jobs from a clean mobile-friendly dashboard
-- **Auto-apply** — approved jobs are applied to automatically at your scheduled apply time
+- **🤖 Auto-apply** — approved jobs are submitted directly by Railway using a Playwright browser + Claude AI: fills forms, uploads your CV, and verifies the result page confirms submission
+- **Apply status badges** — each Applied card shows ✅ Confirmed / 📤 Submitted / 👤 Manual needed / ❌ Failed
 - **Interview pipeline** — track applied jobs through Screening, Interviewing, Offer, and Rejected stages directly from the Applied tab
-- **Run Search Now** — trigger an immediate AI job search from the New tab without waiting for the next scheduled run
-- **Apply Now** — instantly apply to all approved jobs from the Approved tab, overriding the schedule
-- **Weekdays-only mode** — opt in to skip weekend searches and applies via the Schedule settings
-- **WhatsApp / Telegram notifications** — get notified when new jobs land, and when applications go out
-- **Multi-user** — supports multiple accounts; the admin user's schedule drives all searches
-- **Sort bar** — sort your job list by Date, Match score, or Company name
-- **Bulk actions** — select multiple jobs and Approve All or Pass All in one click
-- **Pass reason** — when passing on a job, optionally record why (Overqualified, Underqualified, Not interesting, Wrong location, Wrong salary, Already applied)
-- **Activity log** — a dedicated Activity tab tracks all your actions: approvals, rejections, searches, CV uploads, and application updates
-- **Admin panel** — admins can view all users, their pipeline stats, and activate/deactivate accounts at `/admin`
+- **WhatsApp notifications** — get alerted on your phone for every key event: new jobs found, apply confirmed, and manual-apply warnings
+- **Scheduled runs** — configure daily search and apply windows; view the next run time from the dashboard
 
 ---
 
-## Architecture
+## How It Works
 
-```
-Railway (cloud)
-  └── app.py              ← web app + REST API
-       ├── /data/jobs.db  ← SQLite on persistent volume
-       └── /data/uploads/ ← CVs on persistent volume
+### 1. Job Search
+Claude is given your CV, job titles, and search keywords. It queries job boards, scores each result against your profile, and saves new positions to a SQLite database on Railway.
 
-Mac (optional — for local search/apply automation)
-  ├── search_jobs.py      ← Claude searches job boards, writes pending_jobs.json
-  ├── apply_jobs.py       ← Claude fills in applications, writes applied_updates.json
-  ├── relay.py            ← bridges local JSON files to Railway every 30 seconds
-  └── config.json         ← RAILWAY_URL + SYNC_API_KEY + ANTHROPIC_API_KEY
-```
+### 2. URL Verification (Automatic)
+When jobs are imported, every URL is checked in parallel (8 concurrent workers, 8 s timeout). Each job is marked:
+- **🔗 URL OK** — page responds with HTTP 2xx/3xx
+- **⚠️ Dead link** — timeout, 404, or connection error
 
-Railway hosts the dashboard and persists all data. If you want fully automated searching and applying, the Mac-side scripts handle the heavy AI work and `relay.py` bridges between the two. The app is fully functional without the Mac side — you can manually trigger searches and manage jobs entirely from the dashboard.
+Dead links are visible immediately in the dashboard so you don't waste time reviewing phantom postings.
+
+### 3. Review & Approve
+Open the dashboard → **Review** tab. Each card shows the job title, company, location, match %, candidate score, and URL status. Approve, pass, or defer each job.
+
+### 4. Application Submission (Playwright + Claude)
+When the scheduled apply window runs, approved jobs are submitted directly from Railway:
+
+1. **Extract applicant data** — Claude reads your CV and profile to pull name, email, phone, LinkedIn, GitHub, and a short bio
+2. **Navigate to job URL** — Playwright opens a headless Chromium browser on Railway
+3. **Blocker detection** — login walls and CAPTCHAs are detected and flagged as `manual_required`
+4. **Find Apply button** — clicks common apply-button patterns if the form isn't already visible
+5. **Claude-powered form fill** — the full page HTML is sent to Claude, which returns a JSON plan of `fill`, `select`, `upload`, and `submit` instructions
+6. **Execute instructions** — Playwright follows the plan: types text, selects options, uploads your CV file
+7. **Result verification** — after submit, Claude checks the result page for confirmation phrases ("application received", "thank you for applying", etc.)
+
+Result is stored as one of:
+| Status | Meaning |
+|--------|---------|
+| `confirmed` ✅ | Result page confirmed the application was received |
+| `submitted` 📤 | Form was submitted but no clear confirmation detected |
+| `manual_required` 👤 | Login wall, CAPTCHA, or unrecoverable blocker found |
+| `failed` ❌ | Playwright error or unexpected exception |
+
+### 5. Notifications
+WhatsApp messages are sent via Twilio for:
+- 🔍 New jobs found after a search run
+- ✅ Application confirmed (with confirmation snippet)
+- 👤 Manual apply needed (with reason and job URL)
+
+---
+
+## Setup
+
+### Environment Variables (Railway)
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Claude API key (required) |
+| `TWILIO_SID` | Twilio account SID for WhatsApp |
+| `TWILIO_TOKEN` | Twilio auth token |
+| `TWILIO_FROM` | Twilio WhatsApp sender number (`whatsapp:+14155238886`) |
+| `TWILIO_TO` | Your WhatsApp number (`whatsapp:+972...`) |
+| `APP_PASSWORD` | Dashboard login password |
+| `SECRET_KEY` | Flask session secret key |
+
+### Profile Setup (Dashboard → Profile)
+Fill in:
+- **CV / Resume** — plain text or paste your full CV; used by Claude for job matching and form-filling
+- **Job Titles** — comma-separated target roles (e.g. `VP Product, Head of Product, CPO`)
+- **Keywords** — extra search terms
+- **Email** — used when filling application forms
+- **CV File** — upload a PDF/DOCX for file-upload fields on application forms
+
+### Schedule Setup (Dashboard → Schedule)
+Set your preferred search time and apply window. Railway keeps the process running 24/7.
 
 ---
 
 ## Tech Stack
 
-- **Backend**: pure Python `http.server` (no Flask/Django) — zero extra dependencies
-- **Database**: SQLite via Python stdlib `sqlite3`
-- **Frontend**: vanilla JS + CSS (no framework, no build step)
-- **AI**: Claude via the Anthropic API
-- **Hosting**: Railway
-
----
-
-## Quick Start (Local)
-
-### 1. Configure
-
-```bash
-cp config.example.json config.json   # or edit config.json directly
-```
-
-Edit `config.json`:
-```json
-{
-  "anthropic_api_key": "sk-ant-api03-...",
-  "admin_email": "your@email.com",
-  "sync_api_key": "generate-a-random-secret",
-  "railway_url": "",
-  "port": 5001
-}
-```
-
-### 2. Run locally
-
-```bash
-python3 app.py
-```
-
-Open http://localhost:5001 → register with your admin email, upload your CV, and configure your preferences.
-
----
-
-## Deploy to Railway
-
-Full instructions are in [DEPLOY.md](DEPLOY.md). Quick summary:
-
-1. Push this repo to GitHub
-2. New Railway project → Deploy from GitHub repo
-3. Add a persistent volume mounted at `/data`
-4. Set environment variables:
-
-| Variable | Value |
-|---|---|
-| `ANTHROPIC_API_KEY` | your Anthropic key |
-| `ADMIN_EMAIL` | your email |
-| `SYNC_API_KEY` | same value as in `config.json` |
-| `DATABASE_PATH` | `/data/jobs.db` |
-| `UPLOADS_DIR` | `/data/uploads` |
-
-5. Copy your Railway URL into `config.json` → `railway_url`
-
----
-
-## Running the Mac-side tasks (optional)
-
-### relay.py (always-on bridge)
-
-```bash
-python3 relay.py
-```
-
-Polls every 30 seconds → syncs pending jobs up to Railway, pulls approved jobs down for the apply task.
-
-### Scheduled tasks
-
-Set up two daily Claude Code tasks (or cron jobs):
-
-| Task | File | Runs at |
-|---|---|---|
-| Job search | `search_jobs.py` | 11 AM (configurable) |
-| Auto-apply | `apply_jobs.py` | 2 PM (configurable) |
-
-Configure times in Settings → Schedule inside the web app.
-
----
-
-## Sync API
-
-All sync endpoints are authenticated with `SYNC_API_KEY` (passed as `?api_key=...`).
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/sync/jobs` | Ingest new jobs from the Mac search task |
-| `GET` | `/api/sync/approved` | Fetch approved jobs for the Mac apply task |
-| `POST` | `/api/sync/updates` | Mark jobs as applied/failed after apply runs |
-| `POST` | `/api/sync/notify` | Deliver a WhatsApp/Telegram notification |
-
----
-
-## Dashboard
-
-| Tab | Contents |
-|---|---|
-| **New** | Freshly found jobs — Approve, Pass, or Later |
-| **Approved** | Queued for auto-apply at scheduled time |
-| **Applied** | Submitted applications with timestamp, notes, and interview stage tracking |
-| **Passed** | Jobs you skipped (with optional reason) |
-| **Expired** | Old jobs past their window |
-| **Activity** | Full history of all your actions |
-
-### Sort bar
-
-Every tab with jobs shows three sort options:
-
-| Button | Sorts by |
-|---|---|
-| 📅 Date | Most recently found (default) |
-| 🎯 Match | Highest match percentage first |
-| 🏢 Company | Alphabetical by company name |
-
-
-The **New** tab also shows a **🔍 Run Search Now** button in the sort bar to trigger an immediate AI search on demand. The **Approved** tab banner includes an **🚀 Apply Now** button to apply to all approved jobs instantly.
-
-### Bulk actions
-
-Click **Select** in the sort bar to enter selection mode. Check any jobs, then use the floating bar at the bottom to **Approve All** or **Pass All** in one action.
-
-### Pass reason
-
-When passing on a job, a modal prompts you to choose a reason:
-
-- Overqualified
-- Underqualified
-- Not interesting
-- Wrong location
-- Wrong salary
-- Already applied
-- Not relevant to my search
-- (Skip — no reason)
-
-The reason is stored and shown in the Passed tab.
-
-Each job card shows:
-- **Match %** — keyword/title/seniority overlap with your profile (green ≥ 70%, amber ≥ 45%, red below)
-- **Candidate score** — how competitive you are for the specific role
-- **Status badge** — one-click 🔍 check if role is still open
-- **Why this fits you** — AI explanation of relevance
-
----
-
-## Admin Panel
-
-Navigate to `/admin` (visible in the profile dropdown for admin accounts).
-
-- View all registered users with their pipeline stats (New / Approved / Applied / Total jobs)
-- See join date and active/inactive status
-- Activate or deactivate non-admin accounts
-
----
-
-## Activity Log
-
-The Activity tab shows a chronological feed of everything that happened in your account:
-
-- Jobs imported from a search run
-- Individual approvals and passes (with reason if set)
-- CV uploads and AI analysis runs
-- Job status checks
-- Application submissions and failures
-
----
-
-## Project Structure
-
-```
-app.py              Main web server (routes, HTML, JS, auth, API)
-ai_analysis.py      CV analysis, job scoring, status checking (Claude)
-auth.py             Session-based auth (cookie + SQLite)
-db.py               Database schema, migrations, and activity logging
-relay.py            Mac <> Railway sync bridge (optional)
-DEPLOY.md           Full Railway deployment guide
-config.json         Local secrets (gitignored in production)
-Procfile            Railway start command
-```
+| Component | Technology |
+|-----------|-----------|
+| Backend | Python / Flask |
+| AI | Anthropic Claude (claude-opus-4-5) |
+| Browser automation | Playwright (Chromium, headless) |
+| Database | SQLite (persistent Railway volume) |
+| Notifications | Twilio WhatsApp API |
+| Hosting | Railway (always-on) |
 
 ---
 
 ## Database Schema
 
-| Table | Purpose |
-|---|---|
-| `users` | Accounts, roles, preferences, schedule |
-| `jobs` | All job postings with status, scores, notes |
-| `rejected_patterns` | Passed jobs with optional reason |
-| `activity_log` | Timestamped event log per user |
+Jobs table key columns:
+
+| Column | Description |
+|--------|-------------|
+| `url_verified` | 1 = URL alive, 0 = dead link (checked on import) |
+| `url_check_date` | ISO timestamp of last URL check |
+| `apply_status` | `confirmed` / `submitted` / `manual_required` / `failed` |
+| `apply_confirmation` | Confirmation text snippet from the result page |
+| `apply_attempts` | Number of submission attempts made |
+| `apply_error` | Error or blocker description if status is not confirmed |
 
 ---
 
-## License
+## Development
 
-MIT
+```bash
+git clone https://github.com/eranganot/job-hunter
+cd job-hunter
+pip install -r requirements.txt
+playwright install chromium
+python app.py
+```
+
+Set the environment variables in a `.env` file or export them in your shell before running locally.
