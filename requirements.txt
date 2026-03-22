@@ -1,7 +1,5 @@
 # Job Hunter — Python dependencies
-# All core modules (http.server, sqlite3, json, urllib) are stdlib.
-# Only add packages here if you extend the app with third-party libs.
+# Core modules (http.server, sqlite3, json, urllib) are stdlib — no install needed.
 
-# PDF text extraction (used indirectly via ai_analysis.py base64 encoding — no install needed)
-# Uncomment if you later add pypdf or pdfplumber:
-# pypdf==4.3.1
+# Browser automation for job application submission
+playwright==1.44.0
