@@ -104,6 +104,12 @@ def init_db():
     for _migration in [
         "ALTER TABLE jobs ADD COLUMN stage TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN weekdays_only INTEGER DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN url_verified INTEGER DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN url_check_date TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_status TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_confirmation TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_attempts INTEGER DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN apply_error TEXT DEFAULT NULL",
     ]:
         try:
             conn.execute(_migration)
