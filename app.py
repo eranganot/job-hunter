@@ -269,19 +269,35 @@ def run_job_search(user_id: int):
 
         jobs_data = json.loads(text)
 
+        # ── Verify job URLs in parallel before inserting ────────────────────
+        import apply_engine as _ae
+        from concurrent.futures import ThreadPoolExecutor as _TPE
+        _urls = {j.get("url", "") for j in jobs_data if j.get("url")}
+        _url_ok = {}
+        with _TPE(max_workers=8) as _ex:
+            _futs = {_ex.submit(_ae.check_url_alive, u): u for u in _urls}
+            for _f, _u in _futs.items():
+                try:
+                    _url_ok[_u] = 1 if _f.result(timeout=12) else 0
+                except Exception:
+                    _url_ok[_u] = 0
+        _chk_date = datetime.now().isoformat()
+
         conn = database.get_db()
         inserted = 0
         for j in jobs_data:
             try:
+                _jurl = j.get("url", "")
                 conn.execute(
                     "INSERT OR IGNORE INTO jobs "
                     "(user_id,title,company,location,url,description,why_relevant,source,"
-                    "found_date,match_score,candidate_score,status) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new')",
+                    "found_date,match_score,candidate_score,status,url_verified,url_check_date) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?)",
                     (user_id, j.get("job_title",""), j.get("company",""),
-                     j.get("location",""), j.get("url",""), j.get("description",""),
+                     j.get("location",""), _jurl, j.get("description",""),
                      j.get("fit_reason",""), j.get("source",""), j.get("found_date",today),
-                     j.get("match_score",0), j.get("candidate_score",0)))
+                     j.get("match_score",0), j.get("candidate_score",0),
+                     _url_ok.get(_jurl), _chk_date if _jurl else None))
                 inserted += 1
             except Exception as e:
                 print(f"[run-search] insert error: {e}")
@@ -306,11 +322,12 @@ def run_job_search(user_id: int):
 
 
 def run_job_apply(user_id: int) -> int:
-    """Immediately mark all approved jobs for user as applied."""
+    """Submit applications to all approved jobs using browser automation + Claude."""
     try:
+        import apply_engine
         conn = database.get_db()
         jobs = conn.execute(
-            "SELECT id, title, company FROM jobs WHERE user_id=? AND status='approved'",
+            "SELECT id, title, company, url FROM jobs WHERE user_id=? AND status='approved'",
             (user_id,)
         ).fetchall()
 
@@ -318,28 +335,89 @@ def run_job_apply(user_id: int) -> int:
             conn.close()
             return 0
 
-        today = datetime.now().strftime("%Y-%m-%d")
-        for j in jobs:
-            conn.execute(
-                "UPDATE jobs SET status='applied', applied_date=?, notes=? "
-                "WHERE id=? AND user_id=?",
-                (today, "Applied via Apply Now", j["id"], user_id)
-            )
-        conn.commit()
-        count = len(jobs)
-        database.log_activity(user_id, "job_applied",
-                              f"Applied to {count} job(s) via Apply Now")
+        # Gather user + CV data for form filling
+        user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        profile = conn.execute(
+            "SELECT cv_text, cv_filename FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
         conn.close()
 
+        cv_text   = (profile["cv_text"] or "") if profile else ""
+        email     = user["email"] if user else ""
+        applicant = apply_engine.extract_applicant_data(cv_text, email)
+
+        cv_path = None
+        if profile and profile["cv_filename"]:
+            cv_path = os.path.join(UPLOADS_DIR, str(user_id), profile["cv_filename"])
+
+        today = datetime.now().strftime("%Y-%m-%d")
+        count = 0
+        confirmed_list, manual_list = [], []
+
+        for j in jobs:
+            job_url = j["url"] or ""
+            if job_url:
+                res = apply_engine.submit_application(
+                    job_url, j["title"], j["company"],
+                    applicant, cv_path, ANTHROPIC_KEY
+                )
+                apply_status       = res["status"]
+                apply_confirmation = res.get("confirmation_text", "")[:1000]
+                apply_error        = res.get("error", "")[:500]
+                notes = f"Applied via Job Hunter — {apply_status}"
+            else:
+                apply_status       = "submitted"
+                apply_confirmation = ""
+                apply_error        = "No URL available"
+                notes = "Applied via Job Hunter (no URL)"
+
+            c2 = database.get_db()
+            c2.execute(
+                "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                "apply_status=?, apply_confirmation=?, apply_error=?, "
+                "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                "WHERE id=? AND user_id=?",
+                (today, notes, apply_status, apply_confirmation,
+                 apply_error, j["id"], user_id)
+            )
+            c2.commit()
+            c2.close()
+
+            database.log_activity(
+                user_id, "job_applied",
+                f"{j['title']} @ {j['company']} — {apply_status}"
+            )
+            count += 1
+            if apply_status == "confirmed":
+                confirmed_list.append(j)
+            elif apply_status == "manual_required":
+                manual_list.append(j)
+
+        # ── Notifications ────────────────────────────────────────────────────────────────────────────────
+        parts = []
+        if confirmed_list:
+            parts.append(f"✅ {len(confirmed_list)} confirmed")
+        if manual_list:
+            parts.append(f"U0001f464 {len(manual_list)} need manual apply")
         companies = ", ".join(j["company"] for j in jobs[:3])
         if count > 3:
             companies += f" +{count - 3} more"
         deliver_notification(
             user_id,
-            f"🚀 Applied to {count} job{'s' if count != 1 else ''}! "
-            f"({companies})"
+            f"U0001f680 Applied to {count} job{'s' if count != 1 else ''}! "
+            + (f"{' · '.join(parts)} " if parts else "")
+            + f"({companies})"
         )
-        print(f"[run-apply] user {user_id}: applied to {count} jobs")
+        if manual_list:
+            mc = ", ".join(j["company"] for j in manual_list[:3])
+            if len(manual_list) > 3:
+                mc += f" +{len(manual_list) - 3} more"
+            deliver_notification(
+                user_id,
+                f"U0001f464 {len(manual_list)} job(s) need manual apply: {mc}. "
+                f"Check your Applied tab."
+            )
+        print(f"[run-apply] user {user_id}: {count} jobs — confirmed={len(confirmed_list)} manual={len(manual_list)}")
         return count
 
     except Exception as e:
@@ -2016,6 +2094,7 @@ function actionBar(job) {
     <div class="mt-4 pt-4 border-t border-slate-100">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="inline-flex items-center gap-2 text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-xl font-medium">🚀 Applied ${ago(job.applied_date)}</span>
+           ${applyStatusBadge(job)}
         <div class="flex gap-1.5 flex-wrap">
           <button onclick="setStage(${job.id},'screening')"    class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='screening'   ?'bg-blue-100 text-blue-700 border-blue-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">📞 Screening</button>
           <button onclick="setStage(${job.id},'interviewing')" class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='interviewing'?'bg-amber-100 text-amber-700 border-amber-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">👥 Interviewing</button>
@@ -2023,6 +2102,8 @@ function actionBar(job) {
           <button onclick="setStage(${job.id},'rejected')"     class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='rejected'    ?'bg-red-100 text-red-600 border-red-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">❌ Rejected</button>
         </div>
       </div>
+      ${job.apply_confirmation ? `<div class="mt-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100"><span class="font-medium">✅ Confirmed:</span> ${job.apply_confirmation.substring(0,220)}${job.apply_confirmation.length>220?'…':''}</div>` : ''}
+      ${(job.apply_status === 'manual_required' && job.apply_error) ? `<div class="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">👤 <span class="font-medium">Manual apply needed:</span> ${job.apply_error}</div>` : ''}
     </div>`;
   }
   if (job.status === 'failed') return `
@@ -2067,8 +2148,19 @@ async function checkStatus(id) {
   }
 }
 
+function urlVerifiedBadge(job) {
+  if (job.url_verified === 1) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">🔗 URL OK</span>';
+  if (job.url_verified === 0) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title="URL unreachable — job may be closed">⚠️ Dead link</span>';
+  return '';
+}
+function applyStatusBadge(job) {
+  const map = {confirmed:'✅ Confirmed',submitted:'📤 Submitted',manual_required:'👤 Manual needed',failed:'❌ Failed'};
+  const cls = {confirmed:'bg-green-50 text-green-700 border-green-200',submitted:'bg-blue-50 text-blue-700 border-blue-200',manual_required:'bg-amber-50 text-amber-700 border-amber-200',failed:'bg-red-50 text-red-700 border-red-200'};
+  if (!job.apply_status || !map[job.apply_status]) return '';
+  return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
+}
 function renderJob(job) {
-  const badges = [matchBadge(job.match_score), candidateBadge(job.candidate_score), statusCheckBadge(job)].filter(Boolean).join('');
+  const badges = [matchBadge(job.match_score), candidateBadge(job.candidate_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
   const verifyBtn = job.url
     ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
     : '';
