@@ -2339,7 +2339,9 @@ async function setStage(id, stage) {
         card.querySelectorAll('.stage-btn').forEach(b => {
           b.className = 'stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all border-slate-200 text-slate-500 hover:border-slate-400';
         });
-        const act = card.querySelector('[onclick="setStage('+id+',\''+stage+'\')"'+']');
+        let act = null;
+        card.querySelectorAll('.stage-btn').forEach(b => { if ((b.getAttribute('onclick')||'').includes("'"+stage+"'")) act = b; });
+        if (act) act.className = 'stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all border-blue-400 text-blue-600 bg-blue-50 font-medium';
         if (act) act.className = 'stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all border-blue-400 text-blue-600 bg-blue-50 font-medium';
       }
       showToast('Stage updated ✅');
