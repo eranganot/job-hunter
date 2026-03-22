@@ -1,25 +1,6 @@
 #!/usr/bin/env python3
 """
-Job Hunter — St
-            if path == "/api/set-stage":
-                if not user: self.send_json({"error": "Unauthorized"}, 401); return
-                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                job_id = body.get("id"); stage = body.get("stage")
-                if not job_id: self.send_json({"error": "Missing id"}, 400); return
-                conn = database.get_db()
-                conn.execute("UPDATE jobs SET stage=? WHERE id=? AND user_id=?", (stage, job_id, user["id"]))
-                conn.commit(); conn.close()
-                if stage: database.log_activity(user["id"], "job_stage_updated", f"Interview stage: {stage}")
-                self.send_json({"ok": True}); return
-
-            if path == "/api/dismiss-onboarding":
-                if not user: self.send_json({"error": "Unauthorized"}, 401); return
-                conn = database.get_db()
-                conn.execute("UPDATE user_profiles SET onboarding_complete=1 WHERE user_id=?", (user["id"],))
-                conn.commit(); conn.close()
-                self.send_json({"ok": True}); return
-
-andalone Multi-User App
+Job Hunter – Standalone Multi-User App
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Local development:
     python3 app.py           → http://localhost:5001
@@ -219,7 +200,7 @@ def run_job_search(user_id: int):
 
         def _call_claude_search(prompt_text: str) -> list:
             body = json.dumps({
-                "model": "claude-opus-4-5-20251101",
+                "model": "claude-sonnet-4-6",
                 "max_tokens": 4096,
                 "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages": [{"role": "user", "content": prompt_text}]
@@ -236,7 +217,11 @@ def run_job_search(user_id: int):
             if text.startswith("```"):
                 text = text.split("```")[1]
                 if text.startswith("json"): text = text[4:]
-            return json.loads(text.strip())
+            if not text.strip(): return []
+            try:
+                return json.loads(text.strip())
+            except Exception:
+                return []
 
         # ── Multi-round: one call per job title ──────────────────────────
         search_titles = titles[:6]
@@ -2345,8 +2330,25 @@ async function runSearch() {
 }
 
 async function setStage(id, stage) {
-  const r = await api('/api/set-stage', 'POST', {id, stage});
-  if (r && r.ok) loadJobs('applied');
+  try {
+    const r = await fetch('/api/set-stage', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id, stage})});
+    const data = r.ok ? await r.json() : null;
+    if (data && data.ok) {
+      const card = document.getElementById('job-'+id);
+      if (card) {
+        card.querySelectorAll('.stage-btn').forEach(b => {
+          b.className = 'stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all border-slate-200 text-slate-500 hover:border-slate-400';
+        });
+        const act = card.querySelector('[onclick="setStage('+id+',\''+stage+'\')"'+']');
+        if (act) act.className = 'stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all border-blue-400 text-blue-600 bg-blue-50 font-medium';
+      }
+      showToast('Stage updated ✅');
+    } else {
+      showToast('Stage update failed ❌');
+    }
+  } catch(e) {
+    showToast('Connection error ❌');
+  }
 }
 
 async function runApply() {
@@ -2947,6 +2949,26 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             self.send_json(result)
             return
+
+        # ── Update applied-job pipeline stage ───────────────────────────────────
+        if path == "/api/set-stage":
+            user = self.get_user()
+            if not user:
+                self.send_json({"error": "auth"}, 401); return
+            data   = self.read_json()
+            job_id = data.get("id")
+            stage  = data.get("stage")
+            if not job_id or stage not in ("screening","interviewing","offer","rejected"):
+                self.send_json({"error": "invalid"}, 400); return
+            conn = database.get_db()
+            conn.execute(
+                "UPDATE jobs SET apply_status=? WHERE id=? AND user_id=?",
+                (stage, job_id, user["id"])
+            )
+            conn.commit(); conn.close()
+            database.log_activity(user["id"], "stage_update",
+                f"Stage updated to {stage} for job {job_id}")
+            self.send_json({"ok": True}); return
 
         # ── Bulk job actions ──────────────────────────────────────────────────────
         if path == "/api/jobs/bulk":
