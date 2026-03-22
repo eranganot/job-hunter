@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Job Hunter Ã¢ÂÂ St
+Job Hunter — St
             if path == "/api/set-stage":
                 if not user: self.send_json({"error": "Unauthorized"}, 401); return
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -20,9 +20,9 @@ Job Hunter Ã¢ÂÂ St
                 self.send_json({"ok": True}); return
 
 andalone Multi-User App
-Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Local development:
-    python3 app.py           Ã¢ÂÂ http://localhost:5001
+    python3 app.py           → http://localhost:5001
 
 Cloud (Railway):
     Set environment variables (see .env.example), push to GitHub, deploy.
@@ -46,7 +46,7 @@ import auth
 import db as database
 from ai_analysis import analyze_cv
 
-# Ã¢ÂÂÃ¢ÂÂ Config Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Config ────────────────────────────────────────────────────────────────────
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
@@ -65,15 +65,15 @@ def _cfg(env_key: str, json_key: str, default="") -> str:
 
 ANTHROPIC_KEY = _cfg("ANTHROPIC_API_KEY", "anthropic_api_key")
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
-SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relayÃ¢ÂÂserver calls
+SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
 
-# Persistent paths Ã¢ÂÂ override with env vars on Railway (point to a mounted volume)
+# Persistent paths — override with env vars on Railway (point to a mounted volume)
 DB_FILE     = _cfg("DATABASE_PATH", "_db_path", os.path.join(BASE_DIR, "jobs.db"))
 UPLOADS_DIR = _cfg("UPLOADS_DIR",   "_uploads",  os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-# Ã¢ÂÂÃ¢ÂÂ Local IP (for mobile access) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Local IP (for mobile access) ─────────────────────────────────────────────
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -90,13 +90,13 @@ _railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN', '')
 MOBILE_URL = (f"https://{_railway_domain}" if _railway_domain
               else f"http://{LOCAL_IP}:{PORT}")
 
-# Ã¢ÂÂÃ¢ÂÂ DB + Auth init Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── DB + Auth init ────────────────────────────────────────────────────────────
 
 database.set_db_path(DB_FILE)
 auth.set_db_getter(database.get_db)
 auth.set_admin_email(ADMIN_EMAIL)
 
-# Ã¢ÂÂÃ¢ÂÂ Notifications Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Notifications ─────────────────────────────────────────────────────────────
 
 def send_telegram(token: str, chat_id: str, message: str):
     try:
@@ -108,9 +108,9 @@ def send_telegram(token: str, chat_id: str, message: str):
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read())
             if result.get("ok"):
-                print("[telegram] Ã¢ÂÂ Sent")
+                print("[telegram] ✅ Sent")
             else:
-                print(f"[telegram] Ã¢ÂÂ Ã¯Â¸Â  {result}")
+                print(f"[telegram] ⚠️  {result}")
     except Exception as e:
         print(f"[telegram] Error: {e}")
 
@@ -132,9 +132,9 @@ def send_whatsapp(account_sid: str, auth_token: str, to_number: str, message: st
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read())
             if result.get("sid"):
-                print(f"[whatsapp] Ã¢ÂÂ Sent Ã¢ÂÂ {result['sid']}")
+                print(f"[whatsapp] ✅ Sent — {result['sid']}")
             else:
-                print(f"[whatsapp] Ã¢ÂÂ Ã¯Â¸Â  {result}")
+                print(f"[whatsapp] ⚠️  {result}")
     except Exception as e:
         print(f"[whatsapp] Error: {e}")
 
@@ -150,7 +150,7 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
         return
     channel = p["notification_channel"]
     dashboard_url = f"{MOBILE_URL}{url_suffix}"
-    msg_with_link = message + f"\n\nÃ°ÂÂÂ± Dashboard: {dashboard_url}"
+    msg_with_link = message + f"\n\n📱 Dashboard: {dashboard_url}"
     if channel == "telegram" and p["telegram_token"] and p["telegram_chat_id"]:
         send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
     elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
@@ -185,7 +185,7 @@ _search_running: set = set()
 
 
 def run_job_search(user_id: int):
-    """Search for new jobs via multi-round Anthropic web-search (one call per title)."""
+    """Search for new jobs via multi-round Anthropic web-search (one call per job title)."""
     if user_id in _search_running:
         return
     _search_running.add(user_id)
@@ -195,29 +195,22 @@ def run_job_search(user_id: int):
             "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
         ).fetchone()
         conn.close()
-
         if not profile:
             print(f"[run-search] No profile for user {user_id}")
             return
-
         import urllib.request as _ur
         import urllib.error  as _ue
-
         try:
             titles    = json.loads(profile["job_titles"] or "[]")
             keywords  = json.loads(profile["keywords"]   or "[]")
             locations = json.loads(profile["locations"]  or "[]")
         except Exception:
             titles, keywords, locations = [], [], ["Tel Aviv"]
-
-        if not locations:
-            locations = ["Tel Aviv"]
-        if not titles:
-            titles = ["Senior Product Manager"]
-
+        if not locations: locations = ["Tel Aviv"]
+        if not titles:    titles    = ["Senior Product Manager"]
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # ââ Load all existing job URLs to deduplicate against full DB history ââââââ
+        # ── Load all existing URLs to dedup against full history ─────────
         conn = database.get_db()
         existing_urls = {r[0] for r in conn.execute(
             "SELECT url FROM jobs WHERE user_id=? AND url!=''", (user_id,)
@@ -225,108 +218,78 @@ def run_job_search(user_id: int):
         conn.close()
 
         def _call_claude_search(prompt_text: str) -> list:
-            """Call Claude web-search API and return parsed job list."""
             body = json.dumps({
                 "model": "claude-opus-4-5-20251101",
                 "max_tokens": 4096,
                 "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                 "messages": [{"role": "user", "content": prompt_text}]
             }).encode()
-            req = _ur.Request(
-                "https://api.anthropic.com/v1/messages",
-                data=body, method="POST",
-                headers={
-                    "x-api-key": ANTHROPIC_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "anthropic-beta": "web-search-2025-03-05",
-                    "content-type": "application/json"
-                }
-            )
+            req = _ur.Request("https://api.anthropic.com/v1/messages", data=body, method="POST",
+                headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
+                         "anthropic-beta": "web-search-2025-03-05", "content-type": "application/json"})
             with _ur.urlopen(req, timeout=120) as resp:
                 result = json.loads(resp.read())
             text = ""
             for block in result.get("content", []):
                 if block.get("type") == "text":
-                    text = block["text"].strip()
-                    break
+                    text = block["text"].strip(); break
             if text.startswith("```"):
                 text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
-            return json.loads(text)
+                if text.startswith("json"): text = text[4:]
+            return json.loads(text.strip())
 
-        # ââ Multi-round search: one Claude call per job title ââââââââââââââââââ
+        # ── Multi-round: one call per job title ──────────────────────────
         search_titles = titles[:6]
         all_jobs_data = []
         seen_urls     = set(existing_urls)
-        seen_key      = set()  # (title_lower, company_lower) for url-less dedup
+        seen_key      = set()
 
         for title in search_titles:
             prompt = (
                 f"You are a job-search assistant. Search the web for 5-8 REAL, currently open "
                 f"job listings for the role: '{title}'.\n\n"
-                f"Candidate profile:\n"
-                f"  Key skills: {', '.join(keywords[:10])}\n"
+                f"Candidate profile:\n  Key skills: {', '.join(keywords[:10])}\n"
                 f"  Locations: {', '.join(locations)} (or Remote)\n"
                 f"  Seniority: Senior / Director / VP / Head-of\n\n"
                 "Search ALL of these sources:\n"
                 "  - LinkedIn Jobs (linkedin.com/jobs)\n"
                 "  - Glassdoor (glassdoor.com/job-listings)\n"
-                "  - AllJobs.co.il\n"
-                "  - Drushim.co.il\n"
+                "  - AllJobs.co.il\n  - Drushim.co.il\n"
                 "  - Wellfound / AngelList (wellfound.com/jobs)\n"
                 "  - Comeet (comeet.co)\n"
                 "  - Greenhouse boards (boards.greenhouse.io)\n"
                 "  - Lever boards (jobs.lever.co)\n"
                 "  - Company career pages directly\n\n"
-                "Return ONLY a JSON array (no markdown, no explanation) with this exact shape:\n"
-                "[\n"
-                "  {\n"
-                '    \"job_title\": \"exact title from posting\",\n'
-                '    \"company\": \"company name\",\n'
-                '    \"location\": \"city or Remote\",\n'
-                '    \"url\": \"direct link to the job posting\",\n'
-                '    \"description\": \"2-3 sentence summary\",\n'
-                '    \"source\": \"LinkedIn / Glassdoor / AllJobs / Drushim / Wellfound / Comeet / Greenhouse / Lever / Company\",\n'
-                f'    \"found_date\": \"{today}\",\n'
-                '    \"match_score\": <0-100 how well this role matches the profile>,\n'
-                '    \"candidate_score\": <0-100 how strong a candidate they are>,\n'
-                '    \"fit_reason\": \"1-2 sentence explanation\"\n'
-                "  }\n"
-                "]"
+                "Return ONLY a JSON array (no markdown) with this shape:\n"
+                '[{"job_title":"exact title","company":"company name","location":"city or Remote",'
+                '"url":"direct link","description":"2-3 sentence summary",'
+                '"source":"LinkedIn/Glassdoor/AllJobs/Drushim/Wellfound/Comeet/Greenhouse/Lever/Company",'
+                f'"found_date":"{today}","match_score":<0-100>,"candidate_score":<0-100>,'
+                '"fit_reason":"1-2 sentence explanation"}]'
             )
             try:
                 jobs_data = _call_claude_search(prompt)
                 added = 0
                 for j in jobs_data:
                     jurl = (j.get("url") or "").strip()
-                    jkey = (j.get("job_title", "").lower().strip(),
-                            j.get("company", "").lower().strip())
-                    if jurl and jurl in seen_urls:
-                        continue
-                    if not jurl and jkey in seen_key:
-                        continue
-                    if jurl:
-                        seen_urls.add(jurl)
-                    seen_key.add(jkey)
-                    all_jobs_data.append(j)
-                    added += 1
-                print(f"[run-search] title='{title}': {len(jobs_data)} results, {added} new (total unique={len(all_jobs_data)})")
+                    jkey = (j.get("job_title","").lower().strip(), j.get("company","").lower().strip())
+                    if jurl and jurl in seen_urls: continue
+                    if not jurl and jkey in seen_key: continue
+                    if jurl: seen_urls.add(jurl)
+                    seen_key.add(jkey); all_jobs_data.append(j); added += 1
+                print(f"[run-search] '{title}': {len(jobs_data)} found, {added} new (total={len(all_jobs_data)})")
             except Exception as e:
-                print(f"[run-search] title='{title}' error: {e}")
+                print(f"[run-search] '{title}' error: {e}")
 
         if not all_jobs_data:
             database.log_activity(user_id, "jobs_searched", "Search returned no new results")
-            deliver_notification(user_id,
-                f"Ã°ÂÂÂ Search Complete â {today}\n\nNo new jobs found this run.",
-                url_suffix="/dashboard#new")
+            deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix="/dashboard#new")
             return
 
-        # ââ Parallel URL verification for new jobs ââââââââââââââââââââââââââââââââ
+        # ── URL check for new jobs ───────────────────────────────────────
         import apply_engine as _ae
         from concurrent.futures import ThreadPoolExecutor as _TPE
-        _new_urls = {j.get("url", "").strip() for j in all_jobs_data if j.get("url")}
+        _new_urls = {j.get("url","").strip() for j in all_jobs_data if j.get("url")}
         _url_ok   = {}
         with _TPE(max_workers=8) as _ex:
             _futs = {_ex.submit(_ae.check_url_alive, u): u for u in _new_urls}
@@ -335,10 +298,8 @@ def run_job_search(user_id: int):
                 except: _url_ok[_u] = 0
         _chk_date = datetime.now().isoformat()
 
-        # ââ Insert new jobs into DB âââââââââââââââââââââââââââââââââââââââââââââââââââ
-        conn     = database.get_db()
-        inserted = 0
-        new_jobs_info = []
+        # ── Insert new jobs ──────────────────────────────────────────────
+        conn = database.get_db(); inserted = 0; new_jobs_info = []
         for j in all_jobs_data:
             try:
                 _jurl = (j.get("url") or "").strip()
@@ -347,31 +308,21 @@ def run_job_search(user_id: int):
                     "(user_id,title,company,location,url,description,why_relevant,source,"
                     "found_date,match_score,candidate_score,status,url_verified,url_check_date) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?)",
-                    (user_id, j.get("job_title",""), j.get("company",""),
-                     j.get("location",""), _jurl, j.get("description",""),
-                     j.get("fit_reason",""), j.get("source",""), j.get("found_date",today),
-                     j.get("match_score",0), j.get("candidate_score",0),
-                     _url_ok.get(_jurl) if _jurl else None,
-                     _chk_date if _jurl else None))
+                    (user_id, j.get("job_title",""), j.get("company",""), j.get("location",""),
+                     _jurl, j.get("description",""), j.get("fit_reason",""), j.get("source",""),
+                     j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
+                     _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None))
                 inserted += 1
-                new_jobs_info.append({
-                    "title":   j.get("job_title",""),
-                    "company": j.get("company",""),
-                    "url_ok":  _url_ok.get(_jurl) if _jurl else None,
-                })
-            except Exception as e:
-                print(f"[run-search] insert error: {e}")
-        conn.commit()
-        conn.close()
+                new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
+            except Exception as e: print(f"[run-search] insert error: {e}")
+        conn.commit(); conn.close()
 
-        # ââ Parallel URL verification for ALL historical unverified jobs âââââââââââââ
+        # ── URL check ALL historical unverified jobs ─────────────────────
         conn = database.get_db()
         unverified = conn.execute(
-            "SELECT id, url FROM jobs WHERE user_id=? AND url_verified IS NULL AND url!=''",
-            (user_id,)
+            "SELECT id, url FROM jobs WHERE user_id=? AND url_verified IS NULL AND url!=''", (user_id,)
         ).fetchall()
         conn.close()
-
         hist_alive = hist_dead = 0
         if unverified:
             with _TPE(max_workers=8) as _ex2:
@@ -382,39 +333,32 @@ def run_job_search(user_id: int):
                     except: hist_results[_r2["id"]] = 0
             conn = database.get_db()
             for job_id, ok in hist_results.items():
-                conn.execute(
-                    "UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",
-                    (ok, _chk_date, job_id)
-                )
+                conn.execute("UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",(ok,_chk_date,job_id))
                 if ok: hist_alive += 1
                 else:  hist_dead  += 1
-            conn.commit()
-            conn.close()
-            print(f"[run-search] historical URL check: {hist_alive} alive, {hist_dead} dead")
+            conn.commit(); conn.close()
 
-        database.log_activity(user_id, "jobs_searched",
-                              f"Found {inserted} new job(s) across {len(search_titles)} title search(es)")
+        database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(search_titles)} title search(es)")
 
-        # ââ Consolidated search notification âââââââââââââââââââââââââââââââââââââââ
-        notif_lines = [f"Ã°ÂÂÂ Search Complete â {today}"]
+        # ── Consolidated search notification ─────────────────────────────
+        notif_lines = [f"🔍 Search Complete — {today}"]
         if inserted > 0:
-            notif_lines.append(f"\nÃ°ÂÂÂ {inserted} new job(s) added for review:")
+            notif_lines.append(f"\n📋 {inserted} new job(s) added for review:")
             for info in new_jobs_info[:10]:
-                url_icon = "Ã°ÂÂÂ" if info["url_ok"] == 1 else ("Ã¢ÂÂ Ã¯Â¸Â" if info["url_ok"] == 0 else "")
-                notif_lines.append(f"  \u2022 {info['title']} @ {info['company']} {url_icon}".rstrip())
-            if len(new_jobs_info) > 10:
-                notif_lines.append(f"  Ã¢ÂÂ¦ and {len(new_jobs_info) - 10} more")
+                icon = "🔗" if info["url_ok"]==1 else ("⚠️" if info["url_ok"]==0 else "")
+                notif_lines.append(f"  • {info['title']} @ {info['company']} {icon}".rstrip())
+            if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
         else:
-            notif_lines.append("\nNo new jobs inserted (all already in your history).")
-        if (hist_alive + hist_dead) > 0:
-            notif_lines.append(f"\nÃ°ÂÂÂ Re-checked {hist_alive + hist_dead} existing job URL(s):")
-            notif_lines.append(f"  Ã¢ÂÂ {hist_alive} alive  Ã¢ÂÂ {hist_dead} dead")
+            notif_lines.append("\nNo new jobs inserted (all already in history).")
+        if (hist_alive+hist_dead)>0:
+            notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
+            notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
         deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#new")
         print(f"[run-search] user {user_id}: inserted={inserted} hist_checked={hist_alive+hist_dead}")
 
     except Exception as e:
         print(f"[run-search] Error: {e}")
-        database.log_activity(user_id, "jobs_searched", "Job search failed â will retry at next scheduled time")
+        database.log_activity(user_id, "jobs_searched", "Job search failed — will retry at next scheduled time")
     finally:
         _search_running.discard(user_id)
 
@@ -461,7 +405,7 @@ def run_job_apply(user_id: int) -> int:
                 apply_status       = res["status"]
                 apply_confirmation = res.get("confirmation_text", "")[:1000]
                 apply_error        = res.get("error", "")[:500]
-                notes = f"Applied via Job Hunter Ã¢ÂÂ {apply_status}"
+                notes = f"Applied via Job Hunter — {apply_status}"
             else:
                 apply_status       = "submitted"
                 apply_confirmation = ""
@@ -482,7 +426,7 @@ def run_job_apply(user_id: int) -> int:
 
             database.log_activity(
                 user_id, "job_applied",
-                f"{j['title']} @ {j['company']} Ã¢ÂÂ {apply_status}"
+                f"{j['title']} @ {j['company']} — {apply_status}"
             )
             count += 1
             if apply_status == "confirmed":
@@ -494,36 +438,36 @@ def run_job_apply(user_id: int) -> int:
             else:
                 failed_list.append(j)
 
-        # Ã¢ÂÂÃ¢ÂÂ Notifications Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
-        # ââ Single consolidated apply notification âââââââââââââââââââââââââââ
+        # ── Notifications ────────────────────────────────────────────────────────────────────────────────
+        # ── Single consolidated apply notification ──────────────────────────────
         today_str = datetime.now().strftime("%Y-%m-%d")
-        notif_lines = [f"Ã°ÂÂÂ Apply Run Complete â {today_str}", f"Ã°ÂÂÂ {count} application(s) submitted\n"]
+        notif_lines = [f"🚀 Apply Run Complete — {today_str}", f"📊 {count} application(s) submitted\n"]
         if confirmed_list:
-            notif_lines.append(f"Ã¢ÂÂ {len(confirmed_list)} Confirmed:")
+            notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
             for j in confirmed_list[:5]:
-                notif_lines.append(f"  â¢ {j['title']} @ {j['company']}")
+                notif_lines.append(f"  • {j['title']} @ {j['company']}")
             if len(confirmed_list) > 5:
-                notif_lines.append(f"  Ã¢ÂÂ¦ +{len(confirmed_list)-5} more")
+                notif_lines.append(f"  … +{len(confirmed_list)-5} more")
         if submitted_list:
-            notif_lines.append(f"\nÃ°ÂÂÂ¤ {len(submitted_list)} Submitted (awaiting confirmation):")
+            notif_lines.append(f"\n📤 {len(submitted_list)} Submitted (awaiting confirmation):")
             for j in submitted_list[:5]:
-                notif_lines.append(f"  â¢ {j['title']} @ {j['company']}")
+                notif_lines.append(f"  • {j['title']} @ {j['company']}")
             if len(submitted_list) > 5:
-                notif_lines.append(f"  Ã¢ÂÂ¦ +{len(submitted_list)-5} more")
+                notif_lines.append(f"  … +{len(submitted_list)-5} more")
         if manual_list:
-            notif_lines.append(f"\nÃ°ÂÂÂ¤ {len(manual_list)} Need Manual Apply:")
+            notif_lines.append(f"\n👤 {len(manual_list)} Need Manual Apply:")
             for j in manual_list[:5]:
-                notif_lines.append(f"  â¢ {j['title']} @ {j['company']}")
+                notif_lines.append(f"  • {j['title']} @ {j['company']}")
             if len(manual_list) > 5:
-                notif_lines.append(f"  Ã¢ÂÂ¦ +{len(manual_list)-5} more")
+                notif_lines.append(f"  … +{len(manual_list)-5} more")
         if failed_list:
-            notif_lines.append(f"\nÃ¢ÂÂ {len(failed_list)} Failed:")
+            notif_lines.append(f"\n❌ {len(failed_list)} Failed:")
             for j in failed_list[:5]:
-                notif_lines.append(f"  â¢ {j['title']} @ {j['company']}")
+                notif_lines.append(f"  • {j['title']} @ {j['company']}")
             if len(failed_list) > 5:
-                notif_lines.append(f"  Ã¢ÂÂ¦ +{len(failed_list)-5} more")
+                notif_lines.append(f"  … +{len(failed_list)-5} more")
         deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#applied")
-        print(f"[run-apply] user {user_id}: {count} jobs â confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed={len(failed_list)}")
+        print(f"[run-apply] user {user_id}: {count} — confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed={len(failed_list)}")
         return count
 
     except Exception as e:
@@ -531,10 +475,10 @@ def run_job_apply(user_id: int) -> int:
         return 0
 
 
-# Ã¢ÂÂÃ¢ÂÂ Multipart parser Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Multipart parser ──────────────────────────────────────────────────────────
 
 def parse_multipart(headers, body: bytes) -> dict:
-    """Returns dict: field_name Ã¢ÂÂ str  or  field_name Ã¢ÂÂ {'filename':str,'data':bytes}"""
+    """Returns dict: field_name → str  or  field_name → {'filename':str,'data':bytes}"""
     ctype = headers.get("Content-Type", "")
     boundary = None
     for part in ctype.split(";"):
@@ -570,9 +514,9 @@ def parse_multipart(headers, body: bytes) -> dict:
                 parts[name] = content.decode("utf-8", errors="replace")
     return parts
 
-# Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ─────────────────────────────────────────────────────────────────────────────
 # HTML PAGES
-# Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ─────────────────────────────────────────────────────────────────────────────
 
 _COMMON_HEAD = """
   <meta charset="UTF-8"/>
@@ -597,18 +541,18 @@ _COMMON_HEAD = """
   </style>
 """
 
-# Ã¢ÂÂÃ¢ÂÂ Auth pages Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Auth pages ────────────────────────────────────────────────────────────────
 
 LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>""" + _COMMON_HEAD + """
-  <title>Job Hunter Ã¢ÂÂ Sign In</title>
+  <title>Job Hunter — Sign In</title>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-blue-900 flex items-center justify-center p-4">
 <div class="w-full max-w-md fade">
   <div class="text-center mb-8">
     <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-xl">
-      <span class="text-3xl">Ã°ÂÂÂ¯</span>
+      <span class="text-3xl">🎯</span>
     </div>
     <h1 class="text-3xl font-bold text-white">Job Hunter</h1>
     <p class="text-blue-300 mt-1 text-sm">Your AI-powered job search assistant</p>
@@ -626,9 +570,9 @@ LOGIN_HTML = """<!DOCTYPE html>
       </div>
       <div>
         <label class="label" for="password">Password</label>
-        <input class="input" type="password" name="password" id="password" placeholder="Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" required/>
+        <input class="input" type="password" name="password" id="password" placeholder="••••••••" required/>
       </div>
-      <button type="submit" class="btn btn-primary w-full mt-2">Sign in Ã¢ÂÂ</button>
+      <button type="submit" class="btn btn-primary w-full mt-2">Sign in →</button>
     </form>
 
     <p class="text-center text-sm text-slate-500 mt-6">
@@ -643,13 +587,13 @@ LOGIN_HTML = """<!DOCTYPE html>
 REGISTER_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>""" + _COMMON_HEAD + """
-  <title>Job Hunter Ã¢ÂÂ Create Account</title>
+  <title>Job Hunter — Create Account</title>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-blue-900 flex items-center justify-center p-4">
 <div class="w-full max-w-md fade">
   <div class="text-center mb-8">
     <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-xl">
-      <span class="text-3xl">Ã°ÂÂÂ¯</span>
+      <span class="text-3xl">🎯</span>
     </div>
     <h1 class="text-3xl font-bold text-white">Job Hunter</h1>
     <p class="text-blue-300 mt-1 text-sm">Let's get you set up</p>
@@ -675,9 +619,9 @@ REGISTER_HTML = """<!DOCTYPE html>
       </div>
       <div>
         <label class="label" for="password2">Confirm password</label>
-        <input class="input" type="password" name="password2" id="password2" placeholder="Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" required minlength="8"/>
+        <input class="input" type="password" name="password2" id="password2" placeholder="••••••••" required minlength="8"/>
       </div>
-      <button type="submit" class="btn btn-primary w-full mt-2">Create account Ã¢ÂÂ</button>
+      <button type="submit" class="btn btn-primary w-full mt-2">Create account →</button>
     </form>
 
     <p class="text-center text-sm text-slate-500 mt-6">
@@ -694,12 +638,12 @@ def error_block(msg: str) -> str:
         return ""
     return f"""<div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{msg}</div>"""
 
-# Ã¢ÂÂÃ¢ÂÂ Onboarding Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Onboarding ────────────────────────────────────────────────────────────────
 
 ONBOARDING_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>""" + _COMMON_HEAD + """
-  <title>Job Hunter Ã¢ÂÂ Setup</title>
+  <title>Job Hunter — Setup</title>
   <style>
     .step { display:none; }
     .step.active { display:block; }
@@ -727,7 +671,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
 <header class="bg-white border-b border-slate-100 sticky top-0 z-20">
   <div class="max-w-2xl mx-auto px-5 py-4 flex items-center justify-between">
     <div class="flex items-center gap-2">
-      <span class="text-2xl">Ã°ÂÂÂ¯</span>
+      <span class="text-2xl">🎯</span>
       <span class="font-bold text-slate-900">Job Hunter</span>
     </div>
     <div class="text-sm text-slate-400">Step <span id="step-num">1</span> of 4</div>
@@ -739,34 +683,34 @@ ONBOARDING_HTML = """<!DOCTYPE html>
 
 <main class="max-w-2xl mx-auto px-5 py-8">
 
-<!-- Ã¢ÂÂÃ¢ÂÂ STEP 1: Upload CV Ã¢ÂÂÃ¢ÂÂ -->
+<!-- ── STEP 1: Upload CV ── -->
 <div class="step active fade" id="step-1">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Upload your CV</h2>
   <p class="text-slate-500 mb-6">We'll analyze it and recommend the best job titles and search strategy for you.</p>
 
   <div id="drop-zone" class="drop-zone bg-white rounded-2xl p-10 text-center cursor-pointer mb-4"
        onclick="document.getElementById('cv-file').click()">
-    <div id="drop-icon" class="text-5xl mb-3">Ã°ÂÂÂ</div>
+    <div id="drop-icon" class="text-5xl mb-3">📄</div>
     <p id="drop-text" class="font-semibold text-slate-700">Drag & drop your CV here</p>
-    <p class="text-slate-400 text-sm mt-1">or click to browse Ã¢ÂÂ PDF only</p>
+    <p class="text-slate-400 text-sm mt-1">or click to browse — PDF only</p>
     <input type="file" id="cv-file" accept=".pdf" class="hidden" onchange="handleFile(this.files[0])"/>
   </div>
 
   <div id="upload-status" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 text-sm text-blue-700"></div>
 
   <button id="analyze-btn" onclick="analyzeCV()"
-    class="btn btn-primary w-full hidden">Ã¢ÂÂ¨ Analyze with AI Ã¢ÂÂ</button>
+    class="btn btn-primary w-full hidden">✨ Analyze with AI →</button>
   <button id="skip-cv-btn" onclick="goToStep(2)"
-    class="btn btn-secondary w-full mt-2">Skip for now Ã¢ÂÂ</button>
+    class="btn btn-secondary w-full mt-2">Skip for now →</button>
 </div>
 
-<!-- Ã¢ÂÂÃ¢ÂÂ STEP 2: Review Profile Ã¢ÂÂÃ¢ÂÂ -->
+<!-- ── STEP 2: Review Profile ── -->
 <div class="step fade" id="step-2">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Your job profile</h2>
   <p class="text-slate-500 mb-6">Review and adjust the AI recommendations, or fill them in manually.</p>
 
   <div id="ai-summary-box" class="hidden bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 mb-6">
-    <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">Ã¢ÂÂ¨ AI Summary</p>
+    <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">✨ AI Summary</p>
     <p id="ai-summary-text" class="text-sm text-amber-900"></p>
   </div>
 
@@ -774,7 +718,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
     <div>
       <label class="label">Job titles to search for</label>
       <div class="tag-input-wrap" id="titles-wrap" onclick="focusTagInput('titles-input')">
-        <input class="tag-input" id="titles-input" placeholder="e.g. VP ProductÃ¢ÂÂ¦" onkeydown="tagKeyDown(event,'titles-wrap')"/>
+        <input class="tag-input" id="titles-input" placeholder="e.g. VP Product…" onkeydown="tagKeyDown(event,'titles-wrap')"/>
       </div>
       <p class="text-xs text-slate-400 mt-1">Press Enter or comma to add</p>
     </div>
@@ -782,14 +726,14 @@ ONBOARDING_HTML = """<!DOCTYPE html>
     <div>
       <label class="label">Key skills & keywords</label>
       <div class="tag-input-wrap" id="keywords-wrap" onclick="focusTagInput('keywords-input')">
-        <input class="tag-input" id="keywords-input" placeholder="e.g. B2B, Product StrategyÃ¢ÂÂ¦" onkeydown="tagKeyDown(event,'keywords-wrap')"/>
+        <input class="tag-input" id="keywords-input" placeholder="e.g. B2B, Product Strategy…" onkeydown="tagKeyDown(event,'keywords-wrap')"/>
       </div>
     </div>
 
     <div>
       <label class="label">Preferred locations</label>
       <div class="tag-input-wrap" id="locations-wrap" onclick="focusTagInput('locations-input')">
-        <input class="tag-input" id="locations-input" placeholder="e.g. Tel AvivÃ¢ÂÂ¦" onkeydown="tagKeyDown(event,'locations-wrap')"/>
+        <input class="tag-input" id="locations-input" placeholder="e.g. Tel Aviv…" onkeydown="tagKeyDown(event,'locations-wrap')"/>
       </div>
     </div>
 
@@ -815,12 +759,12 @@ ONBOARDING_HTML = """<!DOCTYPE html>
   </div>
 
   <div class="flex gap-3 mt-8">
-    <button onclick="goToStep(1)" class="btn btn-secondary">Ã¢ÂÂ Back</button>
-    <button onclick="saveProfile()" class="btn btn-primary flex-1">Looks good Ã¢ÂÂ </button>
+    <button onclick="goToStep(1)" class="btn btn-secondary">← Back</button>
+    <button onclick="saveProfile()" class="btn btn-primary flex-1">Looks good → </button>
   </div>
 </div>
 
-<!-- Ã¢ÂÂÃ¢ÂÂ STEP 3: Notifications Ã¢ÂÂÃ¢ÂÂ -->
+<!-- ── STEP 3: Notifications ── -->
 <div class="step fade" id="step-3">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Stay notified</h2>
   <p class="text-slate-500 mb-6">Get a message after each daily search and application run.</p>
@@ -833,7 +777,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
         <div class="font-semibold text-slate-900">Telegram</div>
         <div class="text-sm text-slate-500">Receive messages via a Telegram bot</div>
       </div>
-      <span class="ml-auto text-2xl">Ã¢ÂÂÃ¯Â¸Â</span>
+      <span class="ml-auto text-2xl">✈️</span>
     </label>
 
     <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
@@ -843,7 +787,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
         <div class="font-semibold text-slate-900">WhatsApp</div>
         <div class="text-sm text-slate-500">Receive messages via Twilio sandbox</div>
       </div>
-      <span class="ml-auto text-2xl">Ã°ÂÂÂ¬</span>
+      <span class="ml-auto text-2xl">💬</span>
     </label>
 
     <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
@@ -859,7 +803,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
   <!-- Telegram form -->
   <div id="form-telegram" class="hidden bg-white border border-slate-200 rounded-xl p-5 space-y-4 mb-4">
     <p class="text-sm text-slate-600 bg-blue-50 rounded-lg p-3">
-      1. Search for <strong>@BotFather</strong> on Telegram Ã¢ÂÂ /newbot Ã¢ÂÂ get your token.<br/>
+      1. Search for <strong>@BotFather</strong> on Telegram → /newbot → get your token.<br/>
       2. Start a chat with your new bot, then send any message.<br/>
       3. Visit <code class="bg-slate-100 px-1 rounded">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> and copy your <code class="bg-slate-100 px-1 rounded">chat_id</code>.
     </p>
@@ -871,14 +815,14 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       <label class="label">Chat ID</label>
       <input class="input" type="text" id="tg-chat-id" placeholder="123456789"/>
     </div>
-    <button onclick="testTelegram()" class="btn btn-secondary text-sm">Ã°ÂÂ§Âª Send test message</button>
+    <button onclick="testTelegram()" class="btn btn-secondary text-sm">🧪 Send test message</button>
     <div id="tg-test-result" class="text-sm hidden"></div>
   </div>
 
   <!-- WhatsApp form -->
   <div id="form-whatsapp" class="hidden bg-white border border-slate-200 rounded-xl p-5 space-y-4 mb-4">
     <p class="text-sm text-slate-600 bg-green-50 rounded-lg p-3">
-      1. Go to <strong>console.twilio.com</strong> Ã¢ÂÂ Messaging Ã¢ÂÂ Try it out Ã¢ÂÂ WhatsApp.<br/>
+      1. Go to <strong>console.twilio.com</strong> → Messaging → Try it out → WhatsApp.<br/>
       2. Send the join message to <strong>+1 415 523 8886</strong> on WhatsApp.<br/>
       3. Paste your Twilio credentials below.
     </p>
@@ -894,22 +838,22 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       <label class="label">Your WhatsApp number</label>
       <input class="input" type="tel" id="wa-number" placeholder="+972546912084"/>
     </div>
-    <button onclick="testWhatsapp()" class="btn btn-secondary text-sm">Ã°ÂÂ§Âª Send test message</button>
+    <button onclick="testWhatsapp()" class="btn btn-secondary text-sm">🧪 Send test message</button>
     <div id="wa-test-result" class="text-sm hidden"></div>
   </div>
 
   <div class="flex gap-3 mt-4">
-    <button onclick="goToStep(2)" class="btn btn-secondary">Ã¢ÂÂ Back</button>
-    <button onclick="saveNotifications()" class="btn btn-primary flex-1">Continue Ã¢ÂÂ</button>
+    <button onclick="goToStep(2)" class="btn btn-secondary">← Back</button>
+    <button onclick="saveNotifications()" class="btn btn-primary flex-1">Continue →</button>
   </div>
 </div>
 
-<!-- Ã¢ÂÂÃ¢ÂÂ STEP 4: Schedule Ã¢ÂÂÃ¢ÂÂ -->
+<!-- ── STEP 4: Schedule ── -->
 <div class="step fade" id="step-4">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Set your schedule</h2>
   <p id="ob-schedule-desc" class="text-slate-500 mb-6">Job Hunter will run automatically for you.</p>
 
-  <!-- Frequency choice Ã¢ÂÂ hidden for admin -->
+  <!-- Frequency choice — hidden for admin -->
   <div id="ob-frequency-section" class="hidden mb-5">
     <label class="label">How often should it run?</label>
     <div class="space-y-2">
@@ -926,16 +870,16 @@ ONBOARDING_HTML = """<!DOCTYPE html>
         <input type="radio" name="ob-frequency" value="daily" onchange="obUpdateScheduleUI()" class="accent-blue-600 w-4 h-4"/>
         <div>
           <div class="font-semibold text-sm">Daily</div>
-          <div class="text-xs text-slate-500">Run every day Ã¢ÂÂ for intensive searches</div>
+          <div class="text-xs text-slate-500">Run every day — for intensive searches</div>
         </div>
       </label>
     </div>
   </div>
 
-  <!-- Day pickers Ã¢ÂÂ shown for weekly -->
+  <!-- Day pickers — shown for weekly -->
   <div id="ob-day-section" class="bg-white border border-slate-200 rounded-2xl p-5 mb-4 space-y-5">
     <div>
-      <label class="label">Ã°ÂÂÂ Search day</label>
+      <label class="label">🔍 Search day</label>
       <div class="flex gap-2 flex-wrap" id="ob-search-day-btns">
         <button type="button" onclick="obSelectDay('search',1)" data-day="1" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Mon</button>
         <button type="button" onclick="obSelectDay('search',2)" data-day="2" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Tue</button>
@@ -946,7 +890,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       <input type="hidden" id="ob-search-day" value="1"/>
     </div>
     <div>
-      <label class="label">Ã°ÂÂÂ Apply day</label>
+      <label class="label">🚀 Apply day</label>
       <div class="flex gap-2 flex-wrap" id="ob-apply-day-btns">
         <button type="button" onclick="obSelectDay('apply',1)" data-day="1" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Mon</button>
         <button type="button" onclick="obSelectDay('apply',2)" data-day="2" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Tue</button>
@@ -960,7 +904,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
 
   <div class="bg-white border border-slate-200 rounded-2xl p-5 space-y-5 mb-5">
     <div>
-      <label class="label" id="ob-search-time-label">Ã°ÂÂÂ Search time</label>
+      <label class="label" id="ob-search-time-label">🔍 Search time</label>
       <select class="input" id="search-hour">
         <option value="7">7:00 AM</option><option value="8">8:00 AM</option>
         <option value="9">9:00 AM</option><option value="10">10:00 AM</option>
@@ -969,7 +913,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       </select>
     </div>
     <div>
-      <label class="label" id="ob-apply-time-label">Ã°ÂÂÂ Apply time</label>
+      <label class="label" id="ob-apply-time-label">🚀 Apply time</label>
       <select class="input" id="apply-hour">
         <option value="12">12:00 PM</option><option value="13">1:00 PM</option>
         <option value="14" selected>2:00 PM</option><option value="15">3:00 PM</option>
@@ -981,17 +925,17 @@ ONBOARDING_HTML = """<!DOCTYPE html>
   <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 mb-6">
     <p class="font-semibold text-blue-900 mb-2">Here's how it works:</p>
     <ul class="text-sm text-blue-800 space-y-1" id="ob-how-it-works">
-      <li>1Ã¯Â¸ÂÃ¢ÂÂ£  At your search time, we find new matching jobs</li>
-      <li>2Ã¯Â¸ÂÃ¢ÂÂ£  You get notified and review them in this dashboard</li>
-      <li>3Ã¯Â¸ÂÃ¢ÂÂ£  Tap <strong>Approve</strong> on jobs you like</li>
-      <li>4Ã¯Â¸ÂÃ¢ÂÂ£  At your apply time, we auto-apply to approved jobs</li>
-      <li>5Ã¯Â¸ÂÃ¢ÂÂ£  Jobs not reviewed in 3 days expire automatically</li>
+      <li>1️⃣  At your search time, we find new matching jobs</li>
+      <li>2️⃣  You get notified and review them in this dashboard</li>
+      <li>3️⃣  Tap <strong>Approve</strong> on jobs you like</li>
+      <li>4️⃣  At your apply time, we auto-apply to approved jobs</li>
+      <li>5️⃣  Jobs not reviewed in 3 days expire automatically</li>
     </ul>
   </div>
 
   <div class="flex gap-3">
-    <button onclick="goToStep(3)" class="btn btn-secondary">Ã¢ÂÂ Back</button>
-    <button onclick="finishOnboarding()" class="btn btn-primary flex-1">Ã°ÂÂÂ Start Job Hunt!</button>
+    <button onclick="goToStep(3)" class="btn btn-secondary">← Back</button>
+    <button onclick="finishOnboarding()" class="btn btn-primary flex-1">🚀 Start Job Hunt!</button>
   </div>
 </div>
 
@@ -1014,7 +958,7 @@ function goToStep(n) {
   if (n === 4) initScheduleStep();
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Tags Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Tags ──────────────────────────────────────────────────────────────────────
 function addTag(wrapId, value) {
   const v = value.trim().replace(/,$/,'').trim();
   if (!v) return;
@@ -1025,7 +969,7 @@ function addTag(wrapId, value) {
   if (existing.includes(v.toLowerCase())) { input.value=''; return; }
   const tag = document.createElement('span');
   tag.className = 'tag';
-  tag.innerHTML = `<span>${v}</span><button type="button" onclick="this.parentElement.remove()">ÃÂ</button>`;
+  tag.innerHTML = `<span>${v}</span><button type="button" onclick="this.parentElement.remove()">×</button>`;
   wrap.insertBefore(tag, input);
   input.value = '';
 }
@@ -1049,7 +993,7 @@ function setTags(wrapId, values) {
   (values || []).forEach(v => addTag(wrapId, v));
 }
 
-// Ã¢ÂÂÃ¢ÂÂ CV Upload Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── CV Upload ─────────────────────────────────────────────────────────────────
 const dz = document.getElementById('drop-zone');
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('over'));
@@ -1062,9 +1006,9 @@ function handleFile(file) {
   if (!file || !file.name.endsWith('.pdf')) {
     showUploadStatus('Please upload a PDF file.', 'error'); return;
   }
-  document.getElementById('drop-icon').textContent = 'Ã¢ÂÂ³';
-  document.getElementById('drop-text').textContent = `Uploading ${file.name}Ã¢ÂÂ¦`;
-  showUploadStatus('UploadingÃ¢ÂÂ¦', 'info');
+  document.getElementById('drop-icon').textContent = '⏳';
+  document.getElementById('drop-text').textContent = `Uploading ${file.name}…`;
+  showUploadStatus('Uploading…', 'info');
 
   const fd = new FormData();
   fd.append('cv', file);
@@ -1073,14 +1017,14 @@ function handleFile(file) {
     .then(data => {
       if (data.success) {
         cvUploaded = true;
-        document.getElementById('drop-icon').textContent = 'Ã¢ÂÂ';
+        document.getElementById('drop-icon').textContent = '✅';
         document.getElementById('drop-text').textContent = file.name + ' ready';
         showUploadStatus('CV uploaded! Click below to analyze it.', 'success');
         document.getElementById('analyze-btn').classList.remove('hidden');
-        document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis Ã¢ÂÂ';
+        document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis →';
       } else {
         showUploadStatus(data.error || 'Upload failed.', 'error');
-        document.getElementById('drop-icon').textContent = 'Ã°ÂÂÂ';
+        document.getElementById('drop-icon').textContent = '📄';
         document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
       }
     })
@@ -1101,12 +1045,12 @@ function showUploadStatus(msg, type) {
 
 async function analyzeCV() {
   const btn = document.getElementById('analyze-btn');
-  btn.textContent = 'Ã¢ÂÂ³ Analyzing your CVÃ¢ÂÂ¦';
+  btn.textContent = '⏳ Analyzing your CV…';
   btn.disabled = true;
   try {
     const resp = await fetch('/api/analyze-cv', {method:'POST'});
     const data = await resp.json();
-    if (data.error) { showUploadStatus(data.error, 'error'); btn.disabled=false; btn.textContent='Ã¢ÂÂ¨ Analyze with AI Ã¢ÂÂ'; return; }
+    if (data.error) { showUploadStatus(data.error, 'error'); btn.disabled=false; btn.textContent='✨ Analyze with AI →'; return; }
     aiData = data;
     populateStep2(data);
     goToStep(2);
@@ -1115,7 +1059,7 @@ async function analyzeCV() {
     goToStep(2);
   }
   btn.disabled = false;
-  btn.textContent = 'Ã¢ÂÂ¨ Analyze with AI Ã¢ÂÂ';
+  btn.textContent = '✨ Analyze with AI →';
 }
 
 function populateStep2(data) {
@@ -1130,7 +1074,7 @@ function populateStep2(data) {
   if (data.salary_max) document.getElementById('salary-max').value = data.salary_max;
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Profile save Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Profile save ──────────────────────────────────────────────────────────────
 async function saveProfile() {
   const body = {
     job_titles:   getTags('titles-wrap'),
@@ -1145,7 +1089,7 @@ async function saveProfile() {
   goToStep(3);
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Notification forms Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Notification forms ────────────────────────────────────────────────────────
 function showNotifForm(channel) {
   ['telegram','whatsapp'].forEach(c => {
     document.getElementById('form-'+c).classList.toggle('hidden', c !== channel);
@@ -1163,7 +1107,7 @@ async function testTelegram() {
   const el = document.getElementById('tg-test-result');
   el.classList.remove('hidden');
   el.className = `text-sm p-3 rounded-lg mt-2 ${d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
-  el.textContent = d.success ? 'Ã¢ÂÂ Message sent! Check Telegram.' : 'Ã¢ÂÂ ' + (d.error || 'Failed');
+  el.textContent = d.success ? '✅ Message sent! Check Telegram.' : '❌ ' + (d.error || 'Failed');
 }
 
 async function testWhatsapp() {
@@ -1178,7 +1122,7 @@ async function testWhatsapp() {
   const el = document.getElementById('wa-test-result');
   el.classList.remove('hidden');
   el.className = `text-sm p-3 rounded-lg mt-2 ${d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
-  el.textContent = d.success ? 'Ã¢ÂÂ Message sent! Check WhatsApp.' : 'Ã¢ÂÂ ' + (d.error || 'Failed');
+  el.textContent = d.success ? '✅ Message sent! Check WhatsApp.' : '❌ ' + (d.error || 'Failed');
 }
 
 async function saveNotifications() {
@@ -1197,7 +1141,7 @@ async function saveNotifications() {
   goToStep(4);
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Onboarding schedule helpers Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Onboarding schedule helpers ───────────────────────────────────────────────
 async function initScheduleStep() {
   try {
     const r = await fetch('/api/me');
@@ -1233,7 +1177,7 @@ function obSelectDay(type, day) {
   });
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Finish Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Finish ────────────────────────────────────────────────────────────────────
 async function finishOnboarding() {
   const isAdmin = userRole === 'admin';
   const freq = isAdmin ? 'daily' : (document.querySelector('input[name="ob-frequency"]:checked')?.value || 'weekly');
@@ -1253,12 +1197,12 @@ async function finishOnboarding() {
 </body>
 </html>"""
 
-# Ã¢ÂÂÃ¢ÂÂ Settings Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Settings ──────────────────────────────────────────────────────────────────
 
 SETTINGS_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>""" + _COMMON_HEAD + """
-  <title>Job Hunter Ã¢ÂÂ Settings</title>
+  <title>Job Hunter — Settings</title>
   <style>
     .tab-btn { transition:all .15s; }
     .tab-btn.active { background:#fff;color:#1d4ed8;box-shadow:0 1px 4px rgba(0,0,0,.1);font-weight:600; }
@@ -1285,12 +1229,12 @@ SETTINGS_HTML = """<!DOCTYPE html>
 <header class="bg-gradient-to-r from-slate-900 via-blue-900 to-blue-800 text-white shadow-xl sticky top-0 z-30">
   <div class="max-w-3xl mx-auto px-5 py-3 flex items-center justify-between gap-3">
     <a href="/dashboard" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-      <span class="text-xl">Ã°ÂÂÂ¯</span>
+      <span class="text-xl">🎯</span>
       <span class="font-bold">Job Hunter</span>
     </a>
     <div class="flex items-center gap-3">
       <span id="user-name-display" class="text-blue-300 text-sm hidden sm:block"></span>
-      <a href="/dashboard" class="btn btn-secondary text-sm px-4 py-2 min-h-0 h-9">Ã¢ÂÂ Dashboard</a>
+      <a href="/dashboard" class="btn btn-secondary text-sm px-4 py-2 min-h-0 h-9">← Dashboard</a>
       <a href="/logout" class="text-blue-300 hover:text-white text-sm transition-colors">Sign out</a>
     </div>
   </div>
@@ -1337,12 +1281,12 @@ SETTINGS_HTML = """<!DOCTYPE html>
       <p id="cv-current" class="text-sm text-slate-500 mb-3">No CV uploaded yet.</p>
       <div id="cv-drop" class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
            onclick="document.getElementById('cv-file-input').click()">
-        <p class="text-slate-600 font-medium text-sm">Ã°ÂÂÂ Click to upload a new CV</p>
-        <p class="text-slate-400 text-xs mt-1">PDF only Ã¢ÂÂ replaces current CV</p>
+        <p class="text-slate-600 font-medium text-sm">📄 Click to upload a new CV</p>
+        <p class="text-slate-400 text-xs mt-1">PDF only — replaces current CV</p>
         <input type="file" id="cv-file-input" accept=".pdf" class="hidden" onchange="uploadCV(this.files[0])"/>
       </div>
       <div id="cv-upload-status" class="hidden text-sm p-3 rounded-lg mt-3"></div>
-      <button id="cv-analyze-btn" onclick="reanalyzeCV()" class="hidden btn btn-secondary mt-3 text-sm">Ã¢ÂÂ¨ Re-analyze with AI Ã¢ÂÂ</button>
+      <button id="cv-analyze-btn" onclick="reanalyzeCV()" class="hidden btn btn-secondary mt-3 text-sm">✨ Re-analyze with AI →</button>
     </div>
   </div>
 
@@ -1353,20 +1297,20 @@ SETTINGS_HTML = """<!DOCTYPE html>
       <div>
         <label class="label">Job titles to search for</label>
         <div class="tag-input-wrap" id="s-titles-wrap" onclick="document.getElementById('s-titles-input').focus()">
-          <input class="tag-input" id="s-titles-input" placeholder="Add titleÃ¢ÂÂ¦" onkeydown="tagKeyDown(event,'s-titles-wrap')"/>
+          <input class="tag-input" id="s-titles-input" placeholder="Add title…" onkeydown="tagKeyDown(event,'s-titles-wrap')"/>
         </div>
         <p class="text-xs text-slate-400 mt-1">Press Enter or comma to add</p>
       </div>
       <div>
         <label class="label">Key skills & keywords</label>
         <div class="tag-input-wrap" id="s-keywords-wrap" onclick="document.getElementById('s-keywords-input').focus()">
-          <input class="tag-input" id="s-keywords-input" placeholder="Add keywordÃ¢ÂÂ¦" onkeydown="tagKeyDown(event,'s-keywords-wrap')"/>
+          <input class="tag-input" id="s-keywords-input" placeholder="Add keyword…" onkeydown="tagKeyDown(event,'s-keywords-wrap')"/>
         </div>
       </div>
       <div>
         <label class="label">Preferred locations</label>
         <div class="tag-input-wrap" id="s-locations-wrap" onclick="document.getElementById('s-locations-input').focus()">
-          <input class="tag-input" id="s-locations-input" placeholder="Add locationÃ¢ÂÂ¦" onkeydown="tagKeyDown(event,'s-locations-wrap')"/>
+          <input class="tag-input" id="s-locations-input" placeholder="Add location…" onkeydown="tagKeyDown(event,'s-locations-wrap')"/>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-4">
@@ -1391,13 +1335,13 @@ SETTINGS_HTML = """<!DOCTYPE html>
                     hover:border-blue-400 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
         <input type="radio" name="s-notif" value="telegram" onchange="showNotifSection('telegram')" class="accent-blue-600 w-4 h-4"/>
         <span class="font-semibold">Telegram</span>
-        <span class="ml-auto text-xl">Ã¢ÂÂÃ¯Â¸Â</span>
+        <span class="ml-auto text-xl">✈️</span>
       </label>
       <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-green-400 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
         <input type="radio" name="s-notif" value="whatsapp" onchange="showNotifSection('whatsapp')" class="accent-green-600 w-4 h-4"/>
         <span class="font-semibold">WhatsApp</span>
-        <span class="ml-auto text-xl">Ã°ÂÂÂ¬</span>
+        <span class="ml-auto text-xl">💬</span>
       </label>
       <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-slate-400 transition-colors has-[:checked]:border-slate-400">
@@ -1409,14 +1353,14 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <div id="sn-telegram" class="hidden space-y-4 border-t pt-5">
       <div><label class="label">Bot token</label><input class="input" type="text" id="sn-tg-token" placeholder="123456789:AAH..."/></div>
       <div><label class="label">Chat ID</label><input class="input" type="text" id="sn-tg-chat-id" placeholder="12345678"/></div>
-      <button onclick="testNotification('telegram')" class="btn btn-secondary text-sm">Ã°ÂÂ§Âª Test</button>
+      <button onclick="testNotification('telegram')" class="btn btn-secondary text-sm">🧪 Test</button>
     </div>
 
     <div id="sn-whatsapp" class="hidden space-y-4 border-t pt-5">
       <div><label class="label">Twilio Account SID</label><input class="input" type="text" id="sn-wa-sid" placeholder="ACxxxxxxxx"/></div>
       <div><label class="label">Twilio Auth Token</label><input class="input" type="text" id="sn-wa-token" placeholder="auth token"/></div>
       <div><label class="label">Your WhatsApp number</label><input class="input" type="tel" id="sn-wa-number" placeholder="+972..."/></div>
-      <button onclick="testNotification('whatsapp')" class="btn btn-secondary text-sm">Ã°ÂÂ§Âª Test</button>
+      <button onclick="testNotification('whatsapp')" class="btn btn-secondary text-sm">🧪 Test</button>
     </div>
 
     <div id="test-notif-result" class="hidden text-sm p-3 rounded-lg mt-3"></div>
@@ -1428,7 +1372,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <h3 class="font-bold text-slate-900 mb-1">Schedule</h3>
     <p id="schedule-role-note" class="text-sm text-slate-500 mb-5"></p>
 
-    <!-- Frequency toggle Ã¢ÂÂ hidden for admin (always daily) -->
+    <!-- Frequency toggle — hidden for admin (always daily) -->
     <div id="frequency-section" class="hidden mb-6">
       <label class="label">How often should Job Hunter run?</label>
       <div class="space-y-2">
@@ -1437,7 +1381,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
           <input type="radio" name="s-frequency" value="weekly" onchange="updateScheduleUI()" class="accent-blue-600 w-4 h-4 shrink-0"/>
           <div>
             <div class="font-semibold text-sm">Weekly <span class="text-xs text-slate-400 font-normal">(recommended)</span></div>
-            <div class="text-xs text-slate-500">One search + apply cycle per week Ã¢ÂÂ less noise, more quality</div>
+            <div class="text-xs text-slate-500">One search + apply cycle per week — less noise, more quality</div>
           </div>
         </label>
         <label class="flex items-center gap-4 p-3.5 border-2 border-slate-200 rounded-xl cursor-pointer
@@ -1445,16 +1389,16 @@ SETTINGS_HTML = """<!DOCTYPE html>
           <input type="radio" name="s-frequency" value="daily" onchange="updateScheduleUI()" class="accent-blue-600 w-4 h-4 shrink-0"/>
           <div>
             <div class="font-semibold text-sm">Daily</div>
-            <div class="text-xs text-slate-500">Run every day Ã¢ÂÂ best during an active intensive search</div>
+            <div class="text-xs text-slate-500">Run every day — best during an active intensive search</div>
           </div>
         </label>
       </div>
     </div>
 
-    <!-- Day-of-week pickers Ã¢ÂÂ shown for weekly schedule -->
+    <!-- Day-of-week pickers — shown for weekly schedule -->
     <div id="day-section" class="hidden mb-6 space-y-5">
       <div>
-        <label class="label">Ã°ÂÂÂ Search day</label>
+        <label class="label">🔍 Search day</label>
         <div class="flex gap-2 flex-wrap" id="search-day-btns">
           <button type="button" onclick="selectDay('search',1)" data-day="1" class="day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Mon</button>
           <button type="button" onclick="selectDay('search',2)" data-day="2" class="day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Tue</button>
@@ -1465,7 +1409,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
         <input type="hidden" id="s-search-day" value="1"/>
       </div>
       <div>
-        <label class="label">Ã°ÂÂÂ Apply day</label>
+        <label class="label">🚀 Apply day</label>
         <div class="flex gap-2 flex-wrap" id="apply-day-btns">
           <button type="button" onclick="selectDay('apply',1)" data-day="1" class="day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Mon</button>
           <button type="button" onclick="selectDay('apply',2)" data-day="2" class="day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Tue</button>
@@ -1480,7 +1424,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <!-- Time pickers (always shown) -->
     <div class="space-y-5">
       <div>
-        <label class="label">Ã°ÂÂÂ Search time</label>
+        <label class="label">🔍 Search time</label>
         <select class="input" id="s-search-hour">
           <option value="7">7:00 AM</option><option value="8">8:00 AM</option>
           <option value="9">9:00 AM</option><option value="10">10:00 AM</option>
@@ -1489,7 +1433,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
         </select>
       </div>
       <div>
-        <label class="label">Ã°ÂÂÂ Apply time</label>
+        <label class="label">🚀 Apply time</label>
         <select class="input" id="s-apply-hour">
           <option value="12">12:00 PM</option><option value="13">1:00 PM</option>
           <option value="14">2:00 PM</option><option value="15">3:00 PM</option>
@@ -1500,7 +1444,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
 
     <div class="mt-5 flex items-center gap-3">
       <input type="checkbox" id="s-weekdays-only" class="w-4 h-4 rounded accent-blue-600">
-      <label for="s-weekdays-only" class="text-sm text-slate-700 cursor-pointer">Ã°ÂÂÂ Weekdays only Ã¢ÂÂ skip Saturday &amp; Sunday</label>
+      <label for="s-weekdays-only" class="text-sm text-slate-700 cursor-pointer">📅 Weekdays only — skip Saturday &amp; Sunday</label>
     </div>
     <button onclick="saveSchedule()" class="btn btn-primary mt-6">Save schedule</button>
   </div>
@@ -1509,9 +1453,9 @@ SETTINGS_HTML = """<!DOCTYPE html>
   <div class="panel bg-white rounded-2xl p-6 shadow-sm border border-slate-100" id="panel-account">
     <h3 class="font-bold text-slate-900 mb-4">Change Password</h3>
     <div class="space-y-4">
-      <div><label class="label">Current password</label><input class="input" type="password" id="s-cur-pw" placeholder="Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢"/></div>
+      <div><label class="label">Current password</label><input class="input" type="password" id="s-cur-pw" placeholder="••••••••"/></div>
       <div><label class="label">New password</label><input class="input" type="password" id="s-new-pw" placeholder="At least 8 characters" minlength="8"/></div>
-      <div><label class="label">Confirm new password</label><input class="input" type="password" id="s-new-pw2" placeholder="Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢"/></div>
+      <div><label class="label">Confirm new password</label><input class="input" type="password" id="s-new-pw2" placeholder="••••••••"/></div>
     </div>
     <div id="pw-result" class="hidden text-sm p-3 rounded-lg mt-3"></div>
     <button onclick="changePassword()" class="btn btn-primary mt-4">Change password</button>
@@ -1524,7 +1468,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<div id="save-toast" class="save-toast">Ã¢ÂÂ Saved!</div>
+<div id="save-toast" class="save-toast">✅ Saved!</div>
 
 <script>
 let userData = {};
@@ -1560,16 +1504,16 @@ async function loadUser() {
 
   // CV
   if (userData.cv_path) {
-    document.getElementById('cv-current').textContent = 'Ã¢ÂÂ CV on file Ã¢ÂÂ upload a new PDF to replace it.';
+    document.getElementById('cv-current').textContent = '✅ CV on file — upload a new PDF to replace it.';
     document.getElementById('cv-analyze-btn').classList.remove('hidden');
   }
 
-  // Schedule Ã¢ÂÂ role-aware
+  // Schedule — role-aware
   const isAdmin = userData.role === 'admin';
   const freq    = userData.schedule_frequency || (isAdmin ? 'daily' : 'weekly');
 
   document.getElementById('schedule-role-note').textContent = isAdmin
-    ? 'Ã°ÂÂÂ As the admin, your schedule runs daily.'
+    ? '🔒 As the admin, your schedule runs daily.'
     : 'Choose how often Job Hunter searches and applies for you.';
 
   if (!isAdmin) {
@@ -1633,7 +1577,7 @@ function addTag(wrapId, value) {
   if (existing.includes(v.toLowerCase())) { input.value=''; return; }
   const tag = document.createElement('span');
   tag.className = 'tag';
-  tag.innerHTML = `<span>${v}</span><button type="button" onclick="this.parentElement.remove()">ÃÂ</button>`;
+  tag.innerHTML = `<span>${v}</span><button type="button" onclick="this.parentElement.remove()">×</button>`;
   wrap.insertBefore(tag, input);
   input.value = '';
 }
@@ -1651,7 +1595,7 @@ function setTags(wrapId, values) {
 
 function showToast(msg) {
   const t = document.getElementById('save-toast');
-  t.textContent = msg || 'Ã¢ÂÂ Saved!';
+  t.textContent = msg || '✅ Saved!';
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2500);
 }
@@ -1705,7 +1649,7 @@ async function testNotification(channel) {
   const el = document.getElementById('test-notif-result');
   el.classList.remove('hidden');
   el.className = `text-sm p-3 rounded-lg mt-3 ${d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
-  el.textContent = d.success ? 'Ã¢ÂÂ Test message sent!' : 'Ã¢ÂÂ ' + (d.error||'Failed');
+  el.textContent = d.success ? '✅ Test message sent!' : '❌ ' + (d.error||'Failed');
 }
 
 async function saveSchedule() {
@@ -1727,35 +1671,35 @@ async function uploadCV(file) {
   if (!file || !file.name.endsWith('.pdf')) {
     showCVStatus('Please upload a PDF file.', 'error'); return;
   }
-  showCVStatus('UploadingÃ¢ÂÂ¦', 'info');
+  showCVStatus('Uploading…', 'info');
   const fd = new FormData();
   fd.append('cv', file);
   const r = await fetch('/api/upload-cv', {method:'POST', body:fd});
   const d = await r.json();
   if (d.success) {
-    showCVStatus('Ã¢ÂÂ CV uploaded successfully!', 'success');
-    document.getElementById('cv-current').textContent = 'Ã¢ÂÂ New CV on file.';
+    showCVStatus('✅ CV uploaded successfully!', 'success');
+    document.getElementById('cv-current').textContent = '✅ New CV on file.';
     document.getElementById('cv-analyze-btn').classList.remove('hidden');
   } else {
-    showCVStatus('Ã¢ÂÂ ' + (d.error||'Upload failed.'), 'error');
+    showCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
   }
 }
 
 async function reanalyzeCV() {
   const btn = document.getElementById('cv-analyze-btn');
-  btn.textContent = 'Ã¢ÂÂ³ AnalyzingÃ¢ÂÂ¦';
+  btn.textContent = '⏳ Analyzing…';
   btn.disabled = true;
   const r = await fetch('/api/analyze-cv', {method:'POST'});
   const d = await r.json();
   if (d.error) {
-    showCVStatus('Ã¢ÂÂ ' + d.error, 'error');
+    showCVStatus('❌ ' + d.error, 'error');
   } else {
-    showCVStatus('Ã¢ÂÂ AI analysis complete! Job preferences updated.', 'success');
+    showCVStatus('✅ AI analysis complete! Job preferences updated.', 'success');
     // Reload to show updated preferences
     await loadUser();
     setTab('preferences');
   }
-  btn.textContent = 'Ã¢ÂÂ¨ Re-analyze with AI Ã¢ÂÂ';
+  btn.textContent = '✨ Re-analyze with AI →';
   btn.disabled = false;
 }
 
@@ -1780,7 +1724,7 @@ async function changePassword() {
     body:JSON.stringify({current_password:cur, new_password:nw})});
   const d = await r.json();
   el.className = `text-sm p-3 rounded-lg mt-3 ${d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
-  el.textContent = d.success ? 'Ã¢ÂÂ Password changed.' : 'Ã¢ÂÂ ' + (d.error||'Failed');
+  el.textContent = d.success ? '✅ Password changed.' : '❌ ' + (d.error||'Failed');
   if (d.success) { ['s-cur-pw','s-new-pw','s-new-pw2'].forEach(id => document.getElementById(id).value=''); }
 }
 
@@ -1789,22 +1733,22 @@ loadUser();
 </body>
 </html>"""
 
-# Ã¢ÂÂÃ¢ÂÂ Admin Panel Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Admin Panel ───────────────────────────────────────────────────────────────
 
 ADMIN_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>""" + _COMMON_HEAD + """
-  <title>Job Hunter Ã¢ÂÂ Admin</title>
+  <title>Job Hunter — Admin</title>
 </head>
 <body class="bg-slate-50 min-h-screen">
 <header class="bg-gradient-to-r from-slate-900 via-blue-900 to-blue-800 text-white shadow-xl sticky top-0 z-30">
   <div class="max-w-5xl mx-auto px-5 py-3 flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <span class="text-xl">Ã°ÂÂÂ¯</span>
+      <span class="text-xl">🎯</span>
       <span class="font-bold">Job Hunter</span>
       <span class="text-xs bg-amber-500 text-white px-2 py-0.5 rounded-full font-bold ml-1">ADMIN</span>
     </div>
-    <a href="/dashboard" class="btn btn-secondary text-sm px-4 py-2 min-h-0 h-9">Ã¢ÂÂ Dashboard</a>
+    <a href="/dashboard" class="btn btn-secondary text-sm px-4 py-2 min-h-0 h-9">← Dashboard</a>
   </div>
 </header>
 
@@ -1812,7 +1756,7 @@ ADMIN_HTML = """<!DOCTYPE html>
   <h1 class="text-2xl font-bold text-slate-900 mb-1">Admin Panel</h1>
   <p class="text-slate-500 text-sm mb-6">All users and their pipeline status.</p>
   <div id="users-grid" class="space-y-4">
-    <div class="text-center py-10 text-slate-400 animate-pulse text-sm">Loading usersÃ¢ÂÂ¦</div>
+    <div class="text-center py-10 text-slate-400 animate-pulse text-sm">Loading users…</div>
   </div>
 </div>
 
@@ -1820,7 +1764,7 @@ ADMIN_HTML = """<!DOCTYPE html>
 async function loadUsers() {
   const r = await fetch('/api/admin/users');
   if (r.status === 403 || r.status === 401) {
-    document.getElementById('users-grid').innerHTML = '<p class="text-red-600 text-center py-8">Access denied Ã¢ÂÂ admins only.</p>';
+    document.getElementById('users-grid').innerHTML = '<p class="text-red-600 text-center py-8">Access denied — admins only.</p>';
     return;
   }
   const users = await r.json();
@@ -1856,7 +1800,7 @@ async function loadUsers() {
       <div class="mt-3 flex gap-2">
         <button onclick="toggleUser(${u.id}, ${u.is_active})"
           class="text-xs px-4 py-2 rounded-lg border font-medium transition-all ${u.is_active?'border-red-200 text-red-600 hover:bg-red-50':'border-green-200 text-green-600 hover:bg-green-50'}">
-          ${u.is_active?'Ã°ÂÂÂ« Deactivate':'Ã¢ÂÂ Activate'}
+          ${u.is_active?'🚫 Deactivate':'✅ Activate'}
         </button>
       </div>` : ''}
     </div>
@@ -1873,7 +1817,7 @@ loadUsers();
 </body>
 </html>"""
 
-# Ã¢ÂÂÃ¢ÂÂ Dashboard (user-aware) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ── Dashboard (user-aware) ────────────────────────────────────────────────────
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -1913,19 +1857,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <header class="bg-gradient-to-r from-slate-900 via-blue-900 to-blue-800 text-white shadow-2xl sticky top-0 z-30">
   <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
     <div class="min-w-0">
-      <h1 class="text-base font-bold tracking-tight">Ã°ÂÂÂ¯ Job Hunter</h1>
+      <h1 class="text-base font-bold tracking-tight">🎯 Job Hunter</h1>
       <p id="user-tagline" class="text-blue-300 text-xs mt-0.5 hidden sm:block"></p>
     </div>
     <div id="stats-bar" class="flex gap-3 sm:gap-5 text-center shrink-0"></div>
     <div class="flex items-center gap-2 shrink-0">
-      <button onclick="loadAll()" class="btn-touch text-blue-300 hover:text-white text-xl transition-colors" title="Refresh">Ã¢ÂÂ»</button>
+      <button onclick="loadAll()" class="btn-touch text-blue-300 hover:text-white text-xl transition-colors" title="Refresh">↻</button>
       <div class="dropdown">
         <button id="avatar-btn" aria-label="Account menu" aria-haspopup="true" onclick="this.closest('.dropdown').classList.toggle('open')"
           class="btn-touch w-9 h-9 rounded-full bg-blue-600 text-white text-sm font-bold flex items-center justify-center">?</button>
         <div class="dropdown-menu">
-          <a href="/settings" class="dropdown-item">Ã¢ÂÂÃ¯Â¸Â Settings</a>
-          <a href="/admin"    class="dropdown-item hidden" id="admin-link">Ã°ÂÂÂ¡Ã¯Â¸Â Admin</a>
-          <a href="/logout"   class="dropdown-item">Ã¢ÂÂ Sign out</a>
+          <a href="/settings" class="dropdown-item">⚙️ Settings</a>
+          <a href="/admin"    class="dropdown-item hidden" id="admin-link">🛡️ Admin</a>
+          <a href="/logout"   class="dropdown-item">← Sign out</a>
         </div>
       </div>
     </div>
@@ -1948,19 +1892,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Sort + Bulk controls -->
 <div id="sort-bar" class="max-w-4xl mx-auto px-4 mt-2 flex items-center gap-2 flex-wrap">
   <span class="text-xs text-slate-400 font-medium shrink-0">Sort:</span>
-  <button onclick="setSort('date')"    id="sort-date"    class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">Ã°ÂÂÂ Date</button>
-  <button onclick="setSort('match')"   id="sort-match"   class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">Ã°ÂÂÂ¯ Match</button>
-  <button onclick="setSort('company')" id="sort-company" class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">Ã°ÂÂÂ¢ Company</button>
-  <button onclick="toggleSelect()" id="bulk-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">Ã¢ÂÂ Select</button>
-  <button onclick="runSearch()" id="run-search-btn" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-600 font-semibold bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1">Ã°ÂÂÂ Run Search Now</button>
+  <button onclick="setSort('date')"    id="sort-date"    class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">📅 Date</button>
+  <button onclick="setSort('match')"   id="sort-match"   class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🎯 Match</button>
+  <button onclick="setSort('company')" id="sort-company" class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🏢 Company</button>
+  <button onclick="toggleSelect()" id="bulk-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">☐ Select</button>
+  <button onclick="runSearch()" id="run-search-btn" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-600 font-semibold bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1">🔍 Run Search Now</button>
 </div>
 
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
 <div id="empty-state" class="hidden text-center py-24 px-4">
-  <div class="text-5xl mb-3 opacity-30">Ã°ÂÂÂ</div>
+  <div class="text-5xl mb-3 opacity-30">🔍</div>
   <p id="empty-msg" class="text-slate-500 font-medium">Nothing here yet</p>
   <p class="text-slate-400 text-sm mt-1">New jobs appear at your daily search time</p>
-  <button id="empty-search-cta" onclick="runSearch()" class="hidden mt-5 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">Ã°ÂÂÂ Run Search Now</button>
+  <button id="empty-search-cta" onclick="runSearch()" class="hidden mt-5 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all">🔍 Run Search Now</button>
 </div>
 
 <!-- Activity panel -->
@@ -1969,9 +1913,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Bulk action bar (floating) -->
 <div id="bulk-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-2xl text-sm whitespace-nowrap">
   <span id="bulk-count" class="font-medium">0 selected</span>
-  <button onclick="bulkAction('approve')" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl font-semibold transition-all">Ã¢ÂÂ Approve</button>
-  <button onclick="bulkAction('reject')"  class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl font-semibold transition-all">Ã¢ÂÂ Pass</button>
-  <button onclick="clearSelect()" class="text-slate-400 hover:text-white px-2 transition-all text-xl leading-none">Ã¢ÂÂ</button>
+  <button onclick="bulkAction('approve')" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl font-semibold transition-all">✅ Approve</button>
+  <button onclick="bulkAction('reject')"  class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl font-semibold transition-all">❌ Pass</button>
+  <button onclick="clearSelect()" class="text-slate-400 hover:text-white px-2 transition-all text-xl leading-none">✕</button>
 </div>
 
 <!-- Pass reason modal -->
@@ -1980,15 +1924,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <h3 class="font-bold text-slate-900 mb-0.5">Why are you passing?</h3>
     <p class="text-xs text-slate-400 mb-4">Helps improve future matches</p>
     <div class="space-y-2 mb-3">
-      <button onclick="selectReason('Not a good fit')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã°ÂÂ¤Â Not a good fit</button>
-      <button onclick="selectReason('Wrong seniority level')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã°ÂÂÂ Wrong seniority level</button>
-      <button onclick="selectReason('Salary too low')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã°ÂÂÂ° Salary too low</button>
-      <button onclick="selectReason('Bad company')"           class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã°ÂÂÂ¢ Bad company</button>
-      <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã°ÂÂÂ Wrong location</button>
-      <button onclick="selectReason('Already applied elsewhere')"       class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã¢ÂÂ Already applied elsewhere</button>
-      <button onclick="selectReason('Not relevant to my search')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">Ã°ÂÂÂ Not relevant to my search</button>
+      <button onclick="selectReason('Not a good fit')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🤔 Not a good fit</button>
+      <button onclick="selectReason('Wrong seniority level')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📊 Wrong seniority level</button>
+      <button onclick="selectReason('Salary too low')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">💰 Salary too low</button>
+      <button onclick="selectReason('Bad company')"           class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🏢 Bad company</button>
+      <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📍 Wrong location</button>
+      <button onclick="selectReason('Already applied elsewhere')"       class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
+      <button onclick="selectReason('Not relevant to my search')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🔍 Not relevant to my search</button>
     </div>
-    <button onclick="skipReason()" class="w-full text-sm text-slate-400 hover:text-slate-600 py-2 transition-all">Skip Ã¢ÂÂ no reason</button>
+    <button onclick="skipReason()" class="w-full text-sm text-slate-400 hover:text-slate-600 py-2 transition-all">Skip — no reason</button>
   </div>
 </div>
 
@@ -2018,14 +1962,14 @@ async function loadMe() {
   const sh = me.search_hour || 11;
   const ah = me.apply_hour || 14;
   const fmt = h => h < 12 ? h+' AM' : h===12 ? '12 PM' : (h-12)+' PM';
-  document.getElementById('schedule-hint').textContent = 'Ã°ÂÂÂ '+fmt(sh)+' ÃÂ· Ã°ÂÂÂ '+fmt(ah);
+  document.getElementById('schedule-hint').textContent = '🔍 '+fmt(sh)+' · 🚀 '+fmt(ah);
   if (me.role === 'admin') {
     const al = document.getElementById('admin-link');
     if (al) al.classList.remove('hidden');
   }
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Sort Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Sort ──────────────────────────────────────────────────────────────────────
 function setSort(s) {
   sortBy = s;
   document.querySelectorAll('.sort-btn').forEach(b => {
@@ -2037,12 +1981,12 @@ function setSort(s) {
   loadJobs(tab);
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Bulk select Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Bulk select ───────────────────────────────────────────────────────────────
 function toggleSelect() {
   selectMode = !selectMode;
   selectedIds.clear();
   const btn = document.getElementById('bulk-toggle');
-  btn.textContent = selectMode ? 'Ã¢ÂÂ Cancel' : 'Ã¢ÂÂ Select';
+  btn.textContent = selectMode ? '✕ Cancel' : '☐ Select';
   if (selectMode) {
     btn.classList.add('bg-slate-900','text-white','border-slate-900');
     btn.classList.remove('text-slate-500','border-slate-200');
@@ -2059,7 +2003,7 @@ function clearSelect() {
   selectedIds.clear();
   const btn = document.getElementById('bulk-toggle');
   if (btn) {
-    btn.textContent = 'Ã¢ÂÂ Select';
+    btn.textContent = '☐ Select';
     btn.classList.remove('bg-slate-900','text-white','border-slate-900');
     btn.classList.add('text-slate-500','border-slate-200');
   }
@@ -2091,7 +2035,7 @@ async function bulkAction(action) {
   loadAll();
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Pass reason modal Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Pass reason modal ─────────────────────────────────────────────────────────
 function openPassModal(id) {
   _pendingPassId = id;
   const m = document.getElementById('pass-modal');
@@ -2126,20 +2070,20 @@ async function doReject(id, reason) {
   loadAll();
 }
 
-// Ã¢ÂÂÃ¢ÂÂ Activity log Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// ── Activity log ──────────────────────────────────────────────────────────────
 async function loadActivity() {
   const panel = document.getElementById('activity-panel');
   if (!panel) return;
-  panel.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">LoadingÃ¢ÂÂ¦</div>';
+  panel.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">Loading…</div>';
   const items = await api('/api/activity');
   if (!items || items.length === 0) {
-    panel.innerHTML = '<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-3 opacity-30">Ã°ÂÂÂ</div><p class="font-medium">No activity yet</p><p class="text-sm mt-1">Actions like approving jobs and running searches appear here</p></div>';
+    panel.innerHTML = '<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-3 opacity-30">📋</div><p class="font-medium">No activity yet</p><p class="text-sm mt-1">Actions like approving jobs and running searches appear here</p></div>';
     return;
   }
-  const icons = {jobs_searched:'Ã°ÂÂÂ',job_approved:'Ã¢ÂÂ',job_rejected:'Ã¢ÂÂ',job_applied:'Ã°ÂÂÂ',
-    cv_uploaded:'Ã°ÂÂÂ',cv_analyzed:'Ã¢ÂÂ¨',job_status_checked:'Ã°ÂÂÂ',bulk_approve:'Ã¢ÂÂ',bulk_reject:'Ã¢ÂÂ',jobs_injected:'Ã°ÂÂÂ¥',job_stage_updated:'Ã°ÂÂÂ'};
+  const icons = {jobs_searched:'🔍',job_approved:'✅',job_rejected:'❌',job_applied:'🚀',
+    cv_uploaded:'📄',cv_analyzed:'✨',job_status_checked:'🔎',bulk_approve:'✅',bulk_reject:'❌',jobs_injected:'📥',job_stage_updated:'📊'};
   panel.innerHTML = items.map(item => {
-    const icon = icons[item.event_type] || 'Ã°ÂÂÂ';
+    const icon = icons[item.event_type] || '📋';
     const dt = new Date(item.created_date);
     const dateStr = dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'}) + ' ' +
       dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
@@ -2184,37 +2128,37 @@ function sourceBadge(s) {
 function actionBar(job) {
   if (job.status === 'new') return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
-      <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">Ã¢ÂÂ Approve to Apply</button>
+      <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
       <div class="flex gap-2">
-        <button onclick="act(${job.id},'later')"  class="btn-touch flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-xl px-4">Ã¢ÂÂ¸ Later</button>
-        <button onclick="act(${job.id},'reject')" class="btn-touch flex-1 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">Ã¢ÂÂ Pass</button>
+        <button onclick="act(${job.id},'later')"  class="btn-touch flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-xl px-4">⏸ Later</button>
+        <button onclick="act(${job.id},'reject')" class="btn-touch flex-1 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
       </div>
     </div>`;
   if (job.status === 'approved') return `
     <div class="flex items-center gap-3 mt-4 pt-4 border-t border-slate-100">
-      <div class="flex-1 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2.5 font-medium">Ã°ÂÂÂ Queued Ã¢ÂÂ marks as applied at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</div>
+      <div class="flex-1 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2.5 font-medium">📋 Queued — marks as applied at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</div>
       <button onclick="act(${job.id},'reject')" class="btn-touch text-xs text-slate-400 hover:text-red-500 px-2">Undo</button>
     </div>`;
   if (job.status === 'applied') {
     return `
     <div class="mt-4 pt-4 border-t border-slate-100">
       <div class="flex items-center gap-2 flex-wrap">
-        <span class="inline-flex items-center gap-2 text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-xl font-medium">Ã°ÂÂÂ Applied ${ago(job.applied_date)}</span>
+        <span class="inline-flex items-center gap-2 text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-xl font-medium">🚀 Applied ${ago(job.applied_date)}</span>
            ${applyStatusBadge(job)}
         <div class="flex gap-1.5 flex-wrap">
-          <button onclick="setStage(${job.id},'screening')"    class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='screening'   ?'bg-blue-100 text-blue-700 border-blue-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">Ã°ÂÂÂ Screening</button>
-          <button onclick="setStage(${job.id},'interviewing')" class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='interviewing'?'bg-amber-100 text-amber-700 border-amber-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">Ã°ÂÂÂ¥ Interviewing</button>
-          <button onclick="setStage(${job.id},'offer')"        class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='offer'       ?'bg-green-100 text-green-700 border-green-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">Ã°ÂÂÂ Offer!</button>
-          <button onclick="setStage(${job.id},'rejected')"     class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='rejected'    ?'bg-red-100 text-red-600 border-red-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">Ã¢ÂÂ Rejected</button>
+          <button onclick="setStage(${job.id},'screening')"    class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='screening'   ?'bg-blue-100 text-blue-700 border-blue-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">📞 Screening</button>
+          <button onclick="setStage(${job.id},'interviewing')" class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='interviewing'?'bg-amber-100 text-amber-700 border-amber-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">👥 Interviewing</button>
+          <button onclick="setStage(${job.id},'offer')"        class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='offer'       ?'bg-green-100 text-green-700 border-green-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">🎉 Offer!</button>
+          <button onclick="setStage(${job.id},'rejected')"     class="stage-btn text-xs px-2.5 py-1.5 rounded-lg border transition-all ${job.stage==='rejected'    ?'bg-red-100 text-red-600 border-red-300 font-semibold':'border-slate-200 text-slate-500 hover:border-slate-400'}">❌ Rejected</button>
         </div>
       </div>
-      ${job.apply_confirmation ? `<div class="mt-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100"><span class="font-medium">Ã¢ÂÂ Confirmed:</span> ${job.apply_confirmation.substring(0,220)}${job.apply_confirmation.length>220?'Ã¢ÂÂ¦':''}</div>` : ''}
-      ${(job.apply_status === 'manual_required' && job.apply_error) ? `<div class="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">Ã°ÂÂÂ¤ <span class="font-medium">Manual apply needed:</span> ${job.apply_error}</div>` : ''}
+      ${job.apply_confirmation ? `<div class="mt-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100"><span class="font-medium">✅ Confirmed:</span> ${job.apply_confirmation.substring(0,220)}${job.apply_confirmation.length>220?'…':''}</div>` : ''}
+      ${(job.apply_status === 'manual_required' && job.apply_error) ? `<div class="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">👤 <span class="font-medium">Manual apply needed:</span> ${job.apply_error}</div>` : ''}
     </div>`;
   }
   if (job.status === 'failed') return `
     <div class="mt-4 pt-4 border-t border-slate-100">
-      <span class="inline-flex items-center gap-2 text-sm text-red-600 bg-red-50 px-4 py-2.5 rounded-xl font-medium">Ã¢ÂÂ Ã¯Â¸Â Failed Ã¢ÂÂ ${job.notes||'see notes'}</span>
+      <span class="inline-flex items-center gap-2 text-sm text-red-600 bg-red-50 px-4 py-2.5 rounded-xl font-medium">⚠️ Failed — ${job.notes||'see notes'}</span>
     </div>`;
   return '';
 }
@@ -2232,35 +2176,35 @@ function candidateBadge(score) {
   const cls = score >= 70 ? 'bg-blue-100 text-blue-700 border-blue-200'
             : score >= 45 ? 'bg-indigo-50 text-indigo-600 border-indigo-200'
                           : 'bg-slate-100 text-slate-500 border-slate-200';
-  const icon = score >= 70 ? 'Ã¢Â­Â' : score >= 45 ? 'Ã¢ÂÂ¦' : 'Ã¢ÂÂ';
+  const icon = score >= 70 ? '⭐' : score >= 45 ? '✦' : '◇';
   return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border ${cls}" title="Your candidate strength score for this role">${icon} ${score} score</span>`;
 }
 
 function statusCheckBadge(job) {
-  if (job.status_check === 'open')    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">Ã¢ÂÂ Still open</span>`;
-  if (job.status_check === 'closed')  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200">Ã¢ÂÂ Closed</span>`;
-  if (job.status_check === 'unknown') return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">Ã¢ÂÂ Unknown</span>`;
+  if (job.status_check === 'open')    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">✅ Still open</span>`;
+  if (job.status_check === 'closed')  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200">❌ Closed</span>`;
+  if (job.status_check === 'unknown') return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">❓ Unknown</span>`;
   return '';
 }
 
 async function checkStatus(id) {
   const btn = document.getElementById('verify-btn-'+id);
-  if (btn) { btn.innerHTML = 'Ã¢ÂÂ³'; btn.disabled = true; btn.title = 'CheckingÃ¢ÂÂ¦'; }
+  if (btn) { btn.innerHTML = '⏳'; btn.disabled = true; btn.title = 'Checking…'; }
   try {
     await api('/api/jobs/'+id+'/check-status', 'POST', {});
     loadJobs(tab);
   } catch(e) {
-    if (btn) { btn.innerHTML = 'Ã°ÂÂÂ'; btn.disabled = false; btn.title = 'Verify if still open'; }
+    if (btn) { btn.innerHTML = '🔍'; btn.disabled = false; btn.title = 'Verify if still open'; }
   }
 }
 
 function urlVerifiedBadge(job) {
-  if (job.url_verified === 1) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">Ã°ÂÂÂ URL OK</span>';
-  if (job.url_verified === 0) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title="URL unreachable Ã¢ÂÂ job may be closed">Ã¢ÂÂ Ã¯Â¸Â Dead link</span>';
+  if (job.url_verified === 1) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">🔗 URL OK</span>';
+  if (job.url_verified === 0) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title="URL unreachable — job may be closed">⚠️ Dead link</span>';
   return '';
 }
 function applyStatusBadge(job) {
-  const map = {confirmed:'Ã¢ÂÂ Confirmed',submitted:'Ã°ÂÂÂ¤ Submitted',manual_required:'Ã°ÂÂÂ¤ Manual needed',failed:'Ã¢ÂÂ Failed'};
+  const map = {confirmed:'✅ Confirmed',submitted:'📤 Submitted',manual_required:'👤 Manual needed',failed:'❌ Failed'};
   const cls = {confirmed:'bg-green-50 text-green-700 border-green-200',submitted:'bg-blue-50 text-blue-700 border-blue-200',manual_required:'bg-amber-50 text-amber-700 border-amber-200',failed:'bg-red-50 text-red-700 border-red-200'};
   if (!job.apply_status || !map[job.apply_status]) return '';
   return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
@@ -2268,7 +2212,7 @@ function applyStatusBadge(job) {
 function renderJob(job) {
   const badges = [matchBadge(job.match_score), candidateBadge(job.candidate_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
   const verifyBtn = job.url
-    ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">Ã°ÂÂÂ</button>`
+    ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
     : '';
   const isSelectable = selectMode && job.status === 'new';
   const isSelected   = selectedIds.has(job.id);
@@ -2288,15 +2232,15 @@ function renderJob(job) {
         <h2 class="text-base sm:text-lg font-bold text-slate-900 leading-snug">${job.title}</h2>
         <p class="text-blue-700 font-semibold mt-0.5 text-sm sm:text-base">${job.company}</p>
         ${job.company_info ? `<p class="text-slate-500 text-sm mt-0.5 leading-snug">${job.company_info}</p>` : ''}
-        <p class="text-slate-400 text-xs mt-1.5">Ã°ÂÂÂ ${job.location||'Tel Aviv'}</p>
+        <p class="text-slate-400 text-xs mt-1.5">📍 ${job.location||'Tel Aviv'}</p>
       </div>
       <div class="flex items-center gap-1.5 shrink-0">
         ${verifyBtn}
-        ${job.url ? `<a href="${job.url}" target="_blank" onclick="event.stopPropagation()" class="btn-touch text-xs text-blue-600 font-medium border border-blue-200 px-3 rounded-lg hover:bg-blue-50 whitespace-nowrap">View Ã¢ÂÂ</a>` : ''}
+        ${job.url ? `<a href="${job.url}" target="_blank" onclick="event.stopPropagation()" class="btn-touch text-xs text-blue-600 font-medium border border-blue-200 px-3 rounded-lg hover:bg-blue-50 whitespace-nowrap">View ↗</a>` : ''}
       </div>
     </div>
     ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
-    ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">Ã¢ÂÂ¨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
+    ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.description ? `<p class="clamp3 text-sm text-slate-600 leading-relaxed mt-3">${job.description}</p>` : ''}
     ${isSelectable ? '' : actionBar(job)}
   </div>`;
@@ -2305,12 +2249,12 @@ function renderJob(job) {
 async function loadJobs(status) {
   const list  = document.getElementById('jobs-list');
   const empty = document.getElementById('empty-state');
-  list.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">LoadingÃ¢ÂÂ¦</div>';
+  list.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">Loading…</div>';
   const jobs = await api('/api/jobs?status=' + status + '&sort=' + sortBy);
   if (!jobs || jobs.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
-    const msgs = {new:'No new jobs yet Ã¢ÂÂ next search at your scheduled time.',
+    const msgs = {new:'No new jobs yet — next search at your scheduled time.',
       approved:'No approved jobs. Go to New and click Approve.',
       applied:'No applications yet.',rejected:'Nothing passed on yet.',expired:'No expired listings.'};
     document.getElementById('empty-msg').textContent = msgs[status]||'Nothing here.';
@@ -2319,7 +2263,7 @@ async function loadJobs(status) {
   } else {
     empty.classList.add('hidden');
     let html = '';
-    if (status === 'approved') html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">Ã°ÂÂÂ Apply Now</button></div>`;
+    if (status === 'approved') html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">🚀 Apply Now</button></div>`;
     html += jobs.map(renderJob).join('');
     list.innerHTML = html;
   }
@@ -2373,15 +2317,15 @@ async function runSearch() {
   const btn = document.getElementById('run-search-btn');
   if (!btn || btn.disabled) return;
   btn.disabled = true;
-  btn.textContent = 'Ã¢ÂÂ³ SearchingÃ¢ÂÂ¦';
+  btn.textContent = '⏳ Searching…';
   try {
     const r = await api('/api/run-search', 'POST', {});
     if (r.error) {
       btn.disabled = false;
-      btn.textContent = 'Ã°ÂÂÂ Run Search Now';
+      btn.textContent = '🔍 Run Search Now';
       alert('Search error: ' + r.error);
     } else {
-      btn.textContent = 'Ã¢ÂÂ Search runningÃ¢ÂÂ¦';
+      btn.textContent = '✓ Search running…';
       let polls = 0;
       const poll = setInterval(() => {
         loadAll();
@@ -2389,13 +2333,13 @@ async function runSearch() {
         if (polls >= 8) {
           clearInterval(poll);
           btn.disabled = false;
-          btn.textContent = 'Ã°ÂÂÂ Run Search Now';
+          btn.textContent = '🔍 Run Search Now';
         }
       }, 15000);
     }
   } catch(e) {
     btn.disabled = false;
-    btn.textContent = 'Ã°ÂÂÂ Run Search Now';
+    btn.textContent = '🔍 Run Search Now';
     alert('Could not start search');
   }
 }
@@ -2409,48 +2353,43 @@ async function runApply() {
   const btn = document.getElementById('run-apply-btn');
   if (!btn || btn.disabled) return;
   btn.disabled = true;
-  btn.textContent = 'Ã¢ÂÂ³ ApplyingÃ¢ÂÂ¦';
+  btn.textContent = '⏳ Applying…';
   try {
     const r = await api('/api/run-apply', 'POST', {});
     if (r.error) {
       btn.disabled = false;
-      btn.textContent = 'Ã°ÂÂÂ Apply Now';
+      btn.textContent = '🚀 Apply Now';
       alert('Apply error: ' + r.error);
     } else if (r.applied === 0) {
       btn.disabled = false;
-      btn.textContent = 'Ã°ÂÂÂ Apply Now';
+      btn.textContent = '🚀 Apply Now';
       alert('No approved jobs to apply to.');
     } else {
-      btn.textContent = `Ã¢ÂÂ Applied to ${r.applied}!`;
+      btn.textContent = `✓ Applied to ${r.applied}!`;
       setTimeout(() => loadAll(), 1200);
     }
   } catch(e) {
     btn.disabled = false;
-    btn.textContent = 'Ã°ÂÂÂ Apply Now';
+    btn.textContent = '🚀 Apply Now';
     alert('Could not run apply');
   }
 }
 </script>
 <script>
-// URL hash tab deep-link: /dashboard#applied, /dashboard#new, etc.
-(function () {
-  const _orig = window.setTab;
-  window.setTab = function (t) {
-    _orig(t);
-    history.replaceState(null, '', '#' + t);
-  };
-  // Run synchronously — script is at end of body so setTab is already defined
-  const _hash = location.hash.replace('#', '');
-  const _valid = ['new','approved','applied','passed','activity','profile','preferences','notifications','schedule'];
-  if (_hash && _valid.includes(_hash)) { window.setTab(_hash); }
+(function(){
+  const _o=window.setTab;
+  window.setTab=function(t){_o(t);history.replaceState(null,'','#'+t);};
+  const _h=location.hash.replace('#','');
+  const _v=['new','approved','applied','passed','activity','profile','preferences','notifications','schedule'];
+  if(_h&&_v.includes(_h))window.setTab(_h);
 })();
 </script>
 </body>
 </html>"""
 
-# Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ─────────────────────────────────────────────────────────────────────────────
 # HTTP HANDLER
-# Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ─────────────────────────────────────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
 
@@ -2458,7 +2397,7 @@ class Handler(BaseHTTPRequestHandler):
         ts = datetime.now().strftime("%H:%M:%S")
         print(f"[{ts}] {fmt % args}")
 
-    # Ã¢ÂÂÃ¢ÂÂ Helpers Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def send_html(self, html: str, code: int = 200):
         body = html.encode()
@@ -2514,7 +2453,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
-    # Ã¢ÂÂÃ¢ÂÂ GET Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+    # ── GET ───────────────────────────────────────────────────────────────────
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -2700,7 +2639,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json([dict(r) for r in rows])
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Sync: export approved jobs for relay/scheduled tasks Ã¢ÂÂÃ¢ÂÂ
+        # ── Sync: export approved jobs for relay/scheduled tasks ──
         if path == "/api/sync/approved":
             qs = parse_qs(parsed.query)
             if not self._check_sync_key(qs.get("api_key", [""])[0]):
@@ -2715,13 +2654,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-    # Ã¢ÂÂÃ¢ÂÂ POST Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+    # ── POST ──────────────────────────────────────────────────────────────────
 
     def do_POST(self):
         parsed = urlparse(self.path)
         path   = parsed.path
 
-        # Ã¢ÂÂÃ¢ÂÂ Login Ã¢ÂÂÃ¢ÂÂ
+        # ── Login ──
         if path == "/login":
             body = urllib.parse.parse_qs(self.read_body().decode())
             email    = body.get("email", [""])[0]
@@ -2739,7 +2678,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Register Ã¢ÂÂÃ¢ÂÂ
+        # ── Register ──
         if path == "/register":
             body = urllib.parse.parse_qs(self.read_body().decode())
             name     = body.get("name", [""])[0].strip()
@@ -2777,7 +2716,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         user_id = user["id"]
 
-        # Ã¢ÂÂÃ¢ÂÂ CV Upload Ã¢ÂÂÃ¢ÂÂ
+        # ── CV Upload ──
         if path == "/api/upload-cv":
             body = self.read_body()
             parts = parse_multipart(self.headers, body)
@@ -2799,7 +2738,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "path": cv_path})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ CV Analyze Ã¢ÂÂÃ¢ÂÂ
+        # ── CV Analyze ──
         if path == "/api/analyze-cv":
             if not ANTHROPIC_KEY:
                 self.send_json({"error": "Anthropic API key not configured. Add it to config.json."})
@@ -2837,7 +2776,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(e)})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Save profile Ã¢ÂÂÃ¢ÂÂ
+        # ── Save profile ──
         if path == "/api/save-profile":
             data = self.read_json()
             kwargs = {}
@@ -2859,7 +2798,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Save notifications Ã¢ÂÂÃ¢ÂÂ
+        # ── Save notifications ──
         if path == "/api/save-notifications":
             data = self.read_json()
             kwargs = {}
@@ -2873,11 +2812,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Test notification Ã¢ÂÂÃ¢ÂÂ
+        # ── Test notification ──
         if path == "/api/test-notification":
             data    = self.read_json()
             channel = data.get("channel", "none")
-            msg     = f"Ã¢ÂÂ Job Hunter test message Ã¢ÂÂ connection works! Dashboard: {MOBILE_URL}"
+            msg     = f"✅ Job Hunter test message — connection works! Dashboard: {MOBILE_URL}"
             try:
                 if channel == "telegram":
                     send_telegram(data.get("telegram_token",""), data.get("telegram_chat_id",""), msg)
@@ -2889,7 +2828,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"success": False, "error": str(e)})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Save schedule Ã¢ÂÂÃ¢ÂÂ
+        # ── Save schedule ──
         if path == "/api/save-schedule":
             data = self.read_json()
             kwargs = {}
@@ -2909,7 +2848,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Change password Ã¢ÂÂÃ¢ÂÂ
+        # ── Change password ──
         if path == "/api/change-password":
             data = self.read_json()
             err = auth.change_password(user_id, data.get("current_password",""), data.get("new_password",""))
@@ -2919,7 +2858,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"success": True})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Job actions Ã¢ÂÂÃ¢ÂÂ
+        # ── Job actions ──
         m = re.match(r"^/api/jobs/(\d+)/(approve|reject|later|applied|failed)$", path)
         if m:
             job_id = int(m.group(1))
@@ -2959,7 +2898,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 detail = f"Passed on {job['title']} at {job['company']}"
                 if reason:
-                    detail += f" Ã¢ÂÂ {reason}"
+                    detail += f" — {reason}"
                 database.log_activity(user_id, "job_rejected", detail)
             elif action == "approve":
                 database.log_activity(user_id, "job_approved",
@@ -2971,7 +2910,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Check if job is still open (calls Claude + fetches URL) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Check if job is still open (calls Claude + fetches URL) ──────────
         m = re.match(r"^/api/jobs/(\d+)/check-status$", path)
         if m:
             user = self.require_auth()
@@ -3002,14 +2941,14 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 conn.commit()
                 database.log_activity(user["id"], "job_status_checked",
-                    f"{job['title']} at {job['company']} Ã¢ÂÂ {status_str}")
+                    f"{job['title']} at {job['company']} — {status_str}")
             except Exception as e:
                 result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
             conn.close()
             self.send_json(result)
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Bulk job actions Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Bulk job actions ──────────────────────────────────────────────────────
         if path == "/api/jobs/bulk":
             data   = self.read_json()
             action = data.get("action", "")
@@ -3041,7 +2980,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "updated": done})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Admin: toggle user active state Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Admin: toggle user active state ───────────────────────────────────
         m = re.match(r"^/api/admin/users/(\d+)/toggle$", path)
         if m:
             if user.get("role") != "admin":
@@ -3055,7 +2994,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Run Search Now Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Run Search Now ────────────────────────────────────────────────────────
         if path == "/api/run-search":
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
@@ -3068,7 +3007,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"status": "started"})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Run Apply Now Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Run Apply Now ─────────────────────────────────────────────────────────
         if path == "/api/run-apply":
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
@@ -3077,7 +3016,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"applied": count})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Admin job inject Ã¢ÂÂ session-authenticated, admin only Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Admin job inject — session-authenticated, admin only ────────────────
         if path == "/api/admin/inject-jobs":
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)
@@ -3107,7 +3046,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"inserted": inserted})
             return
 
-        # Ã¢ÂÂÃ¢ÂÂ Sync endpoints Ã¢ÂÂ called by relay.py on Mac, no session needed Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+        # ── Sync endpoints — called by relay.py on Mac, no session needed ──────
 
         if path == "/api/sync/jobs":
             data = self.read_json()
@@ -3160,7 +3099,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             conn.close()
             if updates:
-                # Log activity per user Ã¢ÂÂ look up user_id for each updated job
+                # Log activity per user — look up user_id for each updated job
                 conn2 = database.get_db()
                 uid_counts: dict = {}
                 for u in updates:
@@ -3188,12 +3127,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-# Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ─────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT
-# Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print(f"\nÃ°ÂÂÂ¯  Job Hunter (Multi-User) startingÃ¢ÂÂ¦")
+    print(f"\n🎯  Job Hunter (Multi-User) starting…")
     database.init_db()
 
     # Process any waiting files
@@ -3205,17 +3144,17 @@ if __name__ == "__main__":
     t = threading.Thread(target=file_watcher, daemon=True)
     t.start()
 
-    ai_status = "Ã¢ÂÂ Configured" if ANTHROPIC_KEY else "Ã¢ÂÂ Ã¯Â¸Â  Not set Ã¢ÂÂ add to config.json"
+    ai_status = "✅ Configured" if ANTHROPIC_KEY else "⚠️  Not set — add to config.json"
 
-    print(f"\nÃ°ÂÂÂ  Folder:        {BASE_DIR}")
-    print(f"Ã°ÂÂÂÃ¯Â¸Â   Database:      jobs.db")
-    print(f"Ã°ÂÂ¤Â  Anthropic AI:  {ai_status}")
-    print(f"\nÃ°ÂÂÂ¥Ã¯Â¸Â   Desktop:       http://localhost:{PORT}")
-    print(f"Ã°ÂÂÂ±  Mobile:        {MOBILE_URL}   Ã¢ÂÂ open on your phone")
-    print(f"Ã¢ÂÂ¨Ã¯Â¸Â   Ctrl+C to stop\n")
+    print(f"\n📂  Folder:        {BASE_DIR}")
+    print(f"🗄️   Database:      jobs.db")
+    print(f"🤖  Anthropic AI:  {ai_status}")
+    print(f"\n🖥️   Desktop:       http://localhost:{PORT}")
+    print(f"📱  Mobile:        {MOBILE_URL}   ← open on your phone")
+    print(f"⌨️   Ctrl+C to stop\n")
 
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nÃ°ÂÂÂ  Stopped.")
+        print("\n👋  Stopped.")
