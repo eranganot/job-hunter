@@ -2362,9 +2362,9 @@ async function runSearch() {
         const done = entries.find(e => e.event_type === 'jobs_searched' && e.created_date >= startISO);
         if (done) {
           const msg = done.details || '';
-          const found = msg.match(/(\d+) new/);
+          const found = msg.match(/([0-9]+) new/;
           if (found) {
-            alert('\u2705 Search complete — ' + found[1] + ' new job' + (found[1]==='1'?'':'s') + ' found!');
+            alert('✅ Search complete — ' + found[1] + ' new job' + (found[1]==='1'?'':'s') + ' found!');
             setTimeout(() => loadAll(), 500);
           } else {
             alert('Search complete — no new jobs found this run.');
@@ -2374,9 +2374,9 @@ async function runSearch() {
     };
     setTimeout(poll, 8000);
   } catch(e) {
-    alert('Connection error \u274C');
+    alert('Connection error ❌');
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '\uD83D\uDD0D Run Search Now'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔍 Run Search Now'; }
   }
 }
 
