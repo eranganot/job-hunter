@@ -2433,7 +2433,7 @@ async function runApply() {
   try {
     const r = await fetch('/api/me');
     const u = await r.json();
-    if (r.ok && !u.cv_text) {
+    if (r.ok && !u.cv_path && !u.cv_text) {
       const w = document.getElementById('cv-warning');
       if (w) w.classList.remove('hidden');
     }
