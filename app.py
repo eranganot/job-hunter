@@ -383,7 +383,7 @@ def run_job_search(user_id: int):
                 else:  hist_dead  += 1
             conn.commit(); conn.close()
 
-        database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across titlesitles)} title search(es)")
+        database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es)")
 
         # ── Consolidated search notification ─────────────────────────────
         notif_lines = [f"🔍 Search Complete — {today}"]
