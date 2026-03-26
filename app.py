@@ -227,7 +227,7 @@ def run_job_search(user_id: int):
         # ── Load all existing URLs to dedup against full history ─────────
         conn = database.get_db()
         existing_urls = {r[0] for r in conn.execute(
-            "SELECT url FROM jobs WHERE user_id=? AND url!=''", (user_id,)
+            "SELECT url FROM jobs WHERE user_id=? AND url!='' AND status NOT IN ('rejected','expired')", (user_id,)
         ).fetchall()}
         conn.close()
 
@@ -264,7 +264,7 @@ def run_job_search(user_id: int):
 
         for title in search_titles:
             prompt = (
-                f"You are a job-search assistant. Search the web for 5-8 REAL, currently open "
+                f"You are a job-search assistant. Search the web for 5-8 REAL, currently open, recently posted (last 30 days) "
                 f"job listings for the role: '{title}'.\n\n"
                 f"Candidate profile:\n  Key skills: {', '.join(keywords[:10])}\n"
                 f"  Locations: {', '.join(locations)} (or Remote)\n"
@@ -2342,32 +2342,41 @@ setInterval(loadAll, 5 * 60 * 1000);
 
 async function runSearch() {
   const btn = document.getElementById('run-search-btn');
-  if (!btn || btn.disabled) return;
-  btn.disabled = true;
-  btn.textContent = '⏳ Searching…';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Searching…'; }
   try {
-    const r = await api('/api/run-search', 'POST', {});
-    if (r.error) {
-      btn.disabled = false;
-      btn.textContent = '🔍 Run Search Now';
-      alert('Search error: ' + r.error);
-    } else {
-      btn.textContent = '✓ Search running…';
-      let polls = 0;
-      const poll = setInterval(() => {
-        loadAll();
-        polls++;
-        if (polls >= 8) {
-          clearInterval(poll);
-          btn.disabled = false;
-          btn.textContent = '🔍 Run Search Now';
-        }
-      }, 15000);
-    }
+    const r = await fetch('/api/run-search', {method:'POST', headers:{'Content-Type':'application/json'}});
+    const data = await r.json();
+    if (!r.ok) { alert('Search failed: ' + (data.error || 'Server error')); return; }
+    if (btn) btn.innerHTML = '✓ Search running…';
+    // Poll activity log until a new jobs_searched entry appears
+    const startTime = Date.now();
+    const startISO = new Date().toISOString().replace('T',' ').slice(0,19);
+    const poll = async () => {
+      if (Date.now() - startTime > 180000) {
+        alert('Search is taking longer than usual. Check the Activity tab for results.');
+        return;
+      }
+      try {
+        const ar = await fetch('/api/activity?limit=3');
+        const entries = await ar.json();
+        const done = entries.find(e => e.event_type === 'jobs_searched' && e.created_date >= startISO);
+        if (done) {
+          const msg = done.details || '';
+          const found = msg.match(/(\d+) new/);
+          if (found) {
+            alert('\u2705 Search complete — ' + found[1] + ' new job' + (found[1]==='1'?'':'s') + ' found!');
+            setTimeout(() => loadAll(), 500);
+          } else {
+            alert('Search complete — no new jobs found this run.');
+          }
+        } else { setTimeout(poll, 5000); }
+      } catch(e) { setTimeout(poll, 5000); }
+    };
+    setTimeout(poll, 8000);
   } catch(e) {
-    btn.disabled = false;
-    btn.textContent = '🔍 Run Search Now';
-    alert('Could not start search');
+    alert('Connection error \u274C');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '\uD83D\uDD0D Run Search Now'; }
   }
 }
 
