@@ -2404,16 +2404,16 @@ async function runApply() {
     if (r.ok) {
       const n = data.applied ?? 0;
       if (n > 0) {
-        showToast('✅ Applied to ' + n + ' job' + (n === 1 ? '' : 's') + '!');
-        setTimeout(() => loadData(), 1500);
+        alert('✅ Applied to ' + n + ' job' + (n === 1 ? '' : 's') + '!');
+        setTimeout(() => loadAll(), 1500);
       } else {
-        showToast('No approved jobs to apply to — approve some first.');
+        alert('No approved jobs to apply to — approve some first.');
       }
     } else {
-      showToast('Apply failed: ' + (data.error || 'Server error'));
+      alert('Apply failed: ' + (data.error || 'Server error'));
     }
   } catch(e) {
-    showToast('Connection error ❌');
+    alert('Connection error ❌');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Run Apply Now'; }
   }
