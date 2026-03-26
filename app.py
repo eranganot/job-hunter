@@ -2115,7 +2115,7 @@ async function loadActivity() {
     const dateStr = dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'}) + ' ' +
       dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     const labels = {'jobs_searched':'Job Search','job_approved':'Job Approved','job_rejected':'Job Rejected','job_applied':'Applied','cv_uploaded':'CV Uploaded','cv_analyzed':'CV Analyzed','job_status_checked':'Status Check','bulk_approve':'Bulk Approve','bulk_reject':'Bulk Reject','jobs_injected':'Jobs Imported','job_stage_updated':'Stage Updated'};
-    const label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+    const label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());
     return `<div class="bg-white rounded-xl border border-slate-100 px-4 py-3 flex items-center gap-3 fade">
       <span class="text-xl w-8 text-center shrink-0">${icon}</span>
       <div class="flex-1 min-w-0">
