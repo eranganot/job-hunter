@@ -2362,7 +2362,7 @@ async function runSearch() {
         const done = entries.find(e => e.event_type === 'jobs_searched' && e.created_date >= startISO);
         if (done) {
           const msg = done.details || '';
-          const found = msg.match(/([0-9]+) new/;
+          const found = msg.match(/([0-9]+) new/);
           if (found) {
             alert('✅ Search complete — ' + found[1] + ' new job' + (found[1]==='1'?'':'s') + ' found!');
             setTimeout(() => loadAll(), 500);
