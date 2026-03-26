@@ -246,7 +246,7 @@ def run_job_search(user_id: int):
             text = ""
             for block in result.get("content", []):
                 if block.get("type") == "text":
-                    text = block["text"].strip(); break
+                    text = block["text"].strip()
             if text.startswith("```"):
                 text = text.split("```")[1]
                 if text.startswith("json"): text = text[4:]
