@@ -257,7 +257,7 @@ def run_job_search(user_id: int):
                 return []
 
         # ── Multi-round: one call per job title ──────────────────────────
-        search_titles = titles[:6]
+        search_titles = titles[:2]
         all_jobs_data = []
         seen_urls     = set(existing_urls)
         seen_key      = set()
@@ -301,6 +301,9 @@ def run_job_search(user_id: int):
                     seen_key.add(jkey); all_jobs_data.append(j); added += 1
                 print(f"[run-search] '{title}': {len(jobs_data)} found, {added} new (total={len(all_jobs_data)})")
             except Exception as e:
+                if '429' in str(e):
+                    print(f"[run-search] '{title}' rate-limited (429) – stopping.")
+                    break
                 print(f"[run-search] '{title}' error: {e}")
 
         if not all_jobs_data:
