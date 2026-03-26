@@ -231,81 +231,100 @@ def run_job_search(user_id: int):
         ).fetchall()}
         conn.close()
 
-        def _call_claude_search(prompt_text: str) -> list:
-            body = json.dumps({
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 4096,
-                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
-                "messages": [{"role": "user", "content": prompt_text}]
-            }).encode()
+        def _fetch_jobs_from_free_apis(search_titles_: list) -> list:
+            """Fetch real job listings from free public APIs (no auth, no Anthropic quota)."""
+            raw = []
+            try:
+                url = "https://remotive.com/api/remote-jobs?category=product-management&limit=20"
+                req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with _ur.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read())
+                for j in data.get("jobs", [])[:20]:
+                    raw.append({"job_title": j.get("title",""), "company": j.get("company_name",""),
+                        "location": j.get("candidate_required_location","Remote"),
+                        "url": j.get("url",""), "description": (j.get("description") or "")[:400],
+                        "candidate_score": 0, "fit_reason": ""})
+                print(f"[fetch-jobs] Remotive: {len(data.get('jobs',[]))} jobs")
+            except Exception as e:
+                print(f"[fetch-jobs] Remotive error: {e}")
+            try:
+                url = "https://www.themuse.com/api/public/jobs?page=0&level=Senior+Level&category=Product"
+                req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with _ur.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read())
+                for j in data.get("results", [])[:20]:
+                    locs = ", ".join(l.get("name","") for l in (j.get("locations") or []))
+                    raw.append({"job_title": j.get("name",""),
+                        "company": ((j.get("company") or {}).get("name") or ""),
+                        "location": locs or "Remote",
+                        "url": ((j.get("refs") or {}).get("landing_page") or ""),
+                        "description": "", "candidate_score": 0, "fit_reason": ""})
+                print(f"[fetch-jobs] Muse: {len(data.get('results',[]))} jobs")
+            except Exception as e:
+                print(f"[fetch-jobs] Muse error: {e}")
+            return raw
+
+        def _score_jobs_with_claude(raw_jobs: list) -> list:
+            """Score raw job listings using Claude standard API (no web-search quota)."""
+            if not raw_jobs:
+                return []
+            profile_text = (
+                f"Target roles: {', '.join(titles[:4])}\n"
+                f"Key skills: {', '.join(keywords[:10])}\n"
+                f"Locations: {', '.join(locations)} or Remote\n"
+                f"Seniority: Senior / Director / VP / Head-of"
+            )
+            jobs_json = json.dumps(
+                [{"job_title": j.get("job_title",""), "company": j.get("company",""),
+                  "location": j.get("location",""), "url": j.get("url",""),
+                  "description": (j.get("description") or "")[:200]}
+                 for j in raw_jobs[:25]], ensure_ascii=False)
+            prompt = (
+                "You are a job matching assistant. Review these job listings and score each "
+                f"for this candidate:\n\n{profile_text}\n\n"
+                f"Job listings (JSON):\n{jobs_json}\n\n"
+                "Return ONLY a JSON array with fields: job_title, company, location, url, "
+                "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
+                "Only include jobs with candidate_score >= 40. Return ONLY valid JSON, no markdown."
+            )
+            body = json.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}]}).encode()
             req = _ur.Request("https://api.anthropic.com/v1/messages", data=body, method="POST",
                 headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
-                         "anthropic-beta": "web-search-2025-03-05", "content-type": "application/json"})
-            with _ur.urlopen(req, timeout=120) as resp:
+                         "content-type": "application/json"})
+            with _ur.urlopen(req, timeout=60) as resp:
                 result = json.loads(resp.read())
-            text = ""
+            scored_text = ""
             for block in result.get("content", []):
                 if block.get("type") == "text":
-                    text = block["text"].strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"): text = text[4:]
-            print(f"[debug] raw text: {repr(text[:400])}")
-            if not text.strip(): return []
+                    scored_text = block["text"].strip()
+            print(f"[score-jobs] preview: {repr(scored_text[:200])}")
+            if scored_text.startswith("```"):
+                scored_text = scored_text.split("```")[1]
+                if scored_text.startswith("json"): scored_text = scored_text[4:]
             try:
-                return json.loads(text.strip())
-            except Exception:
-                return []
+                return json.loads(scored_text.strip())
+            except Exception as ex:
+                print(f"[score-jobs] parse error: {ex}"); return []
 
-        # ── Multi-round: one call per job title ──────────────────────────
-        search_titles = titles[:2]
         all_jobs_data = []
         seen_urls     = set(existing_urls)
         seen_key      = set()
 
-        for i, title in enumerate(search_titles):
-            if i > 0:
-                time.sleep(5)  # Avoid rate limiting between Anthropic API calls
-            prompt = (
-                f"You are a job-search assistant. Search the web for 5-8 REAL, currently open, recently posted (last 30 days) "
-                f"job listings for the role: '{title}'.\n\n"
-                f"Candidate profile:\n  Key skills: {', '.join(keywords[:10])}\n"
-                f"  Locations: {', '.join(locations)} (or Remote)\n"
-                f"  Seniority: Senior / Director / VP / Head-of\n\n"
-                "Search ALL of these sources:\n"
-                "  - LinkedIn Jobs (linkedin.com/jobs)\n"
-                "  - Glassdoor (glassdoor.com/job-listings)\n"
-                "  - AllJobs.co.il\n  - Drushim.co.il\n"
-                "  - Wellfound / AngelList (wellfound.com/jobs)\n"
-                "  - Comeet (comeet.co)\n"
-                "  - Greenhouse boards (boards.greenhouse.io)\n"
-                "  - Lever boards (jobs.lever.co)\n"
-                "  - SpeakNow careers (speaknow.co/careers/)\n"
-                "  - TechMap product jobs (github.com/mluggy/techmap jobs/product.csv)\n"
-                "  - Company career pages directly\n\n"
-                "Return ONLY a JSON array (no markdown) with this shape:\n"
-                '[{"job_title":"exact title","company":"company name","location":"city or Remote",'
-                '"url":"direct link","description":"2-3 sentence summary",'
-                '"source":"LinkedIn/Glassdoor/AllJobs/Drushim/Wellfound/Comeet/Greenhouse/Lever/SpeakNow/TechMap/Company",'
-                f'"found_date":"{today}","match_score":<0-100>,"candidate_score":<0-100>,'
-                '"fit_reason":"1-2 sentence explanation"}]'
-            )
-            try:
-                jobs_data = _call_claude_search(prompt)
-                added = 0
-                for j in jobs_data:
-                    jurl = (j.get("url") or "").strip()
-                    jkey = (j.get("job_title","").lower().strip(), j.get("company","").lower().strip())
-                    if jurl and jurl in seen_urls: continue
-                    if not jurl and jkey in seen_key: continue
-                    if jurl: seen_urls.add(jurl)
-                    seen_key.add(jkey); all_jobs_data.append(j); added += 1
-                print(f"[run-search] '{title}': {len(jobs_data)} found, {added} new (total={len(all_jobs_data)})")
-            except Exception as e:
-                if '429' in str(e):
-                    print(f"[run-search] '{title}' rate-limited (429) – stopping.")
-                    break
-                print(f"[run-search] '{title}' error: {e}")
+        # Fetch real job listings from free public APIs (no Anthropic web-search quota)
+        raw_jobs = _fetch_jobs_from_free_apis(titles[:4])
+        print(f"[run-search] Fetched {len(raw_jobs)} raw jobs from free APIs")
+        jobs_data = _score_jobs_with_claude(raw_jobs) if raw_jobs else []
+        print(f"[run-search] Claude scored {len(jobs_data)} matching jobs")
+
+        for j in jobs_data:
+            jurl = (j.get("url") or "").strip()
+            jkey = (j.get("job_title","").lower().strip(), j.get("company","").lower().strip())
+            if jurl and jurl in seen_urls: continue
+            if not jurl and jkey in seen_key: continue
+            if jurl: seen_urls.add(jurl)
+            if jkey: seen_key.add(jkey)
+            all_jobs_data.append(j)
 
         if not all_jobs_data:
             database.log_activity(user_id, "jobs_searched", "Search returned no new results")
