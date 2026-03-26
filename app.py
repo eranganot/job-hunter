@@ -250,6 +250,7 @@ def run_job_search(user_id: int):
             if text.startswith("```"):
                 text = text.split("```")[1]
                 if text.startswith("json"): text = text[4:]
+            print(f"[debug] raw text: {repr(text[:400])}")
             if not text.strip(): return []
             try:
                 return json.loads(text.strip())
