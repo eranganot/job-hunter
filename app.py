@@ -262,7 +262,9 @@ def run_job_search(user_id: int):
         seen_urls     = set(existing_urls)
         seen_key      = set()
 
-        for title in search_titles:
+        for i, title in enumerate(search_titles):
+            if i > 0:
+                time.sleep(5)  # Avoid rate limiting between Anthropic API calls
             prompt = (
                 f"You are a job-search assistant. Search the web for 5-8 REAL, currently open, recently posted (last 30 days) "
                 f"job listings for the role: '{title}'.\n\n"
