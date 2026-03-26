@@ -154,12 +154,45 @@ def check_notifications():
         print(f"[notify] Error: {e}")
 
 
+_last_auto_run: dict = {}  # {(user_id, 'search'|'apply'): 'YYYY-MM-DD'}
+
+
+def _check_scheduled_jobs() -> None:
+    """Auto-trigger search/apply for each active user when their scheduled hour arrives."""
+    try:
+        now = datetime.utcnow()
+        today = now.strftime('%Y-%m-%d')
+        current_hour = now.hour
+        conn = database.get_db()
+        rows = conn.execute(
+            "SELECT u.id, p.search_hour, p.apply_hour "
+            "FROM users u JOIN user_profiles p ON p.user_id = u.id "
+            "WHERE u.is_active = 1"
+        ).fetchall()
+        conn.close()
+        for row in rows:
+            uid, sh, ah = row
+            s_key = (uid, 'search')
+            if current_hour == sh and _last_auto_run.get(s_key) != today:
+                _last_auto_run[s_key] = today
+                print(f'[scheduler] Triggering search for user {uid} at hour {sh}')
+                threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
+            a_key = (uid, 'apply')
+            if current_hour == ah and _last_auto_run.get(a_key) != today:
+                _last_auto_run[a_key] = today
+                print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
+                threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
+    except Exception as e:
+        print(f'[scheduler] Error: {e}')
+
+
 def file_watcher():
     while True:
         database.import_pending_jobs(BASE_DIR)
         database.import_applied_updates(BASE_DIR)
         check_notifications()
-        time.sleep(30)
+        _check_scheduled_jobs()
+        time.sleep(60)
 
 
 _search_running: set = set()
@@ -244,11 +277,13 @@ def run_job_search(user_id: int):
                 "  - Comeet (comeet.co)\n"
                 "  - Greenhouse boards (boards.greenhouse.io)\n"
                 "  - Lever boards (jobs.lever.co)\n"
+                "  - SpeakNow careers (speaknow.co/careers/)\n"
+                "  - TechMap product jobs (github.com/mluggy/techmap jobs/product.csv)\n"
                 "  - Company career pages directly\n\n"
                 "Return ONLY a JSON array (no markdown) with this shape:\n"
                 '[{"job_title":"exact title","company":"company name","location":"city or Remote",'
                 '"url":"direct link","description":"2-3 sentence summary",'
-                '"source":"LinkedIn/Glassdoor/AllJobs/Drushim/Wellfound/Comeet/Greenhouse/Lever/Company",'
+                '"source":"LinkedIn/Glassdoor/AllJobs/Drushim/Wellfound/Comeet/Greenhouse/Lever/SpeakNow/TechMap/Company",'
                 f'"found_date":"{today}","match_score":<0-100>,"candidate_score":<0-100>,'
                 '"fit_reason":"1-2 sentence explanation"}]'
             )
@@ -1884,6 +1919,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button onclick="runSearch()" id="run-search-btn" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-600 font-semibold bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1">🔍 Run Search Now</button>
 </div>
 
+<div id="cv-warning" class="hidden max-w-4xl mx-auto px-4 pt-3">
+  <div class="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+    <span class="text-xl">⚠️</span>
+    <span><strong>No CV uploaded.</strong> Auto-apply will fail without a CV. Go to <a href="#profile" onclick="showTab('profile')" class="underline font-semibold">Profile → CV</a> and paste your resume.</span>
+    <button onclick="document.getElementById('cv-warning').classList.add('hidden')" class="ml-auto text-amber-500 hover:text-amber-700 text-lg leading-none">✕</button>
+  </div>
+</div>
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
 <div id="empty-state" class="hidden text-center py-24 px-4">
   <div class="text-5xl mb-3 opacity-30">🔍</div>
@@ -2355,27 +2397,25 @@ async function setStage(id, stage) {
 
 async function runApply() {
   const btn = document.getElementById('run-apply-btn');
-  if (!btn || btn.disabled) return;
-  btn.disabled = true;
-  btn.textContent = '⏳ Applying…';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Applying…'; }
   try {
-    const r = await api('/api/run-apply', 'POST', {});
-    if (r.error) {
-      btn.disabled = false;
-      btn.textContent = '🚀 Apply Now';
-      alert('Apply error: ' + r.error);
-    } else if (r.applied === 0) {
-      btn.disabled = false;
-      btn.textContent = '🚀 Apply Now';
-      alert('No approved jobs to apply to.');
+    const r = await fetch('/api/run-apply', {method:'POST', headers:{'Content-Type':'application/json'}});
+    const data = await r.json();
+    if (r.ok) {
+      const n = data.applied ?? 0;
+      if (n > 0) {
+        showToast('✅ Applied to ' + n + ' job' + (n === 1 ? '' : 's') + '!');
+        setTimeout(() => loadData(), 1500);
+      } else {
+        showToast('No approved jobs to apply to — approve some first.');
+      }
     } else {
-      btn.textContent = `✓ Applied to ${r.applied}!`;
-      setTimeout(() => loadAll(), 1200);
+      showToast('Apply failed: ' + (data.error || 'Server error'));
     }
   } catch(e) {
-    btn.disabled = false;
-    btn.textContent = '🚀 Apply Now';
-    alert('Could not run apply');
+    showToast('Connection error ❌');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Run Apply Now'; }
   }
 }
 </script>
@@ -2386,6 +2426,18 @@ async function runApply() {
   const _h=location.hash.replace('#','');
   const _v=['new','approved','applied','passed','activity','profile','preferences','notifications','schedule'];
   if(_h&&_v.includes(_h))window.setTab(_h);
+})();
+
+// Show CV warning banner if no CV is uploaded
+(async () => {
+  try {
+    const r = await fetch('/api/me');
+    const u = await r.json();
+    if (r.ok && !u.cv_text) {
+      const w = document.getElementById('cv-warning');
+      if (w) w.classList.remove('hidden');
+    }
+  } catch(e) {}
 })();
 </script>
 </body>
