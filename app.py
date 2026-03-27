@@ -154,7 +154,21 @@ def check_notifications():
         print(f"[notify] Error: {e}")
 
 
-_last_auto_run: dict = {}  # {(user_id, 'search'|'apply'): 'YYYY-MM-DD'}
+def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
+    """Check activity_log to see if this scheduled job already fired today.
+    DB-backed so it survives server restarts (unlike an in-memory dict).
+    """
+    try:
+        conn = database.get_db()
+        row = conn.execute(
+            "SELECT 1 FROM activity_log "
+            "WHERE user_id=? AND event_type=? AND created_date >= ? LIMIT 1",
+            (user_id, event_type, today)
+        ).fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return False
 
 
 def _check_scheduled_jobs() -> None:
@@ -172,14 +186,10 @@ def _check_scheduled_jobs() -> None:
         conn.close()
         for row in rows:
             uid, sh, ah = row
-            s_key = (uid, 'search')
-            if current_hour == sh and _last_auto_run.get(s_key) != today:
-                _last_auto_run[s_key] = today
+            if current_hour == sh and not _scheduler_already_ran(uid, 'jobs_searched', today):
                 print(f'[scheduler] Triggering search for user {uid} at hour {sh}')
                 threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
-            a_key = (uid, 'apply')
-            if current_hour == ah and _last_auto_run.get(a_key) != today:
-                _last_auto_run[a_key] = today
+            if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
                 print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
                 threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
     except Exception as e:
