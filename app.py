@@ -253,22 +253,26 @@ def run_job_search(user_id: int):
         conn.close()
 
         def _search_jobs_with_claude_websearch(titles_: list, locs_: list, kws_: list) -> list:
-            """Search real job sites using Claude web_search: LinkedIn, AllJobs, Drushim, etc."""
+            """Search real job sites via Claude web_search: LinkedIn, AllJobs, Drushim, etc.
+            Fixes: no beta header, robust JSON parsing, error logging."""
             import re as _re2
             all_jobs = []
             loc  = ', '.join(locs_[:3]) if locs_ else 'Israel, Tel Aviv'
             kw   = ', '.join(kws_[:5])  if kws_  else ''
             sites = ('alljobs.co.il, drushim.co.il, linkedin.com/jobs, glassdoor.com, '
                      'wellfound.com/jobs, jobs.lever.co, boards.greenhouse.io, comeet.co')
+            search_errors = []
+
             for title in titles_[:8]:
                 try:
                     prompt = (
-                        f'Find "{title}" job listings posted recently in {loc}. '
-                        + (f'Relevant keywords: {kw}. ' if kw else '')
+                        f'Search for "{title}" job listings in {loc}. '
+                        + (f'Keywords: {kw}. ' if kw else '')
                         + f'Search these sites: {sites}. '
-                        + 'Return ONLY a JSON array of real jobs you actually find. '
-                        + 'Each object must have: job_title, company, location, url, description. '
-                        + 'Include up to 10 jobs. Only include listings with real direct apply URLs.'
+                        + 'Find 5-10 real current job listings. '
+                        + 'Respond with ONLY a JSON array, no other text before or after. '
+                        + 'Each item: {"job_title":"...", "company":"...", "location":"...", '
+                        + '"url":"...", "description":"..."}'
                     )
                     _body = json.dumps({
                         'model': 'claude-sonnet-4-6',
@@ -281,27 +285,51 @@ def run_job_search(user_id: int):
                         headers={
                             'x-api-key': ANTHROPIC_KEY,
                             'anthropic-version': '2023-06-01',
-                            'anthropic-beta': 'web-search-2025-03-05',
                             'content-type': 'application/json'
                         }
                     )
                     with _ur.urlopen(_req, timeout=120) as _resp:
                         _result = json.loads(_resp.read())
+
                     for _block in _result.get('content', []):
-                        if _block.get('type') == 'text':
-                            _m = _re2.search(r'\[([\s\S]*?)\]', _block['text'])
-                            if _m:
-                                try:
-                                    _jobs = json.loads('[' + _m.group(1) + ']')
-                                    for _j in _jobs:
-                                        if isinstance(_j, dict) and _j.get('url'):
-                                            _j.setdefault('candidate_score', 75)
-                                            _j.setdefault('fit_reason', 'Found via web search')
-                                            all_jobs.append(_j)
-                                except Exception:
-                                    pass
+                        if _block.get('type') != 'text':
+                            continue
+                        _txt = _block['text'].strip()
+                        if _txt.startswith('['):
+                            try:
+                                _jobs = json.loads(_txt)
+                                for _j in _jobs:
+                                    if isinstance(_j, dict) and _j.get('url'):
+                                        _j.setdefault('candidate_score', 75)
+                                        _j.setdefault('fit_reason', 'Found via web search')
+                                        all_jobs.append(_j)
+                                continue
+                            except Exception:
+                                pass
+                        _si = _txt.rfind('[')
+                        _ei = _txt.rfind(']')
+                        if _si >= 0 and _ei > _si:
+                            try:
+                                _jobs = json.loads(_txt[_si:_ei+1])
+                                for _j in _jobs:
+                                    if isinstance(_j, dict) and _j.get('url'):
+                                        _j.setdefault('candidate_score', 75)
+                                        _j.setdefault('fit_reason', 'Found via web search')
+                                        all_jobs.append(_j)
+                            except Exception:
+                                pass
+
+                except _ue.HTTPError as _he:
+                    _err = f'{title}: HTTP {_he.code} - {_he.read().decode()[:200]}'
+                    print(f'[search] {_err}')
+                    search_errors.append(_err)
                 except Exception as _e:
-                    print(f'[search] {title}: {_e}')
+                    _err = f'{title}: {type(_e).__name__}: {_e}'
+                    print(f'[search] {_err}')
+                    search_errors.append(_err)
+
+            if search_errors:
+                print(f'[search] Errors summary: {search_errors[:3]}')
             return all_jobs
 
         def _score_jobs_with_claude(raw_jobs: list) -> list:
