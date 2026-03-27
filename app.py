@@ -2012,6 +2012,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#f8fafc;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:500;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.25);transition:opacity .3s';
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, 3200);
+}
+</script>
+<script>
 let tab = 'new';
 let me = {};
 let sortBy = 'date';
