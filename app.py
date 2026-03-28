@@ -27,6 +27,10 @@ import auth
 import db as database
 from ai_analysis import analyze_cv
 
+# ── Compiled Tailwind CSS (gzipped + base64, 19KB → 4KB stored) ───────────────
+import gzip as _gz, base64 as _b64
+_TW_CSS = _gz.decompress(_b64.b64decode("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"))
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -828,7 +832,7 @@ def parse_multipart(headers, body: bytes) -> dict:
 _COMMON_HEAD = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/tw.css"/>
   <style>
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -2881,6 +2885,16 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path   = parsed.path
         qs     = parse_qs(parsed.query)
+
+        # Compiled Tailwind CSS
+        if path == "/static/tw.css":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/css; charset=utf-8")
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.send_header("Content-Length", str(len(_TW_CSS)))
+            self.end_headers()
+            self.wfile.write(_TW_CSS)
+            return
 
         # Public routes
         if path in ("/login", "/login/"):
