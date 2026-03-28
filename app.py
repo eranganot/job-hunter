@@ -190,19 +190,38 @@ def _check_scheduled_jobs() -> None:
         current_hour = now.hour
         conn = database.get_db()
         rows = conn.execute(
-            "SELECT u.id, p.search_hour, p.apply_hour "
+            "SELECT u.id, p.search_hour, p.apply_hour, "
+            "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only "
             "FROM users u JOIN user_profiles p ON p.user_id = u.id "
             "WHERE u.is_active = 1"
         ).fetchall()
         conn.close()
         for row in rows:
-            uid, sh, ah = row
+            uid, sh, ah = row[0], row[1], row[2]
+            freq = row[3] or 'daily'
+            s_dow = row[4]
+            a_dow = row[5]
+            wo = row[6]
+            cur_dow = now.weekday()  # 0=Mon ... 6=Sun
+            # Skip weekends if weekdays_only
+            if wo and cur_dow >= 5:
+                continue
+            # Search: check hour + frequency/day
             if current_hour == sh and not _scheduler_already_ran(uid, 'jobs_searched', today):
-                print(f'[scheduler] Triggering search for user {uid} at hour {sh}')
-                threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
+                run_search = True
+                if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
+                    run_search = False
+                if run_search:
+                    print(f'[scheduler] Triggering search for user {uid} at hour {sh}')
+                    threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
+            # Apply: check hour + frequency/day
             if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
-                print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
-                threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
+                run_apply = True
+                if freq == 'weekly' and a_dow is not None and cur_dow != a_dow:
+                    run_apply = False
+                if run_apply:
+                    print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
+                    threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
     except Exception as e:
         print(f'[scheduler] Error: {e}')
 
@@ -350,6 +369,63 @@ def run_job_search(user_id: int):
                 for t in batch: t.start()
                 for t in batch: t.join(timeout=25)
 
+            # -- TechMap product.csv (curated Israeli product jobs) --
+            try:
+                import csv as _csv, io as _io
+                _tm_url = 'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/product.csv'
+                _tm_req = _ur2.Request(_tm_url, headers={"User-Agent": "JobHunter/1.0"})
+                with _ur2.urlopen(_tm_req, timeout=15) as _tm_resp:
+                    _tm_text = _tm_resp.read().decode('utf-8', errors='replace')
+                _tm_count = 0
+                for _row in _csv.DictReader(_io.StringIO(_tm_text)):
+                    _tm_title = (_row.get('title') or '').strip()
+                    if _title_match(_tm_title):
+                        _tm_url_j = (_row.get('url') or '').strip()
+                        if _tm_url_j:
+                            all_raw.append({"job_title": _tm_title, "company": _row.get('company',''),
+                                            "location": _row.get('city',''), "url": _tm_url_j,
+                                            "description": _tm_title, "source": "techmap"})
+                            _tm_count += 1
+                print(f"[search] TechMap CSV: {_tm_count} product jobs matched")
+            except Exception as _tme:
+                print(f"[search] TechMap CSV error: {_tme}")
+
+            # -- Comeet boards for Israeli companies --
+            _comeet_slugs = {'monday': 'monday.com', 'ironsource': 'ironSource', 'gong': 'Gong',
+                             'yotpo2': 'Yotpo', 'lightricks2': 'Lightricks'}
+            for _cm_slug, _cm_name in _comeet_slugs.items():
+                try:
+                    _cm_url = f'https://www.comeet.co/careers/api/{_cm_slug}/positions'
+                    _cm_data = _get_json(_cm_url, timeout=12)
+                    if isinstance(_cm_data, list):
+                        for _cm_j in _cm_data:
+                            _cm_t = _cm_j.get('name', '')
+                            if _title_match(_cm_t):
+                                _cm_loc = ''
+                                if _cm_j.get('location'):
+                                    _cm_loc = _cm_j['location'].get('name', '') if isinstance(_cm_j['location'], dict) else str(_cm_j['location'])
+                                all_raw.append({"job_title": _cm_t, "company": _cm_name,
+                                                "location": _cm_loc, "url": _cm_j.get('url',''),
+                                                "description": _cm_t, "source": "comeet"})
+                except Exception:
+                    pass
+            print(f"[search] Comeet + SpeakNow queries done")
+
+            # -- SpeakNow careers --
+            try:
+                _sn_req = _ur2.Request('https://speaknow.co/careers/', headers={"User-Agent": "JobHunter/1.0"})
+                with _ur2.urlopen(_sn_req, timeout=12) as _sn_resp:
+                    _sn_html = _sn_resp.read().decode('utf-8', errors='replace')
+                import re as _re_sn
+                # Find job links on the careers page
+                _sn_links = _re_sn.findall(r'href=["\'](https?://[^"\'>]*(?:career|job|position|apply)[^"\'>]*)["\'\s>]', _sn_html, _re_sn.IGNORECASE)
+                for _sn_url in set(_sn_links[:10]):
+                    all_raw.append({"job_title": "SpeakNow Career Opportunity", "company": "SpeakNow",
+                                    "location": "Israel", "url": _sn_url,
+                                    "description": "Career opportunity at SpeakNow", "source": "speaknow"})
+            except Exception as _sne:
+                print(f"[search] SpeakNow error: {_sne}")
+
             print(f"[search] Pre-filter: {len(all_raw)} title-matched jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} companies")
 
             if not all_raw:
@@ -432,6 +508,51 @@ def run_job_search(user_id: int):
                         j["source"] = "greenhouse/lever"
                         scored_jobs.append(j)
 
+
+            # -- Supplemental: Claude web_search for LinkedIn/Glassdoor/Wellfound --
+            try:
+                _ws_sites = 'linkedin.com/jobs, glassdoor.com, wellfound.com/jobs'
+                for _ws_title in titles_[:2]:
+                    try:
+                        _ws_prompt = (
+                            f'Search for "{_ws_title}" job listings in {", ".join(locs_[:2]) or "Israel"}. '
+                            f'Search these sites: {_ws_sites}. '
+                            'Find 5 real current job listings. '
+                            'Respond with ONLY a JSON array. '
+                            'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"..."}'
+                        )
+                        _ws_body = _js2.dumps({
+                            'model': 'claude-sonnet-4-6', 'max_tokens': 4096,
+                            'tools': [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 5}],
+                            'messages': [{'role': 'user', 'content': _ws_prompt}]
+                        }).encode()
+                        _ws_req = _ur2.Request('https://api.anthropic.com/v1/messages', data=_ws_body,
+                                               headers={'x-api-key': ANTHROPIC_KEY,
+                                                        'anthropic-version': '2023-06-01',
+                                                        'content-type': 'application/json'})
+                        with _ur2.urlopen(_ws_req, timeout=120) as _ws_resp:
+                            _ws_result = _js2.loads(_ws_resp.read())
+                        for _ws_blk in _ws_result.get('content', []):
+                            if _ws_blk.get('type') != 'text': continue
+                            _ws_txt = _ws_blk['text'].strip()
+                            _ws_si = _ws_txt.rfind('['); _ws_ei = _ws_txt.rfind(']')
+                            if _ws_si >= 0 and _ws_ei > _ws_si:
+                                try:
+                                    for _ws_j in _js2.loads(_ws_txt[_ws_si:_ws_ei+1]):
+                                        if isinstance(_ws_j, dict) and _ws_j.get('url'):
+                                            _ws_j.setdefault('candidate_score', 70)
+                                            _ws_j.setdefault('match_score', 70)
+                                            _ws_j.setdefault('fit_reason', 'Found via web search')
+                                            _ws_j.setdefault('source', 'web_search')
+                                            scored_jobs.append(_ws_j)
+                                except Exception:
+                                    pass
+                        print(f"[search] Web search for '{_ws_title}': added jobs")
+                    except Exception as _wse:
+                        print(f"[search] Web search error for '{_ws_title}': {_wse}")
+            except Exception as _wse2:
+                print(f"[search] Web search supplemental skipped: {_wse2}")
+
             print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
             return scored_jobs
 
@@ -476,6 +597,8 @@ def run_job_search(user_id: int):
                 continue
             try:
                 _jurl = (j.get("url") or "").strip()
+                if _jurl and _url_ok.get(_jurl) == 0:
+                    continue  # skip dead links
                 conn.execute(
                     "INSERT OR IGNORE INTO jobs "
                     "(user_id,title,company,location,url,description,why_relevant,source,"
@@ -2266,11 +2389,10 @@ async function loadActivity() {
   panel.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">LoadingÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦</div>';
   const items = await api('/api/activity');
   if (!items || items.length === 0) {
-    panel.innerHTML = '<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-3 opacity-30">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ</div><p class="font-medium">No activity yet</p><p class="text-sm mt-1">Actions like approving jobs and running searches appear here</p></div>';
+    panel.innerHTML = '<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-3 opacity-30">--</div><p class="font-medium">No activity yet</p><p class="text-sm mt-1">Actions like approving jobs and running searches appear here</p></div>';
     return;
   }
-  const icons = {jobs_searched:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',job_approved:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',job_rejected:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',job_applied:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',
-    cv_uploaded:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',cv_analyzed:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¨',job_status_checked:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',bulk_approve:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',bulk_reject:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ',jobs_injected:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥',job_stage_updated:'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ'};
+  const icons = {jobs_searched:'[Search]',job_approved:'[OK]',job_rejected:'[X]',job_applied:'[Apply]',notification_sent:'[Notif]',cv_uploaded:'[CV]',profile_updated:'[Profile]'};
   panel.innerHTML = items.map(item => {
     const icon = icons[item.event_type] || 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ';
     const dt = new Date(item.created_date);
@@ -2370,9 +2492,10 @@ function candidateBadge(score) {
 }
 
 function statusCheckBadge(job) {
-  if (job.status_check === 'open')    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Still open</span>`;
-  if (job.status_check === 'closed')  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-600 border border-red-200">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Closed</span>`;
-  if (job.status_check === 'unknown') return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Unknown</span>`;
+  if (!job.status || job.status === 'new') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-200">New</span>';
+  if (job.status === 'approved') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">Approved</span>';
+  if (job.status === 'applied') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-200">Applied</span>';
+  if (job.status === 'rejected') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 border border-red-200">Passed</span>';
   return '';
 }
 
@@ -2388,8 +2511,8 @@ async function checkStatus(id) {
 }
 
 function urlVerifiedBadge(job) {
-  if (job.url_verified === 1) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ URL OK</span>';
-  if (job.url_verified === 0) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title="URL unreachable ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ job may be closed">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¯ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Dead link</span>';
+  if (job.url_verified === 1) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600 border border-green-200">Verified</span>';
+  if (job.url_verified === 0) return '<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 border border-red-200">Dead link</span>';
   return '';
 }
 function applyStatusBadge(job) {
@@ -2399,7 +2522,7 @@ function applyStatusBadge(job) {
   return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
 }
 function renderJob(job) {
-  const badges = [matchBadge(job.match_score), candidateBadge(job.candidate_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
+  const badges = [matchBadge(job.match_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
   const verifyBtn = job.url
     ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ</button>`
     : '';
