@@ -2439,16 +2439,6 @@ function sourceBadge(s) {
 }
 
 
-function retryApply(id) {
-  if (!confirm('Retry auto-apply for this job?')) return;
-  const card = document.getElementById('job-'+id);
-  if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
-  api('/api/jobs/'+id+'/retry', 'POST', {}).then(() => {
-    showToast('Job moved back to Approved queue for retry');
-    loadAll();
-  });
-}
-
 
 function actionBar(job) {
   if (job.status === 'new') return `
@@ -2619,6 +2609,17 @@ async function loadJobs(status) {
     html += jobs.map(renderJob).join('');
     list.innerHTML = html;
   }
+}
+
+
+function retryApply(id) {
+  if (!confirm('Retry auto-apply for this job?')) return;
+  var card = document.getElementById('job-'+id);
+  if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
+  api('/api/jobs/'+id+'/retry', 'POST', {}).then(function() {
+    showToast('Job moved back to Approved queue for retry');
+    loadAll();
+  });
 }
 
 async function act(id, action) {
