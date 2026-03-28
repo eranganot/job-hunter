@@ -50,7 +50,7 @@ _CONFIRMATION_PHRASES = [
 def _claude(prompt: str, max_tokens: int = 1024) -> str:
     """Call Claude and return the text response."""
     payload = json.dumps({
-        "model": "claude-sonnet-4-5",
+        "model": "claude-haiku-4-5-20251001",
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }).encode()
@@ -171,6 +171,7 @@ def submit_application(
 
     try:
         with sync_playwright() as pw:
+            print(f"[apply-engine] Launching Chromium...")
             browser = pw.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-setuid-sandbox",
