@@ -2253,6 +2253,7 @@ function showToast(msg) {
 let tab = 'new';
 let me = {};
 let sortBy = 'date';
+let applyFilter = 'all';
 let selectMode = false;
 let selectedIds = new Set();
 let _pendingPassId = null;
@@ -2437,6 +2438,18 @@ function sourceBadge(s) {
   return `<span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cls}">${s||'Unknown'}</span>`;
 }
 
+
+function retryApply(id) {
+  if (!confirm('Retry auto-apply for this job?')) return;
+  const card = document.getElementById('job-'+id);
+  if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
+  api('/api/jobs/'+id+'/retry', 'POST', {}).then(() => {
+    showToast('Job moved back to Approved queue for retry');
+    loadAll();
+  });
+}
+
+
 function actionBar(job) {
   if (job.status === 'new') return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
@@ -2466,6 +2479,10 @@ function actionBar(job) {
       </div>
       ${job.apply_confirmation ? `<div class="mt-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2 border border-slate-100"><span class="font-medium">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Confirmed:</span> ${job.apply_confirmation.substring(0,220)}${job.apply_confirmation.length>220?'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦':''}</div>` : ''}
       ${(job.apply_status === 'manual_required' && job.apply_error) ? `<div class="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¤ <span class="font-medium">Manual apply needed:</span> ${job.apply_error}</div>` : ''}
+      ${(job.apply_status === 'failed' || job.apply_status === 'manual_required') ? `<div class="mt-3 flex gap-2">
+        <button onclick="retryApply(${job.id})" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-all">Retry Auto-Apply</button>
+        ${job.url ? `<a href="${job.url}" target="_blank" onclick="event.stopPropagation()" class="flex-1 text-center bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium px-4 py-2 rounded-xl transition-all">Apply Manually</a>` : ''}
+      </div>` : ''}
     </div>`;
   }
   if (job.status === 'failed') return `
@@ -2577,6 +2594,28 @@ async function loadJobs(status) {
     empty.classList.add('hidden');
     let html = '';
     if (status === 'approved') html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Apply Now</button></div>`;
+    if (status === 'applied') {
+      const counts = {all: jobs.length, failed: 0, submitted: 0, confirmed: 0, manual_required: 0};
+      jobs.forEach(j => { if (j.apply_status && counts[j.apply_status] !== undefined) counts[j.apply_status]++; });
+      const pill = (key, label, cls) => {
+        const active = applyFilter === key;
+        const count = counts[key] || 0;
+        if (key !== 'all' && count === 0) return '';
+        return '<button onclick="applyFilter=\'' + key + '\';loadJobs(\'applied\')" class="text-xs font-medium px-3 py-1.5 rounded-full border transition-all '
+          + (active ? cls + ' font-bold' : 'border-slate-200 text-slate-500 hover:border-slate-400 bg-white')
+          + '">' + label + (key !== 'all' ? ' (' + count + ')' : '') + '</button>';
+      };
+      html += '<div class="flex gap-2 flex-wrap mb-3 mt-1">'
+        + pill('all', 'All', 'bg-slate-100 text-slate-700 border-slate-300')
+        + pill('failed', 'Failed', 'bg-red-100 text-red-700 border-red-300')
+        + pill('submitted', 'Submitted', 'bg-blue-100 text-blue-700 border-blue-300')
+        + pill('confirmed', 'Confirmed', 'bg-green-100 text-green-700 border-green-300')
+        + pill('manual_required', 'Manual Needed', 'bg-amber-100 text-amber-700 border-amber-300')
+        + '</div>';
+      if (applyFilter !== 'all') {
+        jobs = jobs.filter(j => j.apply_status === applyFilter);
+      }
+    }
     html += jobs.map(renderJob).join('');
     list.innerHTML = html;
   }
@@ -2592,6 +2631,7 @@ async function act(id, action) {
 
 function setTab(t) {
   tab = t;
+  if (t !== 'applied') applyFilter = 'all';
   document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('tab-active'); b.classList.add('text-slate-600'); });
   document.getElementById('tab-'+t).classList.add('tab-active');
   document.getElementById('tab-'+t).classList.remove('text-slate-600');
@@ -3230,7 +3270,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Job actions ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
-        m = re.match(r"^/api/jobs/(\d+)/(approve|reject|later|applied|failed)$", path)
+        m = re.match(r"^/api/jobs/(\d+)/(approve|reject|later|applied|failed|retry)$", path)
         if m:
             job_id = int(m.group(1))
             action = m.group(2)
@@ -3247,6 +3287,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             status_map = {"approve":"approved","reject":"rejected",
+            if action == "retry":
+                conn.execute(
+                    "UPDATE jobs SET status='approved', apply_status=NULL, "
+                    "apply_error=NULL, apply_confirmation=NULL, "
+                    "apply_attempts=0, applied_date=NULL, notes='' "
+                    "WHERE id=? AND user_id=?",
+                    (job_id, user_id)
+                )
+                conn.commit()
+                conn.close()
+                database.log_activity(user_id, "job_retry",
+                    f"Retrying {job['title']} at {job['company']}")
+                self.send_json({"success": True})
+                return
                           "later":"new","applied":"applied","failed":"failed"}
             new_status = status_map[action]
             reason     = data.get("reason", "") or data.get("notes", "")
