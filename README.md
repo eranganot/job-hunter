@@ -1,158 +1,131 @@
-# 🎯 Job Hunter
+# Job Hunter
 
-An AI-powered personal job search assistant that runs entirely on Railway (cloud). It automatically finds relevant positions, lets you review and approve them, then applies on your behalf — and notifies you via WhatsApp every step of the way.
+Automated job search and application tool with AI-powered CV analysis, multi-source job aggregation, and WhatsApp/Telegram notifications.
 
 ## Features
 
-- **Multi-round AI job search** — Claude runs a separate web search per job title, covering **11 sources** per round, and deduplicates results against your full job history
-- **Smart scoring** — every job card shows a match % (how well the role fits your skills) and a candidate score (how strong a candidate you are)
-- 🔗 **Automatic URL verification** — every job URL is checked on import; dead links are flagged with ⚠️ before you review them. Historical jobs with unverified URLs are also re-checked on every search run
-- **Job status check** — one-click 🔍 button fetches the original posting and asks Claude if the role is still open
-- **Review queue** — approve, pass, or defer jobs from a clean mobile-friendly dashboard
-- 🤖 **Auto-apply** — approved jobs are submitted directly by Railway using Playwright + Claude AI: fills forms, uploads your CV, and verifies the result page confirms submission
-- **Apply status badges** — each Applied card shows ✅ Confirmed / 📤 Submitted / 👤 Manual needed / ❌ Failed
-- **Interview pipeline** — track applied jobs through Screening, Interviewing, Offer, and Rejected stages
-- **Two consolidated notifications** — one WhatsApp at the end of each search run (digest of new jobs + URL status), one at the end of each apply run (full outcome breakdown)
-- **Tab deep-links** — notification links open the exact dashboard tab (Review or Applied) automatically
-- **⏰ Automatic scheduling** — configure daily search and apply times; the app runs them automatically every day with no manual trigger needed
-- **⚠️ CV warning** — dashboard shows a banner if no CV is uploaded (required for auto-apply and job scoring)
+- **Multi-Source Job Search** - Aggregates jobs from 8+ sources: Greenhouse boards, Lever boards, TechMap product jobs, Comeet, SpeakNow, LinkedIn, Glassdoor, and Wellfound
+- **AI-Powered Scoring** - Each job is scored against your CV and preferences using Claude Haiku, with match percentage and fit explanation
+- **Smart Filtering** - Only relevant jobs matching your titles and keywords are shown; dead links are automatically filtered out
+- **Scheduled Automation** - Configure daily or weekly search/apply cycles with day-of-week and time controls; weekday-only option available
+- **Auto-Apply** - Approved jobs are submitted via headless Playwright browser with Claude-assisted form filling
+- **WhatsApp & Telegram Notifications** - Get notified when new jobs are found or applications are submitted
+- **Multi-User Auth** - Secure login with per-user profiles, preferences, and job history
+- **CV Analysis** - Upload your PDF resume for AI-powered skill extraction and job matching
 
 ## How It Works
 
-### 1. Multi-Round Job Search
+### 1. Multi-Source Job Search
 
-For each job title in your profile, Claude runs a separate web search using Anthropic's `web_search` tool. Results are deduplicated against your full job history (not just the current run) before being inserted. Each round targets 5–8 unique jobs; a typical 4-title profile yields 15–25 fresh results per day.
+The search engine queries multiple job sources in parallel:
 
-**Sources searched per round:**
-- LinkedIn Jobs (linkedin.com/jobs)
-- Glassdoor (glassdoor.com/job-listings)
-- AllJobs.co.il
-- Drushim.co.il
-- Wellfound / AngelList (wellfound.com/jobs)
-- Comeet (comeet.co)
-- Greenhouse job boards (boards.greenhouse.io)
-- Lever job boards (jobs.lever.co)
-- **SpeakNow careers (speaknow.co/careers/)**
-- **TechMap product jobs (github.com/mluggy/techmap)**
-- Company career pages directly
+- **Greenhouse API** (47 Israeli tech companies) - Direct public API queries to boards-api.greenhouse.io
+- **Lever API** (2+ companies) - Direct public API queries to api.lever.co
+- **TechMap CSV** - Curated Israeli product/management jobs from github.com/mluggy/techmap
+- **Comeet** - Israeli company job boards via Comeet API
+- **SpeakNow** - Career opportunities from speaknow.co/careers
+- **Claude Web Search** (supplemental) - LinkedIn, Glassdoor, and Wellfound via Anthropic web_search API
+
+Jobs are pre-filtered by title match against your preferences, then scored by Claude Haiku against your CV and keywords. Only jobs scoring 40%+ are kept.
 
 ### 2. Automatic Scheduler
 
-The background scheduler checks the clock every 60 seconds and auto-triggers:
-- **Search** at each user's configured search hour (default: 11 AM UTC)
-- **Apply** at each user's configured apply hour (default: 5 PM UTC)
+The built-in scheduler runs every 60 seconds and checks if it's time to trigger a search or apply cycle:
 
-Runs are tracked per-day so each job fires exactly once per day. You can also trigger both manually from the dashboard at any time.
+- Respects **daily vs weekly** frequency setting
+- Honors **search_day_of_week** and **apply_day_of_week** for weekly schedules
+- Skips weekends when **weekdays_only** is enabled
+- Prevents duplicate runs on the same day
 
-### 3. URL Verification (Automatic)
+### 3. URL Verification
 
-After each search run, URLs are checked in parallel (8 concurrent workers, 8 s timeout) for:
-- All new jobs just imported this run
-- All existing jobs in your history that haven't been verified yet (`url_verified IS NULL`)
-
-Each job is marked 🔗 URL OK or ⚠️ Dead link — visible immediately on every card.
+Every job URL is automatically verified after search. Dead links are:
+- Marked with a "Dead link" badge in the dashboard
+- Excluded from new search inserts (won't clutter your job list)
 
 ### 4. Review & Approve
 
-Open the dashboard → Review tab. Each card shows title, company, location, match %, candidate score, source, and URL status. Approve, pass, or defer each job.
+Jobs appear in the dashboard sorted by match score. Each card shows:
+- **Match percentage** - How well the job fits your profile (0-100%)
+- **Fit reason** - AI explanation of why this job matches
+- **Verification status** - Whether the job URL is still active
+
+Actions: Approve to Apply, Later, or Pass.
 
 ### 5. Application Submission (Playwright + Claude)
 
-When the scheduled apply window runs (or you click Run Apply Now), approved jobs are submitted directly from Railway:
+Approved jobs are auto-applied using headless Chromium:
+- Navigates to the job application page
+- Uses Claude to understand form fields
+- Fills in your details from CV and profile
+- Uploads your resume PDF
+- Submits and captures confirmation
 
-1. **Extract applicant data** — Claude reads your CV + profile to pull name, email, phone, LinkedIn, GitHub, and a short bio  
-   ⚠️ **A CV must be uploaded in Profile for this step to work**
-2. **Navigate to the job URL** — Playwright opens a headless Chromium browser on Railway
-3. **Blocker detection** — login walls and CAPTCHAs are detected and flagged as manual_required
-4. **Find Apply button** — clicks common apply-button patterns if the form isn't already visible
-5. **Claude-powered form fill** — the full page HTML is sent to Claude, which returns a JSON plan of fill, select, upload, and submit instructions
-6. **Execute + verify** — Playwright follows the plan and checks the result page for confirmation phrases
+### 6. Notifications
 
-**Apply outcomes:**
-
-| Status | Meaning |
-|---|---|
-| confirmed | ✅ Result page confirmed the application was received |
-| submitted | 📤 Form was submitted but no clear confirmation phrase detected |
-| manual_required | 👤 Login wall, CAPTCHA, or unrecoverable blocker found |
-| failed | ❌ Playwright error or unexpected exception |
-
-### 6. Notifications (2 total, no duplicates)
-
-After each search run — 1 message:
-```
-🔍 Search Complete — 2026-03-26
-📋 4 new job(s) added for review:
-  • VP Product @ TechCorp 🔗
-  • Head of Product @ StartupX ⚠️
-...
-```
-
-After each apply run — 1 message:
-```
-🚀 Apply Run Complete — 2026-03-26
-📊 3 application(s) submitted
-✅ 2 Confirmed: ...
-📤 1 Submitted (awaiting confirmation): ...
-```
+WhatsApp (Twilio) or Telegram notifications for:
+- New jobs found (with count and top matches)
+- Application results (submitted, confirmed, or manual required)
 
 ## Setup
 
 ### Environment Variables (Railway)
 
 | Variable | Description |
-|---|---|
-| `ANTHROPIC_API_KEY` | Claude API key (required) |
-| `TWILIO_SID` | Twilio account SID for WhatsApp |
-| `TWILIO_TOKEN` | Twilio auth token |
-| `TWILIO_FROM` | Twilio WhatsApp sender (whatsapp:+14155238886) |
-| `TWILIO_TO` | Your WhatsApp number (whatsapp:+972...) |
-| `APP_PASSWORD` | Dashboard login password |
-| `SECRET_KEY` | Flask session secret key |
-| `RAILWAY_PUBLIC_DOMAIN` | Set automatically by Railway — used for notification deep-links |
+|----------|-------------|
+| ANTHROPIC_API_KEY | Anthropic API key for Claude AI scoring and web search |
+| DATABASE_URL | SQLite path (auto-created on Railway volume) |
+| SECRET_KEY | Session encryption key |
+| PORT | Server port (default: 8080) |
 
-### Profile Setup (Dashboard → Profile)
+### Profile Setup (Dashboard > Settings)
 
-- **CV / Resume** — full text; used for job matching and form-filling (**required** for auto-apply)
-- **Job Titles** — comma-separated (e.g. VP Product, Head of Product, CPO); each title gets its own search round
-- **Keywords** — extra search terms
-- **Email** — used when filling application forms
-- **CV File** — PDF/DOCX uploaded to Railway; attached to file-upload fields
+1. Add your **job titles** (e.g., VP Product, Director of Product, Senior PM)
+2. Add **keywords** (e.g., AI/ML, Enterprise SaaS, Product-Led Growth)
+3. Set **preferred locations** (e.g., Tel Aviv, Hybrid)
+4. Upload your **CV** (PDF) for AI matching
 
-### Schedule (Dashboard → Schedule)
+### Schedule (Dashboard > Settings > Schedule)
 
-Set your preferred search hour and apply hour (UTC). The scheduler fires automatically — no cron or external trigger needed. Railway keeps the process running 24/7.
+- Choose **daily** or **weekly** frequency
+- Set search and apply hours
+- Pick specific days for weekly schedules
+- Enable weekdays-only to skip weekends
 
 ## Tech Stack
 
-| Component | Technology |
-|---|---|
-| Backend | Python (BaseHTTPRequestHandler) |
-| AI | Anthropic Claude (claude-sonnet-4-6) + web_search tool |
-| Browser automation | Playwright (Chromium, headless) |
-| Database | SQLite (persistent Railway volume) |
-| Notifications | Twilio WhatsApp API |
-| Hosting | Railway (always-on) |
+- **Backend**: Python 3.10+ with BaseHTTPRequestHandler (no framework dependencies)
+- **Database**: SQLite on Railway persistent volume
+- **AI**: Anthropic Claude (Haiku for scoring, Sonnet for web search)
+- **Job Sources**: Greenhouse API, Lever API, TechMap CSV, Comeet API, Claude web_search
+- **Browser Automation**: Playwright (headless Chromium) for auto-apply
+- **Notifications**: Twilio (WhatsApp), Telegram Bot API
+- **Hosting**: Railway with auto-deploy from GitHub
 
-## Database Schema — Key Columns
+## Database Schema - Key Columns
 
-| Column | Description |
-|---|---|
-| `url_verified` | 1 = URL alive, 0 = dead (checked on every search run) |
-| `url_check_date` | ISO timestamp of last URL check |
-| `apply_status` | confirmed / submitted / manual_required / failed |
-| `apply_confirmation` | Confirmation text snippet from result page |
-| `apply_attempts` | Number of submission attempts |
-| `apply_error` | Error or blocker description if not confirmed |
+**users**: id, email, password_hash, name, role, is_active
+**user_profiles**: user_id, job_titles, keywords, locations, cv_text, cv_filename, schedule_frequency, search_hour, apply_hour, search_day_of_week, apply_day_of_week, weekdays_only, notification_channel
+**jobs**: id, user_id, title, company, location, url, description, why_relevant, source, match_score, candidate_score, status, url_verified, found_date
+**activity_log**: id, user_id, event_type, details, created_date
 
 ## Local Development
 
 ```bash
-git clone https://github.com/eranganot/job-hunter
+# Clone and setup
+git clone https://github.com/eranganot/job-hunter.git
 cd job-hunter
-pip install -r requirements.txt
-playwright install chromium
+
+# Set environment variables
+export ANTHROPIC_API_KEY=your_key
+export SECRET_KEY=your_secret
+
+# Install dependencies
+pip install playwright
+playwright install chromium --with-deps
+
+# Run
 python app.py
 ```
 
-Set environment variables in a `.env` file or export them in your shell before running.
+Server starts on http://localhost:8080. First user to register becomes admin.
