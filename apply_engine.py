@@ -24,6 +24,151 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
+
+# ── ATS-specific handlers ─────────────────────────────────────────────────────
+
+def _is_greenhouse(url: str) -> bool:
+    """Check if URL is a Greenhouse job board."""
+    return bool(re.search(r'boards\.greenhouse\.io|job-boards\.greenhouse\.io|grnh\.se', url))
+
+def _is_lever(url: str) -> bool:
+    """Check if URL is a Lever job board."""
+    return bool(re.search(r'jobs\.lever\.co|lever\.co/.*?/[a-f0-9-]+', url))
+
+def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
+    """Handle Greenhouse application forms with known structure."""
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        # Greenhouse forms: look for #application or .application-form
+        # Click "Apply for this job" button if present
+        for sel in ['a:has-text("Apply")', 'button:has-text("Apply")', 'a[href*="application"]']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    page.wait_for_load_state("networkidle", timeout=8_000)
+                    break
+            except Exception:
+                continue
+
+        # Fill standard Greenhouse fields
+        _gh_fill(page, '#first_name', applicant.get('first_name', ''))
+        _gh_fill(page, '#last_name', applicant.get('last_name', ''))
+        _gh_fill(page, '#email', applicant.get('email', ''))
+        _gh_fill(page, '#phone', applicant.get('phone', ''))
+        _gh_fill(page, 'input[name*="linkedin"], input[autocomplete*="url"]', applicant.get('linkedin_url', ''))
+        _gh_fill(page, 'input[name*="location"], input[name*="city"]', applicant.get('location', ''))
+
+        # Upload CV
+        if cv_path:
+            for sel in ['input[type="file"]', '#resume', 'input[name*="resume"]', 'input[name*="cv"]']:
+                try:
+                    page.set_input_files(sel, cv_path)
+                    print(f"[apply-engine] GH: uploaded CV via {sel}")
+                    break
+                except Exception:
+                    continue
+
+        # Submit
+        submitted = False
+        for sel in ['button[type="submit"]', 'input[type="submit"]',
+                    'button:has-text("Submit")', 'button:has-text("Apply")']:
+            try:
+                page.click(sel, timeout=5_000)
+                submitted = True
+                break
+            except Exception:
+                continue
+
+        if not submitted:
+            result["error"] = "Greenhouse: could not find submit button"
+            return result
+
+        page.wait_for_load_state("networkidle", timeout=10_000)
+        confirm_text = page.evaluate("document.body.innerText") or ""
+        if any(w in confirm_text.lower() for w in ["thank", "received", "submitted", "confirmation"]):
+            result.update(success=True, status="confirmed", confirmation_text=confirm_text[:500])
+        else:
+            result.update(success=True, status="submitted", confirmation_text=confirm_text[:500])
+        return result
+
+    except Exception as e:
+        result["error"] = f"Greenhouse handler error: {e}"
+        return result
+
+
+def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
+    """Handle Lever application forms with known structure."""
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        # Click "Apply for this job" link
+        for sel in ['a.postings-btn', 'a:has-text("Apply")', '.posting-btn-submit']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    page.wait_for_load_state("networkidle", timeout=8_000)
+                    break
+            except Exception:
+                continue
+
+        # Fill standard Lever fields
+        _gh_fill(page, 'input[name="name"]', f"{applicant.get('first_name', '')} {applicant.get('last_name', '')}".strip())
+        _gh_fill(page, 'input[name="email"]', applicant.get('email', ''))
+        _gh_fill(page, 'input[name="phone"]', applicant.get('phone', ''))
+        _gh_fill(page, 'input[name="org"], input[name*="company"]', applicant.get('current_company', ''))
+        _gh_fill(page, 'input[name*="linkedin"], input[name*="urls[LinkedIn]"]', applicant.get('linkedin_url', ''))
+
+        # Upload CV
+        if cv_path:
+            for sel in ['input[type="file"]', 'input[name="resume"]', 'input[name*="cv"]']:
+                try:
+                    page.set_input_files(sel, cv_path)
+                    print(f"[apply-engine] Lever: uploaded CV via {sel}")
+                    break
+                except Exception:
+                    continue
+
+        # Submit
+        submitted = False
+        for sel in ['button[type="submit"]', 'button:has-text("Submit")',
+                    'a:has-text("Submit")', '.postings-btn']:
+            try:
+                page.click(sel, timeout=5_000)
+                submitted = True
+                break
+            except Exception:
+                continue
+
+        if not submitted:
+            result["error"] = "Lever: could not find submit button"
+            return result
+
+        page.wait_for_load_state("networkidle", timeout=10_000)
+        confirm_text = page.evaluate("document.body.innerText") or ""
+        if any(w in confirm_text.lower() for w in ["thank", "received", "submitted", "application"]):
+            result.update(success=True, status="confirmed", confirmation_text=confirm_text[:500])
+        else:
+            result.update(success=True, status="submitted", confirmation_text=confirm_text[:500])
+        return result
+
+    except Exception as e:
+        result["error"] = f"Lever handler error: {e}"
+        return result
+
+
+def _gh_fill(page, selector: str, value: str):
+    """Safely fill a form field, skipping if not found or empty value."""
+    if not value:
+        return
+    try:
+        el = page.query_selector(selector)
+        if el and el.is_visible():
+            el.fill(value)
+    except Exception:
+        pass
+
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
 
 _UA = (
@@ -200,6 +345,19 @@ def submit_application(
                 browser.close()
                 return {**_base, "status": "manual_required",
                         "error": "Login or account creation required to apply"}
+
+            # 2b. ATS-specific fast path ──────────────────────────────
+            if _is_greenhouse(job_url):
+                print(f"[apply-engine] Detected Greenhouse ATS")
+                res = _apply_greenhouse(page, applicant, cv_path)
+                browser.close()
+                return res
+
+            if _is_lever(job_url):
+                print(f"[apply-engine] Detected Lever ATS")
+                res = _apply_lever(page, applicant, cv_path)
+                browser.close()
+                return res
 
             # 3. Click Apply button if no form visible yet ────────────────────
             page_html = page.content()
