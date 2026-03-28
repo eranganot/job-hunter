@@ -2970,8 +2970,8 @@ class Handler(BaseHTTPRequestHandler):
                 "uptime_info": "server running",
                 "active_users": user_count,
                 "total_jobs": job_count,
-                "last_search": {"detail": last_search[0] if last_search else None, "date": last_search[1] if last_search else None},
-                "last_apply": {"detail": last_apply[0] if last_apply else None, "date": last_apply[1] if last_apply else None},
+                "last_search": {"detail": repair_mojibake(last_search[0]) if last_search else None, "date": last_search[1] if last_search else None},
+                "last_apply": {"detail": repair_mojibake(last_apply[0]) if last_apply else None, "date": last_apply[1] if last_apply else None},
                 "scheduler": "active (checks every 60s)",
             })
             return
@@ -3053,6 +3053,9 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             items = database.get_activity(user["id"], limit=100)
+            for _it in items:
+                if "details" in _it and _it["details"]:
+                    _it["details"] = repair_mojibake(_it["details"])
             self.send_json(items)
             return
 
