@@ -2570,7 +2570,7 @@ async function loadJobs(status) {
   const list  = document.getElementById('jobs-list');
   const empty = document.getElementById('empty-state');
   list.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">LoadingÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦</div>';
-  const jobs = await api('/api/jobs?status=' + status + '&sort=' + sortBy);
+  let jobs = await api('/api/jobs?status=' + status + '&sort=' + sortBy);
   if (!jobs || jobs.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
