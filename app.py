@@ -3286,7 +3286,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not found"}, 404)
                 return
 
-            status_map = {"approve":"approved","reject":"rejected",
+            status_map = {"approve":"approved","reject":"rejected","later":"new","applied":"applied","failed":"failed","retry":"approved"}
             if action == "retry":
                 conn.execute(
                     "UPDATE jobs SET status='approved', apply_status=NULL, "
@@ -3301,7 +3301,7 @@ class Handler(BaseHTTPRequestHandler):
                     f"Retrying {job['title']} at {job['company']}")
                 self.send_json({"success": True})
                 return
-                          "later":"new","applied":"applied","failed":"failed"}
+
             new_status = status_map[action]
             reason     = data.get("reason", "") or data.get("notes", "")
 
