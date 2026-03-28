@@ -9,6 +9,7 @@ Automated job search and application tool with AI-powered CV analysis, multi-sou
 - **Smart Filtering** - Only relevant jobs matching your titles and keywords are shown; dead links are automatically filtered out
 - **Scheduled Automation** - Configure daily or weekly search/apply cycles with day-of-week and time controls; weekday-only option available
 - **Auto-Apply** - Approved jobs are submitted via headless Playwright browser with Claude-assisted form filling
+- **Failed Job Management** - Filter applied jobs by status (Failed/Submitted/Confirmed), retry auto-apply on failed jobs, or apply manually via direct link
 - **WhatsApp & Telegram Notifications** - Get notified when new jobs are found or applications are submitted
 - **Multi-User Auth** - Secure login with per-user profiles, preferences, and job history
 - **CV Analysis** - Upload your PDF resume for AI-powered skill extraction and job matching
@@ -51,6 +52,15 @@ Jobs appear in the dashboard sorted by match score. Each card shows:
 - **Verification status** - Whether the job URL is still active
 
 Actions: Approve to Apply, Later, or Pass.
+
+
+### 6. Failed Job Recovery
+
+The Applied tab includes tools for managing failed applications:
+- **Filter pills** to view All, Failed, Submitted, or Confirmed applications
+- **Retry Auto-Apply** button on each failed job to move it back to the Approved queue
+- **Apply Manually** button that links directly to the job posting for manual submission
+- Application status tracking with progress badges (Failed, Screening, Interviewing, Offer, Rejected)
 
 ### 5. Application Submission (Playwright + Claude)
 
@@ -100,12 +110,13 @@ WhatsApp (Twilio) or Telegram notifications for:
 - **Job Sources**: Greenhouse API, Lever API, TechMap CSV, Comeet API, Claude web_search
 - **Browser Automation**: Playwright (headless Chromium) for auto-apply
 - **Notifications**: Twilio (WhatsApp), Telegram Bot API
+- **Containerization**: Docker (Dockerfile with Chromium dependencies for Railway)
 - **Hosting**: Railway with auto-deploy from GitHub
 
 ## Database Schema - Key Columns
 
 **users**: id, email, password_hash, name, role, is_active
-**user_profiles**: user_id, job_titles, keywords, locations, cv_text, cv_filename, schedule_frequency, search_hour, apply_hour, search_day_of_week, apply_day_of_week, weekdays_only, notification_channel
+**user_profiles**: user_id, job_titles, keywords, locations, cv_path, cv_summary, schedule_frequency, search_hour, apply_hour, search_day_of_week, apply_day_of_week, weekdays_only, notification_channel
 **jobs**: id, user_id, title, company, location, url, description, why_relevant, source, match_score, candidate_score, status, url_verified, found_date
 **activity_log**: id, user_id, event_type, details, created_date
 
