@@ -369,9 +369,9 @@ def run_job_search(user_id: int):
                 _cv_text = ""
 
             profile_text = (
-                f"Target roles: {\", \".join(titles_[:4])}\n"
-                f"Key skills: {\", \".join(kws_[:10])}\n"
-                f"Locations: {\", \".join(locs_)} or Remote\n"
+                f"Target roles: {', '.join(titles_[:4])}\n"
+                f"Key skills: {', '.join(kws_[:10])}\n"
+                f"Locations: {', '.join(locs_)} or Remote\n"
                 f"Seniority: Senior / Director / VP / Head-of"
             )
             if _cv_text:
