@@ -675,17 +675,17 @@ def run_job_apply(user_id: int) -> int:
         # Gather user + CV data for form filling
         user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         profile = conn.execute(
-            "SELECT cv_text, cv_filename FROM user_profiles WHERE user_id=?", (user_id,)
+            "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
         ).fetchone()
         conn.close()
 
-        cv_text   = (profile["cv_text"] or "") if profile else ""
+        cv_text   = (profile["cv_summary"] or "") if profile else ""
         email     = user["email"] if user else ""
         applicant = apply_engine.extract_applicant_data(cv_text, email)
 
         cv_path = None
-        if profile and profile["cv_filename"]:
-            cv_path = os.path.join(UPLOADS_DIR, str(user_id), profile["cv_filename"])
+        if profile and profile["cv_path"]:
+            cv_path = profile["cv_path"]
 
         today = datetime.now().strftime("%Y-%m-%d")
         count = 0
