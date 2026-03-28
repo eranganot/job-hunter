@@ -2404,7 +2404,7 @@ async function loadActivity() {
     panel.innerHTML = '<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-3 opacity-30">--</div><p class="font-medium">No activity yet</p><p class="text-sm mt-1">Actions like approving jobs and running searches appear here</p></div>';
     return;
   }
-  const icons = {jobs_searched:'[Search]',job_approved:'[OK]',job_rejected:'[X]',job_applied:'[Apply]',notification_sent:'[Notif]',cv_uploaded:'[CV]',profile_updated:'[Profile]'};
+  const icons = {jobs_searched:'🔍',job_approved:'✅',job_rejected:'❌',job_applied:'🚀',notification_sent:'🔔',cv_uploaded:'📄',profile_updated:'⚙️',jobs_injected:'📋',job_stage_updated:'🔄',cv_analyzed:'🧠',bulk_approve:'✅',bulk_reject:'❌',job_status_checked:'📋'};
   panel.innerHTML = items.map(item => {
     const icon = icons[item.event_type] || '📋';
     const dt = new Date(item.created_date);
@@ -3057,6 +3057,30 @@ class Handler(BaseHTTPRequestHandler):
                 if "details" in _it and _it["details"]:
                     _it["details"] = repair_mojibake(_it["details"])
             self.send_json(items)
+            return
+
+        if path == "/api/admin/dedup" and self.command == "POST":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "forbidden"}, status=403)
+                return
+            conn = database.get_db()
+            # Find duplicate jobs: same user_id + company + title, keep the one with lowest id
+            dupes = conn.execute("""
+                SELECT j.id FROM jobs j
+                INNER JOIN (
+                    SELECT user_id, LOWER(TRIM(company)) as c, LOWER(TRIM(title)) as t, MIN(id) as min_id
+                    FROM jobs
+                    GROUP BY user_id, LOWER(TRIM(company)), LOWER(TRIM(title))
+                    HAVING COUNT(*) > 1
+                ) d ON j.user_id = d.user_id AND LOWER(TRIM(j.company)) = d.c AND LOWER(TRIM(j.title)) = d.t AND j.id != d.min_id
+            """).fetchall()
+            dupe_ids = [r[0] for r in dupes]
+            if dupe_ids:
+                conn.execute("DELETE FROM jobs WHERE id IN (%s)" % ",".join(str(i) for i in dupe_ids))
+                conn.commit()
+            conn.close()
+            self.send_json({"removed": len(dupe_ids), "ids": dupe_ids})
             return
 
         if path == "/api/admin/users":
