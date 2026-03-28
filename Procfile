@@ -1,1 +1,1 @@
-web: playwright install chromium --with-deps && python app.py
+web: python app.py
