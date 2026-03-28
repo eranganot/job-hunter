@@ -2253,7 +2253,7 @@ function showToast(msg) {
 let tab = 'new';
 let me = {};
 let sortBy = 'date';
-let applyFilter = 'all';
+var applyFilter = 'all';
 let selectMode = false;
 let selectedIds = new Set();
 let _pendingPassId = null;
