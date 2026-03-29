@@ -69,6 +69,11 @@ def init_db():
             twilio_account_sid   TEXT DEFAULT '',
             twilio_auth_token    TEXT DEFAULT '',
             whatsapp_number      TEXT DEFAULT '',
+            email_address        TEXT DEFAULT '',
+            email_smtp_host      TEXT DEFAULT 'smtp.gmail.com',
+            email_smtp_port      INTEGER DEFAULT 587,
+            email_smtp_user      TEXT DEFAULT '',
+            email_smtp_pass      TEXT DEFAULT '',
             schedule_frequency   TEXT DEFAULT 'weekly',
             search_hour          INTEGER DEFAULT 11,
             search_day_of_week   INTEGER DEFAULT 1,
@@ -110,6 +115,11 @@ def init_db():
         "ALTER TABLE jobs ADD COLUMN apply_confirmation TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_attempts INTEGER DEFAULT 0",
         "ALTER TABLE jobs ADD COLUMN apply_error TEXT DEFAULT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN email_address TEXT DEFAULT ''",
+        "ALTER TABLE user_profiles ADD COLUMN email_smtp_host TEXT DEFAULT 'smtp.gmail.com'",
+        "ALTER TABLE user_profiles ADD COLUMN email_smtp_port INTEGER DEFAULT 587",
+        "ALTER TABLE user_profiles ADD COLUMN email_smtp_user TEXT DEFAULT ''",
+        "ALTER TABLE user_profiles ADD COLUMN email_smtp_pass TEXT DEFAULT ''",
     ]:
         try:
             conn.execute(_migration)

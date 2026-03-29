@@ -134,6 +134,22 @@ def send_whatsapp(account_sid: str, auth_token: str, to_number: str, message: st
         print(f'[whatsapp] Error: {e}' + ((' | Twilio: ' + e.read().decode('utf-8','ignore')) if hasattr(e, 'read') else ''))
 
 
+def send_email(to_addr: str, subject: str, body: str, smtp_host: str = "smtp.gmail.com",
+               smtp_port: int = 587, smtp_user: str = "", smtp_pass: str = ""):
+    """Send an email notification via SMTP."""
+    import smtplib
+    from email.mime.text import MIMEText
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = smtp_user or "jobhunter@noreply.com"
+    msg["To"] = to_addr
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as srv:
+        srv.starttls()
+        if smtp_user and smtp_pass:
+            srv.login(smtp_user, smtp_pass)
+        srv.sendmail(msg["From"], [to_addr], msg.as_string())
+
+
 def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
     """Look up user notification settings and deliver accordingly."""
     message = repair_mojibake(message)
@@ -152,6 +168,16 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
     elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
         send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
                       p["whatsapp_number"], msg_with_link)
+    elif channel == "email" and p["email_address"]:
+        send_email(
+            to_addr=p["email_address"],
+            subject="Job Hunter Notification",
+            body=msg_with_link,
+            smtp_host=p["email_smtp_host"] or "smtp.gmail.com",
+            smtp_port=int(p["email_smtp_port"] or 587),
+            smtp_user=p["email_smtp_user"] or "",
+            smtp_pass=p["email_smtp_pass"] or "",
+        )
 
 
 def check_notifications():
@@ -1655,6 +1681,12 @@ SETTINGS_HTML = """<!DOCTYPE html>
         <span class="ml-auto text-xl">💬</span>
       </label>
       <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
+                    hover:border-orange-400 transition-colors has-[:checked]:border-orange-500 has-[:checked]:bg-orange-50">
+        <input type="radio" name="s-notif" value="email" onchange="showNotifSection('email')" class="accent-orange-600 w-4 h-4"/>
+        <span class="font-semibold">Email</span>
+        <span class="ml-auto text-xl">✉️</span>
+      </label>
+      <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-slate-400 transition-colors has-[:checked]:border-slate-400">
         <input type="radio" name="s-notif" value="none" onchange="showNotifSection('none')" class="accent-slate-600 w-4 h-4"/>
         <span class="font-semibold">Off</span>
@@ -1672,6 +1704,18 @@ SETTINGS_HTML = """<!DOCTYPE html>
       <div><label class="label">Twilio Auth Token</label><input class="input" type="text" id="sn-wa-token" placeholder="auth token"/></div>
       <div><label class="label">Your WhatsApp number</label><input class="input" type="tel" id="sn-wa-number" placeholder="+972..."/></div>
       <button onclick="testNotification('whatsapp')" class="btn btn-secondary text-sm">🧪 Test</button>
+    </div>
+
+    <div id="sn-email" class="hidden space-y-4 border-t pt-5">
+      <div><label class="label">Email address</label><input class="input" type="email" id="sn-email-addr" placeholder="you@example.com"/></div>
+      <div><label class="label">SMTP host</label><input class="input" type="text" id="sn-email-host" placeholder="smtp.gmail.com" value="smtp.gmail.com"/></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">SMTP port</label><input class="input" type="number" id="sn-email-port" placeholder="587" value="587"/></div>
+        <div><label class="label">SMTP user</label><input class="input" type="text" id="sn-email-user" placeholder="you@gmail.com"/></div>
+      </div>
+      <div><label class="label">SMTP password / app password</label><input class="input" type="password" id="sn-email-pass" placeholder="App password"/></div>
+      <p class="text-xs text-slate-400">For Gmail use an <a href="https://myaccount.google.com/apppasswords" target="_blank" class="text-blue-500 underline">App Password</a></p>
+      <button onclick="testNotification('email')" class="btn btn-secondary text-sm">🧪 Test</button>
     </div>
 
     <div id="test-notif-result" class="hidden text-sm p-3 rounded-lg mt-3"></div>
@@ -1812,6 +1856,11 @@ async function loadUser() {
   if (userData.twilio_account_sid) document.getElementById('sn-wa-sid').value    = userData.twilio_account_sid;
   if (userData.twilio_auth_token)  document.getElementById('sn-wa-token').value  = userData.twilio_auth_token;
   if (userData.whatsapp_number)    document.getElementById('sn-wa-number').value = userData.whatsapp_number;
+  if (userData.email_address)   document.getElementById('sn-email-addr').value = userData.email_address;
+  if (userData.email_smtp_host) document.getElementById('sn-email-host').value = userData.email_smtp_host;
+  if (userData.email_smtp_port) document.getElementById('sn-email-port').value = userData.email_smtp_port;
+  if (userData.email_smtp_user) document.getElementById('sn-email-user').value = userData.email_smtp_user;
+  if (userData.email_smtp_pass) document.getElementById('sn-email-pass').value = userData.email_smtp_pass;
 
   // CV
   if (userData.cv_path) {
@@ -1876,6 +1925,8 @@ function setTab(name) {
 function showNotifSection(ch) {
   document.getElementById('sn-telegram').classList.toggle('hidden', ch !== 'telegram');
   document.getElementById('sn-whatsapp').classList.toggle('hidden', ch !== 'whatsapp');
+  const emailEl = document.getElementById('sn-email');
+  if (emailEl) emailEl.classList.toggle('hidden', ch !== 'email');
 }
 
 // Tags (same as onboarding)
@@ -1940,6 +1991,12 @@ async function saveNotifications() {
     body.twilio_account_sid = document.getElementById('sn-wa-sid').value;
     body.twilio_auth_token  = document.getElementById('sn-wa-token').value;
     body.whatsapp_number    = document.getElementById('sn-wa-number').value;
+  } else if (ch === 'email') {
+    body.email_address   = document.getElementById('sn-email-addr').value;
+    body.email_smtp_host = document.getElementById('sn-email-host').value;
+    body.email_smtp_port = document.getElementById('sn-email-port').value;
+    body.email_smtp_user = document.getElementById('sn-email-user').value;
+    body.email_smtp_pass = document.getElementById('sn-email-pass').value;
   }
   await fetch('/api/save-notifications', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   showToast();
@@ -1950,10 +2007,16 @@ async function testNotification(channel) {
   if (channel === 'telegram') {
     body.telegram_token = document.getElementById('sn-tg-token').value;
     body.telegram_chat_id = document.getElementById('sn-tg-chat-id').value;
-  } else {
+  } else if (channel === 'whatsapp') {
     body.twilio_account_sid = document.getElementById('sn-wa-sid').value;
     body.twilio_auth_token  = document.getElementById('sn-wa-token').value;
     body.whatsapp_number    = document.getElementById('sn-wa-number').value;
+  } else if (channel === 'email') {
+    body.email_address   = document.getElementById('sn-email-addr').value;
+    body.email_smtp_host = document.getElementById('sn-email-host').value;
+    body.email_smtp_port = document.getElementById('sn-email-port').value;
+    body.email_smtp_user = document.getElementById('sn-email-user').value;
+    body.email_smtp_pass = document.getElementById('sn-email-pass').value;
   }
   const r = await fetch('/api/test-notification', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();
@@ -2416,11 +2479,16 @@ async function loadActivity() {
       dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     const labels = {'jobs_searched':'Job Search','job_approved':'Job Approved','job_rejected':'Job Rejected','job_applied':'Applied','cv_uploaded':'CV Uploaded','cv_analyzed':'CV Analyzed','job_status_checked':'Status Check','bulk_approve':'Bulk Approve','bulk_reject':'Bulk Reject','jobs_injected':'Jobs Imported','job_stage_updated':'Stage Updated'};
     const label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());
-    return `<div class="bg-white rounded-xl border border-slate-100 px-4 py-3 flex items-center gap-3 fade">
+    const isSuccess = ['job_approved','job_applied','bulk_approve','cv_uploaded','cv_analyzed'].includes(item.event_type) || (item.details && /submitted|success/i.test(item.details));
+    const isFail = ['job_rejected','bulk_reject'].includes(item.event_type) || (item.details && /failed|error|rejected/i.test(item.details));
+    const rowBg = isSuccess ? 'bg-emerald-50 border-emerald-200' : isFail ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100';
+    const detailColor = isSuccess ? 'text-emerald-600' : isFail ? 'text-red-500' : 'text-slate-500';
+    const labelColor = isSuccess ? 'text-emerald-800' : isFail ? 'text-red-700' : 'text-slate-800';
+    return `<div class="${rowBg} rounded-xl border px-4 py-3 flex items-center gap-3 fade">
       <span class="text-xl w-8 text-center shrink-0">${icon}</span>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-semibold text-slate-800">${label}</p>
-        ${item.details ? `<p class="text-xs text-slate-500 mt-0.5 truncate">${item.details}</p>` : ''}
+        <p class="text-sm font-semibold ${labelColor}">${label}</p>
+        ${item.details ? `<p class="text-xs ${detailColor} mt-0.5 truncate">${item.details}</p>` : ''}
       </div>
       <span class="text-xs text-slate-400 shrink-0">${dateStr}</span>
     </div>`;
@@ -2514,11 +2582,20 @@ function candidateBadge(score) {
 }
 
 function statusCheckBadge(job) {
-  if (!job.status || job.status === 'new') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-sky-50 text-sky-600 border border-sky-200">New</span>';
-  if (job.status === 'approved') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200">Approved</span>';
-  if (job.status === 'applied') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-200">Applied</span>';
-  if (job.status === 'rejected') return '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 border border-red-200">Passed</span>';
-  return '';
+  const st = job.status || 'new';
+  const map = {
+    'new':      {bg:'bg-sky-50 text-sky-600 border-sky-200', label:'New', next:'approve'},
+    'approved': {bg:'bg-emerald-50 text-emerald-600 border-emerald-200', label:'Approved', next:'reject'},
+    'applied':  {bg:'bg-purple-50 text-purple-600 border-purple-200', label:'Applied', next:null},
+    'rejected': {bg:'bg-red-50 text-red-500 border-red-200', label:'Passed', next:'approve'}
+  };
+  const info = map[st] || map['new'];
+  const click = info.next ? ` onclick="cycleStatus(${job.id},'${info.next}')" style="cursor:pointer" title="Click to change status"` : ' title="Status: Applied"';
+  return `<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full border ${info.bg} select-none transition-all hover:shadow-sm"${click}>${info.label}</span>`;
+}
+async function cycleStatus(id, action) {
+  await api('/api/jobs/'+id+'/'+action, 'POST', {});
+  loadAll();
 }
 
 async function checkStatus(id) {
@@ -3292,7 +3369,9 @@ class Handler(BaseHTTPRequestHandler):
             data = self.read_json()
             kwargs = {}
             for field in ("notification_channel", "telegram_token", "telegram_chat_id",
-                          "twilio_account_sid", "twilio_auth_token", "whatsapp_number"):
+                          "twilio_account_sid", "twilio_auth_token", "whatsapp_number",
+                          "email_address", "email_smtp_host", "email_smtp_port",
+                          "email_smtp_user", "email_smtp_pass"):
                 if field in data:
                     kwargs[field] = data[field]
             if kwargs:
@@ -3312,6 +3391,16 @@ class Handler(BaseHTTPRequestHandler):
                 elif channel == "whatsapp":
                     send_whatsapp(data.get("twilio_account_sid",""), data.get("twilio_auth_token",""),
                                   data.get("whatsapp_number",""), msg)
+                elif channel == "email":
+                    send_email(
+                        to_addr=data.get("email_address",""),
+                        subject="Job Hunter Test",
+                        body=msg,
+                        smtp_host=data.get("email_smtp_host","smtp.gmail.com"),
+                        smtp_port=int(data.get("email_smtp_port", 587)),
+                        smtp_user=data.get("email_smtp_user",""),
+                        smtp_pass=data.get("email_smtp_pass",""),
+                    )
                 self.send_json({"success": True})
             except Exception as e:
                 self.send_json({"success": False, "error": str(e)})
