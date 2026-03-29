@@ -160,24 +160,28 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
     conn.close()
     if not p:
         return
-    channel = p["notification_channel"]
+    channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",")]
     dashboard_url = f"{MOBILE_URL}{url_suffix}"
     msg_with_link = message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
-    if channel == "telegram" and p["telegram_token"] and p["telegram_chat_id"]:
-        send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
-    elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
-        send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
-                      p["whatsapp_number"], msg_with_link)
-    elif channel == "email" and p["email_address"]:
-        send_email(
-            to_addr=p["email_address"],
-            subject="Job Hunter Notification",
-            body=msg_with_link,
-            smtp_host=p["email_smtp_host"] or "smtp.gmail.com",
-            smtp_port=int(p["email_smtp_port"] or 587),
-            smtp_user=p["email_smtp_user"] or "",
-            smtp_pass=p["email_smtp_pass"] or "",
-        )
+    for channel in channels:
+        try:
+            if channel == "telegram" and p["telegram_token"] and p["telegram_chat_id"]:
+                send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
+            elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
+                send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
+                              p["whatsapp_number"], msg_with_link)
+            elif channel == "email" and p["email_address"]:
+                send_email(
+                    to_addr=p["email_address"],
+                    subject="Job Hunter Notification",
+                    body=msg_with_link,
+                    smtp_host=p["email_smtp_host"] or "smtp.gmail.com",
+                    smtp_port=int(p["email_smtp_port"] or 587),
+                    smtp_user=p["email_smtp_user"] or "",
+                    smtp_pass=p["email_smtp_pass"] or "",
+                )
+        except Exception as _notif_err:
+            print(f"[notify] Error on {channel}: {_notif_err}")
 
 
 def check_notifications():
@@ -331,19 +335,27 @@ def run_job_search(user_id: int):
             _LV_COMPANIES = {
                 'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
             }
-            # Build title match terms from user preferences
-            _terms = set()
+            # Build title match phrases from user preferences
+            _phrases = [t.lower().strip() for t in titles_ if t.strip()]
+            # Also build 2-word combos from each title for partial matching
+            _bigrams = set()
             for _t in titles_:
-                for _w in _t.lower().split():
-                    if len(_w) > 2: _terms.add(_w)
-            # Always include core PM terms
-            _terms.update(["product", "director", "head", "lead", "chief", "vp", "group", "senior"])
-            _terms = list(_terms)
-            print(f"[search] Matching against terms: {_terms}")
+                words = [w for w in _t.lower().split() if len(w) > 2]
+                for i in range(len(words)):
+                    for j in range(i+1, len(words)):
+                        _bigrams.add((words[i], words[j]))
+            print(f"[search] Matching phrases: {_phrases}, bigrams: {len(_bigrams)}")
 
             def _title_match(title):
                 tl = title.lower()
-                return any(t in tl for t in _terms)
+                # Full phrase match (e.g. "product manager" in title)
+                if any(phrase in tl for phrase in _phrases):
+                    return True
+                # Bigram match: at least 2 words from same user title appear
+                for w1, w2 in _bigrams:
+                    if w1 in tl and w2 in tl:
+                        return True
+                return False
 
             def _get_json(url, timeout=20):
                 try:
@@ -1670,27 +1682,23 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <div class="space-y-3 mb-5">
       <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-blue-400 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
-        <input type="radio" name="s-notif" value="telegram" onchange="showNotifSection('telegram')" class="accent-blue-600 w-4 h-4"/>
+        <input type="checkbox" name="s-notif" value="telegram" onchange="toggleNotifSection(this)" class="accent-blue-600 w-4 h-4"/>
         <span class="font-semibold">Telegram</span>
         <span class="ml-auto text-xl">✈️</span>
       </label>
       <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-green-400 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
-        <input type="radio" name="s-notif" value="whatsapp" onchange="showNotifSection('whatsapp')" class="accent-green-600 w-4 h-4"/>
+        <input type="checkbox" name="s-notif" value="whatsapp" onchange="toggleNotifSection(this)" class="accent-green-600 w-4 h-4"/>
         <span class="font-semibold">WhatsApp</span>
         <span class="ml-auto text-xl">💬</span>
       </label>
       <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-orange-400 transition-colors has-[:checked]:border-orange-500 has-[:checked]:bg-orange-50">
-        <input type="radio" name="s-notif" value="email" onchange="showNotifSection('email')" class="accent-orange-600 w-4 h-4"/>
+        <input type="checkbox" name="s-notif" value="email" onchange="toggleNotifSection(this)" class="accent-orange-600 w-4 h-4"/>
         <span class="font-semibold">Email</span>
         <span class="ml-auto text-xl">✉️</span>
       </label>
-      <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
-                    hover:border-slate-400 transition-colors has-[:checked]:border-slate-400">
-        <input type="radio" name="s-notif" value="none" onchange="showNotifSection('none')" class="accent-slate-600 w-4 h-4"/>
-        <span class="font-semibold">Off</span>
-      </label>
+
     </div>
 
     <div id="sn-telegram" class="hidden space-y-4 border-t pt-5">
@@ -1848,9 +1856,16 @@ async function loadUser() {
   if (userData.salary_max) document.getElementById('s-salary-max').value = userData.salary_max;
 
   // Notifications
-  const ch = userData.notification_channel || 'none';
-  const radio = document.querySelector('input[name="s-notif"][value="'+ch+'"]');
-  if (radio) { radio.checked = true; showNotifSection(ch); }
+  const channels = (userData.notification_channel || 'none').split(',');
+  channels.forEach(ch => {
+    const cb = document.querySelector('input[name="s-notif"][value="'+ch.trim()+'"]');
+    if (cb) cb.checked = true;
+  });
+  channels.forEach(ch => {
+    const sec = document.getElementById('sn-'+ch.trim());
+    if (sec) sec.classList.remove('hidden');
+  });
+  updateNotifStyles();
   if (userData.telegram_token)    document.getElementById('sn-tg-token').value   = userData.telegram_token;
   if (userData.telegram_chat_id)  document.getElementById('sn-tg-chat-id').value = userData.telegram_chat_id;
   if (userData.twilio_account_sid) document.getElementById('sn-wa-sid').value    = userData.twilio_account_sid;
@@ -1922,11 +1937,31 @@ function setTab(name) {
   document.getElementById('panel-' + name).classList.add('active');
 }
 
-function showNotifSection(ch) {
-  document.getElementById('sn-telegram').classList.toggle('hidden', ch !== 'telegram');
-  document.getElementById('sn-whatsapp').classList.toggle('hidden', ch !== 'whatsapp');
+function toggleNotifSection(cb) {
+  document.getElementById('sn-telegram').classList.toggle('hidden', !document.querySelector('input[name="s-notif"][value="telegram"]').checked);
+  document.getElementById('sn-whatsapp').classList.toggle('hidden', !document.querySelector('input[name="s-notif"][value="whatsapp"]').checked);
   const emailEl = document.getElementById('sn-email');
-  if (emailEl) emailEl.classList.toggle('hidden', ch !== 'email');
+  if (emailEl) emailEl.classList.toggle('hidden', !document.querySelector('input[name="s-notif"][value="email"]').checked);
+  updateNotifStyles();
+}
+function showNotifSection(ch) {
+  // Legacy compat for onboarding
+  document.querySelectorAll('input[name="s-notif"]').forEach(cb => { cb.checked = cb.value === ch; });
+  toggleNotifSection(null);
+}
+function updateNotifStyles() {
+  document.querySelectorAll('input[name="s-notif"]').forEach(cb => {
+    const label = cb.closest('label');
+    if (!label) return;
+    const colors = {telegram:'border-blue-500 bg-blue-50',whatsapp:'border-green-500 bg-green-50',email:'border-orange-500 bg-orange-50'};
+    if (cb.checked) {
+      label.style.borderColor = cb.value==='telegram'?'#3b82f6':cb.value==='whatsapp'?'#22c55e':'#f97316';
+      label.style.backgroundColor = cb.value==='telegram'?'#eff6ff':cb.value==='whatsapp'?'#f0fdf4':'#fff7ed';
+    } else {
+      label.style.borderColor = '#e2e8f0';
+      label.style.backgroundColor = '';
+    }
+  });
 }
 
 // Tags (same as onboarding)
@@ -1982,16 +2017,19 @@ async function savePreferences() {
 }
 
 async function saveNotifications() {
-  const ch = document.querySelector('input[name="s-notif"]:checked')?.value || 'none';
+  const checked = Array.from(document.querySelectorAll('input[name="s-notif"]:checked')).map(cb => cb.value);
+  const ch = checked.length > 0 ? checked.join(',') : 'none';
   const body = {notification_channel: ch};
-  if (ch === 'telegram') {
+  if (checked.includes('telegram')) {
     body.telegram_token = document.getElementById('sn-tg-token').value;
     body.telegram_chat_id = document.getElementById('sn-tg-chat-id').value;
-  } else if (ch === 'whatsapp') {
+  }
+  if (checked.includes('whatsapp')) {
     body.twilio_account_sid = document.getElementById('sn-wa-sid').value;
     body.twilio_auth_token  = document.getElementById('sn-wa-token').value;
     body.whatsapp_number    = document.getElementById('sn-wa-number').value;
-  } else if (ch === 'email') {
+  }
+  if (checked.includes('email')) {
     body.email_address   = document.getElementById('sn-email-addr').value;
     body.email_smtp_host = document.getElementById('sn-email-host').value;
     body.email_smtp_port = document.getElementById('sn-email-port').value;
@@ -2103,6 +2141,37 @@ async function changePassword() {
 }
 
 loadUser();
+
+// Fix: replace Tailwind has-[:checked] (not in compiled CSS) with JS-driven styles
+function initRadioStyles() {
+  document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach(inp => {
+    const label = inp.closest('label');
+    if (!label || !label.classList.contains('rounded-xl')) return;
+    function upd() {
+      const isOn = inp.checked;
+      // Find the color from the has-[:checked] class hints
+      const cls = label.className;
+      let onBorder = '#3b82f6', onBg = '#eff6ff';
+      if (cls.includes('green')) { onBorder = '#22c55e'; onBg = '#f0fdf4'; }
+      else if (cls.includes('orange')) { onBorder = '#f97316'; onBg = '#fff7ed'; }
+      else if (cls.includes('slate')) { onBorder = '#94a3b8'; onBg = '#f8fafc'; }
+      label.style.borderColor = isOn ? onBorder : '#e2e8f0';
+      label.style.backgroundColor = isOn ? onBg : '';
+    }
+    inp.addEventListener('change', () => {
+      // For radios, reset siblings first
+      if (inp.type === 'radio' && inp.name) {
+        document.querySelectorAll('input[name="'+inp.name+'"]').forEach(sib => {
+          const sl = sib.closest('label');
+          if (sl) { sl.style.borderColor = '#e2e8f0'; sl.style.backgroundColor = ''; }
+        });
+      }
+      upd();
+    });
+    upd(); // Initial state
+  });
+}
+setTimeout(initRadioStyles, 500);
 </script>
 </body>
 </html>"""
@@ -2479,8 +2548,10 @@ async function loadActivity() {
       dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     const labels = {'jobs_searched':'Job Search','job_approved':'Job Approved','job_rejected':'Job Rejected','job_applied':'Applied','cv_uploaded':'CV Uploaded','cv_analyzed':'CV Analyzed','job_status_checked':'Status Check','bulk_approve':'Bulk Approve','bulk_reject':'Bulk Reject','jobs_injected':'Jobs Imported','job_stage_updated':'Stage Updated'};
     const label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());
-    const isSuccess = ['job_approved','job_applied','bulk_approve','cv_uploaded','cv_analyzed'].includes(item.event_type) || (item.details && /submitted|success/i.test(item.details));
-    const isFail = ['job_rejected','bulk_reject'].includes(item.event_type) || (item.details && /failed|error|rejected/i.test(item.details));
+    const detailsFailed = item.details && /failed|error/i.test(item.details);
+    const detailsSuccess = item.details && /submitted|success/i.test(item.details);
+    const isFail = detailsFailed || (!detailsSuccess && ['job_rejected','bulk_reject'].includes(item.event_type));
+    const isSuccess = !isFail && (detailsSuccess || ['job_approved','job_applied','bulk_approve','cv_uploaded','cv_analyzed'].includes(item.event_type));
     const rowBg = isSuccess ? 'bg-emerald-50 border-emerald-200' : isFail ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100';
     const detailColor = isSuccess ? 'text-emerald-600' : isFail ? 'text-red-500' : 'text-slate-500';
     const labelColor = isSuccess ? 'text-emerald-800' : isFail ? 'text-red-700' : 'text-slate-800';
@@ -2630,8 +2701,9 @@ function renderJob(job) {
   const checkbox = isSelectable
     ? `<input type="checkbox" id="cb-${job.id}" ${isSelected?'checked':''} onclick="event.stopPropagation();toggleJobSelect(${job.id})" class="w-5 h-5 rounded accent-blue-600 cursor-pointer shrink-0 mt-0.5"/>`
     : '';
+  const isDead = job.url_verified === 0;
   return `
-  <div class="card bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-5 fade ${isSelected?'ring-2 ring-blue-400':''}" id="job-${job.id}"
+  <div class="card bg-white rounded-2xl shadow-sm border ${isDead?'border-red-200 opacity-60':'border-slate-100'} p-4 sm:p-5 fade ${isSelected?'ring-2 ring-blue-400':''}" id="job-${job.id}"
        ${isSelectable ? `onclick="toggleJobSelect(${job.id})" style="cursor:pointer"` : ''}>
     <div class="flex items-start justify-between gap-2">
       ${checkbox ? `<div class="pt-0.5">${checkbox}</div>` : ''}
@@ -2662,6 +2734,7 @@ async function loadJobs(status) {
   const empty = document.getElementById('empty-state');
   list.innerHTML = '<div class="text-center py-10 text-slate-300 text-sm animate-pulse">Loading…</div>';
   let jobs = await api('/api/jobs?status=' + status + '&sort=' + sortBy);
+  if (status === 'new') jobs = (jobs||[]).filter(j => j.url_verified !== 0);
   if (!jobs || jobs.length === 0) {
     list.innerHTML = '';
     empty.classList.remove('hidden');
@@ -2716,9 +2789,17 @@ function retryApply(id) {
 async function act(id, action) {
   if (action === 'reject') { openPassModal(id); return; }
   const card = document.getElementById('job-'+id);
-  if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
-  await api('/api/jobs/'+id+'/'+action, 'POST', {});
-  loadAll();
+  if (card) {
+    card.style.transition = 'all 0.3s ease';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(100px)';
+    card.style.maxHeight = card.offsetHeight + 'px';
+    setTimeout(() => { card.style.maxHeight = '0'; card.style.padding = '0'; card.style.margin = '0'; card.style.overflow = 'hidden'; }, 300);
+    setTimeout(() => card.remove(), 500);
+  }
+  api('/api/jobs/'+id+'/'+action, 'POST', {}).then(() => {
+    setTimeout(loadAll, 800);
+  });
 }
 
 function setTab(t) {
@@ -3453,7 +3534,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not found"}, 404)
                 return
 
-            status_map = {"approve":"approved","reject":"rejected","later":"new","applied":"applied","failed":"failed","retry":"approved"}
+            status_map = {"approve":"approved","reject":"rejected","later":"later","applied":"applied","failed":"failed","retry":"approved"}
             if action == "retry":
                 conn.execute(
                     "UPDATE jobs SET status='approved', apply_status=NULL, "
@@ -3473,7 +3554,7 @@ class Handler(BaseHTTPRequestHandler):
             reason     = data.get("reason", "") or data.get("notes", "")
 
             if action == "later":
-                conn.execute("UPDATE jobs SET found_date=?, notes=? WHERE id=?",
+                conn.execute("UPDATE jobs SET status='later', found_date=?, notes=? WHERE id=?",
                              (datetime.now().isoformat(), reason, job_id))
             elif action in ("applied", "failed"):
                 conn.execute("UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
