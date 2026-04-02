@@ -2647,7 +2647,7 @@ function actionBar(job) {
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       ${failInfo}
       <div class="space-y-2">
-        <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
+        <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
         <button onclick="act(${job.id},'reject')" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
       </div>
       <p class="text-xs text-slate-400 text-center">⏰ Auto-apply scheduled at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</p>
@@ -2703,7 +2703,7 @@ function statusCheckBadge(job) {
   const map = {
     'new':      {bg:'bg-sky-50 text-sky-600 border-sky-200', label:'New', next:'approve'},
     'approved': {bg:'bg-emerald-50 text-emerald-600 border-emerald-200', label:'Approved', next:'reject'},
-    'applied':  {bg:'bg-purple-50 text-purple-600 border-purple-200', label:'Applied', next:null},
+    'applied':  {bg:'bg-purple-50 text-purple-700 border-purple-200', label:'Applied', next:null},
     'rejected': {bg:'bg-red-50 text-red-500 border-red-200', label:'Passed', next:'approve'}
   };
   const info = map[st] || map['new'];
@@ -2724,7 +2724,7 @@ function markApplied(id) {
       <h3 class="text-lg font-bold text-slate-900 mb-2">Did you apply?</h3>
       <p class="text-sm text-slate-500 mb-4">Did you complete the application for this job?</p>
       <div class="space-y-2">
-        <button onclick="confirmApply(${id}, true)" class="w-full bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold py-2.5 rounded-xl transition-all">Yes, I applied</button>
+        <button onclick="confirmApply(${id}, true)" class="w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold py-2.5 rounded-xl transition-all">Yes, I applied</button>
         <button onclick="confirmApply(${id}, false)" class="w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium py-2.5 rounded-xl transition-all">No, couldn't apply — Remove</button>
         <button onclick="closeApplyModal()" class="w-full text-slate-400 text-sm py-2 hover:text-slate-600 transition-all">Cancel</button>
       </div>
