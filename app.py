@@ -510,7 +510,7 @@ def run_job_search(user_id: int):
                     f"Job listings (JSON):\n{jobs_json}\n\n"
                     "Return ONLY a JSON array with fields: job_title, company, location, url, "
                     "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
-                    "Only include jobs with candidate_score >= 40. Return ONLY valid JSON, no markdown."
+                    "Only include jobs with candidate_score >= 55. Be strict: only include jobs that closely match the candidate\'s target role titles and experience level. Return ONLY valid JSON, no markdown."
                 )
                 try:
                     body = _js2.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 4096,
@@ -540,15 +540,8 @@ def run_job_search(user_id: int):
                                 scored_jobs.append(j)
                     print(f"[search] Batch {batch_i//25+1}: scored {len(batch)} -> {len([j for j in scored_jobs if j not in scored_jobs[:batch_i]])} passed")
                 except Exception as e:
-                    print(f"[search] Scoring error: {e}")
-                    # Fallback: include jobs with default score if scoring fails
-                    for j in batch:
-                        j["candidate_score"] = 65
-                        j["match_score"] = 65
-                        j["fit_reason"] = "Title match (scoring unavailable)"
-                        j["found_date"] = today
-                        j["source"] = "greenhouse/lever"
-                        scored_jobs.append(j)
+                    print(f"[search] Scoring error: {e} — skipping batch of {len(batch)} jobs")
+                    # Skip unscored jobs rather than including them with fake high scores
 
 
             # -- Supplemental: Claude web_search for LinkedIn/Glassdoor/Wellfound --
@@ -632,9 +625,24 @@ def run_job_search(user_id: int):
                 except: _url_ok[_u] = 0
         _chk_date = datetime.now().isoformat()
 
-        # ── Insert new jobs ──────────────────────────────────────────────
-        conn = database.get_db(); inserted = 0; new_jobs_info = []
+        # ── Load rejected patterns to filter out ────────────────────────
+        conn = database.get_db()
+        _rej_patterns = conn.execute(
+            "SELECT LOWER(TRIM(company)) as c, LOWER(TRIM(title)) as t FROM rejected_patterns WHERE user_id=?",
+            (user_id,)
+        ).fetchall()
+        _rej_set = {(r["c"], r["t"]) for r in _rej_patterns}
+        _rej_companies = {r["c"] for r in _rej_patterns if r["c"]}
+        conn.close()
+
+        # ── Insert new jobs (skip rejected patterns) ─────────────────────
+        conn = database.get_db(); inserted = 0; new_jobs_info = []; skipped_rej = 0
         for j in all_jobs_data:
+            _jc = j.get("company","").strip().lower()
+            _jt = j.get("job_title","").strip().lower()
+            if (_jc, _jt) in _rej_set:
+                skipped_rej += 1
+                continue
             if j.get("match_score", 0) <= 0:
                 continue
             try:
@@ -686,7 +694,7 @@ def run_job_search(user_id: int):
                 else:  hist_dead  += 1
             conn.commit(); conn.close()
 
-        database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es)")
+        database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")
 
         # ── Consolidated search notification ─────────────────────────────
         notif_lines = [f"🔍 Search Complete — {today}"]
@@ -761,14 +769,24 @@ def run_job_apply(user_id: int) -> int:
                 notes = "Applied via Job Hunter (no URL)"
 
             c2 = database.get_db()
-            c2.execute(
-                "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                "apply_status=?, apply_confirmation=?, apply_error=?, "
-                "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                "WHERE id=? AND user_id=?",
-                (today, notes, apply_status, apply_confirmation,
-                 apply_error, j["id"], user_id)
-            )
+            if apply_status in ("submitted", "confirmed"):
+                c2.execute(
+                    "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                    "apply_status=?, apply_confirmation=?, apply_error=?, "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "WHERE id=? AND user_id=?",
+                    (today, notes, apply_status, apply_confirmation,
+                     apply_error, j["id"], user_id)
+                )
+            else:
+                # Failed — keep status='approved' so user can retry
+                c2.execute(
+                    "UPDATE jobs SET notes=?, "
+                    "apply_status=?, apply_error=?, "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "WHERE id=? AND user_id=?",
+                    (notes, apply_status, apply_error, j["id"], user_id)
+                )
             c2.commit()
             c2.close()
 
@@ -2597,16 +2615,20 @@ function actionBar(job) {
   if (job.status === 'new') return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
+      <button onclick="act(${job.id},'reject')" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
+    </div>`;
+  if (job.status === 'approved') {
+    const failInfo = job.apply_status === 'failed' ? `<div class="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-2">⚠️ Auto-apply failed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}. Apply manually or remove.</div>` : '';
+    return `
+    <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
+      ${failInfo}
       <div class="flex gap-2">
-        <button onclick="act(${job.id},'later')"  class="btn-touch flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-medium rounded-xl px-4">⏸ Later</button>
-        <button onclick="act(${job.id},'reject')" class="btn-touch flex-1 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
+        <button onclick="markApplied(${job.id})" class="btn-touch flex-1 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-xl px-4">✅ Mark as Applied</button>
+        <button onclick="act(${job.id},'reject')" class="btn-touch flex-1 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Remove</button>
       </div>
+      <p class="text-xs text-slate-400 text-center">⏰ Auto-apply scheduled at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</p>
     </div>`;
-  if (job.status === 'approved') return `
-    <div class="flex items-center gap-3 mt-4 pt-4 border-t border-slate-100">
-      <div class="flex-1 text-sm text-green-700 bg-green-50 rounded-xl px-4 py-2.5 font-medium">📋 Queued — marks as applied at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</div>
-      <button onclick="act(${job.id},'reject')" class="btn-touch text-xs text-slate-400 hover:text-red-500 px-2">Undo</button>
-    </div>`;
+  }
   if (job.status === 'applied') {
     return `
     <div class="mt-4 pt-4 border-t border-slate-100">
@@ -2667,6 +2689,17 @@ function statusCheckBadge(job) {
 async function cycleStatus(id, action) {
   await api('/api/jobs/'+id+'/'+action, 'POST', {});
   loadAll();
+}
+async function markApplied(id) {
+  const card = document.getElementById('job-'+id);
+  if (card) {
+    card.style.transition = 'all 0.3s ease';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(100px)';
+    setTimeout(() => card.remove(), 400);
+  }
+  await api('/api/jobs/'+id+'/applied', 'POST', {notes:'Manually applied by user'});
+  setTimeout(loadAll, 600);
 }
 
 async function checkStatus(id) {
@@ -3534,7 +3567,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not found"}, 404)
                 return
 
-            status_map = {"approve":"approved","reject":"rejected","later":"later","applied":"applied","failed":"failed","retry":"approved"}
+            status_map = {"approve":"approved","reject":"rejected","applied":"applied","failed":"failed","retry":"approved"}
             if action == "retry":
                 conn.execute(
                     "UPDATE jobs SET status='approved', apply_status=NULL, "
@@ -3553,12 +3586,10 @@ class Handler(BaseHTTPRequestHandler):
             new_status = status_map[action]
             reason     = data.get("reason", "") or data.get("notes", "")
 
-            if action == "later":
-                conn.execute("UPDATE jobs SET status='later', found_date=?, notes=? WHERE id=?",
-                             (datetime.now().isoformat(), reason, job_id))
-            elif action in ("applied", "failed"):
-                conn.execute("UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
-                             (new_status, datetime.now().isoformat(), reason, job_id))
+            if action in ("applied", "failed"):
+                conn.execute("UPDATE jobs SET status=?, applied_date=?, notes=?, apply_status=? WHERE id=?",
+                             (new_status, datetime.now().isoformat(), reason,
+                              "submitted" if action == "applied" else "failed", job_id))
             else:
                 conn.execute("UPDATE jobs SET status=?, notes=? WHERE id=?",
                              (new_status, reason, job_id))
