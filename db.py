@@ -1,5 +1,5 @@
 """
-db.py â Multi-user database layer for Job Hunter
+db.py — Multi-user database layer for Job Hunter
 """
 import sqlite3
 import json
@@ -105,7 +105,7 @@ def init_db():
         )
     """)
 
-    # Migrations â safe to re-run on every start
+    # Migrations — safe to re-run on every start
     for _migration in [
         "ALTER TABLE jobs ADD COLUMN stage TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN weekdays_only INTEGER DEFAULT 0",
@@ -154,7 +154,7 @@ def init_db():
     _migrate(conn)
     count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     conn.close()
-    print(f"[db] Schema ready â {count} user(s) registered.")
+    print(f"[db] Schema ready — {count} user(s) registered.")
 
 
 def _migrate(conn: sqlite3.Connection):
@@ -176,10 +176,10 @@ def _migrate(conn: sqlite3.Connection):
             conn.commit()
             print(f"[db] Migration: added {col_name} to {table}")
         except Exception:
-            pass  # Column already exists â that's fine
+            pass  # Column already exists — that's fine
 
 
-# ââ Activity log ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ── Activity log ──────────────────────────────────────────────────────────────
 
 def log_activity(user_id: int, event_type: str, details: str = ""):
     """Append an entry to the activity log for a user."""
@@ -206,7 +206,7 @@ def get_activity(user_id: int, limit: int = 100):
     return [dict(r) for r in rows]
 
 
-# ââ Job helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+# ── Job helpers ───────────────────────────────────────────────────────────────
 
 def expire_old_jobs(conn: sqlite3.Connection, user_id: int):
     cutoff = (datetime.now() - timedelta(days=3)).isoformat()
