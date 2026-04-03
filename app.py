@@ -2897,7 +2897,7 @@ async function act(id, action) {
 function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\\n/g,"<br>"); }
 
 function toggleDesc(el) {
-  const p = el.querySelector('p.clamp3, p.desc-expanded');
+  const p = el.querySelector('.clamp3, .desc-expanded');
   const hint = el.querySelector('.expand-hint');
   if (!p) return;
   if (p.classList.contains('clamp3')) {
