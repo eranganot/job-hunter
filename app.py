@@ -241,7 +241,7 @@ def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
 def _check_scheduled_jobs() -> None:
     """Auto-trigger search/apply for each active user when their scheduled hour arrives."""
     try:
-        now = datetime.utcnow()
+        now = datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=3)))  # Israel time (GMT+3)
         today = now.strftime('%Y-%m-%d')
         current_hour = now.hour
         conn = database.get_db()
@@ -415,10 +415,11 @@ def run_job_search(user_id: int):
                         loc = al[0] if al else ""
                     jurl = j.get("hostedUrl") or f"https://jobs.lever.co/{slug}/{j.get('id', '')}"
                     desc = (j.get("descriptionPlain") or t)[:300]
+                    full_desc = j.get("descriptionPlain") or t
                     with _lk:
                         all_raw.append({"job_title": t, "company": company_name,
                                         "location": loc, "url": jurl,
-                                        "description": desc, "source": "lever"})
+                                        "description": desc, "full_description": full_desc, "source": "lever"})
             # -- Run all API queries in parallel --
             print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever boards...")
             threads = []
@@ -523,14 +524,14 @@ def run_job_search(user_id: int):
                 jobs_json = _js2.dumps(
                     [{"job_title": j.get("job_title",""), "company": j.get("company",""),
                       "location": j.get("location",""), "url": j.get("url",""),
-                      "description": (j.get("description") or "")[:200]}
+                      "description": (j.get("description") or ""), "full_description": (j.get("full_description") or j.get("description") or "")[:2000]}
                      for j in batch], ensure_ascii=False)
 
                 prompt = (
                     "You are a job matching assistant. Review these job listings and score each "
                     f"for this candidate:\n\n{profile_text}\n\n"
                     f"Job listings (JSON):\n{jobs_json}\n\n"
-                    "Return ONLY a JSON array with fields: job_title, company, location, url, publish_date (ISO date string or null if unknown), "
+                    "Return ONLY a JSON array with fields: job_title, company, location, url, publish_date (ISO date string or null if unknown), full_description (preserve the full_description from input if provided), "
                     "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
                     "Only include jobs with candidate_score >= 55. Be strict: only include jobs that closely match the candidate\'s target role titles and experience level. Return ONLY valid JSON, no markdown."
                 )
@@ -684,13 +685,13 @@ def run_job_search(user_id: int):
                 conn.execute(
                     "INSERT OR IGNORE INTO jobs "
                     "(user_id,title,company,location,url,description,why_relevant,source,"
-                    "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?)",
+                    "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date,full_description) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?)",
                     (user_id, j.get("job_title",""), j.get("company",""), j.get("location",""),
                      _jurl, j.get("description",""), j.get("fit_reason",""), j.get("source",""),
                      j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
                      _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None,
-                     j.get("publish_date")))
+                     j.get("publish_date"), (j.get("full_description") or "")[:5000]))
                 inserted += 1
                 new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
             except Exception as e: print(f"[run-search] insert error: {e}")
@@ -2348,7 +2349,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div id="stats-bar" class="flex gap-3 sm:gap-5 text-center shrink-0"></div>
     <div class="flex items-center gap-2 shrink-0">
-      <button onclick="runSearch()" id="run-search-btn" class="btn-touch text-blue-300 hover:text-white text-sm transition-colors font-medium" title="Run Search Now">🔍</button>
         <button onclick="loadAll()" class="btn-touch text-blue-300 hover:text-white text-xl transition-colors" title="Refresh">↻</button>
       <div class="dropdown">
         <button id="avatar-btn" aria-label="Account menu" aria-haspopup="true" onclick="this.closest('.dropdown').classList.toggle('open')"
@@ -2812,7 +2812,7 @@ function renderJob(job) {
     ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
     ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.publish_date ? `<span class="text-slate-400 text-xs">📅 Published ${ago(job.publish_date)}</span>` : ''}
-    ${job.description ? `<div class="mt-3 cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><p class="clamp3 text-sm text-slate-600 leading-relaxed">${job.description}</p><p class="expand-hint">▼ Tap to expand</p></div>` : ''}
+    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${job.description}</p>${job.full_description && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${job.full_description.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
     ${isSelectable ? '' : actionBar(job)}
   </div>`;
 }
@@ -2942,8 +2942,7 @@ function setTab(t) {
   document.getElementById('empty-state').classList.toggle('hidden', true);
   const bulkToggle = document.getElementById('bulk-toggle');
   if (bulkToggle) bulkToggle.classList.toggle('hidden', !isNew);
-  const runSearchBtn = document.getElementById('run-search-btn');
-  if (runSearchBtn) runSearchBtn.classList.remove('hidden');
+  // search button is in empty state only
   if (!isNew && selectMode) clearSelect();
 
   if (isActivity) {
@@ -2968,7 +2967,7 @@ async function runSearch() {
   if (window.__searchRunning) return; // prevent concurrent searches
   window.__searchRunning = true;
   const setBtn = (disabled, html) => {
-    const b = document.getElementById('run-search-btn');
+    const b = document.getElementById('empty-search-cta');
     if (b) { b.disabled = disabled; b.innerHTML = html; }
   };
   setBtn(true, '⏳');
@@ -3983,6 +3982,7 @@ if __name__ == "__main__":
     try:
         _mconn = database.get_db()
         _mconn.execute("UPDATE jobs SET status='rejected', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
+_mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status IN ('failed','manual_required')")
         _mconn.commit()
         _mconn.close()
     except Exception:
