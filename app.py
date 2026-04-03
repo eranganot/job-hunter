@@ -2812,7 +2812,7 @@ function renderJob(job) {
     ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
     ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.publish_date ? `<span class="text-slate-400 text-xs">📅 Published ${ago(job.publish_date)}</span>` : ''}
-    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${job.description}</p>${job.full_description && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${job.full_description.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
+    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${job.description}</p>${job.full_description && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${escHtml(job.full_description)}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
     ${isSelectable ? '' : actionBar(job)}
   </div>`;
 }
@@ -2893,6 +2893,8 @@ async function act(id, action) {
     loadAll();
   }
 }
+
+function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\\n/g,"<br>"); }
 
 function toggleDesc(el) {
   const p = el.querySelector('p.clamp3, p.desc-expanded');
