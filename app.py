@@ -2916,7 +2916,7 @@ async function act(id, action) {
   }
 }
 
-function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\n/g,"<br>").replace(/\\n/g,"<br>"); }
+function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\\n/g,"<br>"); }
 
 function toggleDesc(el) {
   const p = el.querySelector('.clamp3, .desc-expanded');
