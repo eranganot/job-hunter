@@ -134,20 +134,33 @@ def send_whatsapp(account_sid: str, auth_token: str, to_number: str, message: st
         print(f'[whatsapp] Error: {e}' + ((' | Twilio: ' + e.read().decode('utf-8','ignore')) if hasattr(e, 'read') else ''))
 
 
-def send_email(to_addr: str, subject: str, body: str, smtp_host: str = "smtp.gmail.com",
-               smtp_port: int = 587, smtp_user: str = "", smtp_pass: str = ""):
-    """Send an email notification via SMTP."""
-    import smtplib
-    from email.mime.text import MIMEText
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = smtp_user or "jobhunter@noreply.com"
-    msg["To"] = to_addr
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as srv:
-        srv.starttls()
-        if smtp_user and smtp_pass:
-            srv.login(smtp_user, smtp_pass)
-        srv.sendmail(msg["From"], [to_addr], msg.as_string())
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+
+
+def send_email(to_addr: str, subject: str, body: str, **_kwargs):
+    """Send an email notification via Resend.com API."""
+    api_key = RESEND_API_KEY
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY not configured")
+    payload = json.dumps({
+        "from": "Job Hunter <onboarding@resend.dev>",
+        "to": [to_addr],
+        "subject": subject,
+        "text": body,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        method="POST",
+    )
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        result = json.loads(resp.read())
+        if result.get("id"):
+            print(f"[email/resend] ✅ Sent — {result['id']}")
+        else:
+            print(f"[email/resend] ⚠️  {result}")
 
 
 def _log_notification(user_id: int, channel: str, status: str, error_msg: str = ""):
@@ -194,10 +207,6 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
                     to_addr=p["email_address"],
                     subject="Job Hunter Notification",
                     body=msg_with_link,
-                    smtp_host=p["email_smtp_host"] or "smtp.gmail.com",
-                    smtp_port=int(p["email_smtp_port"] or 587),
-                    smtp_user=p["email_smtp_user"] or "",
-                    smtp_pass=p["email_smtp_pass"] or "",
                 )
                 _log_notification(user_id, "email", "Sent OK")
                 print(f"[notify] Email sent to user {user_id}")
@@ -1760,13 +1769,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
 
     <div id="sn-email" class="hidden space-y-4 border-t pt-5">
       <div><label class="label">Email address</label><input class="input" type="email" id="sn-email-addr" placeholder="you@example.com"/></div>
-      <div><label class="label">SMTP host</label><input class="input" type="text" id="sn-email-host" placeholder="smtp.gmail.com" value="smtp.gmail.com"/></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="label">SMTP port</label><input class="input" type="number" id="sn-email-port" placeholder="587" value="587"/></div>
-        <div><label class="label">SMTP user</label><input class="input" type="text" id="sn-email-user" placeholder="you@gmail.com"/></div>
-      </div>
-      <div><label class="label">SMTP password / app password</label><input class="input" type="password" id="sn-email-pass" placeholder="App password"/></div>
-      <p class="text-xs text-slate-400">For Gmail use an <a href="https://myaccount.google.com/apppasswords" target="_blank" class="text-blue-500 underline">App Password</a></p>
+      <p class="text-xs text-slate-400">Notifications will be sent via Resend.com to this address</p>
       <button onclick="testNotification('email')" class="btn btn-secondary text-sm">🧪 Test</button>
     </div>
 
@@ -1915,11 +1918,7 @@ async function loadUser() {
   if (userData.twilio_account_sid) document.getElementById('sn-wa-sid').value    = userData.twilio_account_sid;
   if (userData.twilio_auth_token)  document.getElementById('sn-wa-token').value  = userData.twilio_auth_token;
   if (userData.whatsapp_number)    document.getElementById('sn-wa-number').value = userData.whatsapp_number;
-  if (userData.email_address)   document.getElementById('sn-email-addr').value = userData.email_address;
-  if (userData.email_smtp_host) document.getElementById('sn-email-host').value = userData.email_smtp_host;
-  if (userData.email_smtp_port) document.getElementById('sn-email-port').value = userData.email_smtp_port;
-  if (userData.email_smtp_user) document.getElementById('sn-email-user').value = userData.email_smtp_user;
-  if (userData.email_smtp_pass) document.getElementById('sn-email-pass').value = userData.email_smtp_pass;
+  if (userData.email_address) document.getElementById('sn-email-addr').value = userData.email_address;
 
   // CV
   if (userData.cv_path) {
@@ -2074,11 +2073,7 @@ async function saveNotifications() {
     body.whatsapp_number    = document.getElementById('sn-wa-number').value;
   }
   if (checked.includes('email')) {
-    body.email_address   = document.getElementById('sn-email-addr').value;
-    body.email_smtp_host = document.getElementById('sn-email-host').value;
-    body.email_smtp_port = document.getElementById('sn-email-port').value;
-    body.email_smtp_user = document.getElementById('sn-email-user').value;
-    body.email_smtp_pass = document.getElementById('sn-email-pass').value;
+    body.email_address = document.getElementById('sn-email-addr').value;
   }
   await fetch('/api/save-notifications', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   showToast();
@@ -2094,11 +2089,7 @@ async function testNotification(channel) {
     body.twilio_auth_token  = document.getElementById('sn-wa-token').value;
     body.whatsapp_number    = document.getElementById('sn-wa-number').value;
   } else if (channel === 'email') {
-    body.email_address   = document.getElementById('sn-email-addr').value;
-    body.email_smtp_host = document.getElementById('sn-email-host').value;
-    body.email_smtp_port = document.getElementById('sn-email-port').value;
-    body.email_smtp_user = document.getElementById('sn-email-user').value;
-    body.email_smtp_pass = document.getElementById('sn-email-pass').value;
+    body.email_address = document.getElementById('sn-email-addr').value;
   }
   const r = await fetch('/api/test-notification', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const d = await r.json();
@@ -3631,10 +3622,6 @@ class Handler(BaseHTTPRequestHandler):
                         to_addr=data.get("email_address",""),
                         subject="Job Hunter Test",
                         body=msg,
-                        smtp_host=data.get("email_smtp_host","smtp.gmail.com"),
-                        smtp_port=int(data.get("email_smtp_port", 587)),
-                        smtp_user=data.get("email_smtp_user",""),
-                        smtp_pass=data.get("email_smtp_pass",""),
                     )
                     _log_notification(user_id, "email", "Test OK")
                 self.send_json({"success": True})
