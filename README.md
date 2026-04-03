@@ -7,10 +7,10 @@ Automated job search and application tool with AI-powered CV analysis, multi-sou
 - **Multi-Source Job Search** - Aggregates jobs from 8+ sources: Greenhouse boards, Lever boards, TechMap product jobs, Comeet, SpeakNow, LinkedIn, Glassdoor, and Wellfound
 - **AI-Powered Scoring** - Each job is scored against your CV and preferences using Claude Haiku with full job descriptions (up to 2000 chars) for accurate match percentage and fit explanation
 - **Smart Filtering** - Only relevant jobs matching your titles and keywords are shown; dead links are automatically filtered out
-- **Expandable Job Descriptions** - Full source descriptions stored and viewable inline with tap-to-expand/collapse on each job card
+- **Expandable Job Descriptions** - Full source descriptions (Greenhouse HTML content, Lever plaintext) stored and viewable inline with tap-to-expand/collapse; falls back to "View full description" link when source text is unavailable
 - **Scheduled Automation** - Configure daily or weekly search/apply cycles with day-of-week and time controls; weekday-only option available; scheduler runs on Israel time (GMT+3)
 - **Auto-Apply** - Approved jobs are submitted via headless Playwright browser with Claude-assisted form filling
-- **Failed Job Management** - Failed applications are automatically moved back to the Approved queue on startup; filter applied jobs by status (Failed/Submitted/Confirmed), retry auto-apply on failed jobs, or apply manually via direct link
+- **Failed Job Management** - Failed applications are automatically moved back to the Approved queue on startup; Approved tab has All/New/Retry filter pills; Applied tab filters by status (Failed/Submitted/Confirmed); retry auto-apply or apply manually via direct link
 - **WhatsApp & Telegram Notifications** - Get notified when new jobs are found or applications are submitted
 - **Multi-User Auth** - Secure login with per-user profiles, preferences, and job history
 - **CV Analysis** - Upload your PDF resume for AI-powered skill extraction and job matching
@@ -21,7 +21,7 @@ Automated job search and application tool with AI-powered CV analysis, multi-sou
 
 The search engine queries multiple job sources in parallel:
 
-- **Greenhouse API** (47 Israeli tech companies) - Direct public API queries to boards-api.greenhouse.io
+- **Greenhouse API** (47 Israeli tech companies) - Direct public API queries to boards-api.greenhouse.io with full job descriptions extracted from HTML content
 - **Lever API** (2+ companies) - Direct public API queries to api.lever.co
 - **TechMap CSV** - Curated Israeli product/management jobs from github.com/mluggy/techmap
 - **Comeet** - Israeli company job boards via Comeet API
