@@ -3982,7 +3982,7 @@ if __name__ == "__main__":
     try:
         _mconn = database.get_db()
         _mconn.execute("UPDATE jobs SET status='rejected', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
-_mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status IN ('failed','manual_required')")
+        _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status IN ('failed','manual_required')")
         _mconn.commit()
         _mconn.close()
     except Exception:
