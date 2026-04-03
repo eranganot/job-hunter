@@ -5,11 +5,12 @@ Automated job search and application tool with AI-powered CV analysis, multi-sou
 ## Features
 
 - **Multi-Source Job Search** - Aggregates jobs from 8+ sources: Greenhouse boards, Lever boards, TechMap product jobs, Comeet, SpeakNow, LinkedIn, Glassdoor, and Wellfound
-- **AI-Powered Scoring** - Each job is scored against your CV and preferences using Claude Haiku, with match percentage and fit explanation
+- **AI-Powered Scoring** - Each job is scored against your CV and preferences using Claude Haiku with full job descriptions (up to 2000 chars) for accurate match percentage and fit explanation
 - **Smart Filtering** - Only relevant jobs matching your titles and keywords are shown; dead links are automatically filtered out
-- **Scheduled Automation** - Configure daily or weekly search/apply cycles with day-of-week and time controls; weekday-only option available
+- **Expandable Job Descriptions** - Full source descriptions stored and viewable inline with tap-to-expand/collapse on each job card
+- **Scheduled Automation** - Configure daily or weekly search/apply cycles with day-of-week and time controls; weekday-only option available; scheduler runs on Israel time (GMT+3)
 - **Auto-Apply** - Approved jobs are submitted via headless Playwright browser with Claude-assisted form filling
-- **Failed Job Management** - Filter applied jobs by status (Failed/Submitted/Confirmed), retry auto-apply on failed jobs, or apply manually via direct link
+- **Failed Job Management** - Failed applications are automatically moved back to the Approved queue on startup; filter applied jobs by status (Failed/Submitted/Confirmed), retry auto-apply on failed jobs, or apply manually via direct link
 - **WhatsApp & Telegram Notifications** - Get notified when new jobs are found or applications are submitted
 - **Multi-User Auth** - Secure login with per-user profiles, preferences, and job history
 - **CV Analysis** - Upload your PDF resume for AI-powered skill extraction and job matching
@@ -117,7 +118,7 @@ WhatsApp (Twilio) or Telegram notifications for:
 
 **users**: id, email, password_hash, name, role, is_active
 **user_profiles**: user_id, job_titles, keywords, locations, cv_path, cv_summary, schedule_frequency, search_hour, apply_hour, search_day_of_week, apply_day_of_week, weekdays_only, notification_channel
-**jobs**: id, user_id, title, company, location, url, description, why_relevant, source, match_score, candidate_score, status, url_verified, found_date
+**jobs**: id, user_id, title, company, location, url, description, full_description, why_relevant, source, match_score, candidate_score, status, url_verified, found_date, publish_date
 **activity_log**: id, user_id, event_type, details, created_date
 
 ## Local Development
