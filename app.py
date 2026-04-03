@@ -1361,56 +1361,34 @@ function goToStep(n) {
 }
 
 // ── Tags ──────────────────────────────────────────────────────────────────────
-function makeTagEditable(labelSpan) {
-  const tag = labelSpan.parentElement;
-  const oldVal = labelSpan.textContent.trim();
-  const ed = document.createElement('input');
-  ed.value = oldVal;
-  ed.style.cssText = 'border:none;outline:none;background:transparent;font-size:.8rem;font-weight:600;color:#1d4ed8;width:' + Math.max(oldVal.length, 4) + 'ch;min-width:2ch;max-width:16ch;';
-  labelSpan.replaceWith(ed);
-  ed.focus(); ed.select();
-  const commit = () => {
-    const nv = ed.value.trim();
-    if (nv && nv !== oldVal) {
-      const ns = document.createElement('span');
-      ns.textContent = nv;
-      ns.style.cursor = 'text';
-      ns.title = 'Click to edit';
-      ns.onclick = () => makeTagEditable(ns);
-      ed.replaceWith(ns);
-    } else {
-      const ns = document.createElement('span');
-      ns.textContent = oldVal;
-      ns.style.cursor = 'text';
-      ns.title = 'Click to edit';
-      ns.onclick = () => makeTagEditable(ns);
-      ed.replaceWith(ns);
-      if (!nv) tag.remove();
-    }
-  };
-  ed.addEventListener('blur', commit);
-  ed.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ed.blur(); } if (e.key === 'Escape') { ed.value = oldVal; ed.blur(); } });
-}
-
 function addTag(wrapId, value) {
   const v = value.trim().replace(/,$/,'').trim();
   if (!v) return;
   const wrap = document.getElementById(wrapId);
   const input = wrap.querySelector('.tag-input');
-  // Avoid duplicates
-  const existing = Array.from(wrap.querySelectorAll('.tag span')).map(s => s.textContent.trim().toLowerCase());
+  const existing = Array.from(wrap.querySelectorAll('.tag [contenteditable]')).map(s => s.textContent.trim().toLowerCase());
   if (existing.includes(v.toLowerCase())) { input.value=''; return; }
   const tag = document.createElement('span');
   tag.className = 'tag';
   const label = document.createElement('span');
+  label.contentEditable = 'true';
   label.textContent = v;
-  label.style.cursor = 'text';
   label.title = 'Click to edit';
-  label.onclick = () => makeTagEditable(label);
+  label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;';
+  label.addEventListener('click', e => e.stopPropagation());
+  label.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
+    if (e.key === 'Escape') { label.textContent = v; label.blur(); }
+  });
+  label.addEventListener('blur', () => {
+    const nv = label.textContent.trim();
+    if (!nv) tag.remove(); else label.textContent = nv;
+  });
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = '×';
-  btn.onclick = () => tag.remove();
+  btn.onclick = e => { e.stopPropagation(); tag.remove(); };
   tag.appendChild(label);
   tag.appendChild(btn);
   wrap.insertBefore(tag, input);
@@ -1427,7 +1405,7 @@ function tagKeyDown(e, wrapId) {
 }
 
 function getTags(wrapId) {
-  return Array.from(document.getElementById(wrapId).querySelectorAll('.tag span:first-child')).map(s => s.textContent.trim()).filter(Boolean);
+  return Array.from(document.getElementById(wrapId).querySelectorAll('.tag [contenteditable]')).map(s => s.textContent.trim()).filter(Boolean);
 }
 
 function setTags(wrapId, values) {
@@ -2050,45 +2028,34 @@ function updateNotifStyles() {
 }
 
 // Tags (same as onboarding)
-function makeTagEditable(labelSpan) {
-  const tag = labelSpan.parentElement;
-  const oldVal = labelSpan.textContent.trim();
-  const ed = document.createElement('input');
-  ed.value = oldVal;
-  ed.style.cssText = 'border:none;outline:none;background:transparent;font-size:.8rem;font-weight:600;color:#1d4ed8;width:' + Math.max(oldVal.length, 4) + 'ch;min-width:2ch;max-width:16ch;';
-  labelSpan.replaceWith(ed);
-  ed.focus(); ed.select();
-  const commit = () => {
-    const nv = ed.value.trim();
-    const ns = document.createElement('span');
-    ns.textContent = nv || oldVal;
-    ns.style.cursor = 'text';
-    ns.title = 'Click to edit';
-    ns.onclick = () => makeTagEditable(ns);
-    ed.replaceWith(ns);
-    if (!nv) tag.remove();
-  };
-  ed.addEventListener('blur', commit);
-  ed.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); ed.blur(); } if (e.key === 'Escape') { ed.value = oldVal; ed.blur(); } });
-}
 function addTag(wrapId, value) {
   const v = value.trim().replace(/,$/,'').trim();
   if (!v) return;
   const wrap = document.getElementById(wrapId);
   const input = wrap.querySelector('.tag-input');
-  const existing = Array.from(wrap.querySelectorAll('.tag span')).map(s => s.textContent.trim().toLowerCase());
+  const existing = Array.from(wrap.querySelectorAll('.tag [contenteditable]')).map(s => s.textContent.trim().toLowerCase());
   if (existing.includes(v.toLowerCase())) { input.value=''; return; }
   const tag = document.createElement('span');
   tag.className = 'tag';
   const label = document.createElement('span');
+  label.contentEditable = 'true';
   label.textContent = v;
-  label.style.cursor = 'text';
   label.title = 'Click to edit';
-  label.onclick = () => makeTagEditable(label);
+  label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;';
+  label.addEventListener('click', e => e.stopPropagation());
+  label.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
+    if (e.key === 'Escape') { label.textContent = v; label.blur(); }
+  });
+  label.addEventListener('blur', () => {
+    const nv = label.textContent.trim();
+    if (!nv) tag.remove(); else label.textContent = nv;
+  });
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = '×';
-  btn.onclick = () => tag.remove();
+  btn.onclick = e => { e.stopPropagation(); tag.remove(); };
   tag.appendChild(label);
   tag.appendChild(btn);
   wrap.insertBefore(tag, input);
@@ -2098,7 +2065,7 @@ function tagKeyDown(e, wrapId) {
   if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(wrapId, e.target.value); }
 }
 function getTags(wrapId) {
-  return Array.from(document.getElementById(wrapId).querySelectorAll('.tag span:first-child')).map(s => s.textContent.trim()).filter(Boolean);
+  return Array.from(document.getElementById(wrapId).querySelectorAll('.tag [contenteditable]')).map(s => s.textContent.trim()).filter(Boolean);
 }
 function setTags(wrapId, values) {
   const wrap = document.getElementById(wrapId);
