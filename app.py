@@ -2843,7 +2843,7 @@ async function loadJobs(status) {
       jobs.forEach(j => { if (j.apply_status && (j.apply_status === 'failed' || j.apply_status === 'manual_required')) aCounts.retry++; else aCounts.fresh++; });
       const aPill = (key, label, cls) => {
         const active = approvedFilter === key;
-        return '<button onclick="approvedFilter=\'' + key + '\';loadAll()" class="px-3 py-1 rounded-full text-xs font-medium border transition-all '
+        return '<button onclick="setApprFilter(' + "'" + key + "'" + ')" class="px-3 py-1 rounded-full text-xs font-medium border transition-all '
           + (active ? cls + ' ring-1 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300') + '">'
           + label + '</button>';
       };
@@ -2883,6 +2883,8 @@ async function loadJobs(status) {
   }
 }
 
+
+function setApprFilter(k) { approvedFilter = k; loadAll(); }
 
 function retryApply(id) {
   if (!confirm('Retry auto-apply for this job?')) return;
