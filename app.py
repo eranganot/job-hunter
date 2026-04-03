@@ -1373,9 +1373,12 @@ function addTag(wrapId, value) {
   const label = document.createElement('span');
   label.contentEditable = 'true';
   label.textContent = v;
-  label.title = 'Click to edit';
-  label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;';
+  label.title = 'Tap to edit';
+  label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;-webkit-user-select:text;user-select:text;';
+  const stopAndFocus = e => { e.stopPropagation(); e.preventDefault(); label.focus(); };
   label.addEventListener('click', e => e.stopPropagation());
+  label.addEventListener('touchstart', e => e.stopPropagation(), {passive:false});
+  label.addEventListener('touchend', stopAndFocus, {passive:false});
   label.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
@@ -1388,7 +1391,8 @@ function addTag(wrapId, value) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = '×';
-  btn.onclick = e => { e.stopPropagation(); tag.remove(); };
+  btn.addEventListener('click', e => { e.stopPropagation(); tag.remove(); });
+  btn.addEventListener('touchend', e => { e.stopPropagation(); e.preventDefault(); tag.remove(); }, {passive:false});
   tag.appendChild(label);
   tag.appendChild(btn);
   wrap.insertBefore(tag, input);
@@ -2040,9 +2044,12 @@ function addTag(wrapId, value) {
   const label = document.createElement('span');
   label.contentEditable = 'true';
   label.textContent = v;
-  label.title = 'Click to edit';
-  label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;';
+  label.title = 'Tap to edit';
+  label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;-webkit-user-select:text;user-select:text;';
+  const stopAndFocus = e => { e.stopPropagation(); e.preventDefault(); label.focus(); };
   label.addEventListener('click', e => e.stopPropagation());
+  label.addEventListener('touchstart', e => e.stopPropagation(), {passive:false});
+  label.addEventListener('touchend', stopAndFocus, {passive:false});
   label.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
@@ -2055,7 +2062,8 @@ function addTag(wrapId, value) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = '×';
-  btn.onclick = e => { e.stopPropagation(); tag.remove(); };
+  btn.addEventListener('click', e => { e.stopPropagation(); tag.remove(); });
+  btn.addEventListener('touchend', e => { e.stopPropagation(); e.preventDefault(); tag.remove(); }, {passive:false});
   tag.appendChild(label);
   tag.appendChild(btn);
   wrap.insertBefore(tag, input);
