@@ -1049,12 +1049,12 @@ ONBOARDING_HTML = """<!DOCTYPE html>
   <style>
     .step { display:none; }
     .step.active { display:block; }
-    .tag { display:inline-flex;align-items:center;gap:.35rem;background:#eff6ff;
+    .tag { display:inline-flex;align-items:center;gap:.4rem;background:#eff6ff;
            color:#1d4ed8;border:1px solid #bfdbfe;border-radius:9999px;
-           padding:.2rem .75rem;font-size:.8rem;font-weight:600;cursor:default; }
-    .tag button { background:none;border:none;cursor:pointer;color:#60a5fa;
-                  font-size:.9rem;line-height:1;padding:0; }
-    .tag button:hover { color:#ef4444; }
+           padding:.25rem .5rem .25rem .75rem;font-size:.8rem;font-weight:600; }
+    .tag button { background:#dbeafe;border:none;cursor:pointer;color:#3b82f6;font-size:.85rem;
+                  line-height:1;padding:2px 5px;border-radius:9999px;transition:all .15s; }
+    .tag button:hover { background:#fecaca;color:#dc2626; }
     .tag-input-wrap { display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem;
                       border:1.5px solid #e2e8f0;border-radius:.75rem;
                       cursor:text;transition:border .15s; }
@@ -1610,11 +1610,12 @@ SETTINGS_HTML = """<!DOCTYPE html>
     .tab-btn.active { background:#fff;color:#1d4ed8;box-shadow:0 1px 4px rgba(0,0,0,.1);font-weight:600; }
     .panel { display:none; }
     .panel.active { display:block; }
-    .tag { display:inline-flex;align-items:center;gap:.35rem;background:#eff6ff;
+    .tag { display:inline-flex;align-items:center;gap:.4rem;background:#eff6ff;
            color:#1d4ed8;border:1px solid #bfdbfe;border-radius:9999px;
-           padding:.2rem .75rem;font-size:.8rem;font-weight:600; }
-    .tag button { background:none;border:none;cursor:pointer;color:#60a5fa;font-size:.9rem;line-height:1;padding:0; }
-    .tag button:hover { color:#ef4444; }
+           padding:.25rem .5rem .25rem .75rem;font-size:.8rem;font-weight:600; }
+    .tag button { background:#dbeafe;border:none;cursor:pointer;color:#3b82f6;font-size:.85rem;
+                  line-height:1;padding:2px 5px;border-radius:9999px;transition:all .15s; }
+    .tag button:hover { background:#fecaca;color:#dc2626; }
     .tag-input-wrap { display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem;
                       border:1.5px solid #e2e8f0;border-radius:.75rem;cursor:text;transition:border .15s; }
     .tag-input-wrap:focus-within { border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12); }
@@ -2340,7 +2341,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <h1 class="text-base font-bold tracking-tight">🎯 Job Hunter</h1>
       <p id="user-tagline" class="text-blue-300 text-xs mt-0.5 hidden sm:block"></p>
     </div>
-    <div id="stats-bar" class="flex gap-3 sm:gap-5 text-center shrink-0"></div>
     <div class="flex items-center gap-2 shrink-0">
         <button onclick="loadAll()" class="btn-touch text-blue-300 hover:text-white text-xl transition-colors" title="Refresh">↻</button>
       <div class="dropdown">
@@ -2359,10 +2359,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- TABS -->
 <div class="max-w-4xl mx-auto px-4 mt-4">
   <div class="tab-scroll flex gap-1 bg-slate-200 p-1 rounded-xl w-full">
-    <button onclick="setTab('new')"      id="tab-new"      role="tab" aria-selected="true"  class="tab-btn tab-active flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">New</button>
-    <button onclick="setTab('approved')" id="tab-approved" role="tab" aria-selected="false" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Approved</button>
-    <button onclick="setTab('applied')"  id="tab-applied"  role="tab" aria-selected="false" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Applied</button>
-    <button onclick="setTab('rejected')" id="tab-rejected" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Passed</button>
+    <button onclick="setTab('new')"      id="tab-new"      role="tab" aria-selected="true"  class="tab-btn tab-active flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">New <span id="cnt-new"></span></button>
+    <button onclick="setTab('approved')" id="tab-approved" role="tab" aria-selected="false" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Approved <span id="cnt-approved"></span></button>
+    <button onclick="setTab('applied')"  id="tab-applied"  role="tab" aria-selected="false" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Applied <span id="cnt-applied"></span></button>
+    <button onclick="setTab('rejected')" id="tab-rejected" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Passed <span id="cnt-rejected"></span></button>
     <button onclick="setTab('activity')" id="tab-activity" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm transition-all whitespace-nowrap">Activity</button>
   </div>
   <p id="schedule-hint" class="text-xs text-slate-400 italic text-right mt-2"></p>
@@ -2371,8 +2371,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <!-- Sort + Bulk controls -->
 <div id="sort-bar" class="max-w-4xl mx-auto px-4 mt-2 flex items-center gap-2 flex-wrap">
   <span class="text-xs text-slate-400 font-medium shrink-0">Sort:</span>
-  <button onclick="setSort('date')"    id="sort-date"    class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">📅 Date</button>
-  <button onclick="setSort('match')"   id="sort-match"   class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🎯 Match</button>
+  <button onclick="setSort('date')"    id="sort-date"    class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">📅 Date</button>
+  <button onclick="setSort('match')"   id="sort-match"   class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">🎯 Match</button>
   <button onclick="setSort('company')" id="sort-company" class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🏢 Company</button>
   <button onclick="toggleSelect()" id="bulk-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">☐ Select</button>
 </div>
@@ -2433,7 +2433,7 @@ function showToast(msg) {
 <script>
 let tab = 'new';
 let me = {};
-let sortBy = 'date';
+let sortBy = 'match';
 var applyFilter = 'all';
 var approvedFilter = 'all';
 let selectMode = false;
@@ -2604,11 +2604,11 @@ async function loadActivity() {
 
 async function loadStats() {
   const s = await api('/api/stats');
-  document.getElementById('stats-bar').innerHTML = `
-    <div class="text-center"><div class="text-lg sm:text-xl font-bold">${s.new}</div><div class="text-blue-300 text-xs">New</div></div>
-    <div class="text-center"><div class="text-lg sm:text-xl font-bold text-green-300">${s.approved}</div><div class="text-blue-300 text-xs">Approved</div></div>
-    <div class="hidden sm:block text-center"><div class="text-lg sm:text-xl font-bold text-purple-300">${s.applied}</div><div class="text-blue-300 text-xs">Applied</div></div>
-    <div class="hidden sm:block text-center"><div class="text-lg sm:text-xl font-bold text-slate-300">${s.total}</div><div class="text-blue-300 text-xs">Total</div></div>`;
+  const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n > 0 ? '(' + n + ')' : ''; };
+  set('cnt-new', s.new);
+  set('cnt-approved', s.approved);
+  set('cnt-applied', s.applied);
+  set('cnt-rejected', s.rejected);
 }
 
 function ago(d) {
