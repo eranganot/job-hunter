@@ -389,17 +389,19 @@ def run_job_search(user_id: int):
 
             # -- Query Greenhouse boards --
             def _query_gh(slug, company_name):
-                data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs")
+                data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
                 if not data: return
                 for j in data.get("jobs", []):
                     t = j.get("title", "")
                     if not _title_match(t): continue
                     loc = j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else ""
                     jurl = f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id', '')}"
+                    _gh_content = re.sub(r'<[^>]+>', ' ', j.get("content", "")).strip()[:5000] if j.get("content") else ""
                     with _lk:
                         all_raw.append({"job_title": t, "company": company_name,
                                         "location": loc, "url": jurl,
-                                        "description": t, "source": "greenhouse"})
+                                        "description": (_gh_content[:300] if _gh_content else t),
+                                        "full_description": _gh_content or t, "source": "greenhouse"})
 
             # -- Query Lever boards --
             def _query_lv(slug, company_name):
@@ -2411,18 +2413,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 <!-- Pass reason modal -->
-<div id="pass-modal" class="hidden fixed inset-0 z-50 bg-black/40 items-end justify-center p-4" onclick="if(event.target===this)skipReason()">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 fade">
+<div id="pass-modal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4" onclick="if(event.target===this)skipReason()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-4 fade">
     <h3 class="font-bold text-slate-900 mb-0.5">Why are you passing?</h3>
     <p class="text-xs text-slate-400 mb-4">Helps improve future matches</p>
     <div class="space-y-2 mb-3">
-      <button onclick="selectReason('Not a good fit')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🤔 Not a good fit</button>
-      <button onclick="selectReason('Wrong seniority level')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📊 Wrong seniority level</button>
-      <button onclick="selectReason('Salary too low')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">💰 Salary too low</button>
-      <button onclick="selectReason('Bad company')"           class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🏢 Bad company</button>
-      <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📍 Wrong location</button>
-      <button onclick="selectReason('Already applied elsewhere')"       class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
-      <button onclick="selectReason('Not relevant to my search')" class="reason-btn w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🔍 Not relevant to my search</button>
+      <button onclick="selectReason('Not a good fit')"        class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🤔 Not a good fit</button>
+      <button onclick="selectReason('Wrong seniority level')" class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📊 Wrong seniority level</button>
+      <button onclick="selectReason('Salary too low')"        class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">💰 Salary too low</button>
+      <button onclick="selectReason('Bad company')"           class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🏢 Bad company</button>
+      <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📍 Wrong location</button>
+      <button onclick="selectReason('Already applied elsewhere')"       class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
+      <button onclick="selectReason('Not relevant to my search')" class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🔍 Not relevant to my search</button>
     </div>
     <button onclick="skipReason()" class="w-full text-sm text-slate-400 hover:text-slate-600 py-2 transition-all">Skip — no reason</button>
   </div>
@@ -2442,6 +2444,7 @@ let tab = 'new';
 let me = {};
 let sortBy = 'date';
 var applyFilter = 'all';
+var approvedFilter = 'all';
 let selectMode = false;
 let selectedIds = new Set();
 let _pendingPassId = null;
@@ -2720,7 +2723,7 @@ function markApplied(id) {
   overlay.id = 'apply-modal-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100;display:flex;align-items:center;justify-content:center;padding:1rem;';
   overlay.innerHTML = `
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 fade">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-4 fade">
       <h3 class="text-lg font-bold text-slate-900 mb-2">Did you apply?</h3>
       <p class="text-sm text-slate-500 mb-4">Did you complete the application for this job?</p>
       <div class="space-y-2">
@@ -2812,7 +2815,7 @@ function renderJob(job) {
     ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
     ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.publish_date ? `<span class="text-slate-400 text-xs">📅 Published ${ago(job.publish_date)}</span>` : ''}
-    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${job.description}</p>${job.full_description && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${escHtml(job.full_description)}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
+    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${job.description}</p>${job.full_description && job.full_description.length > 60 && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${escHtml(job.full_description)}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
     ${isSelectable ? '' : actionBar(job)}
   </div>`;
 }
@@ -2835,7 +2838,24 @@ async function loadJobs(status) {
   } else {
     empty.classList.add('hidden');
     let html = '';
-    if (status === 'approved') html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">🚀 Apply Now</button></div>`;
+    if (status === 'approved') {
+      const aCounts = {all: jobs.length, fresh: 0, retry: 0};
+      jobs.forEach(j => { if (j.apply_status && (j.apply_status === 'failed' || j.apply_status === 'manual_required')) aCounts.retry++; else aCounts.fresh++; });
+      const aPill = (key, label, cls) => {
+        const active = approvedFilter === key;
+        return '<button onclick="approvedFilter=\'' + key + '\';loadAll()" class="px-3 py-1 rounded-full text-xs font-medium border transition-all '
+          + (active ? cls + ' ring-1 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300') + '">'
+          + label + '</button>';
+      };
+      html += '<div class="flex flex-wrap gap-2 mb-3 mt-1">'
+        + aPill('all', 'All (' + aCounts.all + ')', 'bg-slate-100 text-slate-700 border-slate-300')
+        + aPill('fresh', 'New (' + aCounts.fresh + ')', 'bg-blue-100 text-blue-700 border-blue-300')
+        + aPill('retry', 'Retry (' + aCounts.retry + ')', 'bg-amber-100 text-amber-700 border-amber-300')
+        + '</div>';
+      if (approvedFilter === 'fresh') jobs = jobs.filter(j => !j.apply_status || (j.apply_status !== 'failed' && j.apply_status !== 'manual_required'));
+      if (approvedFilter === 'retry') jobs = jobs.filter(j => j.apply_status && (j.apply_status === 'failed' || j.apply_status === 'manual_required'));
+      html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">🚀 Apply Now</button></div>`;
+    }
     if (status === 'applied') {
       const counts = {all: jobs.length, failed: 0, submitted: 0, confirmed: 0, manual_required: 0};
       jobs.forEach(j => { if (j.apply_status && counts[j.apply_status] !== undefined) counts[j.apply_status]++; });
@@ -2894,7 +2914,7 @@ async function act(id, action) {
   }
 }
 
-function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\\n/g,"<br>"); }
+function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\n/g,"<br>").replace(/\\n/g,"<br>"); }
 
 function toggleDesc(el) {
   const p = el.querySelector('.clamp3, .desc-expanded');
