@@ -135,14 +135,77 @@ def _parse_json_list(raw) -> list:
         return []
 
 
-def compute_match_score(job: dict, user_profile: dict) -> int:
+
+
+def _haiku_match_score(
+    job_text: str,
+    user_keywords: list,
+    user_titles: list,
+    seniority: str,
+    job_title: str,
+    api_key: str,
+) -> "tuple[int, int, int] | None":
+    """Use Claude Haiku for semantic job-fit scoring.
+
+    Returns (kw_score_0_60, title_score_0_30, seniority_score_0_10)
+    or None on any failure (caller falls back to keyword matching).
     """
-    Compute 0-100 match score: what % of the user's skills appear in the job.
+    if not api_key:
+        return None
+
+    kw_sample  = ", ".join(user_keywords[:30]) or "N/A"
+    ttl_sample = ", ".join(user_titles[:10]) or "N/A"
+
+    prompt = (
+        "You are evaluating a job posting fit for a candidate.\n\n"
+        f"Candidate skills/keywords: {kw_sample}\n"
+        f"Candidate target titles:   {ttl_sample}\n"
+        f"Candidate seniority:       {seniority or 'not specified'}\n\n"
+        f"Job title: {job_title}\n"
+        f"Job text (first 1500 chars):\n{job_text[:1500]}\n\n"
+        "Score on three dimensions:\n"
+        "  keyword_score  0-60  semantic skills/tools match\n"
+        "  title_score    0-30  job title relevance to candidate's targets\n"
+        "  seniority_score 0-10 seniority level fit\n\n"
+        'Return ONLY valid JSON: {"keyword_score":0,"title_score":0,"seniority_score":0}'
+    )
+    try:
+        body = json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key":          api_key,
+                "anthropic-version":  "2023-06-01",
+                "content-type":       "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            resp_data = json.loads(resp.read())
+        text = resp_data["content"][0]["text"].strip()
+        m = re.search(r"\{.*?\}", text, re.DOTALL)
+        scores = json.loads(m.group()) if m else {}
+        return (
+            min(60, max(0, int(scores.get("keyword_score", 0)))),
+            min(30, max(0, int(scores.get("title_score", 0)))),
+            min(10, max(0, int(scores.get("seniority_score", 0)))),
+        )
+    except Exception:
+        return None
+
+def compute_match_score(job: dict, user_profile: dict, api_key: str = "") -> int:
+    """
+    Compute 0-100 match score using Claude Haiku for semantic scoring.
+    Falls back to keyword overlap (60/30/10) when the API is unavailable.
 
     Weights:
-      60% — keyword overlap (user's skills/tools found in job text)
-      30% — job title relevance (does job title relate to user's target titles)
-      10% — seniority alignment
+      60% — skills/keywords fit  (semantic or keyword overlap)
+      30% — job title relevance  (semantic or string match)
+      10% — seniority alignment  (semantic or keyword match)
 
     Returns 0 if the user has no profile data yet.
     """
@@ -158,7 +221,16 @@ def compute_match_score(job: dict, user_profile: dict) -> int:
         job.get("why_relevant", ""),
     ])).lower()
 
-    # 60% — keyword overlap
+    # ── Try Haiku semantic scoring first ────────────────────────────────────
+    haiku_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_KEY", "")
+    job_title_lower = (job.get("title") or "").lower()
+    seniority = (user_profile.get("seniority") or "").lower()
+    haiku = _haiku_match_score(job_text, user_keywords, user_titles, seniority, job_title_lower, haiku_key)
+    if haiku is not None:
+        kw_score, title_score, seniority_score = haiku
+        return min(100, max(0, kw_score + title_score + seniority_score))
+
+    # 60% — keyword overlap (fallback)
     if user_keywords:
         hits = sum(1 for kw in user_keywords if kw.lower() in job_text)
         kw_score = (hits / len(user_keywords)) * 60
@@ -174,8 +246,7 @@ def compute_match_score(job: dict, user_profile: dict) -> int:
             title_score = 30
             break
 
-    # 10% — seniority alignment
-    seniority = (user_profile.get("seniority") or "").lower()
+    # 10% — seniority alignment (fallback)
     seniority_keywords = {
         "junior":    ["junior", "associate", "entry"],
         "mid":       ["mid", "intermediate"],
