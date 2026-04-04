@@ -2738,7 +2738,7 @@ function actionBar(job) {
   if (job.status === 'new') return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
-      <button onclick="act(${job.id},'reject')" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
+      <button onclick="showRejectModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
     </div>`;
   if (job.status === 'approved') {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
@@ -2995,7 +2995,34 @@ function retryApply(id) {
   });
 }
 
-async function act(id, action) {
+const _PASS_REASONS = ['Bad fit','Wrong location','Salary too low','Bad company','Already applied','Other'];
+function _doReject(id, reason) {
+  const m = document.getElementById('pass-modal'); if (m) m.remove();
+  act(id, 'reject', reason);
+}
+function showRejectModal(id) {
+  const ex = document.getElementById('pass-modal'); if (ex) ex.remove();
+  const m = document.createElement('div');
+  m.id = 'pass-modal';
+  m.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+  let html = '<div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 shadow-xl">';
+  html += '<h3 class="font-semibold text-slate-800 mb-3">Pass on this job — why?</h3>';
+  html += '<div class="flex flex-col gap-2">';
+  _PASS_REASONS.forEach(function(r) {
+    html += '<button data-id="' + id + '" data-reason="' + r + '" class="pass-reason-btn text-left px-4 py-2 rounded-lg bg-slate-50 hover:bg-red-50 hover:text-red-600 border border-slate-200 text-sm transition-colors">' + r + '</button>';
+  });
+  html += '<button data-id="' + id + '" data-reason="" class="pass-reason-btn mt-1 text-sm text-slate-400 hover:text-slate-600 text-left px-2 py-1">No reason</button>';
+  html += '</div><button id="pass-cancel" class="mt-3 w-full text-xs text-center text-slate-400 hover:text-slate-600">Cancel</button></div>';
+  m.innerHTML = html;
+  document.body.appendChild(m);
+  m.querySelectorAll('.pass-reason-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { _doReject(Number(btn.dataset.id), btn.dataset.reason); });
+  });
+  const cancelBtn = document.getElementById('pass-cancel'); if (cancelBtn) cancelBtn.addEventListener('click', function() { m.remove(); });
+  m.addEventListener('click', function(e) { if (e.target === m) m.remove(); });
+}
+
+async function act(id, action, reason='') {
   if (action === 'reject') { openPassModal(id); return; }
   const card = document.getElementById('job-'+id);
   if (card) {
@@ -3007,7 +3034,7 @@ async function act(id, action) {
     setTimeout(() => card.remove(), 500);
   }
   try {
-    await api('/api/jobs/'+id+'/'+action, 'POST', {});
+    await api('/api/jobs/'+id+'/'+action, 'POST', {notes: reason});
     loadStats();
   } catch(e) {
     console.error('Action failed:', e);
@@ -3304,7 +3331,6 @@ class Handler(BaseHTTPRequestHandler):
     def get_user(self):
         token = auth.get_token_from_request(self.headers)
         return auth.get_session_user(token)
-
     def require_auth(self):
         """Returns user dict or None (and sends redirect if not authed)."""
         user = self.get_user()
@@ -3927,6 +3953,8 @@ class Handler(BaseHTTPRequestHandler):
                 if reason:
                     detail += f" — {reason}"
                 database.log_activity(user_id, "job_rejected", detail)
+                if reason:
+                    database.record_pass_reason_stat(conn, user_id, reason)
             elif action == "approve":
                 database.log_activity(user_id, "job_approved",
                     f"Approved {job['title']} at {job['company']}")
