@@ -29,13 +29,11 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install pytest
 
       - name: Run tests
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SECRET_KEY: "test-secret-key-ci"
         run: |
-          pytest tests/ -v --tb=short \
-            --cov=. --cov-report=term-missing \
-            --cov-omit="tests/*"
+          pytest tests/ -v --tb=short
