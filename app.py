@@ -137,14 +137,21 @@ def send_whatsapp(account_sid: str, auth_token: str, to_number: str, message: st
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 
+RESEND_VERIFIED_EMAIL = os.environ.get("RESEND_VERIFIED_EMAIL", "eran.ganot@gmail.com")
+
+
 def send_email(to_addr: str, subject: str, body: str, **_kwargs):
-    """Send an email notification via Resend.com API."""
+    """Send an email notification via Resend.com API.
+    Uses onboarding@resend.dev sender which only delivers to the verified account email.
+    """
     api_key = RESEND_API_KEY
     if not api_key:
         raise RuntimeError("RESEND_API_KEY not configured")
+    # onboarding@resend.dev can only send to the Resend account's verified email
+    actual_to = RESEND_VERIFIED_EMAIL if to_addr != RESEND_VERIFIED_EMAIL else to_addr
     payload = json.dumps({
         "from": "Job Hunter <onboarding@resend.dev>",
-        "to": [to_addr],
+        "to": [actual_to],
         "subject": subject,
         "text": body,
     }).encode("utf-8")
@@ -155,12 +162,17 @@ def send_email(to_addr: str, subject: str, body: str, **_kwargs):
     )
     req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        result = json.loads(resp.read())
-        if result.get("id"):
-            print(f"[email/resend] ✅ Sent — {result['id']}")
-        else:
-            print(f"[email/resend] ⚠️  {result}")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            if result.get("id"):
+                print(f"[email/resend] ✅ Sent to {actual_to} — {result['id']}")
+            else:
+                print(f"[email/resend] ⚠️  {result}")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", "ignore")
+        print(f"[email/resend] ❌ HTTP {e.code}: {err_body}")
+        raise RuntimeError(f"Resend API error {e.code}: {err_body}")
 
 
 def _log_notification(user_id: int, channel: str, status: str, error_msg: str = ""):
