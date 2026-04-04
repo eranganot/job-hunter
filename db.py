@@ -122,6 +122,8 @@ def init_db():
         "ALTER TABLE user_profiles ADD COLUMN email_smtp_pass TEXT DEFAULT ''",
         "ALTER TABLE jobs ADD COLUMN publish_date TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN full_description TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_failure_type TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_failure_detail TEXT DEFAULT NULL",
     ]:
         try:
             conn.execute(_migration)
