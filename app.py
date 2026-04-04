@@ -799,6 +799,8 @@ def run_job_apply(user_id: int) -> int:
                 apply_status       = res["status"]
                 apply_confirmation = res.get("confirmation_text", "")[:1000]
                 apply_error        = res.get("error", "")[:500]
+                apply_failure_type   = res.get("apply_failure_type")
+                apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
                 notes = f"Applied via Job Hunter — {apply_status}"
             else:
                 apply_status       = "submitted"
@@ -811,19 +813,21 @@ def run_job_apply(user_id: int) -> int:
                 c2.execute(
                     "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
+                    "apply_failure_type=?, apply_failure_detail=?, "
                     "apply_attempts=COALESCE(apply_attempts,0)+1 "
                     "WHERE id=? AND user_id=?",
                     (today, notes, apply_status, apply_confirmation,
-                     apply_error, j["id"], user_id)
+                     apply_error, apply_failure_type, apply_failure_detail, j["id"], user_id)
                 )
             else:
                 # Failed — keep status='approved' so user can retry
                 c2.execute(
                     "UPDATE jobs SET notes=?, "
                     "apply_status=?, apply_error=?, "
+                    "apply_failure_type=?, apply_failure_detail=?, "
                     "apply_attempts=COALESCE(apply_attempts,0)+1 "
                     "WHERE id=? AND user_id=?",
-                    (notes, apply_status, apply_error, j["id"], user_id)
+                    (notes, apply_status, apply_error, apply_failure_type, apply_failure_detail, j["id"], user_id)
                 )
             c2.commit()
             c2.close()
@@ -2737,10 +2741,13 @@ function actionBar(job) {
       <button onclick="act(${job.id},'reject')" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
     </div>`;
   if (job.status === 'approved') {
+    const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
+    const failTypeBadge = job.apply_failure_type ? `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 mt-1">${_ftLabels[job.apply_failure_type] || job.apply_failure_type}</span>` : '';
     const failInfo = job.apply_status === 'failed' ? `<div class="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-2">⚠️ Auto-apply failed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}. Apply manually or remove.</div>` : '';
     return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       ${failInfo}
+      ${failTypeBadge}
       <div class="space-y-2">
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
         <button onclick="act(${job.id},'reject')" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
@@ -3866,6 +3873,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     "UPDATE jobs SET status='new', apply_status=NULL, "
                     "apply_error=NULL, apply_confirmation=NULL, "
+                    "apply_failure_type=NULL, apply_failure_detail=NULL, "
                     "apply_attempts=0, applied_date=NULL, notes='' "
                     "WHERE id=? AND user_id=?",
                     (job_id, user_id)
@@ -3886,6 +3894,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     "UPDATE jobs SET status='approved', apply_status=NULL, "
                     "apply_error=NULL, apply_confirmation=NULL, "
+                    "apply_failure_type=NULL, apply_failure_detail=NULL, "
                     "apply_attempts=0, applied_date=NULL, notes='' "
                     "WHERE id=? AND user_id=?",
                     (job_id, user_id)
