@@ -169,6 +169,59 @@ def _gh_fill(page, selector: str, value: str):
         pass
 
 
+
+
+# ── Failure type classifier ───────────────────────────────────────────────────
+
+def _classify_failure(error: str, page_text: str = "") -> tuple[str, str]:
+    """Classify an apply error into a typed failure category.
+
+    Returns (failure_type, failure_detail).
+    failure_type: 'captcha' | 'timeout' | 'login_wall' |
+                  'form_validation' | 'network_error' | 'other'
+    """
+    combined = ((error or "") + " " + (page_text or "")).lower()
+    detail = (error or "")[:300]
+
+    if any(k in combined for k in ("captcha", "recaptcha", "hcaptcha",
+                                    "cloudflare", "verify you are human",
+                                    "bot detection", "i am not a robot")):
+        return "captcha", detail
+
+    if any(k in combined for k in ("timeout", "timed out", "time out",
+                                    "deadline exceeded")):
+        return "timeout", detail
+
+    if any(k in combined for k in ("login", "sign in", "log in",
+                                    "please log", "create an account",
+                                    "login required", "account required")):
+        return "login_wall", detail
+
+    if any(k in combined for k in ("required field", "invalid email",
+                                    "validation error", "please fill",
+                                    "missing required", "field is required")):
+        return "form_validation", detail
+
+    if any(k in combined for k in ("connection", "network error", "refused",
+                                    "unreachable", "name resolution",
+                                    "ssl error", "certificate")):
+        return "network_error", detail
+
+    return "other", detail
+
+
+def _add_failure_type(res: dict) -> dict:
+    """Ensure apply_failure_type/detail are set on a result dict."""
+    if "apply_failure_type" not in res:
+        if not res.get("success", False) and res.get("error"):
+            ft, fd = _classify_failure(res["error"])
+            res["apply_failure_type"] = ft
+            res["apply_failure_detail"] = fd
+        else:
+            res["apply_failure_type"] = None
+            res["apply_failure_detail"] = None
+    return res
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
 
 _UA = (
@@ -306,7 +359,8 @@ def submit_application(
     if api_key:
         ANTHROPIC_KEY = api_key
 
-    _base = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    _base = {"success": False, "status": "failed", "confirmation_text": "", "error": "",
+             "apply_failure_type": None, "apply_failure_detail": None}
 
     if not PLAYWRIGHT_AVAILABLE:
         return {**_base, "status": "manual_required",
@@ -335,7 +389,7 @@ def submit_application(
                     pass
             except PWTimeout:
                 browser.close()
-                return {**_base, "error": "Page load timed out"}
+                return {**_base, "apply_failure_type": "timeout", "apply_failure_detail": "Page load timed out after 30s", "error": "Page load timed out"}
 
             page_text = page.evaluate("document.body.innerText") or ""
             lower = page_text.lower()
@@ -351,13 +405,13 @@ def submit_application(
                 print(f"[apply-engine] Detected Greenhouse ATS")
                 res = _apply_greenhouse(page, applicant, cv_path)
                 browser.close()
-                return res
+                return _add_failure_type(res)
 
             if _is_lever(job_url):
                 print(f"[apply-engine] Detected Lever ATS")
                 res = _apply_lever(page, applicant, cv_path)
                 browser.close()
-                return res
+                return _add_failure_type(res)
 
             # 3. Click Apply button if no form visible yet ────────────────────
             page_html = page.content()
@@ -383,7 +437,8 @@ def submit_application(
                             lower = page_text.lower()
                             if any(p in lower for p in _BLOCKER_PHRASES):
                                 browser.close()
-                                return {**_base, "status": "manual_required",
+                                return {**_base, "status": "manual_required", "apply_failure_type": "login_wall",
+                                        "apply_failure_detail": "Login required after clicking Apply",
                                         "error": "Login required after clicking Apply"}
                 except Exception as e:
                     print(f"[apply-engine] apply-button error: {e}")
@@ -459,7 +514,8 @@ def submit_application(
 
             if not submitted:
                 browser.close()
-                return {**_base, "error": "Could not find or click submit button"}
+                ft, fd = _classify_failure("Could not find or click submit button")
+                return {**_base, "apply_failure_type": ft, "apply_failure_detail": fd, "error": "Could not find or click submit button"}
 
             # 6. Wait for result page ─────────────────────────────────────────
             try:
@@ -495,7 +551,7 @@ def submit_application(
 
     except Exception as e:
         err = str(e)
-        status = "manual_required" if any(
-            x in err.lower() for x in ("login", "captcha", "account")
-        ) else "failed"
-        return {**_base, "status": status, "error": err}
+        ft, fd = _classify_failure(err)
+        status = "manual_required" if ft in ("captcha", "login_wall") else "failed"
+        return {**_base, "status": status, "error": err,
+                "apply_failure_type": ft, "apply_failure_detail": fd}
