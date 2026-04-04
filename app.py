@@ -1430,39 +1430,64 @@ dz.addEventListener('drop', e => {
   handleFile(e.dataTransfer.files[0]);
 });
 
-async function handleFile(file) {
+function handleFile(file) {
   if (!file || !file.name.endsWith('.pdf')) {
     showUploadStatus('Please upload a PDF file.', 'error'); return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showUploadStatus('❌ File too large (max 10 MB).', 'error'); return;
   }
   document.getElementById('drop-icon').textContent = '⏳';
   document.getElementById('drop-text').textContent = `Uploading ${file.name}…`;
   showUploadStatus('Uploading…', 'info');
 
-  const fd = new FormData();
-  fd.append('cv', file);
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
-    const r = await fetch('/api/upload-cv', {method:'POST', body:fd, signal:controller.signal});
-    clearTimeout(timer);
-    const data = await r.json();
-    if (data.success) {
-      cvUploaded = true;
-      document.getElementById('drop-icon').textContent = '✅';
-      document.getElementById('drop-text').textContent = file.name + ' ready';
-      showUploadStatus('CV uploaded! Click below to analyze it.', 'success');
-      document.getElementById('analyze-btn').classList.remove('hidden');
-      document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis →';
-    } else {
-      showUploadStatus('❌ ' + (data.error || 'Upload failed.'), 'error');
+  const reader = new FileReader();
+  reader.onload = function() {
+    const base64 = reader.result.split(',')[1];
+    const payload = JSON.stringify({filename: file.name, data: base64});
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload-cv', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.timeout = 30000;
+    xhr.onload = function() {
+      try {
+        const d = JSON.parse(xhr.responseText);
+        if (d.success) {
+          cvUploaded = true;
+          document.getElementById('drop-icon').textContent = '✅';
+          document.getElementById('drop-text').textContent = file.name + ' ready';
+          showUploadStatus('CV uploaded! Click below to analyze it.', 'success');
+          document.getElementById('analyze-btn').classList.remove('hidden');
+          document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis →';
+        } else {
+          showUploadStatus('❌ ' + (d.error || 'Upload failed.'), 'error');
+          document.getElementById('drop-icon').textContent = '📄';
+          document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
+        }
+      } catch(e) {
+        showUploadStatus('❌ Server returned invalid response.', 'error');
+        document.getElementById('drop-icon').textContent = '📄';
+        document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
+      }
+    };
+    xhr.onerror = function() {
+      showUploadStatus('❌ Network error. Check your connection.', 'error');
       document.getElementById('drop-icon').textContent = '📄';
       document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-    }
-  } catch(e) {
-    showUploadStatus('❌ ' + (e.name === 'AbortError' ? 'Upload timed out. Try a smaller file.' : 'Upload failed: ' + e.message), 'error');
+    };
+    xhr.ontimeout = function() {
+      showUploadStatus('❌ Upload timed out. Try a smaller file.', 'error');
+      document.getElementById('drop-icon').textContent = '📄';
+      document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
+    };
+    xhr.send(payload);
+  };
+  reader.onerror = function() {
+    showUploadStatus('❌ Could not read file.', 'error');
     document.getElementById('drop-icon').textContent = '📄';
     document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-  }
+  };
+  reader.readAsDataURL(file);
 }
 
 function showUploadStatus(msg, type) {
@@ -2171,29 +2196,42 @@ async function saveSchedule() {
   showToast();
 }
 
-async function uploadCV(file) {
+function uploadCV(file) {
   if (!file || !file.name.endsWith('.pdf')) {
     showCVStatus('Please upload a PDF file.', 'error'); return;
   }
-  showCVStatus('Uploading…', 'info');
-  const fd = new FormData();
-  fd.append('cv', file);
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
-    const r = await fetch('/api/upload-cv', {method:'POST', body:fd, signal:controller.signal});
-    clearTimeout(timer);
-    const d = await r.json();
-    if (d.success) {
-      showCVStatus('✅ CV uploaded successfully!', 'success');
-      document.getElementById('cv-current').textContent = '✅ New CV on file.';
-      document.getElementById('cv-analyze-btn').classList.remove('hidden');
-    } else {
-      showCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
-    }
-  } catch(e) {
-    showCVStatus('❌ ' + (e.name === 'AbortError' ? 'Upload timed out. Try a smaller file.' : 'Upload failed: ' + e.message), 'error');
+  if (file.size > 10 * 1024 * 1024) {
+    showCVStatus('❌ File too large (max 10 MB).', 'error'); return;
   }
+  showCVStatus('Uploading…', 'info');
+  const reader = new FileReader();
+  reader.onload = function() {
+    const base64 = reader.result.split(',')[1];
+    const payload = JSON.stringify({filename: file.name, data: base64});
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload-cv', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.timeout = 30000;
+    xhr.onload = function() {
+      try {
+        const d = JSON.parse(xhr.responseText);
+        if (d.success) {
+          showCVStatus('✅ CV uploaded successfully!', 'success');
+          document.getElementById('cv-current').textContent = '✅ New CV on file.';
+          document.getElementById('cv-analyze-btn').classList.remove('hidden');
+        } else {
+          showCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
+        }
+      } catch(e) {
+        showCVStatus('❌ Server returned invalid response.', 'error');
+      }
+    };
+    xhr.onerror = function() { showCVStatus('❌ Network error. Check your connection.', 'error'); };
+    xhr.ontimeout = function() { showCVStatus('❌ Upload timed out. Try a smaller file.', 'error'); };
+    xhr.send(payload);
+  };
+  reader.onerror = function() { showCVStatus('❌ Could not read file.', 'error'); };
+  reader.readAsDataURL(file);
 }
 
 async function reanalyzeCV() {
@@ -3618,30 +3656,45 @@ class Handler(BaseHTTPRequestHandler):
         # ── CV Upload ──
         if path == "/api/upload-cv":
             try:
+                import base64 as b64mod
                 ct = self.headers.get("Content-Type", "")
                 cl = self.headers.get("Content-Length", "0")
-                te = self.headers.get("Transfer-Encoding", "")
-                print(f"[cv/upload] headers → Content-Type={ct!r}  Content-Length={cl}  Transfer-Encoding={te!r}")
+                print(f"[cv/upload] Content-Type={ct!r}  Content-Length={cl}")
                 body = self.read_body()
                 print(f"[cv/upload] body size = {len(body)} bytes")
                 if not body:
-                    self.send_json({"error": "No data received. Try again or use a different browser."})
+                    self.send_json({"error": "No data received. Try again."})
                     return
-                parts = parse_multipart(self.headers, body)
-                cv_part = parts.get("cv")
-                if not cv_part or not isinstance(cv_part, dict):
-                    print(f"[cv/upload] parse_multipart keys: {list(parts.keys())}")
-                    self.send_json({"error": "No file received. Multipart parse failed."})
-                    return
-                if not cv_part["filename"].lower().endswith(".pdf"):
+
+                # Accept JSON with base64 data (mobile-safe) or multipart
+                if "application/json" in ct:
+                    payload = json.loads(body)
+                    filename = payload.get("filename", "upload.pdf")
+                    b64data = payload.get("data", "")
+                    if not b64data:
+                        self.send_json({"error": "No file data received."})
+                        return
+                    file_data = b64mod.b64decode(b64data)
+                    print(f"[cv/upload] JSON mode: file={filename}  decoded={len(file_data)} bytes")
+                else:
+                    parts = parse_multipart(self.headers, body)
+                    cv_part = parts.get("cv")
+                    if not cv_part or not isinstance(cv_part, dict):
+                        print(f"[cv/upload] parse_multipart keys: {list(parts.keys())}")
+                        self.send_json({"error": "No file received."})
+                        return
+                    filename = cv_part["filename"]
+                    file_data = cv_part["data"]
+                    print(f"[cv/upload] multipart mode: file={filename}  size={len(file_data)} bytes")
+
+                if not filename.lower().endswith(".pdf"):
                     self.send_json({"error": "Only PDF files are accepted."})
                     return
-                print(f"[cv/upload] file={cv_part['filename']}  size={len(cv_part['data'])} bytes")
                 user_upload_dir = os.path.join(UPLOADS_DIR, str(user_id))
                 os.makedirs(user_upload_dir, exist_ok=True)
                 cv_path = os.path.join(user_upload_dir, "cv.pdf")
                 with open(cv_path, "wb") as f:
-                    f.write(cv_part["data"])
+                    f.write(file_data)
                 auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0)
                 database.log_activity(user_id, "cv_uploaded", "Uploaded new CV PDF")
                 print(f"[cv] ✅ Saved CV for user {user_id}: {cv_path}")
@@ -3650,7 +3703,7 @@ class Handler(BaseHTTPRequestHandler):
                 import traceback
                 print(f"[cv/upload] ❌ Exception: {exc}\n{traceback.format_exc()}")
                 try:
-                    self.send_json({"error": f"Server error during upload: {exc}"}, code=500)
+                    self.send_json({"error": f"Server error: {exc}"}, code=500)
                 except Exception:
                     pass
             return
