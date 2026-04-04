@@ -1429,7 +1429,7 @@ dz.addEventListener('drop', e => {
   handleFile(e.dataTransfer.files[0]);
 });
 
-function handleFile(file) {
+async function handleFile(file) {
   if (!file || !file.name.endsWith('.pdf')) {
     showUploadStatus('Please upload a PDF file.', 'error'); return;
   }
@@ -1439,23 +1439,29 @@ function handleFile(file) {
 
   const fd = new FormData();
   fd.append('cv', file);
-  fetch('/api/upload-cv', {method:'POST', body:fd})
-    .then(r => r.json())
-    .then(data => {
-      if (data.success) {
-        cvUploaded = true;
-        document.getElementById('drop-icon').textContent = '✅';
-        document.getElementById('drop-text').textContent = file.name + ' ready';
-        showUploadStatus('CV uploaded! Click below to analyze it.', 'success');
-        document.getElementById('analyze-btn').classList.remove('hidden');
-        document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis →';
-      } else {
-        showUploadStatus(data.error || 'Upload failed.', 'error');
-        document.getElementById('drop-icon').textContent = '📄';
-        document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-      }
-    })
-    .catch(() => showUploadStatus('Upload error. Please try again.', 'error'));
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    const r = await fetch('/api/upload-cv', {method:'POST', body:fd, signal:controller.signal});
+    clearTimeout(timer);
+    const data = await r.json();
+    if (data.success) {
+      cvUploaded = true;
+      document.getElementById('drop-icon').textContent = '✅';
+      document.getElementById('drop-text').textContent = file.name + ' ready';
+      showUploadStatus('CV uploaded! Click below to analyze it.', 'success');
+      document.getElementById('analyze-btn').classList.remove('hidden');
+      document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis →';
+    } else {
+      showUploadStatus('❌ ' + (data.error || 'Upload failed.'), 'error');
+      document.getElementById('drop-icon').textContent = '📄';
+      document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
+    }
+  } catch(e) {
+    showUploadStatus('❌ ' + (e.name === 'AbortError' ? 'Upload timed out. Try a smaller file.' : 'Upload failed: ' + e.message), 'error');
+    document.getElementById('drop-icon').textContent = '📄';
+    document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
+  }
 }
 
 function showUploadStatus(msg, type) {
@@ -3579,24 +3585,42 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── CV Upload ──
         if path == "/api/upload-cv":
-            body = self.read_body()
-            parts = parse_multipart(self.headers, body)
-            cv_part = parts.get("cv")
-            if not cv_part or not isinstance(cv_part, dict):
-                self.send_json({"error": "No file received."})
-                return
-            if not cv_part["filename"].lower().endswith(".pdf"):
-                self.send_json({"error": "Only PDF files are accepted."})
-                return
-            user_upload_dir = os.path.join(UPLOADS_DIR, str(user_id))
-            os.makedirs(user_upload_dir, exist_ok=True)
-            cv_path = os.path.join(user_upload_dir, "cv.pdf")
-            with open(cv_path, "wb") as f:
-                f.write(cv_part["data"])
-            auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0)
-            database.log_activity(user_id, "cv_uploaded", "Uploaded new CV PDF")
-            print(f"[cv] Saved CV for user {user_id}: {cv_path}")
-            self.send_json({"success": True, "path": cv_path})
+            try:
+                ct = self.headers.get("Content-Type", "")
+                cl = self.headers.get("Content-Length", "0")
+                te = self.headers.get("Transfer-Encoding", "")
+                print(f"[cv/upload] headers → Content-Type={ct!r}  Content-Length={cl}  Transfer-Encoding={te!r}")
+                body = self.read_body()
+                print(f"[cv/upload] body size = {len(body)} bytes")
+                if not body:
+                    self.send_json({"error": "No data received. Try again or use a different browser."})
+                    return
+                parts = parse_multipart(self.headers, body)
+                cv_part = parts.get("cv")
+                if not cv_part or not isinstance(cv_part, dict):
+                    print(f"[cv/upload] parse_multipart keys: {list(parts.keys())}")
+                    self.send_json({"error": "No file received. Multipart parse failed."})
+                    return
+                if not cv_part["filename"].lower().endswith(".pdf"):
+                    self.send_json({"error": "Only PDF files are accepted."})
+                    return
+                print(f"[cv/upload] file={cv_part['filename']}  size={len(cv_part['data'])} bytes")
+                user_upload_dir = os.path.join(UPLOADS_DIR, str(user_id))
+                os.makedirs(user_upload_dir, exist_ok=True)
+                cv_path = os.path.join(user_upload_dir, "cv.pdf")
+                with open(cv_path, "wb") as f:
+                    f.write(cv_part["data"])
+                auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0)
+                database.log_activity(user_id, "cv_uploaded", "Uploaded new CV PDF")
+                print(f"[cv] ✅ Saved CV for user {user_id}: {cv_path}")
+                self.send_json({"success": True, "path": cv_path})
+            except Exception as exc:
+                import traceback
+                print(f"[cv/upload] ❌ Exception: {exc}\n{traceback.format_exc()}")
+                try:
+                    self.send_json({"error": f"Server error during upload: {exc}"}, code=500)
+                except Exception:
+                    pass
             return
 
         # ── CV Analyze ──
