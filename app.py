@@ -2171,14 +2171,21 @@ async function uploadCV(file) {
   showCVStatus('Uploading…', 'info');
   const fd = new FormData();
   fd.append('cv', file);
-  const r = await fetch('/api/upload-cv', {method:'POST', body:fd});
-  const d = await r.json();
-  if (d.success) {
-    showCVStatus('✅ CV uploaded successfully!', 'success');
-    document.getElementById('cv-current').textContent = '✅ New CV on file.';
-    document.getElementById('cv-analyze-btn').classList.remove('hidden');
-  } else {
-    showCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    const r = await fetch('/api/upload-cv', {method:'POST', body:fd, signal:controller.signal});
+    clearTimeout(timer);
+    const d = await r.json();
+    if (d.success) {
+      showCVStatus('✅ CV uploaded successfully!', 'success');
+      document.getElementById('cv-current').textContent = '✅ New CV on file.';
+      document.getElementById('cv-analyze-btn').classList.remove('hidden');
+    } else {
+      showCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
+    }
+  } catch(e) {
+    showCVStatus('❌ ' + (e.name === 'AbortError' ? 'Upload timed out. Try a smaller file.' : 'Upload failed: ' + e.message), 'error');
   }
 }
 
@@ -3195,7 +3202,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", 0))
-        return self.rfile.read(length) if length else b""
+        if length:
+            return self.rfile.read(length)
+        # Handle chunked transfer encoding (common on mobile browsers)
+        te = self.headers.get("Transfer-Encoding", "")
+        if "chunked" in te.lower():
+            chunks = []
+            while True:
+                size_line = self.rfile.readline().strip()
+                if not size_line:
+                    break
+                try:
+                    size = int(size_line, 16)
+                except ValueError:
+                    break
+                if size == 0:
+                    break
+                chunks.append(self.rfile.read(size))
+                self.rfile.read(2)  # consume trailing CRLF
+            return b"".join(chunks)
+        return b""
 
     def read_json(self) -> dict:
         try:
