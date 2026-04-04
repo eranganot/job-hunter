@@ -364,10 +364,19 @@ def run_job_search(user_id: int):
                 'drivenets': 'DriveNets', 'orcasecurity': 'Orca Security',
                 'aquasecurity': 'Aqua Security', 'seekingalpha': 'Seeking Alpha',
                 'fundbox': 'Fundbox', 'ironsource': 'ironSource',
+                # Global tech companies with Israeli offices (Greenhouse)
+                'cyberark': 'CyberArk', 'varonis': 'Varonis', 'zscaler': 'Zscaler',
+                'sisense': 'Sisense', 'gong-io': 'Gong', 'armis': 'Armis',
+                'safebreach': 'SafeBreach', 'cellebrite': 'Cellebrite', 'sealights': 'SeaLights',
+                'datarails': 'DataRails', 'bizzabo': 'Bizzabo', 'lusha': 'Lusha',
+                'perion': 'Perion', 'akamai': 'Akamai', 'illumio': 'Illumio',
             }
             # -- Israeli company slugs (Lever) --
             _LV_COMPANIES = {
                 'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
+                # Global tech with Israeli offices (Lever)
+                'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
+                'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
             }
             # Build title match phrases from user preferences
             _phrases = [t.lower().strip() for t in titles_ if t.strip()]
@@ -435,7 +444,7 @@ def run_job_search(user_id: int):
                                         "location": loc, "url": jurl,
                                         "description": desc, "full_description": full_desc, "source": "lever"})
             # -- Run all API queries in parallel --
-            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever boards...")
+            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever boards (global + IL)...")
             threads = []
             for slug, name in _GH_COMPANIES.items():
                 threads.append(_thr.Thread(target=_query_gh, args=(slug, name), daemon=True))
