@@ -62,7 +62,7 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
     )
 
     payload = {
-        "model": "claude-opus-4-6",
+        "model": "cclaude-sonnet-4-6-20250514,  # Sonnet: same quality as Opus for structured extraction, ~10x cheaper
         "max_tokens": 1024,
         "messages": [{
             "role": "user",
