@@ -124,6 +124,8 @@ def init_db():
         "ALTER TABLE jobs ADD COLUMN full_description TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_failure_type TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_failure_detail TEXT DEFAULT NULL",
+        "CREATE TABLE IF NOT EXISTS user_blocklist (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, company_name TEXT NOT NULL, reason TEXT DEFAULT '', date_added TEXT DEFAULT (datetime('now')), UNIQUE(user_id, company_name))",
+        "CREATE TABLE IF NOT EXISTS pass_reason_stats (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, reason TEXT NOT NULL, count INTEGER DEFAULT 1, last_hit_date TEXT DEFAULT (datetime('now')), UNIQUE(user_id, reason))",
     ]:
         try:
             conn.execute(_migration)
@@ -139,6 +141,28 @@ def init_db():
             notes        TEXT,
             created_date TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_blocklist (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            company_name TEXT NOT NULL,
+            reason       TEXT DEFAULT '',
+            date_added   TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, company_name)
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pass_reason_stats (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            reason        TEXT NOT NULL,
+            count         INTEGER DEFAULT 1,
+            last_hit_date TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, reason)
         )
     """)
 
@@ -328,3 +352,45 @@ def write_users_config(base_dir: str):
     path = os.path.join(base_dir, "users_config.json")
     with open(path, "w") as f:
         json.dump(users, f, indent=2, default=str)
+
+# ── Pass-reason feedback loop (improvement #2) ──────────────────────────────
+
+def add_to_blocklist(conn: sqlite3.Connection, user_id: int, company_name: str, reason: str = "") -> None:
+    """Add a company to the user's blocklist (idempotent — ignores duplicates)."""
+    conn.execute(
+        "INSERT OR IGNORE INTO user_blocklist (user_id, company_name, reason) VALUES (?, ?, ?)",
+        (user_id, company_name, reason or "")
+    )
+    conn.commit()
+
+
+def get_blocklist(conn: sqlite3.Connection, user_id: int) -> list:
+    """Return list of company names the user has blocklisted."""
+    rows = conn.execute(
+        "SELECT company_name FROM user_blocklist WHERE user_id=? ORDER BY date_added DESC",
+        (user_id,)
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def record_pass_reason_stat(conn: sqlite3.Connection, user_id: int, reason: str) -> None:
+    """Increment (or insert) the pass-reason count for a user."""
+    from datetime import datetime
+    conn.execute(
+        """INSERT INTO pass_reason_stats (user_id, reason, count, last_hit_date)
+           VALUES (?, ?, 1, ?)
+           ON CONFLICT(user_id, reason) DO UPDATE SET
+               count = count + 1,
+               last_hit_date = excluded.last_hit_date""",
+        (user_id, reason, datetime.now().isoformat())
+    )
+    conn.commit()
+
+
+def get_pass_reason_stats(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Return {reason: count} dict for the given user, sorted by count desc."""
+    rows = conn.execute(
+        "SELECT reason, count FROM pass_reason_stats WHERE user_id=? ORDER BY count DESC",
+        (user_id,)
+    ).fetchall()
+    return {row[0]: row[1] for row in rows}
