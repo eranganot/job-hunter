@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
 import auth
@@ -3207,9 +3208,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length", 0))
-        if length:
-            return self.rfile.read(length)
+        try:
+            cl_header = self.headers.get("Content-Length", "")
+            length = int(cl_header) if cl_header.strip() else 0
+        except (ValueError, TypeError):
+            length = 0
+        if length > 0:
+            data = self.rfile.read(length)
+            print(f"[read_body] Content-Length={length}, read {len(data)} bytes")
+            return data
         # Handle chunked transfer encoding (common on mobile browsers)
         te = self.headers.get("Transfer-Encoding", "")
         if "chunked" in te.lower():
@@ -3226,7 +3233,21 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 chunks.append(self.rfile.read(size))
                 self.rfile.read(2)  # consume trailing CRLF
-            return b"".join(chunks)
+            result = b"".join(chunks)
+            print(f"[read_body] chunked, total {len(result)} bytes")
+            return result
+        # Fallback: try to read whatever is available (some proxies strip headers)
+        import select
+        try:
+            if hasattr(self.rfile, 'fileno'):
+                ready, _, _ = select.select([self.rfile], [], [], 2.0)
+                if ready:
+                    data = self.rfile.read(10 * 1024 * 1024)  # up to 10MB
+                    print(f"[read_body] fallback read {len(data)} bytes")
+                    return data
+        except Exception as e:
+            print(f"[read_body] fallback select error: {e}")
+        print("[read_body] no Content-Length, not chunked, fallback empty")
         return b""
 
     def read_json(self) -> dict:
@@ -3524,6 +3545,17 @@ class Handler(BaseHTTPRequestHandler):
     # ── POST ──────────────────────────────────────────────────────────────────
 
     def do_POST(self):
+        try:
+            self._do_POST_inner()
+        except Exception as exc:
+            import traceback
+            print(f"[do_POST] ❌ Unhandled exception on {self.path}: {exc}\n{traceback.format_exc()}")
+            try:
+                self.send_json({"error": f"Server error: {exc}"}, code=500)
+            except Exception:
+                pass
+
+    def _do_POST_inner(self):
         parsed = urlparse(self.path)
         path   = parsed.path
 
@@ -4116,7 +4148,10 @@ if __name__ == "__main__":
     print(f"📱  Mobile:        {MOBILE_URL}   ← open on your phone")
     print(f"⌨️   Ctrl+C to stop\n")
 
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    server = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
