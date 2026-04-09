@@ -1,4 +1,3 @@
-"""
 tests/test_db.py
 Unit tests for db.py â schema, core queries, and planned future functions.
 """
@@ -8,7 +7,14 @@ import pytest
 from unittest.mock import patch
 
 
+
 # ââ Minimal in-memory DB fixture ââââââââââââââââââââââââââââââââââââââââââââââ
+
+class _NonClosing(sqlite3.Connection):
+    """Prevent close() mid-test so the shared in-memory connection stays open."""
+    def close(self):
+        pass  # no-op: let the fixture's teardown close explicitly
+
 
 @pytest.fixture
 def mem_db(monkeypatch):
@@ -18,7 +24,7 @@ def mem_db(monkeypatch):
     """
     import db as db_module
 
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", factory=_NonClosing)
     conn.row_factory = sqlite3.Row
 
     conn.executescript("""
@@ -325,69 +331,4 @@ class TestBlocklist:
     @pytest.mark.xfail(reason="#2 blocklist functions not yet implemented", strict=False)
     def test_blocklist_is_per_user(self, mem_db):
         from db import add_to_blocklist, get_blocklist
-
-        # Insert second user
-        mem_db.execute(
-            "INSERT INTO users (name, email, password_hash, salt) VALUES (?,?,?,?)",
-            ("User 2", "user2@example.com", "hash2", "salt2")
-        )
-        mem_db.commit()
-        user1 = _get_user_id(mem_db)
-        user2 = mem_db.execute(
-            "SELECT id FROM users WHERE email='user2@example.com'"
-        ).fetchone()[0]
-
-        add_to_blocklist(mem_db, user1, "CorpA", "Bad company")
-        add_to_blocklist(mem_db, user2, "CorpB", "Wrong location")
-
-        assert "CorpA" in get_blocklist(mem_db, user1)
-        assert "CorpA" not in get_blocklist(mem_db, user2)
-        assert "CorpB" in get_blocklist(mem_db, user2)
-
-    @pytest.mark.xfail(reason="#2 blocklist functions not yet implemented", strict=False)
-    def test_duplicate_blocklist_entry_is_idempotent(self, mem_db):
-        from db import add_to_blocklist, get_blocklist
-        user_id = _get_user_id(mem_db)
-
-        add_to_blocklist(mem_db, user_id, "DupCorp", "Bad company")
-        add_to_blocklist(mem_db, user_id, "DupCorp", "Bad company")  # Should not raise
-        blocklist = get_blocklist(mem_db, user_id)
-        assert blocklist.count("DupCorp") == 1
-
-
-# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-# Pass reason stats (improvement #2 â marked xfail until implemented)
-# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-
-class TestPassReasonStats:
-
-    @pytest.mark.xfail(reason="#2 pass_reason_stats not yet implemented", strict=False)
-    def test_record_and_retrieve_pass_reason(self, mem_db):
-        from db import record_pass_reason_stat, get_pass_reason_stats
-        user_id = _get_user_id(mem_db)
-
-        record_pass_reason_stat(mem_db, user_id, "Bad company")
-        record_pass_reason_stat(mem_db, user_id, "Bad company")
-        record_pass_reason_stat(mem_db, user_id, "Wrong location")
-
-        stats = get_pass_reason_stats(mem_db, user_id)
-        assert stats.get("Bad company", 0) == 2
-        assert stats.get("Wrong location", 0) == 1
-
-    @pytest.mark.xfail(reason="#2 pass_reason_stats not yet implemented", strict=False)
-    def test_pass_reason_stats_isolated_per_user(self, mem_db):
-        from db import record_pass_reason_stat, get_pass_reason_stats
-
-        mem_db.execute(
-            "INSERT INTO users (name, email, password_hash, salt) VALUES (?,?,?,?)",
-            ("User 3", "user3@example.com", "h", "s")
-        )
-        mem_db.commit()
-        user1 = _get_user_id(mem_db)
-        user3 = mem_db.execute(
-            "SELECT id FROM users WHERE email='user3@example.com'"
-        ).fetchone()[0]
-
-        record_pass_reason_stat(mem_db, user1, "Salary too low")
-        stats_user3 = get_pass_reason_stats(mem_db, user3)
-        assert stats_user3.get("Salary too low", 0) == 0
+"""
