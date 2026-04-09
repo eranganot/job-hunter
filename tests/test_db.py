@@ -1,9 +1,12 @@
+"""
+tests/test_db.py
 Unit tests for db.py — schema, core queries, and planned future functions.
 """
 import json
 import sqlite3
 import pytest
 from unittest.mock import patch
+
 
 
 
@@ -330,4 +333,3 @@ class TestBlocklist:
 
     @pytest.mark.xfail(reason="#2 blocklist functions not yet implemented", strict=False)
     def test_blocklist_is_per_user(self, mem_db):
-tests/test_db.py
