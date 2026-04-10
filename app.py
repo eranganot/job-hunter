@@ -3886,7 +3886,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Job actions ──
-        m = re.match(r"^/api/jobs/(\d+)/(approve|reject|later|applied|failed|retry)$", path)
+        m = re.match(r"^/api/jobs/(\d+)/(approve|reject|later|applied|failed|retry|restore)$", path)
         if m:
             job_id = int(m.group(1))
             action = m.group(2)
