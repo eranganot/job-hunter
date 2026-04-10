@@ -2672,7 +2672,7 @@ function selectReason(reason) {
   doReject(id, reason);
 }
 
-async function doReject(id, reason) {
+async async function doReject(id, reason) {
   const card = document.getElementById('job-'+id);
   if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
   await api('/api/jobs/'+id+'/reject', 'POST', {reason});
@@ -2746,7 +2746,7 @@ function actionBar(job) {
   if (job.status === 'new') return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
-      <button onclick="showRejectModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
+      <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
     </div>`;
   if (job.status === 'approved') {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
@@ -3078,7 +3078,7 @@ async function restoreToNew(id) {
   try {
     await api('/api/jobs/'+id+'/restore', 'POST', {});
     showToast('Job restored to New tab');
-    loadAll();
+    setTab('new');
   } catch(e) {
     console.error('Restore failed:', e);
     loadAll();
