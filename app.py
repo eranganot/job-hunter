@@ -2672,7 +2672,7 @@ function selectReason(reason) {
   doReject(id, reason);
 }
 
-async async function doReject(id, reason) {
+async function doReject(id, reason) {
   const card = document.getElementById('job-'+id);
   if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
   await api('/api/jobs/'+id+'/reject', 'POST', {reason});
