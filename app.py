@@ -2880,7 +2880,7 @@ function actionBar(job) {
       ${failTypeBadge}
       <div class="space-y-2">
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
-        <button onclick="act(${job.id},'reject')" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
+        <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
       </div>
       <p class="text-xs text-slate-400 text-center">⏰ Auto-apply scheduled at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</p>
     </div>`;
