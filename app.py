@@ -3633,7 +3633,7 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
             jobs_list = [dict(r) for r in rows]
 
-            # Auto-compute match/candidate scores for any unscored jobs
+            # Auto-compute match/candidate scores for any unscored jobs (async)
             try:
                 from ai_analysis import compute_match_score, compute_candidate_score
                 profile = conn.execute(
@@ -3641,22 +3641,41 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if profile and profile["cv_analyzed"]:
                     profile_dict = dict(profile)
-                    updated = False
-                    for job in jobs_list:
-                        if job.get("match_score") is None:
-                            ms = compute_match_score(job, profile_dict)
-                            cs = compute_candidate_score(job, profile_dict)
-                            conn.execute(
-                                "UPDATE jobs SET match_score=?, candidate_score=? WHERE id=?",
-                                (ms, cs, job["id"])
-                            )
-                            job["match_score"]     = ms
-                            job["candidate_score"] = cs
-                            updated = True
-                    if updated:
-                        conn.commit()
+                    unscored_ids = [j["id"] for j in jobs_list if j.get("match_score") is None]
+                    if unscored_ids:
+                        def _bg_score(job_ids, uid, pd):
+                            try:
+                                c2 = database.get_db()
+                                for jid in job_ids:
+                                    row = c2.execute(
+                                        "SELECT * FROM jobs WHERE id=? AND user_id=?",
+                                        (jid, uid)
+                                    ).fetchone()
+                                    if not row:
+                                        continue
+                                    jd = dict(row)
+                                    if jd.get("match_score") is not None:
+                                        continue
+                                    try:
+                                        ms = compute_match_score(jd, pd)
+                                        cs = compute_candidate_score(jd, pd)
+                                        c2.execute(
+                                            "UPDATE jobs SET match_score=?, candidate_score=? WHERE id=?",
+                                            (ms, cs, jid)
+                                        )
+                                        c2.commit()
+                                    except Exception as ie:
+                                        print(f"[score-bg] job {jid}: {ie}")
+                                c2.close()
+                            except Exception as be:
+                                print(f"[score-bg] fatal: {be}")
+                        threading.Thread(
+                            target=_bg_score,
+                            args=(unscored_ids, user["id"], profile_dict),
+                            daemon=True
+                        ).start()
             except Exception as e:
-                print(f"[score] Error computing scores: {e}")
+                print(f"[score] Error spawning score thread: {e}")
 
             conn.close()
             self.send_json(jobs_list)
@@ -4037,7 +4056,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Remove rejected pattern so it won't be filtered in future searches
                 conn.execute(
                     "DELETE FROM rejected_patterns WHERE user_id=? AND LOWER(TRIM(company))=LOWER(TRIM(?)) AND LOWER(TRIM(title))=LOWER(TRIM(?))",
-                    (user_id, job.get("company",""), job.get("title",""))
+                    (user_id, job["company"] or "", job["title"] or "")
                 )
                 conn.commit()
                 conn.close()
