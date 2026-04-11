@@ -513,6 +513,128 @@ def run_job_search(user_id: int):
             except Exception as _sne:
                 print(f"[search] SpeakNow error: {_sne}")
 
+            # -- Sparkhire careers (best-effort) --
+            _SPARKHIRE_COMPANIES = [
+                ('hibob', 'HiBob'), ('monday', 'monday.com'), ('fiverr', 'Fiverr'),
+                ('rapyd', 'Rapyd'), ('gong', 'Gong'), ('lemonade', 'Lemonade'),
+            ]
+            _sparkhire_count = 0
+            for _sh_slug, _sh_name in _SPARKHIRE_COMPANIES:
+                try:
+                    _sh_req = _ur2.Request(f"https://candidate.sparkhire.com/users/{_sh_slug}/jobs", headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
+                    with _ur2.urlopen(_sh_req, timeout=10) as _sh_resp:
+                        _sh_html = _sh_resp.read().decode('utf-8', errors='replace')
+                    import re as _re_sh
+                    _sh_jobs = _re_sh.findall(r'<a[^>]+href="([^"]+)"[^>]*>\s*<[^>]+>([^<]{5,120})</[^>]+>\s*</a>', _sh_html)
+                    for _sh_href, _sh_title in _sh_jobs[:15]:
+                        _t = _sh_title.strip()
+                        if _title_match(_t):
+                            _u = _sh_href if _sh_href.startswith('http') else f"https://candidate.sparkhire.com{_sh_href}"
+                            all_raw.append({"title": _t, "company": _sh_name, "location": "", "url": _u, "description": "", "source": "sparkhire"})
+                            _sparkhire_count += 1
+                except Exception:
+                    pass
+            print(f"[search] Sparkhire: {_sparkhire_count} jobs matched")
+
+            # -- Workday tenants (public JSON search API) --
+            _WORKDAY_TENANTS = [
+                ("nvidia", "wd5", "nvidiaexternal", "NVIDIA"),
+                ("ibm", "wd1", "IBM", "IBM"),
+                ("ebay", "wd1", "ebay", "eBay"),
+                ("paypal", "wd1", "paypal", "PayPal"),
+                ("intel", "wd1", "External", "Intel"),
+                ("hpe", "wd1", "Jobsatyou", "HPE"),
+                ("vmware", "wd1", "VMware", "VMware"),
+                ("accenture", "wd3", "AccentureCareers", "Accenture"),
+                ("salesforce", "wd12", "External_Career_Site", "Salesforce"),
+                ("dell", "wd1", "External", "Dell"),
+            ]
+            _workday_count = 0
+            for _wd_t, _wd_s, _wd_st, _wd_n in _WORKDAY_TENANTS:
+                try:
+                    _wd_url = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com/wday/cxs/{_wd_t}/{_wd_st}/jobs"
+                    _wd_body = _js2.dumps({"limit": 20, "offset": 0, "searchText": ""}).encode('utf-8')
+                    _wd_req = _ur2.Request(_wd_url, data=_wd_body, headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0 JobHunter/1.0"})
+                    with _ur2.urlopen(_wd_req, timeout=12) as _wd_resp:
+                        _wd_data = _js2.loads(_wd_resp.read().decode('utf-8', errors='replace'))
+                    for _wd_j in (_wd_data.get("jobPostings") or [])[:20]:
+                        _wd_tt = (_wd_j.get("title") or "").strip()
+                        if _title_match(_wd_tt):
+                            _wd_p = _wd_j.get("externalPath") or ""
+                            _wd_full = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com{_wd_p}" if _wd_p else ""
+                            all_raw.append({"title": _wd_tt, "company": _wd_n, "location": _wd_j.get("locationsText","") or "", "url": _wd_full, "description": "", "source": "workday"})
+                            _workday_count += 1
+                except Exception:
+                    pass
+            print(f"[search] Workday: {_workday_count} jobs matched")
+
+            # -- LinkedIn public guest endpoint --
+            _linkedin_count = 0
+            import urllib.parse as _urp2
+            for _li_kw in titles_[:5]:
+                try:
+                    _li_q = _urp2.quote(_li_kw)
+                    _li_l = _urp2.quote("Israel")
+                    _li_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={_li_q}&location={_li_l}&start=0"
+                    _li_req = _ur2.Request(_li_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                    with _ur2.urlopen(_li_req, timeout=12) as _li_resp:
+                        _li_html = _li_resp.read().decode('utf-8', errors='replace')
+                    import re as _re_li
+                    _li_cards = _re_li.findall(r'<a[^>]+class="base-card__full-link[^"]*"[^>]+href="([^"?]+)', _li_html)
+                    _li_titles = _re_li.findall(r'<h3[^>]+class="base-search-card__title"[^>]*>\s*([^<]+?)\s*</h3>', _li_html)
+                    _li_comps = _re_li.findall(r'<h4[^>]+class="base-search-card__subtitle"[^>]*>\s*<a[^>]*>\s*([^<]+?)\s*</a>', _li_html)
+                    _li_locs = _re_li.findall(r'<span[^>]+class="job-search-card__location"[^>]*>\s*([^<]+?)\s*</span>', _li_html)
+                    for _li_i in range(min(20, len(_li_cards), len(_li_titles))):
+                        _li_t = _li_titles[_li_i].strip()
+                        if _title_match(_li_t):
+                            _li_c = _li_comps[_li_i].strip() if _li_i < len(_li_comps) else ""
+                            _li_lc = _li_locs[_li_i].strip() if _li_i < len(_li_locs) else ""
+                            all_raw.append({"title": _li_t, "company": _li_c, "location": _li_lc, "url": _li_cards[_li_i], "description": "", "source": "linkedin"})
+                            _linkedin_count += 1
+                except Exception:
+                    pass
+            print(f"[search] LinkedIn guest: {_linkedin_count} jobs matched")
+
+            # -- Indeed (best-effort) --
+            _indeed_count = 0
+            for _in_kw in titles_[:3]:
+                try:
+                    _in_q = _urp2.quote(_in_kw)
+                    _in_url = f"https://il.indeed.com/jobs?q={_in_q}&l=Israel&fromage=7&sort=date"
+                    _in_req = _ur2.Request(_in_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+                    with _ur2.urlopen(_in_req, timeout=12) as _in_resp:
+                        _in_html = _in_resp.read().decode('utf-8', errors='replace')
+                    import re as _re_in
+                    _in_items = _re_in.findall(r'data-jk="([a-z0-9]+)"[^>]*>[\s\S]{0,2000}?title="([^"]{5,200})"', _in_html)
+                    for _in_jk, _in_tt in _in_items[:15]:
+                        _in_t = _in_tt.strip()
+                        if _title_match(_in_t):
+                            all_raw.append({"title": _in_t, "company": "", "location": "", "url": f"https://il.indeed.com/viewjob?jk={_in_jk}", "description": "", "source": "indeed"})
+                            _indeed_count += 1
+                except Exception:
+                    pass
+            print(f"[search] Indeed: {_indeed_count} jobs matched")
+
+            # -- Second-level dedup: normalized company+title fingerprint --
+            def _norm_fp(_r):
+                import re as _re_fp
+                _tt = (_r.get("title") or "").lower()
+                _cc = (_r.get("company") or "").lower()
+                _tt = _re_fp.sub(r'[\(\[].*?[\)\]]', '', _tt)
+                _tt = _re_fp.sub(r'[^a-z0-9 ]', ' ', _tt)
+                _tt = _re_fp.sub(r'\s+', ' ', _tt).strip()
+                _cc = _re_fp.sub(r'[^a-z0-9 ]', ' ', _cc)
+                _cc = _re_fp.sub(r'\s+', ' ', _cc).strip()
+                return f"{_cc}|{_tt}"
+            _seen_fps = set()
+            _deduped = []
+            for _r in all_raw:
+                _fp = _norm_fp(_r)
+                if _fp and _fp != "|" and _fp not in _seen_fps:
+                    _seen_fps.add(_fp)
+                    _deduped.append(_r)
+            print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
+            all_raw = _deduped
             print(f"[search] Pre-filter: {len(all_raw)} title-matched jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} companies")
 
             if not all_raw:
