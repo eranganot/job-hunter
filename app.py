@@ -2798,6 +2798,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+  <!-- Cover Letter Modal (admin only) -->
+  <div id="cl-modal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4" onclick="if(event.target===this)closeCoverLetter()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 fade max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold text-slate-900" id="cl-title">Cover Letter</h3>
+        <button onclick="closeCoverLetter()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <textarea id="cl-text" class="flex-1 w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-700 resize-none min-h-[200px] focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none" placeholder="Click Generate to create a cover letter..."></textarea>
+      <div class="flex gap-2 mt-3">
+        <button onclick="generateCoverLetter()" id="cl-gen-btn" class="flex-1 btn bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">Generate</button>
+        <button onclick="saveCoverLetter()" class="flex-1 btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium py-2.5 rounded-xl transition-colors">Save</button>
+        <button onclick="copyCoverLetter()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium py-2.5 px-4 rounded-xl transition-colors">\U0001F4CB Copy</button>
+      </div>
+      <p id="cl-status" class="text-xs text-slate-400 mt-2 text-center hidden"></p>
+    </div>
+  </div>
+
 <script>
 function showToast(msg) {
   const t = document.createElement('div');
@@ -2808,6 +2825,8 @@ function showToast(msg) {
 }
 </script>
 <script>
+    let _dashAdmin = false;
+    fetch('/api/me').then(r=>r.json()).then(u=>{ _dashAdmin = !!(u.role === 'admin' || u.is_admin); }).catch(()=>{});
 let tab = 'new';
 let me = {};
 let sortBy = 'match';
@@ -2943,6 +2962,65 @@ async function doReject(id, reason) {
   loadAll();
 }
 
+    // ── Cover Letter (admin) ──
+    let _clJobId = null;
+    function openCoverLetter(id) {
+      _clJobId = id;
+      const m = document.getElementById('cl-modal');
+      document.getElementById('cl-text').value = '';
+      document.getElementById('cl-status').classList.add('hidden');
+      m.classList.remove('hidden');
+      m.classList.add('flex');
+      // Pre-load existing cover letter if any
+      fetch('/api/jobs?status=all').then(r=>r.json()).then(jobs=>{
+        const j = (jobs.jobs||jobs).find(x=>x.id===id);
+        if(j && j.cover_letter) document.getElementById('cl-text').value = j.cover_letter;
+      }).catch(()=>{});
+    }
+    function closeCoverLetter() {
+      _clJobId = null;
+      const m = document.getElementById('cl-modal');
+      m.classList.remove('flex');
+      m.classList.add('hidden');
+    }
+    async function generateCoverLetter() {
+      const btn = document.getElementById('cl-gen-btn');
+      const status = document.getElementById('cl-status');
+      btn.disabled = true; btn.textContent = 'Generating...';
+      status.textContent = 'Calling AI...'; status.classList.remove('hidden');
+      try {
+        const r = await fetch('/api/jobs/'+_clJobId+'/cover-letter', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({action:'generate'})
+        });
+        const d = await r.json();
+        if(d.letter) {
+          document.getElementById('cl-text').value = d.letter;
+          status.textContent = 'Generated! Edit as needed.';
+        } else {
+          status.textContent = d.error || 'Generation failed';
+        }
+      } catch(e) { status.textContent = 'Error: '+e.message; }
+      btn.disabled = false; btn.textContent = 'Generate';
+    }
+    async function saveCoverLetter() {
+      const status = document.getElementById('cl-status');
+      try {
+        await fetch('/api/jobs/'+_clJobId+'/cover-letter', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({action:'save', letter: document.getElementById('cl-text').value})
+        });
+        status.textContent = 'Saved!'; status.classList.remove('hidden');
+      } catch(e) { status.textContent = 'Save failed'; status.classList.remove('hidden'); }
+    }
+    function copyCoverLetter() {
+      const text = document.getElementById('cl-text').value;
+      navigator.clipboard.writeText(text).then(()=>{
+        const status = document.getElementById('cl-status');
+        status.textContent = 'Copied to clipboard!'; status.classList.remove('hidden');
+        setTimeout(()=> status.classList.add('hidden'), 2000);
+      });
+    }
 // ── Activity log ──────────────────────────────────────────────────────────────
 async function loadActivity() {
   const panel = document.getElementById('activity-panel');
@@ -3011,6 +3089,7 @@ function actionBar(job) {
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
       <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
+          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
     </div>`;
   if (job.status === 'approved') {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
@@ -3023,6 +3102,7 @@ function actionBar(job) {
       <div class="space-y-2">
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
         <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
+          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
       </div>
       <p class="text-xs text-slate-400 text-center">⏰ Auto-apply scheduled at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</p>
     </div>`;
@@ -4322,6 +4402,46 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 self.send_json({"error": "No URL for this job"}, 400)
                 return
+
+        # ── Cover Letter (admin only) ──
+        m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
+        if m:
+            job_id = int(m.group(1))
+            # Admin check
+            if not user.get("email") or user["email"].lower() != (ADMIN_EMAIL or "").lower():
+                self.send_json({"error": "Admin only"}, 403)
+                return
+            data = self.read_json()
+            conn = database.get_db()
+            job = conn.execute(
+                "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            if not job:
+                conn.close()
+                self.send_json({"error": "Not found"}, 404)
+                return
+            action = data.get("action", "generate")
+            if action == "save":
+                # Save edited cover letter
+                conn.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (data.get("letter", ""), job_id))
+                conn.commit()
+                conn.close()
+                self.send_json({"success": True})
+                return
+            # Generate
+            profile = conn.execute(
+                "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            conn.close()
+            from ai_analysis import generate_cover_letter
+            letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, ANTHROPIC_KEY)
+            # Persist
+            c2 = database.get_db()
+            c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
+            c2.commit()
+            c2.close()
+            self.send_json({"success": True, "letter": letter})
+            return
             try:
                 from ai_analysis import check_job_status
                 result = check_job_status(
