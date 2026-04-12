@@ -2735,7 +2735,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </div>
 
 <!-- Onboarding Popup -->
-<div id="onboarding-overlay" class="hidden" style="position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;">
+<div id="onboarding-overlay" class="hidden" style="position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.18);max-width:420px;width:90%;padding:28px 28px 22px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
       <h3 style="font-weight:700;font-size:17px;color:#1e293b;margin:0;">Getting Started</h3>
