@@ -1976,6 +1976,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
       </div>
       <div id="cv-upload-status" class="hidden text-sm p-3 rounded-lg mt-3"></div>
       <button id="cv-analyze-btn" onclick="reanalyzeCV()" class="hidden btn btn-secondary mt-3 text-sm">✨ Re-analyze with AI →</button>
+      <p class="text-xs text-slate-400 mt-2">AI analysis extracts your skills, experience, and preferences from your CV to improve job matching and auto-fill applications.</p>
     </div>
   </div>
 
@@ -3465,31 +3466,24 @@ async function loadOnboarding() {
     const [meR, statsR] = await Promise.all([fetch('/api/me'), fetch('/api/stats')]);
     const u = await meR.json();
     const stats = await statsR.json();
-    const progress = {};
     const dismissed = u.onboarding_dismissed;
     if (dismissed) return;
-    // Auto-detect from profile + activity
-    if (u.cv_path) progress.cv_uploaded = true;
-    if (u.job_titles) progress.search_configured = true;
-    const totalJobs = (stats.approved||0) + (stats.applied||0) + (stats.passed||0);
-    if (totalJobs > 0) progress.first_job_reviewed = true;
-    if (totalJobs > 5 || u.apply_hour != null) progress.auto_apply_choice_made = true;
-    const keys = ['cv_uploaded','search_configured','first_job_reviewed','auto_apply_choice_made'];
-    if (keys.every(k => progress[k])) return; // existing user
-    // Pre-check completed milestones
-    document.querySelectorAll('#ob-milestones label').forEach(lbl => {
-      const cb = lbl.querySelector('input');
-      if (progress[lbl.dataset.key]) { cb.checked = true; cb.disabled = true; lbl.style.opacity = '0.5'; }
-    });
+    // Only show for first-time or zero-activity users
+    const totalJobs = (stats.approved||0) + (stats.applied||0) + (stats.passed||0) + (stats.new||0);
+    if (totalJobs > 0) return;           // active user
+    if (u.cv_path && u.job_titles) return; // configured user
+    // Show popup
     const overlay = document.getElementById('onboarding-overlay');
-    overlay.classList.remove('hidden');
     overlay.style.display = 'flex';
+    overlay.classList.remove('hidden');
+    // Wire checkbox changes — auto-close + persist when all checked
     document.querySelectorAll('.ob-check').forEach(cb => {
       cb.addEventListener('change', async () => {
         if (cb.checked) cb.closest('label').style.opacity = '0.5';
-        if ([...document.querySelectorAll('.ob-check')].every(c => c.checked)) {
+        const allChecked = [...document.querySelectorAll('.ob-check')].every(c => c.checked);
+        if (allChecked) {
           try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e){}
-          setTimeout(() => { overlay.style.display = 'none'; }, 500);
+          overlay.style.display = 'none';
         }
       });
     });
