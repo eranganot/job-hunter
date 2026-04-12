@@ -4140,9 +4140,9 @@ class Handler(BaseHTTPRequestHandler):
                 database.log_activity(user_id, "cv_uploaded", "Uploaded new CV PDF")
                 print(f"[cv] ✅ Saved CV for user {user_id}: {cv_path}")
                 self.send_json({"success": True, "path": cv_path})
+                bump_onboarding(user_id, "cv_uploaded")
             except Exception as exc:
                 import traceback
-            bump_onboarding(user_id, "cv_uploaded")
                 print(f"[cv/upload] ❌ Exception: {exc}\n{traceback.format_exc()}")
                 try:
                     self.send_json({"error": f"Server error: {exc}"}, code=500)
@@ -4208,8 +4208,8 @@ class Handler(BaseHTTPRequestHandler):
                 auth.update_profile(user_id, **kwargs)
             database.write_users_config(BASE_DIR)
             self.send_json({"success": True})
-            return
             bump_onboarding(user_id, "search_configured")
+            return
 
         # ── Save notifications ──
         if path == "/api/save-notifications":
