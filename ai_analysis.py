@@ -374,3 +374,58 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
     is_open = data.get("is_open")
     data["status_check"] = "open" if is_open is True else ("closed" if is_open is False else "unknown")
     return data
+
+
+
+def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
+    """Generate a concise, personalized cover letter using Claude Haiku 4.5.
+
+    Focuses on 2-3 specific skill overlaps between the CV and JD.
+    Max 250 words, professional yet conversational tone.
+    """
+    api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return "[Error] No API key available for cover letter generation."
+
+    cv_summary = (profile.get("cv_summary") or profile.get("cv_analyzed") or "")[:4000]
+    jd_text = (job.get("full_description") or job.get("description") or job.get("title", ""))[:4000]
+    job_title = job.get("title", "Unknown Role")
+    company = job.get("company", "the company")
+
+    system_prompt = (
+        "You are a job-search assistant writing personalized cover letters. "
+        "Write a cover letter in a professional yet conversational tone, "
+        "no more than 250 words. Focus on 2-3 specific overlaps between the "
+        "candidate's CV and the job description. Do not invent experience "
+        "not present in the CV. Output plain text only, no markdown headers."
+    )
+
+    user_msg = (
+        f"JOB TITLE: {job_title}\n"
+        f"COMPANY: {company}\n\n"
+        f"JOB DESCRIPTION:\n{jd_text}\n\n"
+        f"CV SUMMARY:\n{cv_summary}"
+    )
+
+    try:
+        body = json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 600,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_msg}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key":         api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp_data = json.loads(resp.read())
+        return resp_data["content"][0]["text"].strip()
+    except Exception as e:
+        print(f"[cover-letter] Error: {e}")
+        return f"[Error] Could not generate cover letter: {e}"
