@@ -126,6 +126,12 @@ def init_db():
         "ALTER TABLE jobs ADD COLUMN apply_failure_detail TEXT DEFAULT NULL",
         "CREATE TABLE IF NOT EXISTS user_blocklist (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, company_name TEXT NOT NULL, reason TEXT DEFAULT '', date_added TEXT DEFAULT (datetime('now')), UNIQUE(user_id, company_name))",
         "CREATE TABLE IF NOT EXISTS pass_reason_stats (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, reason TEXT NOT NULL, count INTEGER DEFAULT 1, last_hit_date TEXT DEFAULT (datetime('now')), UNIQUE(user_id, reason))",
+        "ALTER TABLE user_profiles ADD COLUMN auto_apply_enabled INTEGER DEFAULT 0",
+        "ALTER TABLE user_profiles ADD COLUMN applications_sent_today INTEGER DEFAULT 0",
+        "ALTER TABLE user_profiles ADD COLUMN applications_reset_date TEXT DEFAULT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN onboarding_progress TEXT DEFAULT '{}'",
+        "ALTER TABLE user_profiles ADD COLUMN onboarding_dismissed INTEGER DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN cover_letter TEXT DEFAULT NULL",
     ]:
         try:
             conn.execute(_migration)
