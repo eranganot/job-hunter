@@ -281,7 +281,7 @@ def _check_scheduled_jobs() -> None:
         conn = database.get_db()
         rows = conn.execute(
             "SELECT u.id, p.search_hour, p.apply_hour, "
-            "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only "
+            "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only, p.auto_apply_enabled "
             "FROM users u JOIN user_profiles p ON p.user_id = u.id "
             "WHERE u.is_active = 1"
         ).fetchall()
@@ -292,6 +292,7 @@ def _check_scheduled_jobs() -> None:
             s_dow = row[4]
             a_dow = row[5]
             wo = row[6]
+            auto_apply = row[7]
             cur_dow = now.weekday()  # 0=Mon ... 6=Sun
             # Skip weekends if weekdays_only
             if wo and cur_dow >= 5:
@@ -308,6 +309,8 @@ def _check_scheduled_jobs() -> None:
             if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
                 run_apply = True
                 if freq == 'weekly' and a_dow is not None and cur_dow != a_dow:
+                    run_apply = False
+                if not auto_apply:
                     run_apply = False
                 if run_apply:
                     print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
@@ -910,6 +913,39 @@ def run_job_search(user_id: int):
 
 def run_job_apply(user_id: int) -> int:
     """Submit applications to all approved jobs using browser automation + Claude."""
+    # ── Rate-limit + auto_apply gate ──────────────────────────────────────────
+    from datetime import timezone as _tz
+    today_utc = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+    _rc = database.get_db()
+    _prof = _rc.execute(
+        "SELECT auto_apply_enabled, applications_sent_today, applications_reset_date "
+        "FROM user_profiles WHERE user_id=?", (user_id,)
+    ).fetchone()
+    _urow = _rc.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+    _is_admin = (_urow and _urow["email"] and _urow["email"].lower() == (ADMIN_EMAIL or "").lower())
+
+    # SILENT MODE: auto-apply off => return immediately, no notification
+    if not _prof or not _prof["auto_apply_enabled"]:
+        _rc.close()
+        return {"applied": 0, "error": "", "skipped": "auto_apply_disabled"}
+
+    # Daily reset at 00:00 UTC
+    if _prof["applications_reset_date"] != today_utc:
+        _rc.execute(
+            "UPDATE user_profiles SET applications_sent_today=0, applications_reset_date=? "
+            "WHERE user_id=?", (today_utc, user_id))
+        _rc.commit()
+        _sent_today = 0
+    else:
+        _sent_today = _prof["applications_sent_today"] or 0
+
+    DAILY_CAP = 3
+    _remaining = None if _is_admin else max(0, DAILY_CAP - _sent_today)
+    _rc.close()
+
+    if _remaining is not None and _remaining <= 0:
+        return {"applied": 0, "error": "", "skipped": "daily_limit_reached"}
+
     try:
         import apply_engine
         conn = database.get_db()
@@ -917,6 +953,10 @@ def run_job_apply(user_id: int) -> int:
             "SELECT id, title, company, url FROM jobs WHERE user_id=? AND status='approved'",
             (user_id,)
         ).fetchall()
+
+        # Cap jobs to daily remaining quota (non-admin only)
+        if _remaining is not None:
+            jobs = jobs[:_remaining]
 
         if not jobs:
             conn.close()
@@ -989,6 +1029,14 @@ def run_job_apply(user_id: int) -> int:
                 f"{j['title']} @ {j['company']} — {apply_status}"
             )
             count += 1
+            # Increment daily application counter
+            try:
+                _uc = database.get_db()
+                _uc.execute("UPDATE user_profiles SET applications_sent_today = applications_sent_today + 1 WHERE user_id=?", (user_id,))
+                _uc.commit()
+                _uc.close()
+            except Exception:
+                pass
             if apply_status == "confirmed":
                 confirmed_list.append(j)
             elif apply_status == "submitted":
