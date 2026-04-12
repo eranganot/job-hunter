@@ -2734,33 +2734,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-  <!-- Onboarding Checklist -->
-  <div id="onboarding-card" class="hidden max-w-4xl mx-auto px-4 pt-4">
-    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-5 border border-blue-100 shadow-sm">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-bold text-slate-900 text-base">Getting Started</h3>
-        <button onclick="dismissOnboarding()" class="text-xs text-slate-400 hover:text-slate-600 transition-colors">Skip for now</button>
-      </div>
-      <div class="space-y-2.5" id="ob-milestones">
-        <div class="flex items-center gap-3" data-key="cv_uploaded">
-          <span class="ob-icon text-lg">1</span>
-          <div><p class="text-sm font-medium text-slate-700">Upload your CV</p><p class="text-xs text-slate-400">So we can match you with the right jobs</p></div>
-        </div>
-        <div class="flex items-center gap-3" data-key="search_configured">
-          <span class="ob-icon text-lg">2</span>
-          <div><p class="text-sm font-medium text-slate-700">Set up your search criteria</p><p class="text-xs text-slate-400">Titles, locations, salary range</p></div>
-        </div>
-        <div class="flex items-center gap-3" data-key="first_job_reviewed">
-          <span class="ob-icon text-lg">3</span>
-          <div><p class="text-sm font-medium text-slate-700">Review your first job</p><p class="text-xs text-slate-400">Approve or pass to train the matcher</p></div>
-        </div>
-        <div class="flex items-center gap-3" data-key="auto_apply_choice_made">
-          <span class="ob-icon text-lg">4</span>
-          <div><p class="text-sm font-medium text-slate-700">Choose Manual or Automatic mode</p><p class="text-xs text-slate-400">Manual: you review and apply. Automatic: Job Hunter applies for you (up to 3/day).</p></div>
-        </div>
-      </div>
+<!-- Onboarding Popup -->
+<div id="onboarding-overlay" class="hidden" style="position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.18);max-width:420px;width:90%;padding:28px 28px 22px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+      <h3 style="font-weight:700;font-size:17px;color:#1e293b;margin:0;">Getting Started</h3>
+      <button onclick="dismissOnboarding()" style="font-size:12px;color:#94a3b8;background:none;border:none;cursor:pointer;">Skip for now</button>
+    </div>
+    <div id="ob-milestones" style="display:flex;flex-direction:column;gap:12px;">
+      <label data-key="cv_uploaded" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+        <input type="checkbox" class="ob-check" style="margin-top:3px;width:17px;height:17px;accent-color:#3b82f6;cursor:pointer;" />
+        <div><div style="font-size:14px;font-weight:500;color:#334155;">Upload your CV</div><div style="font-size:12px;color:#94a3b8;">So we can match you with the right jobs</div></div>
+      </label>
+      <label data-key="search_configured" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+        <input type="checkbox" class="ob-check" style="margin-top:3px;width:17px;height:17px;accent-color:#3b82f6;cursor:pointer;" />
+        <div><div style="font-size:14px;font-weight:500;color:#334155;">Set up your search criteria</div><div style="font-size:12px;color:#94a3b8;">Titles, locations, salary range</div></div>
+      </label>
+      <label data-key="first_job_reviewed" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+        <input type="checkbox" class="ob-check" style="margin-top:3px;width:17px;height:17px;accent-color:#3b82f6;cursor:pointer;" />
+        <div><div style="font-size:14px;font-weight:500;color:#334155;">Review your first job</div><div style="font-size:12px;color:#94a3b8;">Approve or pass to train the matcher</div></div>
+      </label>
+      <label data-key="auto_apply_choice_made" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+        <input type="checkbox" class="ob-check" style="margin-top:3px;width:17px;height:17px;accent-color:#3b82f6;cursor:pointer;" />
+        <div><div style="font-size:14px;font-weight:500;color:#334155;">Choose Manual or Automatic mode</div><div style="font-size:12px;color:#94a3b8;">In Settings &gt; Schedule</div></div>
+      </label>
     </div>
   </div>
+</div>
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
 <div id="empty-state" class="hidden text-center py-24 px-4">
   <div class="text-5xl mb-3 opacity-30">🔍</div>
@@ -3460,36 +3460,53 @@ async function loadAll() {
 }
 
 
-    async function loadOnboarding() {
-      try {
-        const r = await fetch('/api/me');
-        const u = await r.json();
-        const card = document.getElementById('onboarding-card');
-        if (!card) return;
-        const dismissed = u.onboarding_dismissed;
-        const progress = JSON.parse(u.onboarding_progress || '{}');
-        const allDone = ['cv_uploaded','search_configured','first_job_reviewed','auto_apply_choice_made'].every(k => progress[k]);
-        if (dismissed || allDone) { card.classList.add('hidden'); return; }
-        card.classList.remove('hidden');
-        document.querySelectorAll('#ob-milestones [data-key]').forEach(el => {
-          const key = el.dataset.key;
-          const icon = el.querySelector('.ob-icon');
-          if (progress[key]) {
-            icon.textContent = '\u2705';
-            el.classList.add('opacity-50');
-          } else {
-            icon.textContent = {'cv_uploaded':'\U0001F4C4','search_configured':'\U0001F50D','first_job_reviewed':'\u2B50','auto_apply_choice_made':'\u2699\uFE0F'}[key] || '\u2B1C';
-          }
-        });
-      } catch(e) { console.log('[onboarding]', e); }
-    }
-
-    async function dismissOnboarding() {
-      document.getElementById('onboarding-card')?.classList.add('hidden');
-      try {
-        await fetch('/api/dismiss-onboarding', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
-      } catch(e) {}
-    }
+async function loadOnboarding() {
+  try {
+    const r = await fetch('/api/me');
+    const u = await r.json();
+    const progress = JSON.parse(u.onboarding_progress || '{}');
+    const dismissed = u.onboarding_dismissed;
+    // Auto-detect existing progress from profile data
+    if (u.cv_path) progress.cv_uploaded = true;
+    if (u.job_titles) progress.search_configured = true;
+    if (dismissed) return; // user dismissed before
+    const keys = ['cv_uploaded','search_configured','first_job_reviewed','auto_apply_choice_made'];
+    const allDone = keys.every(k => progress[k]);
+    if (allDone) return; // existing user, all done
+    // Pre-check boxes for completed milestones
+    document.querySelectorAll('#ob-milestones label').forEach(lbl => {
+      const k = lbl.dataset.key;
+      const cb = lbl.querySelector('input');
+      if (progress[k]) { cb.checked = true; cb.disabled = true; lbl.style.opacity = '0.5'; }
+    });
+    // Show the popup
+    const overlay = document.getElementById('onboarding-overlay');
+    overlay.classList.remove('hidden');
+    overlay.style.display = 'flex';
+    // Wire checkbox changes
+    document.querySelectorAll('.ob-check').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        const label = cb.closest('label');
+        const key = label.dataset.key;
+        if (cb.checked) {
+          label.style.opacity = '0.5';
+          try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e){}
+        }
+        // Check if all are now checked
+        const allChecked = [...document.querySelectorAll('.ob-check')].every(c => c.checked);
+        if (allChecked) {
+          try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e){}
+          setTimeout(() => { overlay.style.display = 'none'; }, 600);
+        }
+      });
+    });
+  } catch(e) { console.log('onboarding err', e); }
+}
+async function dismissOnboarding() {
+  const overlay = document.getElementById('onboarding-overlay');
+  overlay.style.display = 'none';
+  try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e) {}
+}
 document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
 });
