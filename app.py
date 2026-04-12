@@ -2118,6 +2118,22 @@ SETTINGS_HTML = """<!DOCTYPE html>
       <input type="checkbox" id="s-weekdays-only" class="w-4 h-4 rounded accent-blue-600">
       <label for="s-weekdays-only" class="text-sm text-slate-700 cursor-pointer">📅 Weekdays only — skip Saturday &amp; Sunday</label>
     </div>
+
+    <!-- Auto-apply toggle -->
+    <div class="mt-6 pt-5 border-t border-slate-100">
+      <label class="flex items-center justify-between cursor-pointer">
+        <div>
+          <span class="text-sm font-semibold text-slate-700">Enable Automatic Applications</span>
+          <p class="text-xs text-slate-400 mt-0.5">When off, Job Hunter will never auto-submit applications for you.</p>
+        </div>
+        <div class="relative">
+          <input type="checkbox" id="s-auto-apply" class="sr-only peer" />
+          <div class="w-11 h-6 bg-slate-200 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:bg-blue-600 transition-colors"></div>
+          <div class="absolute left-[2px] top-[2px] w-5 h-5 bg-white rounded-full shadow peer-checked:translate-x-5 transition-transform"></div>
+        </div>
+      </label>
+      <p class="text-xs text-amber-600 mt-2 hidden" id="auto-apply-warning">\u26A0\uFE0F Standard accounts are limited to 3 automatic applications per day.</p>
+    </div>
     <button onclick="saveSchedule()" class="btn btn-primary mt-6">Save schedule</button>
   </div>
 
@@ -2210,6 +2226,8 @@ async function loadUser() {
   if (userData.search_hour) { for(let o of sh.options) if(parseInt(o.value)===userData.search_hour) o.selected=true; }
   if (userData.apply_hour)  { for(let o of ah.options) if(parseInt(o.value)===userData.apply_hour)  o.selected=true; }
   const woChk = document.getElementById('s-weekdays-only');
+          if (userData.auto_apply_enabled) document.getElementById('s-auto-apply').checked = true;
+          if (!isAdmin) document.getElementById('auto-apply-warning').classList.remove('hidden');
   if (woChk) woChk.checked = !!userData.weekdays_only;
 
   // Set days
@@ -2396,6 +2414,7 @@ async function saveSchedule() {
       search_day_of_week: parseInt(document.getElementById('s-search-day').value || 1),
       apply_day_of_week:  parseInt(document.getElementById('s-apply-day').value  || 1),
       weekdays_only:      document.getElementById('s-weekdays-only')?.checked ? 1 : 0,
+          auto_apply_enabled: document.getElementById('s-auto-apply')?.checked ? 1 : 0,
     })});
   showToast();
 }
@@ -4076,7 +4095,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self.read_json()
             kwargs = {}
             for int_field in ("search_hour", "apply_hour", "search_day_of_week",
-                              "apply_day_of_week", "onboarding_complete", "weekdays_only"):
+                              "apply_day_of_week", "onboarding_complete", "weekdays_only", "auto_apply_enabled"):
                 if int_field in data:
                     kwargs[int_field] = int(data[int_field])
             if "schedule_frequency" in data:
