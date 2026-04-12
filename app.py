@@ -218,6 +218,28 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
             print(f"[notify] Error on {channel}: {_notif_err}")
 
 
+def notify_admin_new_user(new_user_email: str, new_user_name: str):
+    """Send a new-signup alert to the admin via ALL their configured channels."""
+    if not ADMIN_EMAIL:
+        return
+    conn = database.get_db()
+    admin_row = conn.execute(
+        "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
+    ).fetchone()
+    if not admin_row:
+        conn.close()
+        print(f"[admin-notify] No admin user row for {ADMIN_EMAIL}")
+        return
+    admin_id = admin_row["id"]
+    conn.close()
+    display = new_user_name or new_user_email
+    message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter."
+    try:
+        deliver_notification(admin_id, message, url_suffix="/dashboard")
+    except Exception as e:
+        print(f"[admin-notify] failed (non-fatal): {e}")
+
+
 def check_notifications():
     notify_file = os.path.join(BASE_DIR, "notify.json")
     if not os.path.exists(notify_file):
@@ -3821,6 +3843,11 @@ class Handler(BaseHTTPRequestHandler):
                 html = REGISTER_HTML.replace("{error_block}", error_block(err))
                 self.send_html(html)
                 return
+            # Notify admin about new signup (non-blocking)
+            try:
+                notify_admin_new_user(new_user_email=email, new_user_name=name)
+            except Exception as e:
+                print(f"[admin-notify] registration hook error: {e}")
             token = auth.create_session(user_id)
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
