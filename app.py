@@ -240,6 +240,31 @@ def notify_admin_new_user(new_user_email: str, new_user_name: str):
         print(f"[admin-notify] failed (non-fatal): {e}")
 
 
+def bump_onboarding(user_id: int, key: str):
+    """Set a single onboarding milestone to true (idempotent)."""
+    try:
+        conn = database.get_db()
+        row = conn.execute(
+            "SELECT onboarding_progress FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if not row:
+            conn.close()
+            return
+        progress = json.loads(row["onboarding_progress"] or "{}")
+        if progress.get(key):
+            conn.close()
+            return  # already set
+        progress[key] = True
+        conn.execute(
+            "UPDATE user_profiles SET onboarding_progress=? WHERE user_id=?",
+            (json.dumps(progress), user_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[onboarding] bump {key} for user {user_id}: {e}")
+
+
 def check_notifications():
     notify_file = os.path.join(BASE_DIR, "notify.json")
     if not os.path.exists(notify_file):
@@ -2708,6 +2733,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <button onclick="document.getElementById('cv-warning').classList.add('hidden')" class="ml-auto text-amber-500 hover:text-amber-700 text-lg leading-none">✕</button>
   </div>
 </div>
+
+  <!-- Onboarding Checklist -->
+  <div id="onboarding-card" class="hidden max-w-4xl mx-auto px-4 pt-4">
+    <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-5 border border-blue-100 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold text-slate-900 text-base">Getting Started</h3>
+        <button onclick="dismissOnboarding()" class="text-xs text-slate-400 hover:text-slate-600 transition-colors">Skip for now</button>
+      </div>
+      <div class="space-y-2.5" id="ob-milestones">
+        <div class="flex items-center gap-3" data-key="cv_uploaded">
+          <span class="ob-icon text-lg">1</span>
+          <div><p class="text-sm font-medium text-slate-700">Upload your CV</p><p class="text-xs text-slate-400">So we can match you with the right jobs</p></div>
+        </div>
+        <div class="flex items-center gap-3" data-key="search_configured">
+          <span class="ob-icon text-lg">2</span>
+          <div><p class="text-sm font-medium text-slate-700">Set up your search criteria</p><p class="text-xs text-slate-400">Titles, locations, salary range</p></div>
+        </div>
+        <div class="flex items-center gap-3" data-key="first_job_reviewed">
+          <span class="ob-icon text-lg">3</span>
+          <div><p class="text-sm font-medium text-slate-700">Review your first job</p><p class="text-xs text-slate-400">Approve or pass to train the matcher</p></div>
+        </div>
+        <div class="flex items-center gap-3" data-key="auto_apply_choice_made">
+          <span class="ob-icon text-lg">4</span>
+          <div><p class="text-sm font-medium text-slate-700">Choose Manual or Automatic mode</p><p class="text-xs text-slate-400">Manual: you review and apply. Automatic: Job Hunter applies for you (up to 3/day).</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
 <div id="empty-state" class="hidden text-center py-24 px-4">
   <div class="text-5xl mb-3 opacity-30">🔍</div>
@@ -3323,8 +3376,40 @@ function setTab(t) {
 
 async function loadAll() {
   await Promise.all([loadStats(), tab === 'activity' ? loadActivity() : loadJobs(tab)]);
+      loadOnboarding();
 }
 
+
+    async function loadOnboarding() {
+      try {
+        const r = await fetch('/api/me');
+        const u = await r.json();
+        const card = document.getElementById('onboarding-card');
+        if (!card) return;
+        const dismissed = u.onboarding_dismissed;
+        const progress = JSON.parse(u.onboarding_progress || '{}');
+        const allDone = ['cv_uploaded','search_configured','first_job_reviewed','auto_apply_choice_made'].every(k => progress[k]);
+        if (dismissed || allDone) { card.classList.add('hidden'); return; }
+        card.classList.remove('hidden');
+        document.querySelectorAll('#ob-milestones [data-key]').forEach(el => {
+          const key = el.dataset.key;
+          const icon = el.querySelector('.ob-icon');
+          if (progress[key]) {
+            icon.textContent = '\u2705';
+            el.classList.add('opacity-50');
+          } else {
+            icon.textContent = {'cv_uploaded':'\U0001F4C4','search_configured':'\U0001F50D','first_job_reviewed':'\u2B50','auto_apply_choice_made':'\u2699\uFE0F'}[key] || '\u2B1C';
+          }
+        });
+      } catch(e) { console.log('[onboarding]', e); }
+    }
+
+    async function dismissOnboarding() {
+      document.getElementById('onboarding-card')?.classList.add('hidden');
+      try {
+        await fetch('/api/dismiss-onboarding', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+      } catch(e) {}
+    }
 document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
 });
@@ -3977,6 +4062,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"success": True, "path": cv_path})
             except Exception as exc:
                 import traceback
+            bump_onboarding(user_id, "cv_uploaded")
                 print(f"[cv/upload] ❌ Exception: {exc}\n{traceback.format_exc()}")
                 try:
                     self.send_json({"error": f"Server error: {exc}"}, code=500)
@@ -4043,6 +4129,7 @@ class Handler(BaseHTTPRequestHandler):
             database.write_users_config(BASE_DIR)
             self.send_json({"success": True})
             return
+            bump_onboarding(user_id, "search_configured")
 
         # ── Save notifications ──
         if path == "/api/save-notifications":
@@ -4107,6 +4194,13 @@ class Handler(BaseHTTPRequestHandler):
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
             database.write_users_config(BASE_DIR)
+            bump_onboarding(user_id, "auto_apply_choice_made")
+            self.send_json({"success": True})
+            return
+
+        # ── Dismiss onboarding ──
+        if path == "/api/dismiss-onboarding":
+            auth.update_profile(user_id, onboarding_dismissed=1)
             self.send_json({"success": True})
             return
 
@@ -4205,6 +4299,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             conn.close()
             database.write_approved_jobs(BASE_DIR)
+            bump_onboarding(user_id, "first_job_reviewed")
             self.send_json({"success": True})
             return
 
