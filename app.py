@@ -3462,49 +3462,41 @@ async function loadAll() {
 
 async function loadOnboarding() {
   try {
-    const r = await fetch('/api/me');
-    const u = await r.json();
-    const progress = JSON.parse(u.onboarding_progress || '{}');
+    const [meR, statsR] = await Promise.all([fetch('/api/me'), fetch('/api/stats')]);
+    const u = await meR.json();
+    const stats = await statsR.json();
+    const progress = {};
     const dismissed = u.onboarding_dismissed;
-    // Auto-detect existing progress from profile data
+    if (dismissed) return;
+    // Auto-detect from profile + activity
     if (u.cv_path) progress.cv_uploaded = true;
     if (u.job_titles) progress.search_configured = true;
-    if (dismissed) return; // user dismissed before
+    const totalJobs = (stats.approved||0) + (stats.applied||0) + (stats.passed||0);
+    if (totalJobs > 0) progress.first_job_reviewed = true;
+    if (totalJobs > 5 || u.apply_hour != null) progress.auto_apply_choice_made = true;
     const keys = ['cv_uploaded','search_configured','first_job_reviewed','auto_apply_choice_made'];
-    const allDone = keys.every(k => progress[k]);
-    if (allDone) return; // existing user, all done
-    // Pre-check boxes for completed milestones
+    if (keys.every(k => progress[k])) return; // existing user
+    // Pre-check completed milestones
     document.querySelectorAll('#ob-milestones label').forEach(lbl => {
-      const k = lbl.dataset.key;
       const cb = lbl.querySelector('input');
-      if (progress[k]) { cb.checked = true; cb.disabled = true; lbl.style.opacity = '0.5'; }
+      if (progress[lbl.dataset.key]) { cb.checked = true; cb.disabled = true; lbl.style.opacity = '0.5'; }
     });
-    // Show the popup
     const overlay = document.getElementById('onboarding-overlay');
     overlay.classList.remove('hidden');
     overlay.style.display = 'flex';
-    // Wire checkbox changes
     document.querySelectorAll('.ob-check').forEach(cb => {
       cb.addEventListener('change', async () => {
-        const label = cb.closest('label');
-        const key = label.dataset.key;
-        if (cb.checked) {
-          label.style.opacity = '0.5';
+        if (cb.checked) cb.closest('label').style.opacity = '0.5';
+        if ([...document.querySelectorAll('.ob-check')].every(c => c.checked)) {
           try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e){}
-        }
-        // Check if all are now checked
-        const allChecked = [...document.querySelectorAll('.ob-check')].every(c => c.checked);
-        if (allChecked) {
-          try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e){}
-          setTimeout(() => { overlay.style.display = 'none'; }, 600);
+          setTimeout(() => { overlay.style.display = 'none'; }, 500);
         }
       });
     });
-  } catch(e) { console.log('onboarding err', e); }
+  } catch(e) { console.log('onboarding', e); }
 }
 async function dismissOnboarding() {
-  const overlay = document.getElementById('onboarding-overlay');
-  overlay.style.display = 'none';
+  document.getElementById('onboarding-overlay').style.display = 'none';
   try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e) {}
 }
 document.addEventListener('click', e => {
