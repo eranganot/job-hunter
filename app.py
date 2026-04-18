@@ -1975,8 +1975,8 @@ SETTINGS_HTML = """<!DOCTYPE html>
         <input type="file" id="cv-file-input" accept=".pdf" class="hidden" onchange="uploadCV(this.files[0])"/>
       </div>
       <div id="cv-upload-status" class="hidden text-sm p-3 rounded-lg mt-3"></div>
-      <button id="cv-analyze-btn" onclick="reanalyzeCV()" class="hidden btn btn-secondary mt-3 text-sm">✨ Re-analyze with AI →</button>
-      <p class="text-xs text-slate-400 mt-2">AI analysis extracts your skills, experience, and preferences from your CV to improve job matching and auto-fill applications.</p>
+      <button id="cv-analyze-btn" onclick="analyzeCvWithAI()" class="hidden btn btn-secondary mt-3 text-sm">✨ Analyze your CV with AI →</button>
+      <p class="text-xs text-slate-400 mt-2">Get a free Gemini AI review of your CV — includes a score out of 100, key strengths, and specific improvement suggestions.</p>
     </div>
   </div>
 
@@ -2762,6 +2762,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
 </div>
+<!-- CV Optimizer Popup -->
+<div id="cv-optimizer-overlay" class="hidden" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px;">
+  <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-width:540px;width:100%;padding:28px;position:relative;margin:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h3 style="font-weight:700;font-size:18px;color:#1e293b;margin:0;">CV Analysis</h3>
+      <button onclick="closeCvOptimizer()" style="color:#94a3b8;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;padding:0;">&#215;</button>
+    </div>
+    <div id="cvo-loading" style="text-align:center;padding:40px 0;">
+      <div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#6366f1;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
+      <p style="color:#64748b;font-size:14px;">Analyzing your CV with Gemini AI&#8230;</p>
+    </div>
+    <div id="cvo-result" style="display:none;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div id="cvo-score-badge" style="width:84px;height:84px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 8px;font-weight:700;border:3px solid #e2e8f0;">
+          <span id="cvo-score-num" style="font-size:30px;line-height:1;"></span>
+          <span style="font-size:11px;opacity:.6;">/100</span>
+        </div>
+        <div id="cvo-score-label" style="font-weight:600;font-size:15px;margin-bottom:8px;"></div>
+        <p id="cvo-summary" style="color:#64748b;font-size:13px;line-height:1.6;max-width:420px;margin:0 auto;"></p>
+      </div>
+      <div style="margin-bottom:16px;">
+        <h4 style="font-size:12px;font-weight:700;color:#059669;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;">&#10003; Strengths</h4>
+        <ul id="cvo-strengths" style="margin:0;padding:0;list-style:none;"></ul>
+      </div>
+      <div style="margin-bottom:16px;">
+        <h4 style="font-size:12px;font-weight:700;color:#d97706;margin:0 0 10px;text-transform:uppercase;letter-spacing:.06em;">&#9889; Improvements</h4>
+        <div id="cvo-improvements"></div>
+      </div>
+      <div style="margin-bottom:20px;">
+        <h4 style="font-size:12px;font-weight:700;color:#6366f1;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;">&#9670; ATS Tips</h4>
+        <ul id="cvo-ats" style="margin:0;padding:0;list-style:none;"></ul>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #f1f5f9;padding-top:14px;">
+        <span id="cvo-date" style="font-size:11px;color:#94a3b8;"></span>
+        <button onclick="analyzeCvWithAI(true)" style="font-size:12px;color:#6366f1;background:none;border:none;cursor:pointer;font-weight:600;">&#8635; Re-analyze</button>
+      </div>
+    </div>
+    <div id="cvo-error" style="display:none;text-align:center;padding:24px 0;">
+      <p id="cvo-error-msg" style="color:#ef4444;font-size:14px;margin-bottom:12px;"></p>
+      <button onclick="analyzeCvWithAI(true)" style="padding:8px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Try Again</button>
+    </div>
+  </div>
+</div>
 <main class="max-w-4xl mx-auto px-4 py-4 space-y-4 safe-bottom" id="jobs-list"></main>
 <div id="empty-state" class="hidden text-center py-24 px-4">
   <div class="text-5xl mb-3 opacity-30">🔍</div>
@@ -3493,6 +3536,55 @@ async function dismissOnboarding() {
   document.getElementById('onboarding-overlay').style.display = 'none';
   try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e) {}
 }
+async function analyzeCvWithAI(forceRefresh) {
+  const overlay = document.getElementById('cv-optimizer-overlay');
+  overlay.style.display = 'flex';
+  overlay.classList.remove('hidden');
+  document.getElementById('cvo-loading').style.display = 'block';
+  document.getElementById('cvo-result').style.display = 'none';
+  document.getElementById('cvo-error').style.display = 'none';
+  try {
+    if (!forceRefresh) {
+      const cResp = await fetch('/api/cv-optimizer-analyze');
+      const cData = await cResp.json();
+      if (cData.cached && cData.score) { renderCvoResult(cData); return; }
+    }
+    const resp = await fetch('/api/cv-optimizer-analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    renderCvoResult(data);
+  } catch(e) {
+    document.getElementById('cvo-loading').style.display = 'none';
+    document.getElementById('cvo-error').style.display = 'block';
+    document.getElementById('cvo-error-msg').textContent = e.message || 'Analysis failed. Please try again.';
+  }
+}
+function renderCvoResult(d) {
+  document.getElementById('cvo-loading').style.display = 'none';
+  document.getElementById('cvo-result').style.display = 'block';
+  const score = d.score || 0;
+  const col = score >= 80 ? '#059669' : score >= 60 ? '#d97706' : '#ef4444';
+  const bg  = score >= 80 ? '#ecfdf5' : score >= 60 ? '#fffbeb' : '#fef2f2';
+  const badge = document.getElementById('cvo-score-badge');
+  badge.style.background = bg; badge.style.color = col; badge.style.border = '3px solid '+col;
+  document.getElementById('cvo-score-num').textContent = score;
+  const lbl = document.getElementById('cvo-score-label');
+  lbl.textContent = d.score_label || ''; lbl.style.color = col;
+  document.getElementById('cvo-summary').textContent = d.summary || '';
+  document.getElementById('cvo-strengths').innerHTML = (d.strengths||[]).map(s=>
+    '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#059669;">&#10003;</span>'+s+'</li>').join('');
+  document.getElementById('cvo-improvements').innerHTML = (d.improvements||[]).map((imp,idx)=>
+    '<div style="background:#fffbeb;border-left:3px solid #d97706;border-radius:4px;padding:10px 12px;margin-bottom:8px;"><div style="font-weight:600;font-size:13px;color:#92400e;margin-bottom:3px;">'+(idx+1)+'. '+imp.title+'</div><div style="font-size:13px;color:#374151;line-height:1.5;">'+imp.detail+'</div></div>').join('');
+  document.getElementById('cvo-ats').innerHTML = (d.ats_notes||[]).map(a=>
+    '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#6366f1;">&#9670;</span>'+a+'</li>').join('');
+  if (d.analyzed_date) {
+    const dt = new Date(d.analyzed_date);
+    document.getElementById('cvo-date').textContent = 'Last analyzed: '+dt.toLocaleDateString();
+  }
+}
+function closeCvOptimizer() {
+  document.getElementById('cv-optimizer-overlay').style.display = 'none';
+}
 document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
 });
@@ -3627,6 +3719,83 @@ async function runApply() {
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_cv_text(cv_path, cv_summary):
+    """Extract raw text from CV file; fall back to cv_summary."""
+    if cv_path and os.path.exists(cv_path):
+        try:
+            if cv_path.lower().endswith('.pdf'):
+                try:
+                    from pdfminer.high_level import extract_text as _pdfminer_extract
+                    _t = _pdfminer_extract(cv_path)
+                    if _t and len(_t.strip()) > 100:
+                        return _t
+                except Exception:
+                    pass
+                try:
+                    import pypdf as _pypdf
+                    _reader = _pypdf.PdfReader(cv_path)
+                    _t = '\n'.join(p.extract_text() or '' for p in _reader.pages)
+                    if _t and len(_t.strip()) > 100:
+                        return _t
+                except Exception:
+                    pass
+            elif cv_path.lower().endswith(('.docx', '.doc')):
+                try:
+                    from docx import Document as _DocxDoc
+                    _t = '\n'.join(p.text for p in _DocxDoc(cv_path).paragraphs)
+                    if _t and len(_t.strip()) > 100:
+                        return _t
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return cv_summary or ''
+
+
+def _call_gemini_cv_optimizer(cv_text):
+    """Call Gemini API and return structured CV analysis as dict."""
+    import urllib.request as _urlreq
+    _api_key = os.environ.get('GEMINI_API_KEY', '')
+    if not _api_key:
+        raise ValueError('GEMINI_API_KEY not configured. Add it in Railway environment variables.')
+    _prompt = (
+        "You are an expert CV/resume optimizer and career coach with 15+ years of experience.\n"
+        "Analyze the following CV and provide a comprehensive evaluation.\n\n"
+        "CV TEXT:\n" + cv_text[:8000] + "\n\n"
+        "IMPORTANT: Respond ONLY with a valid JSON object (no markdown, no triple backticks, no explanation).\n"
+        "The output must be directly parseable by json.loads().\n\n"
+        'Format exactly:\n'
+        '{\n'
+        '  \"score\": <integer 0-100>,\n'
+        '  \"score_label\": \"<Poor|Fair|Good|Excellent>\",\n'
+        '  \"summary\": \"<2-3 sentence overall assessment in English>\",\n'
+        '  \"strengths\": [\"<strength 1>\", \"<strength 2>\"],\n'
+        '  \"improvements\": [\n'
+        '    {\"title\": \"<title>\", \"detail\": \"<specific advice in English>\"},\n'
+        '    {\"title\": \"<title>\", \"detail\": \"<specific advice in English>\"}\n'
+        '  ],\n'
+        '  \"ats_notes\": [\"<ATS tip 1>\", \"<ATS tip 2>\"]\n'
+        '}\n\n'
+        "Scoring: clarity (20pts) + quantified impact (25pts) + ATS-friendliness (20pts) + structure (20pts) + quality (15pts).\n"
+        "Rules: English only regardless of CV language. 3-5 improvements. 2-4 strengths. 1-3 ATS notes. Be specific."
+    )
+    _payload = json.dumps({
+        "contents": [{"parts": [{"text": _prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1800}
+    }).encode('utf-8')
+    _req = _urlreq.Request(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _api_key,
+        data=_payload, headers={'Content-Type': 'application/json'}, method='POST'
+    )
+    with _urlreq.urlopen(_req, timeout=30) as _resp:
+        _data = json.loads(_resp.read().decode('utf-8'))
+    _text = _data['candidates'][0]['content']['parts'][0]['text'].strip()
+    if _text.startswith('```'):
+        _lines = _text.split('\n')
+        _text = '\n'.join(_lines[1:-1] if _lines[-1].strip() == '```' else _lines[1:])
+    return json.loads(_text)
+
 
 class Handler(BaseHTTPRequestHandler):
 
@@ -4287,6 +4456,47 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        elif self.path == '/api/cv-optimizer-analyze':
+            user_id = self._get_session_user_id()
+            if not user_id:
+                self.send_json({'error': 'not logged in'}, 401); return
+            if self.command == 'GET':
+                with get_db() as _conn:
+                    _prof = _conn.execute('SELECT cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
+                if _prof and _prof['cv_optimizer_result']:
+                    _res = json.loads(_prof['cv_optimizer_result'])
+                    _res['cached'] = True; _res['analyzed_date'] = _prof['cv_optimizer_date']
+                    self.send_json(_res); return
+                self.send_json({'cached': False}); return
+            if self.command == 'POST':
+                try:
+                    from datetime import datetime as _dt, timedelta as _td
+                    with get_db() as _conn:
+                        _prof = _conn.execute('SELECT cv_path, cv_summary, cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
+                    if not _prof:
+                        self.send_json({'error': 'Profile not found'}, 404); return
+                    if _prof['cv_optimizer_result'] and _prof['cv_optimizer_date']:
+                        try:
+                            if _dt.now() - _dt.fromisoformat(_prof['cv_optimizer_date']) < _td(days=7):
+                                _res = json.loads(_prof['cv_optimizer_result'])
+                                _res['cached'] = True; _res['analyzed_date'] = _prof['cv_optimizer_date']
+                                self.send_json(_res); return
+                        except Exception:
+                            pass
+                    _cv_text = _extract_cv_text(_prof['cv_path'], _prof['cv_summary'])
+                    if not _cv_text or len(_cv_text.strip()) < 30:
+                        self.send_json({'error': 'No CV content found. Please upload your CV first.'}); return
+                    _result = _call_gemini_cv_optimizer(_cv_text)
+                    _result['cached'] = False
+                    _now = _dt.now().isoformat()
+                    _result['analyzed_date'] = _now
+                    with get_db() as _conn:
+                        _conn.execute('UPDATE user_profiles SET cv_optimizer_result=?, cv_optimizer_date=? WHERE user_id=?',
+                                      (json.dumps(_result), _now, user_id))
+                        _conn.commit()
+                    self.send_json(_result)
+                except Exception as _e:
+                    self.send_json({'error': str(_e)}, 500)
         # ── Change password ──
         if path == "/api/change-password":
             data = self.read_json()
