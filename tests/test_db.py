@@ -333,3 +333,4 @@ class TestBlocklist:
 
     @pytest.mark.xfail(reason="#2 blocklist functions not yet implemented", strict=False)
     def test_blocklist_is_per_user(self, mem_db):
+        pass
