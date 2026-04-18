@@ -695,11 +695,11 @@ def run_job_search(user_id: int):
             try:
                 _conn2 = database.get_db()
                 _prof2 = _conn2.execute(
-                    "SELECT cv_text FROM user_profiles WHERE user_id=?",
+                    "SELECT cv_summary FROM user_profiles WHERE user_id=?",
                     (user_id,)
                 ).fetchone()
                 _conn2.close()
-                _cv_text = (_prof2["cv_text"] or "") if _prof2 else ""
+                _cv_summary = (_prof2["cv_summary"] or "") if _prof2 else ""
             except Exception:
                 _cv_text = ""
 
@@ -727,7 +727,7 @@ def run_job_search(user_id: int):
                     f"Job listings (JSON):\n{jobs_json}\n\n"
                     "Return ONLY a JSON array with fields: job_title, company, location, url, publish_date (ISO date string or null if unknown), full_description (preserve the full_description from input if provided), "
                     "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
-                    "Only include jobs with candidate_score >= 55. Be strict: only include jobs that closely match the candidate\'s target role titles and experience level. Return ONLY valid JSON, no markdown."
+                    "Only include jobs with candidate_score >= 40. Be strict: only include jobs that closely match the candidate\'s target role titles and experience level. Return ONLY valid JSON, no markdown."
                 )
                 try:
                     body = _js2.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 4096,
