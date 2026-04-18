@@ -3721,30 +3721,22 @@ async function runApply() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _extract_cv_text(cv_path, cv_summary):
-    """Extract raw text from CV file; fall back to cv_summary."""
     if cv_path and os.path.exists(cv_path):
         try:
             if cv_path.lower().endswith('.pdf'):
                 try:
-                    from pdfminer.high_level import extract_text as _pdfminer_extract
-                    _t = _pdfminer_extract(cv_path)
-                    if _t and len(_t.strip()) > 100:
-                        return _t
-                except Exception:
-                    pass
-                try:
-                    import pypdf as _pypdf
-                    _reader = _pypdf.PdfReader(cv_path)
-                    _t = '\n'.join(p.extract_text() or '' for p in _reader.pages)
-                    if _t and len(_t.strip()) > 100:
+                    import pypdf
+                    _pages = pypdf.PdfReader(cv_path).pages
+                    _t = '\n'.join(p.extract_text() or '' for p in _pages)
+                    if len(_t.strip()) > 100:
                         return _t
                 except Exception:
                     pass
             elif cv_path.lower().endswith(('.docx', '.doc')):
                 try:
-                    from docx import Document as _DocxDoc
-                    _t = '\n'.join(p.text for p in _DocxDoc(cv_path).paragraphs)
-                    if _t and len(_t.strip()) > 100:
+                    from docx import Document as _Docx
+                    _t = '\n'.join(p.text for p in _Docx(cv_path).paragraphs)
+                    if len(_t.strip()) > 100:
                         return _t
                 except Exception:
                     pass
@@ -3754,47 +3746,31 @@ def _extract_cv_text(cv_path, cv_summary):
 
 
 def _call_gemini_cv_optimizer(cv_text):
-    """Call Gemini API and return structured CV analysis as dict."""
-    import urllib.request as _urlreq
-    _api_key = os.environ.get('GEMINI_API_KEY', '')
-    if not _api_key:
-        raise ValueError('GEMINI_API_KEY not configured. Add it in Railway environment variables.')
-    _prompt = (
-        "You are an expert CV/resume optimizer and career coach with 15+ years of experience.\n"
-        "Analyze the following CV and provide a comprehensive evaluation.\n\n"
-        "CV TEXT:\n" + cv_text[:8000] + "\n\n"
-        "IMPORTANT: Respond ONLY with a valid JSON object (no markdown, no triple backticks, no explanation).\n"
-        "The output must be directly parseable by json.loads().\n\n"
-        'Format exactly:\n'
-        '{\n'
-        '  \"score\": <integer 0-100>,\n'
-        '  \"score_label\": \"<Poor|Fair|Good|Excellent>\",\n'
-        '  \"summary\": \"<2-3 sentence overall assessment in English>\",\n'
-        '  \"strengths\": [\"<strength 1>\", \"<strength 2>\"],\n'
-        '  \"improvements\": [\n'
-        '    {\"title\": \"<title>\", \"detail\": \"<specific advice in English>\"},\n'
-        '    {\"title\": \"<title>\", \"detail\": \"<specific advice in English>\"}\n'
-        '  ],\n'
-        '  \"ats_notes\": [\"<ATS tip 1>\", \"<ATS tip 2>\"]\n'
-        '}\n\n'
-        "Scoring: clarity (20pts) + quantified impact (25pts) + ATS-friendliness (20pts) + structure (20pts) + quality (15pts).\n"
-        "Rules: English only regardless of CV language. 3-5 improvements. 2-4 strengths. 1-3 ATS notes. Be specific."
-    )
-    _payload = json.dumps({
-        "contents": [{"parts": [{"text": _prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1800}
+    import urllib.request as _ureq
+    _key = os.environ.get('GEMINI_API_KEY', '')
+    if not _key:
+        raise ValueError('GEMINI_API_KEY not set in environment')
+    _cv = cv_text[:8000]
+    _p1 = 'You are an expert CV/resume coach. Analyze the CV below and return ONLY valid JSON.'
+    _p2 = ' No markdown, no backticks. Output must be parseable by json.loads().'
+    _p3 = ' CV language may vary but output MUST be in English.'
+    _p4 = ' Score 0-100 (clarity 20, impact 25, ATS 20, structure 20, quality 15).'
+    _p5 = ' Provide 3-5 improvements and 2-4 strengths.'
+    _fmt = '{"score":72,"score_label":"Good","summary":"...","strengths":["..."],"improvements":[{"title":"...","detail":"..."}],"ats_notes":["..."]}' 
+    _prompt = _p1 + _p2 + _p3 + _p4 + _p5 + '\n\nFormat: ' + _fmt + '\n\nCV:\n' + _cv
+    _body = json.dumps({
+        'contents': [{'parts': [{'text': _prompt}]}],
+        'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 1800}
     }).encode('utf-8')
-    _req = _urlreq.Request(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _api_key,
-        data=_payload, headers={'Content-Type': 'application/json'}, method='POST'
-    )
-    with _urlreq.urlopen(_req, timeout=30) as _resp:
-        _data = json.loads(_resp.read().decode('utf-8'))
-    _text = _data['candidates'][0]['content']['parts'][0]['text'].strip()
-    if _text.startswith('```'):
-        _lines = _text.split('\n')
-        _text = '\n'.join(_lines[1:-1] if _lines[-1].strip() == '```' else _lines[1:])
-    return json.loads(_text)
+    _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _key
+    _req = _ureq.Request(_url, data=_body, headers={'Content-Type': 'application/json'}, method='POST')
+    with _ureq.urlopen(_req, timeout=30) as _r:
+        _d = json.loads(_r.read().decode('utf-8'))
+    _t = _d['candidates'][0]['content']['parts'][0]['text'].strip()
+    if _t.startswith('```'):
+        _lines = _t.split('\n')
+        _t = '\n'.join(_lines[1:-1] if _lines[-1].strip() == '```' else _lines[1:])
+    return json.loads(_t)
 
 
 class Handler(BaseHTTPRequestHandler):
