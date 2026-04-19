@@ -2593,10 +2593,6 @@ async function analyzeCvWithAI(forceRefresh) {
   document.getElementById('cvo-result').style.display = 'none';
   document.getElementById('cvo-error').style.display = 'none';
   try {
-    if (!forceRefresh) {
-      const cResp = await fetch('/api/cv-optimizer-analyze');
-      if (cResp.ok) { const cData = await cResp.json(); if (cData.cached && cData.score) { renderCvoResult(cData); return; } }
-    }
     const resp = await fetch('/api/cv-optimizer-analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
