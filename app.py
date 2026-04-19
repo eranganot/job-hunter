@@ -3768,8 +3768,14 @@ def _call_gemini_cv_optimizer(cv_text):
     }).encode('utf-8')
     _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _key
     _req = _ureq.Request(_url, data=_body, headers={'Content-Type': 'application/json'}, method='POST')
-    with _ureq.urlopen(_req, timeout=30) as _r:
-        _d = json.loads(_r.read().decode('utf-8'))
+    try:
+        with _ureq.urlopen(_req, timeout=30) as _r:
+            _d = json.loads(_r.read().decode('utf-8'))
+    except Exception as _he:
+        _eb = b''
+        try: _eb = _he.read()
+        except: pass
+        raise Exception('Gemini API error: ' + str(_he) + (' - ' + _eb.decode('utf-8', errors='replace')[:300] if _eb else ''))
     _t = _d['candidates'][0]['content']['parts'][0]['text'].strip()
     if _t.startswith('```'):
         _lines = _t.split('\n')
