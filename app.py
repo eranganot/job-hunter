@@ -781,6 +781,7 @@ def run_job_search(user_id: int):
                         _ws_req = _ur2.Request('https://api.anthropic.com/v1/messages', data=_ws_body,
                                                headers={'x-api-key': ANTHROPIC_KEY,
                                                         'anthropic-version': '2023-06-01',
+                                                        'anthropic-beta': 'web-search-2025-03-05',
                                                         'content-type': 'application/json'})
                         with _ur2.urlopen(_ws_req, timeout=120) as _ws_resp:
                             _ws_result = _js2.loads(_ws_resp.read())
@@ -827,7 +828,10 @@ def run_job_search(user_id: int):
 
         if not all_jobs_data:
             database.log_activity(user_id, "jobs_searched", "Search returned no new results")
-            deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix="/dashboard#new")
+            try:
+                deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix="/dashboard#new")
+            except Exception as _dn_err:
+                print(f"[run-search] deliver_notification error: {_dn_err}")
             return
 
         # ── URL check for new jobs ───────────────────────────────────────
@@ -927,12 +931,22 @@ def run_job_search(user_id: int):
         if (hist_alive+hist_dead)>0:
             notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
             notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
-        deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#new")
+        try:
+            deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#new")
+        except Exception as _dn_err:
+            print(f"[run-search] deliver_notification error: {_dn_err}")
         print(f"[run-search] user {user_id}: inserted={inserted} hist_checked={hist_alive+hist_dead}")
 
     except Exception as e:
-        print(f"[run-search] Error: {e}")
-        database.log_activity(user_id, "jobs_searched", "Job search failed — will retry at next scheduled time")
+        import traceback as _tb
+        _tb_str = _tb.format_exc()
+        print(f"[run-search] Error: {type(e).__name__}: {e}\n{_tb_str}")
+        err_summary = f"{type(e).__name__}: {str(e)[:120]}"
+        database.log_activity(user_id, "jobs_searched", f"Job search failed — {err_summary}")
+        try:
+            deliver_notification(user_id, f"\u274c Job search failed\n\n{err_summary}\n\nWill retry at next scheduled time.", url_suffix="/dashboard")
+        except Exception as _ne:
+            print(f"[run-search] Notification also failed: {_ne}")
     finally:
         _search_running.discard(user_id)
 
