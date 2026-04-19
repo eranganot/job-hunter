@@ -131,7 +131,7 @@ def init_db():
         "ALTER TABLE user_profiles ADD COLUMN applications_reset_date TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN onboarding_progress TEXT DEFAULT '{}'",
         "ALTER TABLE user_profiles ADD COLUMN onboarding_dismissed INTEGER DEFAULT 0",
-        "ALTER TABLE jobs ADD COLUMN cover_letter TEXT DEFAULT NULL",,
+        "ALTER TABLE jobs ADD COLUMN cover_letter TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_result TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_date TEXT DEFAULT NULL"
     ]:
