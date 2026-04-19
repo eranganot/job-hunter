@@ -2559,6 +2559,89 @@ function initRadioStyles() {
 }
 setTimeout(initRadioStyles, 500);
 </script>
+
+<div id="cv-optimizer-overlay" class="hidden" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px;">
+  <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-width:540px;width:100%;padding:28px;position:relative;margin:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <h3 style="font-weight:700;font-size:18px;color:#1e293b;margin:0;">CV Analysis</h3>
+      <button onclick="closeCvOptimizer()" style="color:#94a3b8;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;padding:0;">&#215;</button>
+    </div>
+    <div id="cvo-loading" style="text-align:center;padding:40px 0;">
+      <div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#6366f1;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
+      <p style="color:#64748b;font-size:14px;">Analyzing your CV with Gemini AI&#8230;</p>
+    </div>
+    <div id="cvo-result" style="display:none;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div id="cvo-score-badge" style="width:84px;height:84px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 8px;font-weight:700;border:3px solid #e2e8f0;">
+          <span id="cvo-score-num" style="font-size:30px;line-height:1;"></span>
+          <span style="font-size:11px;opacity:.6;">/100</span>
+        </div>
+        <div id="cvo-score-label" style="font-weight:600;font-size:15px;margin-bottom:8px;"></div>
+        <p id="cvo-summary" style="color:#64748b;font-size:13px;line-height:1.6;max-width:420px;margin:0 auto;"></p>
+      </div>
+      <div style="margin-bottom:16px;">
+        <h4 style="font-size:12px;font-weight:700;color:#059669;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;">&#10003; Strengths</h4>
+        <ul id="cvo-strengths" style="margin:0;padding:0;list-style:none;"></ul>
+      </div>
+
+<script>
+async function analyzeCvWithAI(forceRefresh) {
+  const overlay = document.getElementById('cv-optimizer-overlay');
+  overlay.style.display = 'flex';
+  overlay.classList.remove('hidden');
+  document.getElementById('cvo-loading').style.display = 'block';
+  document.getElementById('cvo-result').style.display = 'none';
+  document.getElementById('cvo-error').style.display = 'none';
+  try {
+    if (!forceRefresh) {
+      const cResp = await fetch('/api/cv-optimizer-analyze');
+      const cData = await cResp.json();
+      if (cData.cached && cData.score) { renderCvoResult(cData); return; }
+    }
+    const resp = await fetch('/api/cv-optimizer-analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    renderCvoResult(data);
+  } catch(e) {
+    document.getElementById('cvo-loading').style.display = 'none';
+    document.getElementById('cvo-error').style.display = 'block';
+    document.getElementById('cvo-error-msg').textContent = e.message || 'Analysis failed. Please try again.';
+  }
+}
+function renderCvoResult(d) {
+  document.getElementById('cvo-loading').style.display = 'none';
+  document.getElementById('cvo-result').style.display = 'block';
+  const score = d.score || 0;
+  const col = score >= 80 ? '#059669' : score >= 60 ? '#d97706' : '#ef4444';
+  const bg  = score >= 80 ? '#ecfdf5' : score >= 60 ? '#fffbeb' : '#fef2f2';
+  const badge = document.getElementById('cvo-score-badge');
+  badge.style.background = bg; badge.style.color = col; badge.style.border = '3px solid '+col;
+  document.getElementById('cvo-score-num').textContent = score;
+  const lbl = document.getElementById('cvo-score-label');
+  lbl.textContent = d.score_label || ''; lbl.style.color = col;
+  document.getElementById('cvo-summary').textContent = d.summary || '';
+  document.getElementById('cvo-strengths').innerHTML = (d.strengths||[]).map(s=>
+    '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#059669;">&#10003;</span>'+s+'</li>').join('');
+  document.getElementById('cvo-improvements').innerHTML = (d.improvements||[]).map((imp,idx)=>
+    '<div style="background:#fffbeb;border-left:3px solid #d97706;border-radius:4px;padding:10px 12px;margin-bottom:8px;"><div style="font-weight:600;font-size:13px;color:#92400e;margin-bottom:3px;">'+(idx+1)+'. '+imp.title+'</div><div style="font-size:13px;color:#374151;line-height:1.5;">'+imp.detail+'</div></div>').join('');
+  document.getElementById('cvo-ats').innerHTML = (d.ats_notes||[]).map(a=>
+    '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#6366f1;">&#9670;</span>'+a+'</li>').join('');
+  if (d.analyzed_date) {
+    const dt = new Date(d.analyzed_date);
+    document.getElementById('cvo-date').textContent = 'Last analyzed: '+dt.toLocaleDateString();
+  }
+}
+function closeCvOptimizer() {
+  document.getElementById('cv-optimizer-overlay').style.display = 'none';
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
+});
+
+loadMe().then(() => loadAll());
+setInterval(loadAll, 5 * 60 * 1000);
+
+</script>
 </body>
 </html>"""
 
@@ -2763,29 +2846,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 <!-- CV Optimizer Popup -->
-<div id="cv-optimizer-overlay" class="hidden" style="position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px;">
-  <div style="background:#fff;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.2);max-width:540px;width:100%;padding:28px;position:relative;margin:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h3 style="font-weight:700;font-size:18px;color:#1e293b;margin:0;">CV Analysis</h3>
-      <button onclick="closeCvOptimizer()" style="color:#94a3b8;background:none;border:none;cursor:pointer;font-size:22px;line-height:1;padding:0;">&#215;</button>
-    </div>
-    <div id="cvo-loading" style="text-align:center;padding:40px 0;">
-      <div style="width:40px;height:40px;border:3px solid #e2e8f0;border-top-color:#6366f1;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>
-      <p style="color:#64748b;font-size:14px;">Analyzing your CV with Gemini AI&#8230;</p>
-    </div>
-    <div id="cvo-result" style="display:none;">
-      <div style="text-align:center;margin-bottom:24px;">
-        <div id="cvo-score-badge" style="width:84px;height:84px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 8px;font-weight:700;border:3px solid #e2e8f0;">
-          <span id="cvo-score-num" style="font-size:30px;line-height:1;"></span>
-          <span style="font-size:11px;opacity:.6;">/100</span>
-        </div>
-        <div id="cvo-score-label" style="font-weight:600;font-size:15px;margin-bottom:8px;"></div>
-        <p id="cvo-summary" style="color:#64748b;font-size:13px;line-height:1.6;max-width:420px;margin:0 auto;"></p>
-      </div>
-      <div style="margin-bottom:16px;">
-        <h4 style="font-size:12px;font-weight:700;color:#059669;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;">&#10003; Strengths</h4>
-        <ul id="cvo-strengths" style="margin:0;padding:0;list-style:none;"></ul>
-      </div>
       <div style="margin-bottom:16px;">
         <h4 style="font-size:12px;font-weight:700;color:#d97706;margin:0 0 10px;text-transform:uppercase;letter-spacing:.06em;">&#9889; Improvements</h4>
         <div id="cvo-improvements"></div>
@@ -3536,62 +3596,6 @@ async function dismissOnboarding() {
   document.getElementById('onboarding-overlay').style.display = 'none';
   try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e) {}
 }
-async function analyzeCvWithAI(forceRefresh) {
-  const overlay = document.getElementById('cv-optimizer-overlay');
-  overlay.style.display = 'flex';
-  overlay.classList.remove('hidden');
-  document.getElementById('cvo-loading').style.display = 'block';
-  document.getElementById('cvo-result').style.display = 'none';
-  document.getElementById('cvo-error').style.display = 'none';
-  try {
-    if (!forceRefresh) {
-      const cResp = await fetch('/api/cv-optimizer-analyze');
-      const cData = await cResp.json();
-      if (cData.cached && cData.score) { renderCvoResult(cData); return; }
-    }
-    const resp = await fetch('/api/cv-optimizer-analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
-    renderCvoResult(data);
-  } catch(e) {
-    document.getElementById('cvo-loading').style.display = 'none';
-    document.getElementById('cvo-error').style.display = 'block';
-    document.getElementById('cvo-error-msg').textContent = e.message || 'Analysis failed. Please try again.';
-  }
-}
-function renderCvoResult(d) {
-  document.getElementById('cvo-loading').style.display = 'none';
-  document.getElementById('cvo-result').style.display = 'block';
-  const score = d.score || 0;
-  const col = score >= 80 ? '#059669' : score >= 60 ? '#d97706' : '#ef4444';
-  const bg  = score >= 80 ? '#ecfdf5' : score >= 60 ? '#fffbeb' : '#fef2f2';
-  const badge = document.getElementById('cvo-score-badge');
-  badge.style.background = bg; badge.style.color = col; badge.style.border = '3px solid '+col;
-  document.getElementById('cvo-score-num').textContent = score;
-  const lbl = document.getElementById('cvo-score-label');
-  lbl.textContent = d.score_label || ''; lbl.style.color = col;
-  document.getElementById('cvo-summary').textContent = d.summary || '';
-  document.getElementById('cvo-strengths').innerHTML = (d.strengths||[]).map(s=>
-    '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#059669;">&#10003;</span>'+s+'</li>').join('');
-  document.getElementById('cvo-improvements').innerHTML = (d.improvements||[]).map((imp,idx)=>
-    '<div style="background:#fffbeb;border-left:3px solid #d97706;border-radius:4px;padding:10px 12px;margin-bottom:8px;"><div style="font-weight:600;font-size:13px;color:#92400e;margin-bottom:3px;">'+(idx+1)+'. '+imp.title+'</div><div style="font-size:13px;color:#374151;line-height:1.5;">'+imp.detail+'</div></div>').join('');
-  document.getElementById('cvo-ats').innerHTML = (d.ats_notes||[]).map(a=>
-    '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#6366f1;">&#9670;</span>'+a+'</li>').join('');
-  if (d.analyzed_date) {
-    const dt = new Date(d.analyzed_date);
-    document.getElementById('cvo-date').textContent = 'Last analyzed: '+dt.toLocaleDateString();
-  }
-}
-function closeCvOptimizer() {
-  document.getElementById('cv-optimizer-overlay').style.display = 'none';
-}
-document.addEventListener('click', e => {
-  if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
-});
-
-loadMe().then(() => loadAll());
-setInterval(loadAll, 5 * 60 * 1000);
-
 async function runSearch() {
   if (window.__searchRunning) return; // prevent concurrent searches
   window.__searchRunning = true;
