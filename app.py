@@ -4438,7 +4438,7 @@ class Handler(BaseHTTPRequestHandler):
 
         elif self.path == '/api/cv-optimizer-analyze':
             if self.command == 'GET':
-                with get_db() as _conn:
+                with database.get_db() as _conn:
                     _prof = _conn.execute('SELECT cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
                 if _prof and _prof['cv_optimizer_result']:
                     _res = json.loads(_prof['cv_optimizer_result'])
@@ -4448,7 +4448,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == 'POST':
                 try:
                     from datetime import datetime as _dt, timedelta as _td
-                    with get_db() as _conn:
+                    with database.get_db() as _conn:
                         _prof = _conn.execute('SELECT cv_path, cv_summary, cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
                     if not _prof:
                         self.send_json({'error': 'Profile not found'}, 404); return
@@ -4467,7 +4467,7 @@ class Handler(BaseHTTPRequestHandler):
                     _result['cached'] = False
                     _now = _dt.now().isoformat()
                     _result['analyzed_date'] = _now
-                    with get_db() as _conn:
+                    with database.get_db() as _conn:
                         _conn.execute('UPDATE user_profiles SET cv_optimizer_result=?, cv_optimizer_date=? WHERE user_id=?',
                                       (json.dumps(_result), _now, user_id))
                         _conn.commit()
