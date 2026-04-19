@@ -384,7 +384,9 @@ def run_job_search(user_id: int):
         # ── Load all existing URLs to dedup against full history ─────────
         conn = database.get_db()
         existing_urls = {r[0] for r in conn.execute(
-            "SELECT url FROM jobs WHERE user_id=? AND url!='' AND status NOT IN ('rejected','expired')", (user_id,)
+            "SELECT url FROM jobs WHERE user_id=? AND url!='' "
+            "AND status NOT IN ('rejected','expired') "
+            "AND found_date >= date('now', '-45 days')", (user_id,)
         ).fetchall()}
         conn.close()
 
@@ -428,7 +430,41 @@ def run_job_search(user_id: int):
                 'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
             }
             # Build title match phrases from user preferences
-            _phrases = [t.lower().strip() for t in titles_ if t.strip()]
+            def _expand_title_variants(title):
+                """Expand a job title into structural variants (VP<->VP of<->Vice President<->Head of<->Director, Senior<->Sr.<->Lead).
+                Pure linguistic rules — works for any domain the user enters."""
+                t = title.lower().strip()
+                variants = {t}
+                level_rules = [
+                    ('vp of ',            ['vice president of ', 'head of ', 'director of ']),
+                    ('vp ',               ['vice president ', 'head of ', 'director of ']),
+                    ('vice president of ', ['vp of ', 'head of ', 'director of ']),
+                    ('vice president ',   ['vp ', 'head of ', 'director of ']),
+                    ('head of ',          ['director of ', 'vp of ', 'vp ']),
+                    ('director of ',      ['head of ', 'vp of ', 'vp ']),
+                    ('director ',         ['head of ', 'vp ']),
+                    ('chief ',            ['vp of ', 'head of ']),
+                ]
+                seniority_rules = [
+                    ('senior ',  ['sr. ', 'sr ', 'lead ']),
+                    ('sr. ',     ['senior ', 'sr ', 'lead ']),
+                    ('sr ',      ['senior ', 'sr. ', 'lead ']),
+                    ('lead ',    ['senior ', 'sr. ']),
+                    ('principal ', ['senior ', 'lead ', 'staff ']),
+                    ('staff ',   ['principal ', 'senior ']),
+                ]
+                for pattern, replacements in level_rules + seniority_rules:
+                    if t.startswith(pattern):
+                        rest = t[len(pattern):]
+                        for r in replacements:
+                            variants.add(r + rest)
+                return list(variants)
+
+            _phrases = []
+            for _t in titles_:
+                if _t.strip():
+                    _phrases.extend(_expand_title_variants(_t))
+            _phrases = list(set(_phrases))
             # Also build 2-word combos from each title for partial matching
             _bigrams = set()
             for _t in titles_:
@@ -765,7 +801,7 @@ def run_job_search(user_id: int):
             # -- Supplemental: Claude web_search for LinkedIn/Glassdoor/Wellfound --
             try:
                 _ws_sites = 'linkedin.com/jobs, glassdoor.com, wellfound.com/jobs'
-                for _ws_title in titles_[:2]:
+                for _ws_title in titles_[:5]:
                     try:
                         _ws_prompt = (
                             f'Search for "{_ws_title}" job listings in {", ".join(locs_[:2]) or "Israel"}. '
