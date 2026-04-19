@@ -3536,30 +3536,30 @@ async function dismissOnboarding() {
   document.getElementById('onboarding-overlay').style.display = 'none';
   try { await fetch('/api/dismiss-onboarding', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); } catch(e) {}
 }
-async function analyzeCvWithAI(forceRefresh) {{
+async function analyzeCvWithAI(forceRefresh) {
   const overlay = document.getElementById('cv-optimizer-overlay');
   overlay.style.display = 'flex';
   overlay.classList.remove('hidden');
   document.getElementById('cvo-loading').style.display = 'block';
   document.getElementById('cvo-result').style.display = 'none';
   document.getElementById('cvo-error').style.display = 'none';
-  try {{
-    if (!forceRefresh) {{
+  try {
+    if (!forceRefresh) {
       const cResp = await fetch('/api/cv-optimizer-analyze');
       const cData = await cResp.json();
-      if (cData.cached && cData.score) {{ renderCvoResult(cData); return; }}
-    }}
-    const resp = await fetch('/api/cv-optimizer-analyze', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:'{{}}'}});
+      if (cData.cached && cData.score) { renderCvoResult(cData); return; }
+    }
+    const resp = await fetch('/api/cv-optimizer-analyze', {method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
     renderCvoResult(data);
-  }} catch(e) {{
+  } catch(e) {
     document.getElementById('cvo-loading').style.display = 'none';
     document.getElementById('cvo-error').style.display = 'block';
     document.getElementById('cvo-error-msg').textContent = e.message || 'Analysis failed. Please try again.';
-  }}
-}}
-function renderCvoResult(d) {{
+  }
+}
+function renderCvoResult(d) {
   document.getElementById('cvo-loading').style.display = 'none';
   document.getElementById('cvo-result').style.display = 'block';
   const score = d.score || 0;
@@ -3577,17 +3577,17 @@ function renderCvoResult(d) {{
     '<div style="background:#fffbeb;border-left:3px solid #d97706;border-radius:4px;padding:10px 12px;margin-bottom:8px;"><div style="font-weight:600;font-size:13px;color:#92400e;margin-bottom:3px;">'+(idx+1)+'. '+imp.title+'</div><div style="font-size:13px;color:#374151;line-height:1.5;">'+imp.detail+'</div></div>').join('');
   document.getElementById('cvo-ats').innerHTML = (d.ats_notes||[]).map(a=>
     '<li style="font-size:13px;color:#374151;padding:4px 0 4px 20px;position:relative;"><span style="position:absolute;left:0;color:#6366f1;">&#9670;</span>'+a+'</li>').join('');
-  if (d.analyzed_date) {{
+  if (d.analyzed_date) {
     const dt = new Date(d.analyzed_date);
     document.getElementById('cvo-date').textContent = 'Last analyzed: '+dt.toLocaleDateString();
-  }}
-}}
-function closeCvOptimizer() {{
+  }
+}
+function closeCvOptimizer() {
   document.getElementById('cv-optimizer-overlay').style.display = 'none';
-}}
-document.addEventListener('click', e => {{
+}
+document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
-}});
+});
 
 loadMe().then(() => loadAll());
 setInterval(loadAll, 5 * 60 * 1000);
