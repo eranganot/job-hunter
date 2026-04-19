@@ -3764,7 +3764,7 @@ def _call_gemini_cv_optimizer(cv_text):
     _prompt = _p1 + _p2 + _p3 + _p4 + _p5 + '\n\nFormat: ' + _fmt + '\n\nCV:\n' + _cv
     _body = json.dumps({
         'contents': [{'parts': [{'text': _prompt}]}],
-        'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 1800}
+        'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 8192}
     }).encode('utf-8')
     _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + _key
     _req = _ureq.Request(_url, data=_body, headers={'Content-Type': 'application/json'}, method='POST')
