@@ -2581,7 +2581,7 @@ setTimeout(initRadioStyles, 500);
       </div>
       <div style="margin-bottom:16px;">
         <h4 style="font-size:12px;font-weight:700;color:#059669;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;">&#10003; Strengths</h4>
-        <ul id="cvo-strengths" style="margin:0;padding:0;list-style:none;"></ul>
+        <ul id="cvo-strengths" style="margin:0;padding:0;list-style:none;"></ul><div style="margin-top:16px"><h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:8px">Improvements</h4><div id="cvo-improvements"></div></div><div style="margin-top:16px"><h4 style="font-size:14px;font-weight:600;color:#374151;margin-bottom:8px">ATS Tips</h4><ul id="cvo-ats" style="list-style:none;padding:0;margin:0"></ul></div><div id="cvo-date" style="margin-top:12px;font-size:12px;color:#9ca3af;text-align:right"></div><div id="cvo-error" style="display:none;margin-top:12px;padding:12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#dc2626"><strong>Error:</strong> <span id="cvo-error-msg"></span></div>
       </div>
 
 <script>
@@ -2604,7 +2604,7 @@ async function analyzeCvWithAI(forceRefresh) {
     renderCvoResult(data);
   } catch(e) {
     document.getElementById('cvo-loading').style.display = 'none';
-    document.getElementById('cvo-error').style.display = 'block';
+    document.getElementById('cvo-result').style.display = 'block'; document.getElementById('cvo-error').style.display = 'block';
     document.getElementById('cvo-error-msg').textContent = e.message || 'Analysis failed. Please try again.';
   }
 }
