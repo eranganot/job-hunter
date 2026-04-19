@@ -4437,9 +4437,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         elif self.path == '/api/cv-optimizer-analyze':
-            user_id = self._get_session_user_id()
-            if not user_id:
-                self.send_json({'error': 'not logged in'}, 401); return
             if self.command == 'GET':
                 with get_db() as _conn:
                     _prof = _conn.execute('SELECT cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
