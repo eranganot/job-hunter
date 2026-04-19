@@ -3766,7 +3766,7 @@ def _call_gemini_cv_optimizer(cv_text):
         'contents': [{'parts': [{'text': _prompt}]}],
         'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 1800}
     }).encode('utf-8')
-    _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + _key
+    _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + _key
     _req = _ureq.Request(_url, data=_body, headers={'Content-Type': 'application/json'}, method='POST')
     try:
         with _ureq.urlopen(_req, timeout=30) as _r:
