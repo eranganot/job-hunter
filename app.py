@@ -692,6 +692,7 @@ def run_job_search(user_id: int):
 
             # -- Score against user CV + preferences using Claude Haiku --
             # Fetch CV text from DB
+            _cv_text = ""
             try:
                 _conn2 = database.get_db()
                 _prof2 = _conn2.execute(
@@ -699,7 +700,7 @@ def run_job_search(user_id: int):
                     (user_id,)
                 ).fetchone()
                 _conn2.close()
-                _cv_summary = (_prof2["cv_summary"] or "") if _prof2 else ""
+                _cv_text = (_prof2["cv_summary"] or "") if _prof2 else ""
             except Exception:
                 _cv_text = ""
 
