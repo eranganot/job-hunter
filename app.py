@@ -794,7 +794,13 @@ def run_job_search(user_id: int):
                                 scored_jobs.append(j)
                     print(f"[search] Batch {batch_i//25+1}: scored {len(batch)} -> {len([j for j in scored_jobs if j not in scored_jobs[:batch_i]])} passed")
                 except Exception as e:
-                    print(f"[search] Scoring error: {e} — skipping batch of {len(batch)} jobs")
+                    _err_body = ""
+                    try:
+                        import urllib.error as _ue2
+                        if isinstance(e, _ue2.HTTPError):
+                            _err_body = " | body: " + e.read().decode("utf-8", errors="replace")[:300]
+                    except Exception: pass
+                    print(f"[search] Scoring error: {e}{_err_body} — skipping batch of {len(batch)} jobs")
                     # Skip unscored jobs rather than including them with fake high scores
 
 
@@ -812,13 +818,12 @@ def run_job_search(user_id: int):
                         )
                         _ws_body = _js2.dumps({
                             'model': 'claude-sonnet-4-6', 'max_tokens': 4096,
-                            'tools': [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 5}],
+                            'tools': [{'type': 'web_search_20260209', 'name': 'web_search', 'max_uses': 5}],
                             'messages': [{'role': 'user', 'content': _ws_prompt}]
                         }).encode()
                         _ws_req = _ur2.Request('https://api.anthropic.com/v1/messages', data=_ws_body,
                                                headers={'x-api-key': ANTHROPIC_KEY,
                                                         'anthropic-version': '2023-06-01',
-                                                        'anthropic-beta': 'web-search-2025-03-05',
                                                         'content-type': 'application/json'})
                         with _ur2.urlopen(_ws_req, timeout=120) as _ws_resp:
                             _ws_result = _js2.loads(_ws_resp.read())
