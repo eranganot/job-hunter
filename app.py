@@ -727,7 +727,7 @@ def run_job_search(user_id: int):
                 return []
 
             # -- Score against user CV + preferences --
-            # Cascading fallback: Gemini Flash (free) -> Anthropic Haiku -> rule-based heuristic
+            # Cascading fallback: Gemini Flash (free) → Anthropic Haiku → rule-based heuristic
 
             # Fetch CV summary from DB for richer scoring context
             _cv_text = ""
@@ -771,7 +771,7 @@ def run_job_search(user_id: int):
                 return out
 
             def _score_batch(batch_, profile_text_):
-                """Score a batch of jobs via Gemini -> Anthropic -> heuristic fallback."""
+                """Score a batch of jobs via Gemini → Anthropic → heuristic fallback."""
                 import os as _os_sb
                 _GEMINI_KEY = _os_sb.environ.get('GEMINI_API_KEY', '')
 
@@ -813,7 +813,7 @@ def run_job_search(user_id: int):
                         print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
                         return result_
                     except Exception as _ge:
-                        print(f"[search] Gemini scoring error: {_ge} -- trying Anthropic")
+                        print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
 
                 # --- Try Anthropic Claude Haiku (secondary) ---
                 if ANTHROPIC_KEY:
@@ -835,9 +835,9 @@ def run_job_search(user_id: int):
                         import urllib.error as _ue
                         _ae_body = ""
                         if isinstance(_ae, _ue.HTTPError):
-                            try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:300]
+                            try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:200]
                             except: pass
-                        print(f"[search] Anthropic scoring error: {_ae}{_ae_body} -- falling back to heuristic")
+                        print(f"[search] Anthropic scoring error: {_ae}{_ae_body} — falling back to heuristic")
 
                 # --- Rule-based heuristic (no API needed) ---
                 print(f"[search] Heuristic scoring {len(batch_)} jobs (no AI key available)")
@@ -847,6 +847,7 @@ def run_job_search(user_id: int):
                     _desc = (j.get("full_description") or j.get("description") or "").lower()
                     _loc = (j.get("location") or "").lower()
                     _score = 0
+                    # Title phrase match
                     if any(ph in _t for ph in _phrases):
                         _score += 50
                     else:
@@ -854,11 +855,13 @@ def run_job_search(user_id: int):
                             if _w1 in _t and _w2 in _t:
                                 _score += 35
                                 break
+                    # Keyword match in description (up to +20)
                     for _kw in kws_:
                         if _kw.lower() in _desc:
                             _score += 5
                         if _score >= 70:
                             break
+                    # Location match
                     for _lp in locs_:
                         if _lp.lower() in _loc or "remote" in _loc or "israel" in _loc:
                             _score += 10
@@ -924,7 +927,7 @@ def run_job_search(user_id: int):
                 except Exception as _wse2:
                     print(f"[search] Gemini web search supplemental skipped: {_wse2}")
             else:
-                print("[search] Gemini web search skipped -- no GEMINI_API_KEY")
+                print("[search] Gemini web search skipped — no GEMINI_API_KEY")
 
             print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
             return scored_jobs
@@ -1241,6 +1244,112 @@ def run_job_apply(user_id: int) -> int:
         print(f"[run-apply] Error: {e}")
         import traceback; traceback.print_exc()
         return {"applied": 0, "error": str(e)}
+
+
+# ── Immediate single-job apply (triggered on approval) ───────────────────────
+
+def _trigger_apply_bg(user_id: int, job_id: int):
+    """Fire-and-forget: apply to a single job in a background thread.
+    Called immediately when a user approves a job so they don't wait for the
+    scheduled batch window.
+    """
+    def _run():
+        try:
+            import apply_engine
+            conn = database.get_db()
+            job  = conn.execute(
+                "SELECT id, title, company, url, apply_status FROM jobs "
+                "WHERE id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            if not job:
+                conn.close()
+                return
+            # Guard: already applied or currently in flight
+            if job["apply_status"] in ("applying", "confirmed", "submitted"):
+                conn.close()
+                return
+
+            # Mark as 'applying' so the UI shows a spinner
+            conn.execute(
+                "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
+                (job_id, user_id)
+            )
+            conn.commit()
+
+            user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            profile = conn.execute(
+                "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            conn.close()
+
+            cv_text   = (profile["cv_summary"] or "") if profile else ""
+            email     = user["email"] if user else ""
+            applicant = apply_engine.extract_applicant_data(cv_text, email)
+            cv_path   = (profile["cv_path"] or None) if profile else None
+
+            res = apply_engine.submit_application(
+                job["url"], job["title"], job["company"],
+                applicant, cv_path, ANTHROPIC_KEY
+            )
+
+            apply_status         = res["status"]
+            apply_confirmation   = res.get("confirmation_text", "")[:1000]
+            apply_error          = res.get("error", "")[:500]
+            apply_failure_type   = res.get("apply_failure_type")
+            apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
+            resolved_url         = res.get("resolved_url", job["url"])
+            today                = datetime.now().strftime("%Y-%m-%d")
+
+            c2 = database.get_db()
+            if apply_status in ("submitted", "confirmed"):
+                c2.execute(
+                    "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                    "apply_status=?, apply_confirmation=?, apply_error=?, "
+                    "apply_failure_type=?, apply_failure_detail=?, "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "WHERE id=? AND user_id=?",
+                    (today, f"Applied via Job Hunter — {apply_status}",
+                     apply_status, apply_confirmation, apply_error,
+                     apply_failure_type, apply_failure_detail, job_id, user_id)
+                )
+            else:
+                # Failed / manual_required — keep status='approved' so user can retry
+                c2.execute(
+                    "UPDATE jobs SET apply_status=?, apply_error=?, "
+                    "apply_failure_type=?, apply_failure_detail=?, "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "WHERE id=? AND user_id=?",
+                    (apply_status, apply_error, apply_failure_type,
+                     apply_failure_detail, job_id, user_id)
+                )
+            c2.commit()
+            c2.close()
+
+            database.log_activity(
+                user_id, "job_applied",
+                f"{job['title']} @ {job['company']} — {apply_status}"
+                + (f" (via {resolved_url})" if resolved_url != job['url'] else "")
+            )
+            print(f"[apply-bg] job {job_id}: {apply_status}")
+
+        except Exception as e:
+            import traceback
+            print(f"[apply-bg] job {job_id} error: {e}")
+            traceback.print_exc()
+            # Make sure we don't leave the job stuck in 'applying'
+            try:
+                c3 = database.get_db()
+                c3.execute(
+                    "UPDATE jobs SET apply_status='failed', apply_error=? "
+                    "WHERE id=? AND user_id=? AND apply_status='applying'",
+                    (str(e)[:500], job_id, user_id)
+                )
+                c3.commit()
+                c3.close()
+            except Exception:
+                pass
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ── Multipart parser ──────────────────────────────────────────────────────────
@@ -2757,6 +2866,8 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
 });
 
+loadMe().then(() => loadAll());
+setInterval(loadAll, 5 * 60 * 1000);
 
 </script>
 </body>
@@ -3296,16 +3407,28 @@ function actionBar(job) {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
     const failTypeBadge = job.apply_failure_type ? `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 mt-1">${_ftLabels[job.apply_failure_type] || job.apply_failure_type}</span>` : '';
     const failInfo = job.apply_status === 'failed' ? `<div class="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-2">⚠️ Auto-apply failed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}. Apply manually or remove.</div>` : '';
+    const manualInfo = job.apply_status === 'manual_required' ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">👤 Manual apply needed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}.</div>` : '';
+    // While applying: show spinner, disable actions
+    if (job.apply_status === 'applying') {
+      return `
+      <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
+        <div class="flex items-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-xl px-4 py-3">
+          <svg class="animate-spin w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4l-3 3-3-3h4z"></path></svg>
+          <span class="font-medium">Searching for career page &amp; submitting…</span>
+        </div>
+      </div>`;
+    }
     return `
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
-      ${failInfo}
+      ${failInfo}${manualInfo}
       ${failTypeBadge}
       <div class="space-y-2">
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
+        ${(job.apply_status === 'failed' || job.apply_status === 'manual_required') ? `<button onclick="applyNow(${job.id})" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">🔄 Retry Auto-Apply</button>` : ''}
         <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
           ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
       </div>
-      <p class="text-xs text-slate-400 text-center">⏰ Auto-apply scheduled at ${me.apply_hour ? (me.apply_hour > 12 ? (me.apply_hour-12)+' PM' : me.apply_hour+' AM') : '2 PM'}</p>
+      ${job.url ? `<p class="text-xs text-slate-400 text-center"><a href="${job.url}" target="_blank" class="underline hover:text-slate-600">Apply manually ↗</a></p>` : ''}
     </div>`;
   }
   if (job.status === 'applied') {
@@ -3428,8 +3551,8 @@ function urlVerifiedBadge(job) {
   return '';
 }
 function applyStatusBadge(job) {
-  const map = {confirmed:'✅ Confirmed',submitted:'📤 Submitted',manual_required:'👤 Manual needed',failed:'❌ Failed'};
-  const cls = {confirmed:'bg-green-50 text-green-700 border-green-200',submitted:'bg-blue-50 text-blue-700 border-blue-200',manual_required:'bg-amber-50 text-amber-700 border-amber-200',failed:'bg-red-50 text-red-700 border-red-200'};
+  const map = {applying:'⏳ Applying…',confirmed:'✅ Confirmed',submitted:'📤 Submitted',manual_required:'👤 Manual needed',failed:'❌ Failed'};
+  const cls = {applying:'bg-blue-50 text-blue-600 border-blue-200 animate-pulse',confirmed:'bg-green-50 text-green-700 border-green-200',submitted:'bg-blue-50 text-blue-700 border-blue-200',manual_required:'bg-amber-50 text-amber-700 border-amber-200',failed:'bg-red-50 text-red-700 border-red-200'};
   if (!job.apply_status || !map[job.apply_status]) return '';
   return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
 }
@@ -3506,7 +3629,12 @@ async function loadJobs(status) {
         + '</div>';
       if (approvedFilter === 'fresh') jobs = jobs.filter(j => !j.apply_status || (j.apply_status !== 'failed' && j.apply_status !== 'manual_required'));
       if (approvedFilter === 'retry') jobs = jobs.filter(j => j.apply_status && (j.apply_status === 'failed' || j.apply_status === 'manual_required'));
-      html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${jobs.length} position${jobs.length>1?'s':''} queued</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">Auto-apply runs at your scheduled time</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">🚀 Apply Now</button></div>`;
+      // Auto-start polling for any jobs currently applying
+      jobs.forEach(j => { if (j.apply_status === 'applying') _pollApplyStatus(j.id); });
+      const _applyingNow = jobs.filter(j => j.apply_status === 'applying').length;
+      const _bannerMsg = _applyingNow > 0 ? `⏳ Applying to ${_applyingNow} job${_applyingNow>1?'s':''}…` : `${jobs.length} position${jobs.length>1?'s':''} approved`;
+      const _bannerSub = _applyingNow > 0 ? 'Searching company career pages and submitting' : 'Jobs are applied to automatically when approved';
+      html += `<div class="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 flex items-center justify-between fade"><div><p class="font-bold text-green-800 text-sm sm:text-base">${_bannerMsg}</p><p class="text-xs sm:text-sm text-green-600 mt-0.5">${_bannerSub}</p></div><button id="run-apply-btn" onclick="runApply()" class="flex items-center gap-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-sm transition-all">🚀 Apply All</button></div>`;
     }
     if (status === 'applied') {
       const counts = {all: jobs.length, failed: 0, submitted: 0, confirmed: 0, manual_required: 0};
@@ -3539,13 +3667,43 @@ async function loadJobs(status) {
 function setApprFilter(k) { approvedFilter = k; loadAll(); }
 
 function retryApply(id) {
-  if (!confirm('Retry auto-apply for this job?')) return;
+  applyNow(id);
+}
+
+async function applyNow(id) {
   var card = document.getElementById('job-'+id);
-  if (card) { card.style.opacity='.35'; card.style.pointerEvents='none'; }
-  api('/api/jobs/'+id+'/retry', 'POST', {}).then(function() {
-    showToast('Job moved back to Approved queue for retry');
-    loadAll();
-  });
+  if (card) { card.style.opacity='.7'; card.style.pointerEvents='none'; }
+  try {
+    await api('/api/jobs/'+id+'/apply-now', 'POST', {});
+    showToast('Searching for career page and applying…');
+    // Poll until apply_status changes from 'applying'
+    _pollApplyStatus(id);
+  } catch(e) {
+    if (card) { card.style.opacity='1'; card.style.pointerEvents=''; }
+    showToast('Could not start apply: ' + (e.message||e));
+  }
+}
+
+var _applyPollers = {};
+function _pollApplyStatus(id) {
+  if (_applyPollers[id]) return; // already polling
+  _applyPollers[id] = setInterval(async function() {
+    try {
+      const jobs = await api('/api/jobs?status=approved');
+      const job = (jobs||[]).find(j => j.id === id);
+      if (!job || job.apply_status !== 'applying') {
+        clearInterval(_applyPollers[id]);
+        delete _applyPollers[id];
+        loadAll();
+      } else {
+        // Refresh just the card while spinner is showing
+        loadJobs(tab);
+      }
+    } catch(e) {
+      clearInterval(_applyPollers[id]);
+      delete _applyPollers[id];
+    }
+  }, 4000);
 }
 
 const _PASS_REASONS = ['Bad fit','Wrong location','Salary too low','Bad company','Already applied','Other'];
@@ -4676,7 +4834,32 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             database.write_approved_jobs(BASE_DIR)
             bump_onboarding(user_id, "first_job_reviewed")
+
+            # On approval: immediately kick off background application
+            if action == "approve":
+                _trigger_apply_bg(user_id, job_id)
+
             self.send_json({"success": True})
+            return
+
+        # ── Manual "Apply Now" trigger (also used by Retry) ─────────────────
+        m = re.match(r"^/api/jobs/(\d+)/apply-now$", path)
+        if m:
+            job_id = int(m.group(1))
+            conn   = database.get_db()
+            job    = conn.execute(
+                "SELECT id, title, company, url, status, apply_status "
+                "FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            conn.close()
+            if not job:
+                self.send_json({"error": "Not found"}, 404)
+                return
+            if job["apply_status"] == "applying":
+                self.send_json({"error": "Already applying"}, 409)
+                return
+            _trigger_apply_bg(user_id, job_id)
+            self.send_json({"success": True, "message": "Application started"})
             return
 
         # ── Check if job is still open (calls Claude + fetches URL) ──────────
@@ -4698,24 +4881,6 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 self.send_json({"error": "No URL for this job"}, 400)
                 return
-            try:
-                from ai_analysis import check_job_status
-                result = check_job_status(
-                    job["url"], job["title"], job["company"], ANTHROPIC_KEY
-                )
-                status_str = result.get("status_check", "unknown")
-                conn.execute(
-                    "UPDATE jobs SET status_check=?, status_checked_date=? WHERE id=?",
-                    (status_str, datetime.now().isoformat(), job_id)
-                )
-                conn.commit()
-                database.log_activity(user["id"], "job_status_checked",
-                    f"{job['title']} at {job['company']} — {status_str}")
-            except Exception as e:
-                result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
-            conn.close()
-            self.send_json(result)
-            return
 
         # ── Cover Letter (admin only) ──
         m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
@@ -4755,6 +4920,24 @@ class Handler(BaseHTTPRequestHandler):
             c2.commit()
             c2.close()
             self.send_json({"success": True, "letter": letter})
+            return
+            try:
+                from ai_analysis import check_job_status
+                result = check_job_status(
+                    job["url"], job["title"], job["company"], ANTHROPIC_KEY
+                )
+                status_str = result.get("status_check", "unknown")
+                conn.execute(
+                    "UPDATE jobs SET status_check=?, status_checked_date=? WHERE id=?",
+                    (status_str, datetime.now().isoformat(), job_id)
+                )
+                conn.commit()
+                database.log_activity(user["id"], "job_status_checked",
+                    f"{job['title']} at {job['company']} — {status_str}")
+            except Exception as e:
+                result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
+            conn.close()
+            self.send_json(result)
             return
 
         # ── Update applied-job pipeline stage ───────────────────────────────────
