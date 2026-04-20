@@ -726,8 +726,10 @@ def run_job_search(user_id: int):
             if not all_raw:
                 return []
 
-            # -- Score against user CV + preferences using Claude Haiku --
-            # Fetch CV text from DB
+            # -- Score against user CV + preferences --
+            # Cascading fallback: Gemini Flash (free) -> Anthropic Haiku -> rule-based heuristic
+
+            # Fetch CV summary from DB for richer scoring context
             _cv_text = ""
             try:
                 _conn2 = database.get_db()
@@ -748,105 +750,176 @@ def run_job_search(user_id: int):
             )
             if _cv_text:
                 profile_text += f"\n\nCV Summary (first 1500 chars):\n{_cv_text[:1500]}"
-            # Score in batches of 25
+
+            def _parse_scored_response(text_):
+                """Extract a valid JSON array of scored jobs from an AI response string."""
+                t = text_.strip()
+                if "```" in t:
+                    t = t.split("```")[1]
+                    if t.startswith("json"): t = t[4:]
+                si = t.rfind("["); ei = t.rfind("]")
+                if si < 0 or ei <= si:
+                    return []
+                parsed = _js2.loads(t[si:ei+1])
+                out = []
+                for j in parsed:
+                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 40:
+                        j.setdefault("match_score", j.get("candidate_score", 0))
+                        j.setdefault("found_date", today)
+                        j.setdefault("source", "greenhouse/lever")
+                        out.append(j)
+                return out
+
+            def _score_batch(batch_, profile_text_):
+                """Score a batch of jobs via Gemini -> Anthropic -> heuristic fallback."""
+                import os as _os_sb
+                _GEMINI_KEY = _os_sb.environ.get('GEMINI_API_KEY', '')
+
+                jobs_json_ = _js2.dumps(
+                    [{"job_title": j.get("job_title",""), "company": j.get("company",""),
+                      "location": j.get("location",""), "url": j.get("url",""),
+                      "description": (j.get("description") or ""),
+                      "full_description": (j.get("full_description") or j.get("description") or "")[:2000]}
+                     for j in batch_], ensure_ascii=False)
+
+                prompt_ = (
+                    "You are a job matching assistant. Review these job listings and score each "
+                    f"for this candidate:\n\n{profile_text_}\n\n"
+                    f"Job listings (JSON):\n{jobs_json_}\n\n"
+                    "Return ONLY a JSON array with fields: job_title, company, location, url, "
+                    "publish_date (ISO date string or null if unknown), "
+                    "full_description (preserve the full_description from input if provided), "
+                    "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
+                    "Only include jobs with candidate_score >= 40. Be strict: only include jobs that "
+                    "closely match the candidate's target role titles and experience level. "
+                    "Return ONLY valid JSON, no markdown."
+                )
+
+                # --- Try Gemini Flash first (free tier: 1500 req/day) ---
+                if _GEMINI_KEY:
+                    try:
+                        _g_body = _js2.dumps({
+                            'contents': [{'parts': [{'text': prompt_}]}],
+                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 4096}
+                        }).encode('utf-8')
+                        _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
+                                  'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY)
+                        _g_req = _ur2.Request(_g_url, data=_g_body,
+                                              headers={'Content-Type': 'application/json'}, method='POST')
+                        with _ur2.urlopen(_g_req, timeout=60) as _g_resp:
+                            _g_data = _js2.loads(_g_resp.read().decode('utf-8'))
+                        _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
+                        result_ = _parse_scored_response(_g_text)
+                        print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
+                        return result_
+                    except Exception as _ge:
+                        print(f"[search] Gemini scoring error: {_ge} -- trying Anthropic")
+
+                # --- Try Anthropic Claude Haiku (secondary) ---
+                if ANTHROPIC_KEY:
+                    try:
+                        _a_body = _js2.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 4096,
+                            "messages": [{"role": "user", "content": prompt_}]}).encode()
+                        _a_req = _ur2.Request("https://api.anthropic.com/v1/messages", data=_a_body, method="POST",
+                            headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
+                                     "content-type": "application/json"})
+                        with _ur2.urlopen(_a_req, timeout=60) as _a_resp:
+                            _a_result = _js2.loads(_a_resp.read())
+                        _a_text = ""
+                        for blk in _a_result.get("content", []):
+                            if blk.get("type") == "text": _a_text += blk["text"]
+                        result_ = _parse_scored_response(_a_text)
+                        print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
+                        return result_
+                    except Exception as _ae:
+                        print(f"[search] Anthropic scoring error: {_ae} -- falling back to heuristic")
+
+                # --- Rule-based heuristic (no API needed) ---
+                print(f"[search] Heuristic scoring {len(batch_)} jobs (no AI key available)")
+                out_ = []
+                for j in batch_:
+                    _t = (j.get("job_title") or "").lower()
+                    _desc = (j.get("full_description") or j.get("description") or "").lower()
+                    _loc = (j.get("location") or "").lower()
+                    _score = 0
+                    if any(ph in _t for ph in _phrases):
+                        _score += 50
+                    else:
+                        for _w1, _w2 in _bigrams:
+                            if _w1 in _t and _w2 in _t:
+                                _score += 35
+                                break
+                    for _kw in kws_:
+                        if _kw.lower() in _desc:
+                            _score += 5
+                        if _score >= 70:
+                            break
+                    for _lp in locs_:
+                        if _lp.lower() in _loc or "remote" in _loc or "israel" in _loc:
+                            _score += 10
+                            break
+                    if _score >= 40:
+                        _jc = dict(j)
+                        _jc["candidate_score"] = min(_score, 95)
+                        _jc["match_score"] = _jc["candidate_score"]
+                        _jc.setdefault("found_date", today)
+                        _jc.setdefault("source", j.get("source", "greenhouse/lever"))
+                        _jc.setdefault("fit_reason", "Matched by title and skills")
+                        _jc.setdefault("description", j.get("description") or j.get("job_title", ""))
+                        _jc.setdefault("publish_date", None)
+                        out_.append(_jc)
+                print(f"[search] Heuristic: {len(batch_)} -> {len(out_)} passed")
+                return out_
+
+            # Score all collected jobs in batches of 25
             scored_jobs = []
             for batch_i in range(0, len(all_raw), 25):
                 batch = all_raw[batch_i:batch_i+25]
-                jobs_json = _js2.dumps(
-                    [{"job_title": j.get("job_title",""), "company": j.get("company",""),
-                      "location": j.get("location",""), "url": j.get("url",""),
-                      "description": (j.get("description") or ""), "full_description": (j.get("full_description") or j.get("description") or "")[:2000]}
-                     for j in batch], ensure_ascii=False)
+                scored_jobs.extend(_score_batch(batch, profile_text))
 
-                prompt = (
-                    "You are a job matching assistant. Review these job listings and score each "
-                    f"for this candidate:\n\n{profile_text}\n\n"
-                    f"Job listings (JSON):\n{jobs_json}\n\n"
-                    "Return ONLY a JSON array with fields: job_title, company, location, url, publish_date (ISO date string or null if unknown), full_description (preserve the full_description from input if provided), "
-                    "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
-                    "Only include jobs with candidate_score >= 40. Be strict: only include jobs that closely match the candidate\'s target role titles and experience level. Return ONLY valid JSON, no markdown."
-                )
+            # -- Supplemental: Gemini + Google Search for LinkedIn/Glassdoor/Wellfound --
+            import os as _os_ws
+            _GEMINI_KEY_WS = _os_ws.environ.get('GEMINI_API_KEY', '')
+            if _GEMINI_KEY_WS:
                 try:
-                    body = _js2.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 4096,
-                        "messages": [{"role": "user", "content": prompt}]}).encode()
-                    req = _ur2.Request("https://api.anthropic.com/v1/messages", data=body, method="POST",
-                        headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
-                                 "content-type": "application/json"})
-                    with _ur2.urlopen(req, timeout=60) as resp:
-                        result = _js2.loads(resp.read())
-                    scored_text = ""
-                    for blk in result.get("content", []):
-                        if blk.get("type") == "text":
-                            scored_text += blk["text"]
-                    scored_text = scored_text.strip()
-                    if "```" in scored_text:
-                        scored_text = scored_text.split("```")[1]
-                        if scored_text.startswith("json"): scored_text = scored_text[4:]
-                    # Try parse JSON
-                    si = scored_text.rfind("["); ei = scored_text.rfind("]")
-                    if si >= 0 and ei > si:
-                        parsed = _js2.loads(scored_text[si:ei+1])
-                        for j in parsed:
-                            if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 40:
-                                j.setdefault("match_score", j.get("candidate_score", 0))
-                                j.setdefault("found_date", today)
-                                j.setdefault("source", "greenhouse/lever")
-                                scored_jobs.append(j)
-                    print(f"[search] Batch {batch_i//25+1}: scored {len(batch)} -> {len([j for j in scored_jobs if j not in scored_jobs[:batch_i]])} passed")
-                except Exception as e:
-                    _err_body = ""
-                    try:
-                        import urllib.error as _ue2
-                        if isinstance(e, _ue2.HTTPError):
-                            _err_body = " | body: " + e.read().decode("utf-8", errors="replace")[:300]
-                    except Exception: pass
-                    print(f"[search] Scoring error: {e}{_err_body} — skipping batch of {len(batch)} jobs")
-                    # Skip unscored jobs rather than including them with fake high scores
-
-
-            # -- Supplemental: Claude web_search for LinkedIn/Glassdoor/Wellfound --
-            try:
-                _ws_sites = 'linkedin.com/jobs, glassdoor.com, wellfound.com/jobs'
-                for _ws_title in titles_[:5]:
-                    try:
-                        _ws_prompt = (
-                            f'Search for "{_ws_title}" job listings in {", ".join(locs_[:2]) or "Israel"}. '
-                            f'Search these sites: {_ws_sites}. '
-                            'Find 5 real current job listings. '
-                            'Respond with ONLY a JSON array. '
-                            'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"..."}'
-                        )
-                        _ws_body = _js2.dumps({
-                            'model': 'claude-sonnet-4-6', 'max_tokens': 4096,
-                            'tools': [{'type': 'web_search_20260209', 'name': 'web_search', 'max_uses': 5}],
-                            'messages': [{'role': 'user', 'content': _ws_prompt}]
-                        }).encode()
-                        _ws_req = _ur2.Request('https://api.anthropic.com/v1/messages', data=_ws_body,
-                                               headers={'x-api-key': ANTHROPIC_KEY,
-                                                        'anthropic-version': '2023-06-01',
-                                                        'content-type': 'application/json'})
-                        with _ur2.urlopen(_ws_req, timeout=120) as _ws_resp:
-                            _ws_result = _js2.loads(_ws_resp.read())
-                        for _ws_blk in _ws_result.get('content', []):
-                            if _ws_blk.get('type') != 'text': continue
-                            _ws_txt = _ws_blk['text'].strip()
-                            _ws_si = _ws_txt.rfind('['); _ws_ei = _ws_txt.rfind(']')
+                    for _ws_title in titles_[:3]:
+                        try:
+                            _ws_prompt = (
+                                f'Find 5 current "{_ws_title}" job listings in '
+                                f'{", ".join(locs_[:2]) or "Israel"}. '
+                                'Focus on linkedin.com/jobs, glassdoor.com, and wellfound.com. '
+                                'Return ONLY a JSON array. '
+                                'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"..."}'
+                            )
+                            _ws_body = _js2.dumps({
+                                'contents': [{'parts': [{'text': _ws_prompt}]}],
+                                'tools': [{'google_search': {}}],
+                                'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
+                            }).encode('utf-8')
+                            _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
+                                       'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY_WS)
+                            _ws_req = _ur2.Request(_ws_url, data=_ws_body,
+                                                   headers={'Content-Type': 'application/json'}, method='POST')
+                            with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
+                                _ws_data = _js2.loads(_ws_resp.read().decode('utf-8'))
+                            _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                            _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
                             if _ws_si >= 0 and _ws_ei > _ws_si:
-                                try:
-                                    for _ws_j in _js2.loads(_ws_txt[_ws_si:_ws_ei+1]):
-                                        if isinstance(_ws_j, dict) and _ws_j.get('url'):
-                                            _ws_j.setdefault('candidate_score', 70)
-                                            _ws_j.setdefault('match_score', 70)
-                                            _ws_j.setdefault('fit_reason', 'Found via web search')
-                                            _ws_j.setdefault('source', 'web_search')
-                                            scored_jobs.append(_ws_j)
-                                except Exception:
-                                    pass
-                        print(f"[search] Web search for '{_ws_title}': added jobs")
-                    except Exception as _wse:
-                        print(f"[search] Web search error for '{_ws_title}': {_wse}")
-            except Exception as _wse2:
-                print(f"[search] Web search supplemental skipped: {_wse2}")
+                                for _ws_j in _js2.loads(_ws_text[_ws_si:_ws_ei+1]):
+                                    if isinstance(_ws_j, dict) and _ws_j.get('url'):
+                                        _ws_j.setdefault('candidate_score', 70)
+                                        _ws_j.setdefault('match_score', 70)
+                                        _ws_j.setdefault('fit_reason', 'Found via Google Search')
+                                        _ws_j.setdefault('source', 'web_search')
+                                        _ws_j.setdefault('found_date', today)
+                                        scored_jobs.append(_ws_j)
+                            print(f"[search] Gemini web search for '{_ws_title}': added jobs")
+                        except Exception as _wse:
+                            print(f"[search] Gemini web search error for '{_ws_title}': {_wse}")
+                except Exception as _wse2:
+                    print(f"[search] Gemini web search supplemental skipped: {_wse2}")
+            else:
+                print("[search] Gemini web search skipped -- no GEMINI_API_KEY")
 
             print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
             return scored_jobs
