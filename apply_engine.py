@@ -33,6 +33,10 @@ def _is_lever(url: str) -> bool:
     """Check if URL is a Lever job board."""
     return bool(re.search(r'jobs\.lever\.co|lever\.co/.*?/[a-f0-9-]+', url))
 
+def _is_workday(url: str) -> bool:
+    """Check if URL is a Workday job board."""
+    return bool(re.search(r'myworkdayjobs\.com|\.myworkday\.com/.*?/job/', url))
+
 # Job board domains — URLs from these domains get resolved to the company's own career page
 _JOB_BOARD_DOMAINS = {
     'linkedin.com', 'indeed.com', 'glassdoor.com', 'ziprecruiter.com',
@@ -258,6 +262,130 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         result["error"] = f"Lever handler error: {e}"
         return result
 
+def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
+    """Handle Workday multi-page application wizard.
+
+    Workday uses a step-by-step form (up to ~10 pages). We fill whatever
+    fields we can on each page, then click Next until we hit Submit.
+    """
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+
+    # Automation IDs used by Workday's React components
+    _NEXT_SELS = [
+        'button[data-automation-id="bottom-navigation-next-button"]',
+        'button[data-automation-id="nextButton"]',
+        'button:has-text("Next")',
+        'button:has-text("Continue")',
+        'button:has-text("Save and Continue")',
+    ]
+    _SUBMIT_SELS = [
+        'button[data-automation-id="bottom-navigation-footer-button"]',
+        'button[data-automation-id="submitButton"]',
+        'button:has-text("Submit")',
+        'button[aria-label*="submit" i]',
+    ]
+
+    try:
+        filled_cv = False
+        for page_num in range(12):  # hard cap: prevent infinite loops
+            try:
+                page.wait_for_load_state("networkidle", timeout=8_000)
+            except Exception:
+                pass
+
+            page_text = page.evaluate("document.body.innerText") or ""
+            lower = page_text.lower()
+
+            # ── Confirmation ──────────────────────────────────────────────
+            if any(p in lower for p in _CONFIRMATION_PHRASES):
+                result.update(success=True, status="confirmed",
+                               confirmation_text=page_text[:500])
+                return result
+
+            # ── Login wall ────────────────────────────────────────────────
+            if any(p in lower for p in _BLOCKER_PHRASES):
+                result.update(status="manual_required",
+                               error="Workday: login or account required")
+                return result
+
+            # ── Fill fields on current page ───────────────────────────────
+            _gh_fill(page,
+                'input[data-automation-id="legalNameSection_firstName"],'
+                'input[placeholder*="First" i],input[name*="firstName"]',
+                applicant.get('first_name', ''))
+            _gh_fill(page,
+                'input[data-automation-id="legalNameSection_lastName"],'
+                'input[placeholder*="Last" i],input[name*="lastName"]',
+                applicant.get('last_name', ''))
+            _gh_fill(page,
+                'input[data-automation-id="email"],input[type="email"]',
+                applicant.get('email', ''))
+            _gh_fill(page,
+                'input[data-automation-id*="phone"],input[type="tel"]',
+                applicant.get('phone', ''))
+            _gh_fill(page,
+                'input[data-automation-id*="address"],input[placeholder*="Address" i]',
+                applicant.get('location', ''))
+
+            # ── Upload CV (once) ──────────────────────────────────────────
+            if not filled_cv and cv_path:
+                for sel in [
+                    'input[data-automation-id="file-upload-input-ref"]',
+                    'input[type="file"][name*="resume" i]',
+                    'input[type="file"]',
+                ]:
+                    try:
+                        page.set_input_files(sel, cv_path)
+                        filled_cv = True
+                        print(f"[apply-engine] Workday: uploaded CV via {sel}")
+                        break
+                    except Exception:
+                        continue
+
+            # ── Try Submit first ──────────────────────────────────────────
+            for sel in _SUBMIT_SELS:
+                try:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible() and el.is_enabled():
+                        el.click()
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=12_000)
+                        except Exception:
+                            pass
+                        confirm = page.evaluate("document.body.innerText") or ""
+                        if any(p in confirm.lower() for p in _CONFIRMATION_PHRASES):
+                            result.update(success=True, status="confirmed",
+                                           confirmation_text=confirm[:500])
+                        else:
+                            result.update(success=True, status="submitted",
+                                           confirmation_text=confirm[:500])
+                        return result
+                except Exception:
+                    continue
+
+            # ── Advance to next page ──────────────────────────────────────
+            advanced = False
+            for sel in _NEXT_SELS:
+                try:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible() and el.is_enabled():
+                        el.click()
+                        advanced = True
+                        break
+                except Exception:
+                    continue
+
+            if not advanced:
+                break  # no next / submit found — give up
+
+        result["error"] = "Workday: could not complete multi-page form after 12 pages"
+        return result
+
+    except Exception as e:
+        result["error"] = f"Workday handler error: {e}"
+        return result
+
+
 # ── Failure classifier ────────────────────────────────────────────────────────
 
 def _classify_failure(error: str, page_text: str = "") -> tuple[str, str]:
@@ -458,7 +586,6 @@ def submit_application(
     try:
         with sync_playwright() as pw:
             print(f"[apply-engine] Launching Chromium…")
-romium…")
             browser = pw.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-setuid-sandbox",
@@ -501,6 +628,13 @@ romium…")
             if _is_lever(actual_url):
                 print(f"[apply-engine] Detected Lever ATS")
                 res = _apply_lever(page, applicant, cv_path)
+                browser.close()
+                res["resolved_url"] = actual_url
+                return _add_failure_type(res)
+
+            if _is_workday(actual_url):
+                print(f"[apply-engine] Detected Workday ATS")
+                res = _apply_workday(page, applicant, cv_path)
                 browser.close()
                 res["resolved_url"] = actual_url
                 return _add_failure_type(res)
