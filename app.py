@@ -2689,8 +2689,6 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
 });
 
-loadMe().then(() => loadAll());
-setInterval(loadAll, 5 * 60 * 1000);
 
 </script>
 </body>
@@ -3767,6 +3765,9 @@ async function runApply() {
     }
   } catch(e) {}
 })();
+
+loadMe().then(() => loadAll());
+setInterval(loadAll, 5 * 60 * 1000);
 </script>
 </body>
 </html>"""
@@ -4649,6 +4650,24 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 self.send_json({"error": "No URL for this job"}, 400)
                 return
+            try:
+                from ai_analysis import check_job_status
+                result = check_job_status(
+                    job["url"], job["title"], job["company"], ANTHROPIC_KEY
+                )
+                status_str = result.get("status_check", "unknown")
+                conn.execute(
+                    "UPDATE jobs SET status_check=?, status_checked_date=? WHERE id=?",
+                    (status_str, datetime.now().isoformat(), job_id)
+                )
+                conn.commit()
+                database.log_activity(user["id"], "job_status_checked",
+                    f"{job['title']} at {job['company']} — {status_str}")
+            except Exception as e:
+                result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
+            conn.close()
+            self.send_json(result)
+            return
 
         # ── Cover Letter (admin only) ──
         m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
@@ -4688,24 +4707,6 @@ class Handler(BaseHTTPRequestHandler):
             c2.commit()
             c2.close()
             self.send_json({"success": True, "letter": letter})
-            return
-            try:
-                from ai_analysis import check_job_status
-                result = check_job_status(
-                    job["url"], job["title"], job["company"], ANTHROPIC_KEY
-                )
-                status_str = result.get("status_check", "unknown")
-                conn.execute(
-                    "UPDATE jobs SET status_check=?, status_checked_date=? WHERE id=?",
-                    (status_str, datetime.now().isoformat(), job_id)
-                )
-                conn.commit()
-                database.log_activity(user["id"], "job_status_checked",
-                    f"{job['title']} at {job['company']} — {status_str}")
-            except Exception as e:
-                result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
-            conn.close()
-            self.send_json(result)
             return
 
         # ── Update applied-job pipeline stage ───────────────────────────────────
