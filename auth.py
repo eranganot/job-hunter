@@ -130,7 +130,8 @@ def get_session_user(token: str):
                p.telegram_token, p.telegram_chat_id,
                p.twilio_account_sid, p.twilio_auth_token, p.whatsapp_number,
                p.schedule_frequency, p.search_hour, p.search_day_of_week,
-               p.apply_hour, p.apply_day_of_week, p.onboarding_complete
+               p.apply_hour, p.apply_day_of_week, p.onboarding_complete,
+               p.onboarding_dismissed
         FROM sessions s
         JOIN users u ON u.id = s.user_id
         LEFT JOIN user_profiles p ON p.user_id = u.id
