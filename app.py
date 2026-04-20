@@ -876,10 +876,10 @@ def run_job_search(user_id: int):
                 print(f"[search] Heuristic: {len(batch_)} -> {len(out_)} passed")
                 return out_
 
-            # Score all collected jobs in batches of 25
+            # Score all collected jobs in batches of 50
             scored_jobs = []
-            for batch_i in range(0, len(all_raw), 25):
-                batch = all_raw[batch_i:batch_i+25]
+            for batch_i in range(0, len(all_raw), 50):
+                batch = all_raw[batch_i:batch_i+50]
                 scored_jobs.extend(_score_batch(batch, profile_text))
 
             # -- Supplemental: Gemini + Google Search for LinkedIn/Glassdoor/Wellfound --
