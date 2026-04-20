@@ -2059,16 +2059,6 @@ SETTINGS_HTML = """<!DOCTYPE html>
           <input class="tag-input" id="s-locations-input" placeholder="Add location…" onkeydown="tagKeyDown(event,'s-locations-wrap')"/>
         </div>
       </div>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="label">Min salary (NIS/month)</label>
-          <input class="input" type="number" id="s-salary-min" placeholder="55000" step="1000"/>
-        </div>
-        <div>
-          <label class="label">Max salary (NIS/month)</label>
-          <input class="input" type="number" id="s-salary-max" placeholder="85000" step="1000"/>
-        </div>
-      </div>
     </div>
     <button onclick="savePreferences()" class="btn btn-primary mt-6">Save preferences</button>
   </div>
@@ -2891,26 +2881,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <input type="checkbox" class="ob-check" style="margin-top:3px;width:17px;height:17px;accent-color:#3b82f6;cursor:pointer;" />
         <div><div style="font-size:14px;font-weight:500;color:#334155;">Choose Manual or Automatic mode</div><div style="font-size:12px;color:#94a3b8;">In Settings &gt; Schedule</div></div>
       </label>
-    </div>
-  </div>
-</div>
-<!-- CV Optimizer Popup -->
-      <div style="margin-bottom:16px;">
-        <h4 style="font-size:12px;font-weight:700;color:#d97706;margin:0 0 10px;text-transform:uppercase;letter-spacing:.06em;">&#9889; Improvements</h4>
-        <div id="cvo-improvements"></div>
-      </div>
-      <div style="margin-bottom:20px;">
-        <h4 style="font-size:12px;font-weight:700;color:#6366f1;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;">&#9670; ATS Tips</h4>
-        <ul id="cvo-ats" style="margin:0;padding:0;list-style:none;"></ul>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #f1f5f9;padding-top:14px;">
-        <span id="cvo-date" style="font-size:11px;color:#94a3b8;"></span>
-        <button onclick="analyzeCvWithAI(true)" style="font-size:12px;color:#6366f1;background:none;border:none;cursor:pointer;font-weight:600;">&#8635; Re-analyze</button>
-      </div>
-    </div>
-    <div id="cvo-error" style="display:none;text-align:center;padding:24px 0;">
-      <p id="cvo-error-msg" style="color:#ef4444;font-size:14px;margin-bottom:12px;"></p>
-      <button onclick="analyzeCvWithAI(true)" style="padding:8px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;">Try Again</button>
     </div>
   </div>
 </div>
