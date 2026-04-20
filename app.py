@@ -818,7 +818,7 @@ def run_job_search(user_id: int):
                 # --- Try Anthropic Claude Haiku (secondary) ---
                 if ANTHROPIC_KEY:
                     try:
-                        _a_body = _js2.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 4096,
+                        _a_body = _js2.dumps({"model": "claude-haiku-4-5", "max_tokens": 4096,
                             "messages": [{"role": "user", "content": prompt_}]}).encode()
                         _a_req = _ur2.Request("https://api.anthropic.com/v1/messages", data=_a_body, method="POST",
                             headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
@@ -832,7 +832,12 @@ def run_job_search(user_id: int):
                         print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
                         return result_
                     except Exception as _ae:
-                        print(f"[search] Anthropic scoring error: {_ae} -- falling back to heuristic")
+                        import urllib.error as _ue
+                        _ae_body = ""
+                        if isinstance(_ae, _ue.HTTPError):
+                            try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:300]
+                            except: pass
+                        print(f"[search] Anthropic scoring error: {_ae}{_ae_body} -- falling back to heuristic")
 
                 # --- Rule-based heuristic (no API needed) ---
                 print(f"[search] Heuristic scoring {len(batch_)} jobs (no AI key available)")
