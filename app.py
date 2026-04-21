@@ -3571,8 +3571,8 @@ function applyStatusBadge(job) {
   return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
 }
 function renderJob(job) {
-  // Cache cover letter safely — avoids embedding multi-line strings in onclick HTML attributes
-  if (job.cover_letter) _clLetterCache[job.id] = job.cover_letter;
+  // Cache cover letter safely — skip stale error strings that were previously saved to DB
+  if (job.cover_letter && !job.cover_letter.startsWith('[Error]')) _clLetterCache[job.id] = job.cover_letter;
   const badges = [matchBadge(job.match_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
   const verifyBtn = job.url
     ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
