@@ -3112,18 +3112,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- Cover Letter Modal (admin only) -->
   <div id="cl-modal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4" onclick="if(event.target===this)closeCoverLetter()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 fade max-h-[85vh] flex flex-col">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-bold text-slate-900" id="cl-title">Cover Letter</h3>
-        <button onclick="closeCoverLetter()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 fade" style="max-height:90vh;display:flex;flex-direction:column">
+      <div class="flex items-center justify-between mb-3 shrink-0">
+        <h3 class="font-semibold text-slate-800 text-base" id="cl-title">✍️ Cover Letter</h3>
+        <button onclick="closeCoverLetter()" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
-      <textarea id="cl-text" class="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-700 resize-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none" style="min-height:260px;height:260px" placeholder="Click Generate to create a cover letter..."></textarea>
-      <div class="flex gap-2 mt-3">
-        <button onclick="generateCoverLetter()" id="cl-gen-btn" class="flex-1 btn bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">Generate</button>
-        <button onclick="saveCoverLetter()" class="flex-1 btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium py-2.5 rounded-xl transition-colors">Save</button>
-        <button onclick="copyCoverLetter()" class="btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium py-2.5 px-4 rounded-xl transition-colors">\U0001F4CB Copy</button>
+      <textarea id="cl-text" class="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-700 resize-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none" style="flex:1;min-height:280px;height:280px" placeholder="Click Generate to create a personalised cover letter…"></textarea>
+      <div class="shrink-0 mt-3 flex gap-2">
+        <button onclick="generateCoverLetter()" id="cl-gen-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm font-semibold rounded-xl transition-colors" style="height:40px">Generate</button>
+        <button onclick="saveCoverLetter()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-xl transition-colors" style="height:40px">Save</button>
+        <button onclick="copyCoverLetter()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-xl px-4 transition-colors" style="height:40px">📋 Copy</button>
       </div>
-      <p id="cl-status" class="text-xs text-slate-400 mt-2 text-center hidden"></p>
+      <p id="cl-status" class="shrink-0 text-xs mt-2 text-center hidden"></p>
     </div>
   </div>
 
@@ -3293,8 +3293,9 @@ async function doReject(id, reason) {
     async function generateCoverLetter() {
       const btn = document.getElementById('cl-gen-btn');
       const status = document.getElementById('cl-status');
-      btn.disabled = true; btn.textContent = 'Generating...';
-      status.textContent = 'Calling AI...'; status.classList.remove('hidden');
+      btn.disabled = true; btn.textContent = '⏳ Generating…';
+      status.textContent = ''; status.classList.add('hidden');
+      status.className = 'shrink-0 text-xs mt-2 text-center hidden';
       try {
         const r = await fetch('/api/jobs/'+_clJobId+'/cover-letter', {
           method:'POST', headers:{'Content-Type':'application/json'},
@@ -3303,11 +3304,19 @@ async function doReject(id, reason) {
         const d = await r.json();
         if(d.letter) {
           document.getElementById('cl-text').value = d.letter;
-          status.textContent = 'Generated! Edit as needed.';
+          status.className = 'shrink-0 text-xs mt-2 text-center text-green-600';
+          status.textContent = '✅ Generated! Edit and save as needed.';
+          status.classList.remove('hidden');
         } else {
-          status.textContent = d.error || 'Generation failed';
+          status.className = 'shrink-0 text-xs mt-2 text-center text-red-500';
+          status.textContent = '⚠️ ' + (d.error || 'Generation failed. Check your Gemini API key.');
+          status.classList.remove('hidden');
         }
-      } catch(e) { status.textContent = 'Error: '+e.message; }
+      } catch(e) {
+        status.className = 'shrink-0 text-xs mt-2 text-center text-red-500';
+        status.textContent = '⚠️ Network error: ' + e.message;
+        status.classList.remove('hidden');
+      }
       btn.disabled = false; btn.textContent = 'Generate';
     }
     async function saveCoverLetter() {
@@ -3317,8 +3326,13 @@ async function doReject(id, reason) {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({action:'save', letter: document.getElementById('cl-text').value})
         });
-        status.textContent = 'Saved!'; status.classList.remove('hidden');
-      } catch(e) { status.textContent = 'Save failed'; status.classList.remove('hidden'); }
+        status.className = 'shrink-0 text-xs mt-2 text-center text-green-600';
+        status.textContent = '✅ Saved!'; status.classList.remove('hidden');
+        setTimeout(() => status.classList.add('hidden'), 2000);
+      } catch(e) {
+        status.className = 'shrink-0 text-xs mt-2 text-center text-red-500';
+        status.textContent = '⚠️ Save failed'; status.classList.remove('hidden');
+      }
     }
     function copyCoverLetter() {
       const text = document.getElementById('cl-text').value;
@@ -4918,14 +4932,18 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 self.send_json({"success": True})
                 return
-            # Generate
+            # Generate via Gemini Flash
             profile = conn.execute(
                 "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
             ).fetchone()
             conn.close()
-            from ai_analysis import generate_cover_letter
-            letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, ANTHROPIC_KEY)
-            # Persist
+            try:
+                from ai_analysis import generate_cover_letter
+                letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, ANTHROPIC_KEY)
+            except Exception as gen_err:
+                self.send_json({"error": str(gen_err)}, 500)
+                return
+            # Persist only on success
             c2 = database.get_db()
             c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
             c2.commit()
