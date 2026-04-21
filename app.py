@@ -3590,7 +3590,7 @@ function renderJob(job) {
     ${badges ? `<div class="flex flex-wrap gap-2 mt-2.5">${badges}</div>` : ''}
     ${job.why_relevant ? `<div class="why-box mt-3 rounded-xl p-3"><p class="text-xs font-bold text-amber-700 mb-1 uppercase tracking-wide">✨ Why this fits you</p><p class="text-sm text-amber-900 leading-relaxed">${job.why_relevant}</p></div>` : ''}
     ${job.publish_date ? `<span class="text-slate-400 text-xs">📅 Published ${ago(job.publish_date)}</span>` : ''}
-    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${escHtml(stripHtml(job.description))}</p>${job.full_description && job.full_description.length > 60 && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${escHtml(stripHtml(job.full_description))}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
+    ${job.description ? `<div class="mt-3"><p class="text-sm text-slate-600 leading-relaxed">${stripHtml(job.description)}</p>${job.full_description && job.full_description.length > 60 && job.full_description !== job.description ? `<div class="cursor-pointer" onclick="event.stopPropagation();toggleDesc(this)"><div class="clamp3 text-sm text-slate-500 leading-relaxed mt-2 border-t border-slate-100 pt-2">${stripHtml(job.full_description)}</div><p class="expand-hint">▼ Tap to expand full description</p></div>` : `<div class="mt-1"><a href="${job.url}" target="_blank" class="text-xs text-blue-500 hover:text-blue-700">View full description ↗</a></div>`}</div>` : ''}
     ${isSelectable ? '' : actionBar(job)}
   </div>`;
 }
@@ -3754,7 +3754,22 @@ async function act(id, action, reason='') {
 }
 
 function escHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/\\n/g,"<br>"); }
-function stripHtml(s) { if (!s) return ""; const d = document.createElement("div"); d.innerHTML = s; return (d.textContent || d.innerText || "").replace(/\\s+/g," ").trim(); }
+function stripHtml(s) {
+  if (!s) return "";
+  // Pass 1: decode entities / strip tags (handles raw HTML like <h4>text</h4>)
+  const d = document.createElement("div");
+  d.innerHTML = s;
+  let t = (d.textContent || d.innerText || "");
+  // Pass 2: if pass-1 produced literal angle brackets the text was double-encoded
+  // (stored as &lt;h4&gt; → decoded to <h4> as text, not as a tag).
+  // A second DOM round-trip strips those angle-bracket artifacts too.
+  if (t.includes("<") || t.includes(">")) {
+    const d2 = document.createElement("div");
+    d2.innerHTML = t;
+    t = d2.textContent || d2.innerText || "";
+  }
+  return t.replace(/\s+/g, " ").trim();
+}
 
 function toggleDesc(el) {
   const p = el.querySelector('.clamp3, .desc-expanded');
