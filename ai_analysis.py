@@ -378,25 +378,17 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
 
 
 def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
-    """Generate a concise, personalised cover letter using Gemini Flash.
+    """Generate a personalised cover letter using Gemini Flash, with Claude Haiku fallback.
 
-    Uses the same Gemini model used for job scoring — no extra API key needed.
-    Falls back to a clear error string (NOT prefixed with [Error]) on failure
-    so callers can distinguish success from failure via the raised exception.
-
-    Raises RuntimeError on generation failure so the caller can return a proper
-    error response to the frontend (keeps error out of the letter field).
+    Raises RuntimeError on total failure so the caller returns a proper error JSON.
     """
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if not gemini_key:
-        raise RuntimeError("No Gemini API key configured (GEMINI_API_KEY).")
+    gemini_key    = os.environ.get("GEMINI_API_KEY", "")
+    anthropic_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
 
-    cv_summary = (profile.get("cv_summary") or "")[:3000]
-    jd_text    = (job.get("full_description") or job.get("description") or job.get("title", ""))[:3000]
-    job_title  = job.get("title", "Unknown Role")
-    company    = job.get("company", "the company")
-
-    cv_block = cv_summary if cv_summary else "No CV on file."
+    cv_block  = (profile.get("cv_summary") or "")[:3000] or "No CV on file."
+    jd_text   = (job.get("full_description") or job.get("description") or job.get("title", ""))[:3000]
+    job_title = job.get("title", "Unknown Role")
+    company   = job.get("company", "the company")
 
     prompt = (
         "You are an expert career coach writing a highly personalised, compelling cover letter.\n\n"
@@ -404,7 +396,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
         "- 3 short paragraphs, 200-270 words total.\n"
         "- Paragraph 1 (2-3 sentences): Strong opening — name the role and company, lead with"
         " the single most relevant achievement or skill from the CV."
-        " NEVER start with 'I am writing to express my interest'.\n"
+        " NEVER start with \'I am writing to express my interest\'.\n"
         "- Paragraph 2 (3-4 sentences): Pick 2-3 specific requirements from the JD and map them"
         " to concrete experience or measurable results from the CV.\n"
         "- Paragraph 3 (2 sentences): Why this company specifically. Close with a confident call to action.\n"
@@ -416,25 +408,54 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
         f"CANDIDATE CV SUMMARY (use real achievements and experience from this):\n{cv_block}"
     )
 
-    body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 900},
-    }).encode("utf-8")
+    # ── 1. Try Gemini Flash ──────────────────────────────────────────────────
+    if gemini_key:
+        try:
+            body = json.dumps({
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 900},
+            }).encode("utf-8")
+            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+                   "gemini-2.5-flash:generateContent?key=" + gemini_key)
+            req = urllib.request.Request(url, data=body,
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            print("[cover-letter] Generated via Gemini Flash")
+            return text
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            print(f"[cover-letter] Gemini HTTP {e.code}: {err_body[:200]} — trying Claude fallback")
+        except Exception as e:
+            print(f"[cover-letter] Gemini error: {e} — trying Claude fallback")
 
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.5-flash:generateContent?key=" + gemini_key)
+    # ── 2. Fallback: Claude Haiku ────────────────────────────────────────────
+    if anthropic_key:
+        try:
+            body = json.dumps({
+                "model": "claude-haiku-4-5",
+                "max_tokens": 900,
+                "system": (
+                    "You are an expert career coach. Write a compelling, personalised cover letter "
+                    "in plain text only — no markdown, no headers, no bullet points. "
+                    "3 paragraphs, 200-270 words."
+                ),
+                "messages": [{"role": "user", "content": prompt}],
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages", data=body, method="POST",
+                headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+            text = data["content"][0]["text"].strip()
+            print("[cover-letter] Generated via Claude Haiku (Gemini fallback)")
+            return text
+        except Exception as e:
+            print(f"[cover-letter] Claude fallback error: {e}")
+            raise RuntimeError(f"Both Gemini and Claude failed. Last error: {e}")
 
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        return text
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", errors="replace")
-        print(f"[cover-letter] Gemini HTTP {e.code}: {err_body[:300]}")
-        raise RuntimeError(f"Gemini HTTP {e.code}: {err_body[:200]}")
-    except Exception as e:
-        print(f"[cover-letter] Error: {e}")
-        raise RuntimeError(str(e))
+    raise RuntimeError("No AI API key configured (GEMINI_API_KEY or ANTHROPIC_API_KEY).")
+
