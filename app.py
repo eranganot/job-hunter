@@ -50,6 +50,7 @@ def _cfg(env_key: str, json_key: str, default="") -> str:
     return os.environ.get(env_key) or CONFIG.get(json_key, default)
 
 ANTHROPIC_KEY = _cfg("ANTHROPIC_API_KEY", "anthropic_api_key")
+GEMINI_KEY    = _cfg("GEMINI_API_KEY",     "gemini_api_key")
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
 SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
@@ -4600,8 +4601,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── CV Analyze ──
         if path == "/api/analyze-cv":
-            if not ANTHROPIC_KEY:
-                self.send_json({"error": "Anthropic API key not configured. Add it to config.json."})
+            if not GEMINI_KEY and not ANTHROPIC_KEY:
+                self.send_json({"error": "No AI API key configured. Set GEMINI_API_KEY in Railway environment variables."})
                 return
             # Get CV path from profile
             conn = database.get_db()
