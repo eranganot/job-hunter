@@ -5204,8 +5204,11 @@ if __name__ == "__main__":
     ai_status = "✅ Configured" if ANTHROPIC_KEY else "⚠️  Not set — add to config.json"
 
     print(f"\n📂  Folder:        {BASE_DIR}")
-    print(f"🗄️   Database:      jobs.db")
+    print(f"🗄️   Database:      {DB_FILE}")
+    print(f"📁  Uploads:       {UPLOADS_DIR}")
     print(f"🤖  Anthropic AI:  {ai_status}")
+    print(f"🤖  Gemini AI:     {'✅ Configured' if GEMINI_KEY else '⚠️  GEMINI_API_KEY not set'}")
+    print(f"🔑  Raw env check: GEMINI_API_KEY={'SET' if os.environ.get('GEMINI_API_KEY') else 'MISSING'}")
     print(f"\n🖥️   Desktop:       http://localhost:{PORT}")
     print(f"📱  Mobile:        {MOBILE_URL}   ← open on your phone")
     print(f"⌨️   Ctrl+C to stop\n")
