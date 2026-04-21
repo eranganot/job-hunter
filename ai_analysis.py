@@ -1,5 +1,5 @@
 """
-ai_analysis.py — CV analysis via Claude API for Job Hunter
+ai_analysis.py — CV analysis via Gemini 2.5 Flash (Claude fallback) for Job Hunter
 """
 import base64
 import json
@@ -9,9 +9,9 @@ import urllib.request
 import urllib.error
 
 
-def analyze_cv(pdf_path: str, api_key: str) -> dict:
+def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
     """
-    Analyze a CV/resume PDF using Claude and return structured job recommendations.
+    Analyze a CV/resume PDF using Gemini 2.5 Flash (Claude Sonnet fallback).
 
     Returns a dict with:
         job_titles       list[str]  — 6-8 relevant job titles to search for
@@ -24,12 +24,6 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
         summary          str        — 2-3 sentence profile
         recommendations  list[str]  — 3-4 job search tips
     """
-    if not api_key:
-        raise ValueError(
-            "Anthropic API key not configured. "
-            "Add it to config.json under 'anthropic_api_key'."
-        )
-
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"CV file not found: {pdf_path}")
 
@@ -61,8 +55,65 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
         "Return ONLY the JSON object."
     )
 
+    gemini_key    = os.environ.get("GEMINI_API_KEY", "")
+    anthropic_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+
+    def _normalise(data: dict) -> dict:
+        data.setdefault("job_titles", [])
+        data.setdefault("keywords", [])
+        data.setdefault("locations", ["Tel Aviv"])
+        data.setdefault("salary_min", 0)
+        data.setdefault("salary_max", 0)
+        data.setdefault("experience_years", 0)
+        data.setdefault("seniority", "senior")
+        data.setdefault("summary", "")
+        data.setdefault("recommendations", [])
+        return data
+
+    def _strip_fences(raw: str) -> str:
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            return "\n".join(lines[1:-1])
+        return raw
+
+    # ── 1. Gemini 2.5 Flash (primary) ────────────────────────────────────────
+    if gemini_key:
+        body = json.dumps({
+            "contents": [{
+                "parts": [
+                    {"inlineData": {"mimeType": "application/pdf", "data": pdf_b64}},
+                    {"text": prompt},
+                ]
+            }],
+            "generationConfig": {
+                "thinkingConfig": {"thinkingBudget": 0},
+                "maxOutputTokens": 1024,
+                "temperature": 0.1,
+            },
+        }).encode()
+        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+               "gemini-2.5-flash:generateContent?key=" + gemini_key)
+        req = urllib.request.Request(url, data=body, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                result = json.loads(resp.read())
+            raw = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+            raw = _strip_fences(raw)
+            print("[analyze-cv] Done via Gemini 2.5 Flash")
+            return _normalise(json.loads(raw))
+        except urllib.error.HTTPError as e:
+            gemini_err = e.read().decode()
+            raise RuntimeError(f"Gemini API error {e.code}: {gemini_err}")
+        except Exception as e:
+            raise RuntimeError(f"Gemini error: {e}")
+
+    # ── 2. Claude Sonnet 4.6 fallback (only if no Gemini key) ────────────────
+    if not anthropic_key:
+        raise RuntimeError("No AI API key configured. Set GEMINI_API_KEY or ANTHROPIC_API_KEY.")
+
     payload = {
-        "model": "claude-sonnet-4-6",  # Sonnet: same quality as Opus for structured extraction, ~10x cheaper
+        "model": "claude-sonnet-4-6",
         "max_tokens": 1024,
         "messages": [{
             "role": "user",
@@ -75,14 +126,10 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
                         "data": pdf_b64,
                     }
                 },
-                {
-                    "type": "text",
-                    "text": prompt,
-                }
+                {"type": "text", "text": prompt},
             ]
         }]
     }
-
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages",
@@ -90,9 +137,8 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
         method="POST"
     )
     req.add_header("Content-Type", "application/json")
-    req.add_header("x-api-key", api_key)
+    req.add_header("x-api-key", anthropic_key)
     req.add_header("anthropic-version", "2023-06-01")
-
     try:
         with urllib.request.urlopen(req, timeout=90) as resp:
             result = json.loads(resp.read())
@@ -101,26 +147,9 @@ def analyze_cv(pdf_path: str, api_key: str) -> dict:
         raise RuntimeError(f"Claude API error {e.code}: {error_body}")
 
     raw = result["content"][0]["text"].strip()
-
-    # Strip markdown code fences if Claude included them
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:-1])  # drop first and last fence lines
-
-    data = json.loads(raw)
-
-    # Normalise / fill defaults
-    data.setdefault("job_titles", [])
-    data.setdefault("keywords", [])
-    data.setdefault("locations", ["Tel Aviv"])
-    data.setdefault("salary_min", 0)
-    data.setdefault("salary_max", 0)
-    data.setdefault("experience_years", 0)
-    data.setdefault("seniority", "senior")
-    data.setdefault("summary", "")
-    data.setdefault("recommendations", [])
-
-    return data
+    raw = _strip_fences(raw)
+    print("[analyze-cv] Done via Claude Sonnet 4.6")
+    return _normalise(json.loads(raw))
 
 
 # ── Local scoring (no API needed) ─────────────────────────────────────────────
@@ -502,4 +531,5 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
             raise RuntimeError("Claude error: " + str(e))
 
     raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
+
 
