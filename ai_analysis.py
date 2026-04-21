@@ -387,7 +387,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
     Raises RuntimeError on generation failure so the caller can return a proper
     error response to the frontend (keeps error out of the letter field).
     """
-    gemini_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_key:
         raise RuntimeError("No Gemini API key configured (GEMINI_API_KEY).")
 
@@ -414,7 +414,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
     }).encode("utf-8")
 
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.0-flash:generateContent?key=" + gemini_key)
+           "gemini-2.5-flash:generateContent?key=" + gemini_key)
 
     req = urllib.request.Request(url, data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
