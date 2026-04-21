@@ -3117,7 +3117,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <h3 class="font-bold text-slate-900" id="cl-title">Cover Letter</h3>
         <button onclick="closeCoverLetter()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
       </div>
-      <textarea id="cl-text" class="flex-1 w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-700 resize-none min-h-[200px] focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none" placeholder="Click Generate to create a cover letter..."></textarea>
+      <textarea id="cl-text" class="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-700 resize-none focus:ring-2 focus:ring-blue-300 focus:border-blue-400 outline-none" style="min-height:260px;height:260px" placeholder="Click Generate to create a cover letter..."></textarea>
       <div class="flex gap-2 mt-3">
         <button onclick="generateCoverLetter()" id="cl-gen-btn" class="flex-1 btn bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2.5 rounded-xl transition-colors">Generate</button>
         <button onclick="saveCoverLetter()" class="flex-1 btn bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium py-2.5 rounded-xl transition-colors">Save</button>
@@ -3276,18 +3276,13 @@ async function doReject(id, reason) {
 
     // ── Cover Letter (admin) ──
     let _clJobId = null;
-    function openCoverLetter(id) {
+    function openCoverLetter(id, existingLetter) {
       _clJobId = id;
       const m = document.getElementById('cl-modal');
-      document.getElementById('cl-text').value = '';
+      document.getElementById('cl-text').value = existingLetter || '';
       document.getElementById('cl-status').classList.add('hidden');
       m.classList.remove('hidden');
       m.classList.add('flex');
-      // Pre-load existing cover letter if any
-      fetch('/api/jobs?status=all').then(r=>r.json()).then(jobs=>{
-        const j = (jobs.jobs||jobs).find(x=>x.id===id);
-        if(j && j.cover_letter) document.getElementById('cl-text').value = j.cover_letter;
-      }).catch(()=>{});
     }
     function closeCoverLetter() {
       _clJobId = null;
@@ -3401,7 +3396,7 @@ function actionBar(job) {
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
       <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
-          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
+          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+','+(job.cover_letter ? JSON.stringify(job.cover_letter) : 'null')+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
     </div>`;
   if (job.status === 'approved') {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
@@ -3426,7 +3421,7 @@ function actionBar(job) {
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
         ${(job.apply_status === 'failed' || job.apply_status === 'manual_required') ? `<button onclick="applyNow(${job.id})" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">🔄 Retry Auto-Apply</button>` : ''}
         <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
-          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
+          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+','+(job.cover_letter ? JSON.stringify(job.cover_letter) : 'null')+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
       </div>
       ${job.url ? `<p class="text-xs text-slate-400 text-center"><a href="${job.url}" target="_blank" class="underline hover:text-slate-600">Apply manually ↗</a></p>` : ''}
     </div>`;
@@ -4936,24 +4931,6 @@ class Handler(BaseHTTPRequestHandler):
             c2.commit()
             c2.close()
             self.send_json({"success": True, "letter": letter})
-            return
-            try:
-                from ai_analysis import check_job_status
-                result = check_job_status(
-                    job["url"], job["title"], job["company"], ANTHROPIC_KEY
-                )
-                status_str = result.get("status_check", "unknown")
-                conn.execute(
-                    "UPDATE jobs SET status_check=?, status_checked_date=? WHERE id=?",
-                    (status_str, datetime.now().isoformat(), job_id)
-                )
-                conn.commit()
-                database.log_activity(user["id"], "job_status_checked",
-                    f"{job['title']} at {job['company']} — {status_str}")
-            except Exception as e:
-                result = {"error": str(e), "status_check": "unknown", "reason": str(e)}
-            conn.close()
-            self.send_json(result)
             return
 
         # ── Update applied-job pipeline stage ───────────────────────────────────
