@@ -803,7 +803,7 @@ def run_job_search(user_id: int):
                             'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 4096}
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                  'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
+                                  'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY)
                         _g_req = _ur2.Request(_g_url, data=_g_body,
                                               headers={'Content-Type': 'application/json'}, method='POST')
                         with _ur2.urlopen(_g_req, timeout=60) as _g_resp:
@@ -905,7 +905,7 @@ def run_job_search(user_id: int):
                                 'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
                             }).encode('utf-8')
                             _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                       'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY_WS)
+                                       'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY_WS)
                             _ws_req = _ur2.Request(_ws_url, data=_ws_body,
                                                    headers={'Content-Type': 'application/json'}, method='POST')
                             with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
@@ -3276,11 +3276,13 @@ async function doReject(id, reason) {
 
     // ── Cover Letter (admin) ──
     let _clJobId = null;
-    function openCoverLetter(id, existingLetter) {
+    const _clLetterCache = {};   // job.id → cover_letter string (populated at render time)
+    function openCoverLetter(id) {
       _clJobId = id;
       const m = document.getElementById('cl-modal');
-      document.getElementById('cl-text').value = existingLetter || '';
-      document.getElementById('cl-status').classList.add('hidden');
+      document.getElementById('cl-text').value = _clLetterCache[id] || '';
+      const status = document.getElementById('cl-status');
+      status.textContent = ''; status.classList.add('hidden');
       m.classList.remove('hidden');
       m.classList.add('flex');
     }
@@ -3304,6 +3306,7 @@ async function doReject(id, reason) {
         const d = await r.json();
         if(d.letter) {
           document.getElementById('cl-text').value = d.letter;
+          _clLetterCache[_clJobId] = d.letter;  // keep cache in sync
           status.className = 'shrink-0 text-xs mt-2 text-center text-green-600';
           status.textContent = '✅ Generated! Edit and save as needed.';
           status.classList.remove('hidden');
@@ -3321,11 +3324,13 @@ async function doReject(id, reason) {
     }
     async function saveCoverLetter() {
       const status = document.getElementById('cl-status');
+      const letter = document.getElementById('cl-text').value;
       try {
         await fetch('/api/jobs/'+_clJobId+'/cover-letter', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({action:'save', letter: document.getElementById('cl-text').value})
+          body: JSON.stringify({action:'save', letter})
         });
+        _clLetterCache[_clJobId] = letter;  // keep cache in sync
         status.className = 'shrink-0 text-xs mt-2 text-center text-green-600';
         status.textContent = '✅ Saved!'; status.classList.remove('hidden');
         setTimeout(() => status.classList.add('hidden'), 2000);
@@ -3410,7 +3415,7 @@ function actionBar(job) {
     <div class="mt-4 pt-4 border-t border-slate-100 space-y-2">
       <button onclick="act(${job.id},'approve')" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-sm font-semibold rounded-xl transition-all px-4">✅ Approve to Apply</button>
       <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4">❌ Pass</button>
-          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+','+(job.cover_letter ? JSON.stringify(job.cover_letter) : 'null')+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
+          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
     </div>`;
   if (job.status === 'approved') {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
@@ -3435,7 +3440,7 @@ function actionBar(job) {
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
         ${(job.apply_status === 'failed' || job.apply_status === 'manual_required') ? `<button onclick="applyNow(${job.id})" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">🔄 Retry Auto-Apply</button>` : ''}
         <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
-          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+','+(job.cover_letter ? JSON.stringify(job.cover_letter) : 'null')+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
+          ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
       </div>
       ${job.url ? `<p class="text-xs text-slate-400 text-center"><a href="${job.url}" target="_blank" class="underline hover:text-slate-600">Apply manually ↗</a></p>` : ''}
     </div>`;
@@ -3566,6 +3571,8 @@ function applyStatusBadge(job) {
   return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
 }
 function renderJob(job) {
+  // Cache cover letter safely — avoids embedding multi-line strings in onclick HTML attributes
+  if (job.cover_letter) _clLetterCache[job.id] = job.cover_letter;
   const badges = [matchBadge(job.match_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
   const verifyBtn = job.url
     ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
