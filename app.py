@@ -50,6 +50,7 @@ def _cfg(env_key: str, json_key: str, default="") -> str:
     return os.environ.get(env_key) or CONFIG.get(json_key, default)
 
 ANTHROPIC_KEY = _cfg("ANTHROPIC_API_KEY", "anthropic_api_key")
+GEMINI_KEY    = _cfg("GEMINI_API_KEY",     "gemini_api_key")
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
 SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
@@ -4039,27 +4040,42 @@ def _extract_cv_text(cv_path, cv_summary):
     return cv_summary or ''
 
 
-def _call_gemini_cv_optimizer(cv_text):
-    import urllib.request as _ureq
+def _call_gemini_cv_optimizer(cv_text: str = "", cv_path: str = ""):
+    import urllib.request as _ureq, base64 as _b64
     _key = os.environ.get('GEMINI_API_KEY', '')
     if not _key:
         raise ValueError('GEMINI_API_KEY not set in environment')
-    _cv = cv_text[:8000]
-    _p1 = 'You are an expert CV/resume coach. Analyze the CV below and return ONLY valid JSON.'
+    _p1 = 'You are an expert CV/resume coach. Analyze the CV and return ONLY valid JSON.'
     _p2 = ' No markdown, no backticks. Output must be parseable by json.loads().'
     _p3 = ' CV language may vary but output MUST be in English.'
     _p4 = ' Score 0-100 (clarity 20, impact 25, ATS 20, structure 20, quality 15).'
     _p5 = ' Provide 3-5 improvements and 2-4 strengths.'
-    _fmt = '{"score":72,"score_label":"Good","summary":"...","strengths":["..."],"improvements":[{"title":"...","detail":"..."}],"ats_notes":["..."]}' 
-    _prompt = _p1 + _p2 + _p3 + _p4 + _p5 + '\n\nFormat: ' + _fmt + '\n\nCV:\n' + _cv
+    _fmt = '{"score":72,"score_label":"Good","summary":"...","strengths":["..."],"improvements":[{"title":"...","detail":"..."}],"ats_notes":["..."]}'
+    _instruction = _p1 + _p2 + _p3 + _p4 + _p5 + '\n\nFormat: ' + _fmt + '\n\nAnalyze the CV:'
+    # Prefer sending the PDF directly to Gemini (avoids pypdf dependency)
+    if cv_path and os.path.exists(cv_path) and cv_path.lower().endswith('.pdf'):
+        with open(cv_path, 'rb') as _f:
+            _pdf_b64 = _b64.b64encode(_f.read()).decode()
+        _parts = [
+            {'inlineData': {'mimeType': 'application/pdf', 'data': _pdf_b64}},
+            {'text': _instruction},
+        ]
+    elif cv_text:
+        _parts = [{'text': _instruction + '\n\nCV:\n' + cv_text[:8000]}]
+    else:
+        raise ValueError('No CV content available.')
     _body = json.dumps({
-        'contents': [{'parts': [{'text': _prompt}]}],
-        'generationConfig': {'temperature': 0.3, 'maxOutputTokens': 8192}
+        'contents': [{'parts': _parts}],
+        'generationConfig': {
+            'thinkingConfig': {'thinkingBudget': 0},
+            'temperature': 0.3,
+            'maxOutputTokens': 1024,
+        },
     }).encode('utf-8')
     _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + _key
     _req = _ureq.Request(_url, data=_body, headers={'Content-Type': 'application/json'}, method='POST')
     try:
-        with _ureq.urlopen(_req, timeout=30) as _r:
+        with _ureq.urlopen(_req, timeout=60) as _r:
             _d = json.loads(_r.read().decode('utf-8'))
     except Exception as _he:
         _eb = b''
@@ -4600,8 +4616,8 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── CV Analyze ──
         if path == "/api/analyze-cv":
-            if not ANTHROPIC_KEY:
-                self.send_json({"error": "Anthropic API key not configured. Add it to config.json."})
+            if not GEMINI_KEY and not ANTHROPIC_KEY:
+                self.send_json({"error": "No AI API key configured. Set GEMINI_API_KEY in Railway environment variables."})
                 return
             # Get CV path from profile
             conn = database.get_db()
@@ -4756,10 +4772,11 @@ class Handler(BaseHTTPRequestHandler):
                                 self.send_json(_res); return
                         except Exception:
                             pass
-                    _cv_text = _extract_cv_text(_prof['cv_path'], _prof['cv_summary'])
-                    if not _cv_text or len(_cv_text.strip()) < 30:
-                        self.send_json({'error': 'No CV content found. Please upload your CV first.'}); return
-                    _result = _call_gemini_cv_optimizer(_cv_text)
+                    _cv_path = _prof['cv_path'] or ''
+                    _cv_text = _extract_cv_text(_cv_path, _prof['cv_summary'])
+                    if not _cv_path and (not _cv_text or len(_cv_text.strip()) < 30):
+                        self.send_json({'error': 'No CV found. Please upload your CV first.'}); return
+                    _result = _call_gemini_cv_optimizer(cv_text=_cv_text, cv_path=_cv_path)
                     _result['cached'] = False
                     _now = _dt.now().isoformat()
                     _result['analyzed_date'] = _now
@@ -5186,9 +5203,12 @@ if __name__ == "__main__":
 
     ai_status = "✅ Configured" if ANTHROPIC_KEY else "⚠️  Not set — add to config.json"
 
+    gemini_status = "✅ Configured" if GEMINI_KEY else "⚠️  Not set — add GEMINI_API_KEY"
     print(f"\n📂  Folder:        {BASE_DIR}")
-    print(f"🗄️   Database:      jobs.db")
+    print(f"🗄️   Database:      {DB_FILE}")
+    print(f"📁  Uploads:       {UPLOADS_DIR}")
     print(f"🤖  Anthropic AI:  {ai_status}")
+    print(f"🤖  Gemini AI:     {gemini_status}")
     print(f"\n🖥️   Desktop:       http://localhost:{PORT}")
     print(f"📱  Mobile:        {MOBILE_URL}   ← open on your phone")
     print(f"⌨️   Ctrl+C to stop\n")
