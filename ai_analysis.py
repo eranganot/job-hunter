@@ -405,7 +405,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
         f"JOB TITLE: {job_title}\n"
         f"COMPANY: {company}\n\n"
         f"JOB DESCRIPTION:\n{jd_text}\n\n"
-        f"CV SUMMARY:\n{cv_summary if cv_summary else 'No CV summary available — write a general cover letter.\'}"
+        f"CV SUMMARY:\n{cv_summary or 'No CV summary available - write a general cover letter.'}"
     )
 
     body = json.dumps({
