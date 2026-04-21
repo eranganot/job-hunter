@@ -378,9 +378,11 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
 
 
 def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
-    """Generate a personalised cover letter using Gemini Flash, with Claude Haiku fallback.
+    """Generate a personalised cover letter.
 
-    Raises RuntimeError on total failure so the caller returns a proper error JSON.
+    Primary: Gemini 1.5 Flash (stable GA, works on all API key tiers).
+    Fallback: Claude Sonnet 4.6 (confirmed working in apply_engine).
+    Raises RuntimeError only if both fail — caller returns proper error JSON.
     """
     gemini_key    = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
@@ -390,25 +392,30 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
     job_title = job.get("title", "Unknown Role")
     company   = job.get("company", "the company")
 
-    prompt = (
-        "You are an expert career coach writing a highly personalised, compelling cover letter.\n\n"
-        "RULES:\n"
-        "- 3 short paragraphs, 200-270 words total.\n"
-        "- Paragraph 1 (2-3 sentences): Strong opening — name the role and company, lead with"
-        " the single most relevant achievement or skill from the CV."
-        " NEVER start with \'I am writing to express my interest\'.\n"
-        "- Paragraph 2 (3-4 sentences): Pick 2-3 specific requirements from the JD and map them"
-        " to concrete experience or measurable results from the CV.\n"
-        "- Paragraph 3 (2 sentences): Why this company specifically. Close with a confident call to action.\n"
-        "- Tone: confident, direct, human. No buzzwords. No clichés (dynamic, results-driven, passionate).\n"
-        "- Output plain text only — no markdown, no headers, no bullet points, no subject line.\n\n"
-        f"JOB TITLE: {job_title}\n"
-        f"COMPANY: {company}\n\n"
-        f"JOB DESCRIPTION (extract specific requirements):\n{jd_text}\n\n"
-        f"CANDIDATE CV SUMMARY (use real achievements and experience from this):\n{cv_block}"
+    instructions = (
+        "You are an expert career coach writing a highly personalised, compelling cover letter. "
+        "Rules: "
+        "3 short paragraphs, 200-270 words total. "
+        "Paragraph 1 (2-3 sentences): Strong opening - name the role and company, lead with "
+        "the single most relevant achievement or skill from the CV. "
+        "NEVER start with I am writing to express my interest. "
+        "Paragraph 2 (3-4 sentences): Pick 2-3 specific requirements from the JD and map them "
+        "to concrete experience or measurable results from the CV. "
+        "Paragraph 3 (2 sentences): Why this company specifically. Close with a confident call to action. "
+        "Tone: confident, direct, human. No buzzwords. No cliches like dynamic, results-driven, passionate. "
+        "Output plain text only - no markdown, no headers, no bullet points, no subject line."
     )
 
-    # ── 1. Try Gemini Flash ──────────────────────────────────────────────────
+    user_content = (
+        f"JOB TITLE: {job_title}\n"
+        f"COMPANY: {company}\n\n"
+        f"JOB DESCRIPTION:\n{jd_text}\n\n"
+        f"CANDIDATE CV SUMMARY:\n{cv_block}"
+    )
+
+    prompt = instructions + "\n\n" + user_content
+
+    # ── 1. Try Gemini 1.5 Flash (stable GA, all tiers) ──────────────────────
     if gemini_key:
         try:
             body = json.dumps({
@@ -416,45 +423,45 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
                 "generationConfig": {"temperature": 0.7, "maxOutputTokens": 900},
             }).encode("utf-8")
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   "gemini-2.5-flash:generateContent?key=" + gemini_key)
+                   "gemini-1.5-flash:generateContent?key=" + gemini_key)
             req = urllib.request.Request(url, data=body,
                                          headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            print("[cover-letter] Generated via Gemini Flash")
+            print("[cover-letter] Generated via Gemini 1.5 Flash")
             return text
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            print(f"[cover-letter] Gemini HTTP {e.code}: {err_body[:200]} — trying Claude fallback")
+            print(f"[cover-letter] Gemini HTTP {e.code}: {err_body[:400]}")
         except Exception as e:
-            print(f"[cover-letter] Gemini error: {e} — trying Claude fallback")
+            print(f"[cover-letter] Gemini error: {e}")
 
-    # ── 2. Fallback: Claude Haiku ────────────────────────────────────────────
+    # ── 2. Fallback: Claude Sonnet 4.6 (confirmed working) ──────────────────
     if anthropic_key:
         try:
             body = json.dumps({
-                "model": "claude-haiku-4-5",
+                "model": "claude-sonnet-4-6",
                 "max_tokens": 900,
-                "system": (
-                    "You are an expert career coach. Write a compelling, personalised cover letter "
-                    "in plain text only — no markdown, no headers, no bullet points. "
-                    "3 paragraphs, 200-270 words."
-                ),
-                "messages": [{"role": "user", "content": prompt}],
+                "system": instructions,
+                "messages": [{"role": "user", "content": user_content}],
             }).encode()
             req = urllib.request.Request(
                 "https://api.anthropic.com/v1/messages", data=body, method="POST",
                 headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
                          "content-type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=45) as resp:
                 data = json.loads(resp.read())
             text = data["content"][0]["text"].strip()
-            print("[cover-letter] Generated via Claude Haiku (Gemini fallback)")
+            print("[cover-letter] Generated via Claude Sonnet 4.6 (Gemini fallback)")
             return text
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            print(f"[cover-letter] Claude HTTP {e.code}: {err_body[:400]}")
+            raise RuntimeError(f"Both Gemini and Claude failed. Claude HTTP {e.code}: {err_body[:200]}")
         except Exception as e:
-            print(f"[cover-letter] Claude fallback error: {e}")
+            print(f"[cover-letter] Claude error: {e}")
             raise RuntimeError(f"Both Gemini and Claude failed. Last error: {e}")
 
     raise RuntimeError("No AI API key configured (GEMINI_API_KEY or ANTHROPIC_API_KEY).")
