@@ -803,7 +803,7 @@ def run_job_search(user_id: int):
                             'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 4096}
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                  'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY)
+                                  'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
                         _g_req = _ur2.Request(_g_url, data=_g_body,
                                               headers={'Content-Type': 'application/json'}, method='POST')
                         with _ur2.urlopen(_g_req, timeout=60) as _g_resp:
@@ -905,7 +905,7 @@ def run_job_search(user_id: int):
                                 'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
                             }).encode('utf-8')
                             _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                       'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY_WS)
+                                       'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY_WS)
                             _ws_req = _ur2.Request(_ws_url, data=_ws_body,
                                                    headers={'Content-Type': 'application/json'}, method='POST')
                             with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
