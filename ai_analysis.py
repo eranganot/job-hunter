@@ -396,21 +396,29 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
     job_title  = job.get("title", "Unknown Role")
     company    = job.get("company", "the company")
 
+    cv_block = cv_summary if cv_summary else "No CV on file."
+
     prompt = (
-        "You are a job-search assistant writing personalised cover letters.\n"
-        "Write a cover letter in a professional yet conversational tone, "
-        "no more than 250 words. Focus on 2-3 specific overlaps between the "
-        "candidate's CV and the job description. Do not invent experience "
-        "not present in the CV. Output plain text only — no markdown, no headers, no bullet points.\n\n"
+        "You are an expert career coach writing a highly personalised, compelling cover letter.\n\n"
+        "RULES:\n"
+        "- 3 short paragraphs, 200-270 words total.\n"
+        "- Paragraph 1 (2-3 sentences): Strong opening — name the role and company, lead with"
+        " the single most relevant achievement or skill from the CV."
+        " NEVER start with 'I am writing to express my interest'.\n"
+        "- Paragraph 2 (3-4 sentences): Pick 2-3 specific requirements from the JD and map them"
+        " to concrete experience or measurable results from the CV.\n"
+        "- Paragraph 3 (2 sentences): Why this company specifically. Close with a confident call to action.\n"
+        "- Tone: confident, direct, human. No buzzwords. No clichés (dynamic, results-driven, passionate).\n"
+        "- Output plain text only — no markdown, no headers, no bullet points, no subject line.\n\n"
         f"JOB TITLE: {job_title}\n"
         f"COMPANY: {company}\n\n"
-        f"JOB DESCRIPTION:\n{jd_text}\n\n"
-        f"CV SUMMARY:\n{cv_summary or 'No CV summary available - write a general cover letter.'}"
+        f"JOB DESCRIPTION (extract specific requirements):\n{jd_text}\n\n"
+        f"CANDIDATE CV SUMMARY (use real achievements and experience from this):\n{cv_block}"
     )
 
     body = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 700},
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 900},
     }).encode("utf-8")
 
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
