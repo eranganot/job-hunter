@@ -378,11 +378,10 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
 
 
 def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
-    """Generate a personalised cover letter.
+    """Generate a personalised cover letter via Gemini 1.5 Flash.
 
-    Primary: Gemini 1.5 Flash (stable GA, works on all API key tiers).
-    Fallback: Claude Sonnet 4.6 (confirmed working in apply_engine).
-    Raises RuntimeError only if both fail — caller returns proper error JSON.
+    Claude Sonnet is a fallback only if Gemini key is missing.
+    Raises RuntimeError with the FULL Gemini error so it shows in the UI status bar.
     """
     gemini_key    = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
@@ -396,14 +395,14 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
         "You are an expert career coach writing a highly personalised, compelling cover letter. "
         "Rules: "
         "3 short paragraphs, 200-270 words total. "
-        "Paragraph 1 (2-3 sentences): Strong opening - name the role and company, lead with "
+        "Paragraph 1 (2-3 sentences): Strong opening. Name the role and company, lead with "
         "the single most relevant achievement or skill from the CV. "
-        "NEVER start with I am writing to express my interest. "
+        "Never start with I am writing to express my interest. "
         "Paragraph 2 (3-4 sentences): Pick 2-3 specific requirements from the JD and map them "
         "to concrete experience or measurable results from the CV. "
         "Paragraph 3 (2 sentences): Why this company specifically. Close with a confident call to action. "
-        "Tone: confident, direct, human. No buzzwords. No cliches like dynamic, results-driven, passionate. "
-        "Output plain text only - no markdown, no headers, no bullet points, no subject line."
+        "Tone: confident, direct, human. No buzzwords. No cliches. "
+        "Output plain text only. No markdown, no headers, no bullet points, no subject line."
     )
 
     user_content = (
@@ -413,31 +412,48 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
         f"CANDIDATE CV SUMMARY:\n{cv_block}"
     )
 
-    prompt = instructions + "\n\n" + user_content
+    full_prompt = instructions + "\n\n" + user_content
 
-    # ── 1. Try Gemini 1.5 Flash (stable GA, all tiers) ──────────────────────
+    # ── Try Gemini 1.5 Flash ─────────────────────────────────────────────────
     if gemini_key:
+        gemini_err = None
         try:
             body = json.dumps({
-                "contents": [{"parts": [{"text": prompt}]}],
+                "contents": [{"parts": [{"text": full_prompt}]}],
                 "generationConfig": {"temperature": 0.7, "maxOutputTokens": 900},
             }).encode("utf-8")
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
                    "gemini-1.5-flash:generateContent?key=" + gemini_key)
-            req = urllib.request.Request(url, data=body,
-                                         headers={"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            print("[cover-letter] Generated via Gemini 1.5 Flash")
-            return text
+            greq = urllib.request.Request(url, data=body,
+                                          headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(greq, timeout=30) as resp:
+                gdata = json.loads(resp.read().decode("utf-8"))
+
+            candidates = gdata.get("candidates", [])
+            if not candidates:
+                gemini_err = "Gemini returned no candidates: " + json.dumps(gdata)[:300]
+            else:
+                candidate = candidates[0]
+                finish_reason = candidate.get("finishReason", "")
+                if "content" not in candidate:
+                    gemini_err = "Gemini blocked response (finishReason: " + finish_reason + "): " + json.dumps(candidate)[:200]
+                else:
+                    text = candidate["content"]["parts"][0]["text"].strip()
+                    print("[cover-letter] Generated via Gemini 1.5 Flash")
+                    return text
+
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            print(f"[cover-letter] Gemini HTTP {e.code}: {err_body[:400]}")
+            gemini_err = "Gemini HTTP " + str(e.code) + ": " + err_body[:400]
         except Exception as e:
-            print(f"[cover-letter] Gemini error: {e}")
+            gemini_err = "Gemini exception: " + str(e)
 
-    # ── 2. Fallback: Claude Sonnet 4.6 (confirmed working) ──────────────────
+        if gemini_err:
+            print("[cover-letter] " + gemini_err)
+            # Raise immediately with full error so user sees it in the status bar
+            raise RuntimeError(gemini_err)
+
+    # ── Gemini key not configured — try Claude as fallback ──────────────────
     if anthropic_key:
         try:
             body = json.dumps({
@@ -446,23 +462,21 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
                 "system": instructions,
                 "messages": [{"role": "user", "content": user_content}],
             }).encode()
-            req = urllib.request.Request(
+            areq = urllib.request.Request(
                 "https://api.anthropic.com/v1/messages", data=body, method="POST",
                 headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
                          "content-type": "application/json"}
             )
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                data = json.loads(resp.read())
-            text = data["content"][0]["text"].strip()
-            print("[cover-letter] Generated via Claude Sonnet 4.6 (Gemini fallback)")
+            with urllib.request.urlopen(areq, timeout=45) as resp:
+                adata = json.loads(resp.read())
+            text = adata["content"][0]["text"].strip()
+            print("[cover-letter] Generated via Claude Sonnet 4.6")
             return text
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
-            print(f"[cover-letter] Claude HTTP {e.code}: {err_body[:400]}")
-            raise RuntimeError(f"Both Gemini and Claude failed. Claude HTTP {e.code}: {err_body[:200]}")
+            raise RuntimeError("Claude HTTP " + str(e.code) + ": " + err_body[:300])
         except Exception as e:
-            print(f"[cover-letter] Claude error: {e}")
-            raise RuntimeError(f"Both Gemini and Claude failed. Last error: {e}")
+            raise RuntimeError("Claude error: " + str(e))
 
-    raise RuntimeError("No AI API key configured (GEMINI_API_KEY or ANTHROPIC_API_KEY).")
+    raise RuntimeError("GEMINI_API_KEY is not configured in Railway environment variables.")
 
