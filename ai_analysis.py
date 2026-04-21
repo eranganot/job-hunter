@@ -387,7 +387,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
     if not api_key:
         return "[Error] No API key available for cover letter generation."
 
-    cv_summary = (profile.get("cv_summary") or profile.get("cv_analyzed") or "")[:4000]
+    cv_summary = (profile.get("cv_summary") or "")[:4000]
     jd_text = (job.get("full_description") or job.get("description") or job.get("title", ""))[:4000]
     job_title = job.get("title", "Unknown Role")
     company = job.get("company", "the company")
