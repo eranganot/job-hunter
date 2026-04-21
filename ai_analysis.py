@@ -423,7 +423,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
                 "generationConfig": {"temperature": 0.7, "maxOutputTokens": 900},
             }).encode("utf-8")
             url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   "gemini-1.5-flash:generateContent?key=" + gemini_key)
+                   "gemini-2.5-flash:generateContent?key=" + gemini_key)
             greq = urllib.request.Request(url, data=body,
                                           headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(greq, timeout=30) as resp:
