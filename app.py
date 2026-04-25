@@ -3702,15 +3702,27 @@ async function applyNow(id) {
 }
 
 var _applyPollers = {};
+var _applyPollStart = {};
+const _APPLY_POLL_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes max
 function _pollApplyStatus(id) {
   if (_applyPollers[id]) return; // already polling
+  _applyPollStart[id] = Date.now();
   _applyPollers[id] = setInterval(async function() {
+    // Safety timeout: if still 'applying' after 3 min, the server thread died — stop spinning
+    if (Date.now() - (_applyPollStart[id] || 0) > _APPLY_POLL_TIMEOUT_MS) {
+      clearInterval(_applyPollers[id]);
+      delete _applyPollers[id];
+      delete _applyPollStart[id];
+      loadAll();
+      return;
+    }
     try {
       const jobs = await api('/api/jobs?status=approved');
       const job = (jobs||[]).find(j => j.id === id);
       if (!job || job.apply_status !== 'applying') {
         clearInterval(_applyPollers[id]);
         delete _applyPollers[id];
+        delete _applyPollStart[id];
         loadAll();
       } else {
         // Refresh just the card while spinner is showing
@@ -3719,6 +3731,7 @@ function _pollApplyStatus(id) {
     } catch(e) {
       clearInterval(_applyPollers[id]);
       delete _applyPollers[id];
+      delete _applyPollStart[id];
     }
   }, 4000);
 }
@@ -5216,6 +5229,12 @@ if __name__ == "__main__":
         _mconn = database.get_db()
         _mconn.execute("UPDATE jobs SET status='rejected', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
         _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status IN ('failed','manual_required')")
+        # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
+        _stuck = _mconn.execute(
+            "UPDATE jobs SET apply_status=NULL WHERE apply_status='applying'"
+        ).rowcount
+        if _stuck:
+            print(f"[startup] Reset {_stuck} job(s) stuck in 'applying' state")
         _mconn.commit()
         _mconn.close()
     except Exception:
