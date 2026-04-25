@@ -406,8 +406,8 @@ def run_job_search(user_id: int):
                 'transmitsecurity': 'Transmit Security', 'via': 'Via', 'nice': 'NICE',
                 'yotpo': 'Yotpo', 'bringg': 'Bringg', 'bigid': 'BigID',
                 'axonius': 'Axonius', 'lightricks': 'Lightricks', 'catonetworks': 'Cato Networks',
-                'snyk': 'Snyk', 'sentinelone': 'SentinelOne', 'monday': 'monday.com',
-                'wix': 'Wix', 'fiverr': 'Fiverr', 'tipalti': 'Tipalti',
+                'snyk': 'Snyk', 'sentinelone': 'SentinelOne',
+                'fiverr': 'Fiverr', 'tipalti': 'Tipalti',
                 'checkmarx': 'Checkmarx', 'rapyd': 'Rapyd', 'lemonade': 'Lemonade',
                 'papayaglobal': 'Papaya Global', 'deel': 'Deel', 'drata': 'Drata',
                 'hibob': 'HiBob', 'ironclad': 'Ironclad', 'nextinsurance': 'Next Insurance',
@@ -416,12 +416,17 @@ def run_job_search(user_id: int):
                 'drivenets': 'DriveNets', 'orcasecurity': 'Orca Security',
                 'aquasecurity': 'Aqua Security', 'seekingalpha': 'Seeking Alpha',
                 'fundbox': 'Fundbox', 'ironsource': 'ironSource',
+                'torq': 'Torq', 'augury': 'Augury',
                 # Global tech companies with Israeli offices (Greenhouse)
-                'cyberark': 'CyberArk', 'varonis': 'Varonis', 'zscaler': 'Zscaler',
-                'sisense': 'Sisense', 'gong-io': 'Gong', 'armis': 'Armis',
-                'safebreach': 'SafeBreach', 'cellebrite': 'Cellebrite', 'sealights': 'SeaLights',
-                'datarails': 'DataRails', 'bizzabo': 'Bizzabo', 'lusha': 'Lusha',
-                'perion': 'Perion', 'akamai': 'Akamai', 'illumio': 'Illumio',
+                'zscaler': 'Zscaler', 'sisense': 'Sisense',
+                'gongio': 'Gong', 'armissecurity': 'Armis',
+                'safebreach': 'SafeBreach', 'datarails': 'DataRails',
+                'couchbaseinc': 'Couchbase', 'dremio': 'Dremio',
+                'tenableinc': 'Tenable', 'solarwinds': 'SolarWinds',
+                'recordedfuture': 'Recorded Future', 'rubrik': 'Rubrik',
+                'elastic': 'Elastic', 'mongodb': 'MongoDB',
+                'datadog': 'Datadog', 'cloudflare': 'Cloudflare',
+                'commvault': 'Commvault',
             }
             # -- Israeli company slugs (Lever) --
             _LV_COMPANIES = {
@@ -500,7 +505,6 @@ def run_job_search(user_id: int):
                 if not data: return
                 for j in data.get("jobs", []):
                     t = j.get("title", "")
-                    if not _title_match(t): continue
                     loc = j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else ""
                     jurl = f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id', '')}"
                     _gh_content = re.sub(r'<[^>]+>', ' ', j.get("content", "")).strip()[:5000] if j.get("content") else ""
@@ -516,7 +520,6 @@ def run_job_search(user_id: int):
                 if not isinstance(data, list): return
                 for j in data:
                     t = j.get("text", "")
-                    if not _title_match(t): continue
                     cats = j.get("categories") or {}
                     loc = cats.get("location", "")
                     if not loc:
@@ -530,7 +533,7 @@ def run_job_search(user_id: int):
                                         "location": loc, "url": jurl,
                                         "description": desc, "full_description": full_desc, "source": "lever"})
             # -- Run all API queries in parallel --
-            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever boards (global + IL)...")
+            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever boards...")
             threads = []
             for slug, name in _GH_COMPANIES.items():
                 threads.append(_thr.Thread(target=_query_gh, args=(slug, name), daemon=True))
@@ -730,18 +733,21 @@ def run_job_search(user_id: int):
             # -- Score against user CV + preferences --
             # Cascading fallback: Gemini Flash (free) → Anthropic Haiku → rule-based heuristic
 
-            # Fetch CV summary from DB for richer scoring context
+            # Fetch CV summary + path from DB for richer scoring context
             _cv_text = ""
+            _cv_path = ""
             try:
                 _conn2 = database.get_db()
                 _prof2 = _conn2.execute(
-                    "SELECT cv_summary FROM user_profiles WHERE user_id=?",
+                    "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?",
                     (user_id,)
                 ).fetchone()
                 _conn2.close()
                 _cv_text = (_prof2["cv_summary"] or "") if _prof2 else ""
+                _cv_path = (_prof2["cv_path"] or "") if _prof2 else ""
             except Exception:
                 _cv_text = ""
+                _cv_path = ""
 
             profile_text = (
                 f"Target roles: {', '.join(titles_[:4])}\n"
@@ -750,7 +756,7 @@ def run_job_search(user_id: int):
                 f"Seniority: Senior / Director / VP / Head-of"
             )
             if _cv_text:
-                profile_text += f"\n\nCV Summary (first 1500 chars):\n{_cv_text[:1500]}"
+                profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
 
             def _parse_scored_response(text_):
                 """Extract a valid JSON array of scored jobs from an AI response string."""
@@ -799,15 +805,27 @@ def run_job_search(user_id: int):
                 # --- Try Gemini Flash first (free tier: 1500 req/day) ---
                 if _GEMINI_KEY:
                     try:
+                        import base64 as _b64_sc, os as _os_sc
+                        _parts = []
+                        # Attach full CV PDF if available — much richer context than text summary
+                        _cv_path_sc = _cv_path  # closure from outer scope
+                        if _cv_path_sc and _os_sc.path.exists(_cv_path_sc) and _cv_path_sc.lower().endswith('.pdf'):
+                            with open(_cv_path_sc, 'rb') as _cvf:
+                                _cv_b64 = _b64_sc.b64encode(_cvf.read()).decode()
+                            _parts.append({'inlineData': {'mimeType': 'application/pdf', 'data': _cv_b64}})
+                            print(f"[search] Scoring with CV PDF ({len(_cv_b64)//1024}KB b64)")
+                        else:
+                            print(f"[search] Scoring with CV text (no PDF at '{_cv_path_sc}')")
+                        _parts.append({'text': prompt_})
                         _g_body = _js2.dumps({
-                            'contents': [{'parts': [{'text': prompt_}]}],
+                            'contents': [{'parts': _parts}],
                             'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 4096}
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                  'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY)
+                                  'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
                         _g_req = _ur2.Request(_g_url, data=_g_body,
                                               headers={'Content-Type': 'application/json'}, method='POST')
-                        with _ur2.urlopen(_g_req, timeout=60) as _g_resp:
+                        with _ur2.urlopen(_g_req, timeout=90) as _g_resp:
                             _g_data = _js2.loads(_g_resp.read().decode('utf-8'))
                         _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
                         result_ = _parse_scored_response(_g_text)
@@ -881,52 +899,97 @@ def run_job_search(user_id: int):
                 return out_
 
             # Score all collected jobs in batches of 50
+            # Cap ATS jobs at 300 to avoid excessive API calls; supplemental sources are uncapped
+            _ats_sources = {'greenhouse', 'lever'}
+            _ats_jobs = [j for j in all_raw if j.get('source','') in _ats_sources]
+            _other_jobs = [j for j in all_raw if j.get('source','') not in _ats_sources]
+            ATS_CAP = 300
+            if len(_ats_jobs) > ATS_CAP:
+                print(f"[search] Capping ATS jobs {len(_ats_jobs)} -> {ATS_CAP} (keeping all {len(_other_jobs)} from other sources)")
+                _ats_jobs = _ats_jobs[:ATS_CAP]
+            _jobs_to_score = _ats_jobs + _other_jobs
+            print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other)")
             scored_jobs = []
-            for batch_i in range(0, len(all_raw), 50):
-                batch = all_raw[batch_i:batch_i+50]
+            for batch_i in range(0, len(_jobs_to_score), 50):
+                batch = _jobs_to_score[batch_i:batch_i+50]
                 scored_jobs.extend(_score_batch(batch, profile_text))
 
-            # -- Supplemental: Gemini + Google Search for LinkedIn/Glassdoor/Wellfound --
+            # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
             import os as _os_ws
             _GEMINI_KEY_WS = _os_ws.environ.get('GEMINI_API_KEY', '')
             if _GEMINI_KEY_WS:
-                try:
-                    for _ws_title in titles_[:3]:
-                        try:
-                            _ws_prompt = (
-                                f'Find 5 current "{_ws_title}" job listings in '
-                                f'{", ".join(locs_[:2]) or "Israel"}. '
-                                'Focus on linkedin.com/jobs, glassdoor.com, and wellfound.com. '
-                                'Return ONLY a JSON array. '
-                                'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"..."}'
-                            )
-                            _ws_body = _js2.dumps({
-                                'contents': [{'parts': [{'text': _ws_prompt}]}],
-                                'tools': [{'google_search': {}}],
-                                'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
-                            }).encode('utf-8')
-                            _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                       'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY_WS)
-                            _ws_req = _ur2.Request(_ws_url, data=_ws_body,
-                                                   headers={'Content-Type': 'application/json'}, method='POST')
-                            with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
-                                _ws_data = _js2.loads(_ws_resp.read().decode('utf-8'))
-                            _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
-                            _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
-                            if _ws_si >= 0 and _ws_ei > _ws_si:
-                                for _ws_j in _js2.loads(_ws_text[_ws_si:_ws_ei+1]):
-                                    if isinstance(_ws_j, dict) and _ws_j.get('url'):
-                                        _ws_j.setdefault('candidate_score', 70)
-                                        _ws_j.setdefault('match_score', 70)
-                                        _ws_j.setdefault('fit_reason', 'Found via Google Search')
-                                        _ws_j.setdefault('source', 'web_search')
-                                        _ws_j.setdefault('found_date', today)
-                                        scored_jobs.append(_ws_j)
-                            print(f"[search] Gemini web search for '{_ws_title}': added jobs")
-                        except Exception as _wse:
-                            print(f"[search] Gemini web search error for '{_ws_title}': {_wse}")
-                except Exception as _wse2:
-                    print(f"[search] Gemini web search supplemental skipped: {_wse2}")
+                # Build a rich candidate context for the search prompt
+                _seniority_hint = "VP / Director / Head-of / Senior" if any(
+                    w in " ".join(titles_).lower() for w in ("vp", "director", "head", "senior", "lead", "principal")
+                ) else "Senior / Lead"
+                _cv_snippet = _cv_text[:600].replace('\n', ' ') if _cv_text else ""
+                _locs_str = ", ".join(locs_[:2]) or "Israel"
+
+                def _ws_one_search(query_hint_):
+                    """Run one Gemini Google Search and return raw job dicts."""
+                    _ws_prompt = (
+                        f'Search for current job openings matching this query: "{query_hint_}". '
+                        f'Focus on: linkedin.com/jobs, glassdoor.com, wellfound.com, and company career pages. '
+                        f'Candidate context — seniority: {_seniority_hint}; location: {_locs_str}. '
+                        + (f'Background: {_cv_snippet} ' if _cv_snippet else '')
+                        + 'Return ONLY a JSON array of up to 8 results. '
+                        'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"2-3 sentences about the role"}'
+                    )
+                    try:
+                        _ws_body = _js2.dumps({
+                            'contents': [{'parts': [{'text': _ws_prompt}]}],
+                            'tools': [{'google_search': {}}],
+                            'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
+                        }).encode('utf-8')
+                        _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
+                                   'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY_WS)
+                        _ws_req = _ur2.Request(_ws_url, data=_ws_body,
+                                               headers={'Content-Type': 'application/json'}, method='POST')
+                        with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
+                            _ws_data = _js2.loads(_ws_resp.read().decode('utf-8'))
+                        _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                        _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
+                        if _ws_si >= 0 and _ws_ei > _ws_si:
+                            return [j for j in _js2.loads(_ws_text[_ws_si:_ws_ei+1])
+                                    if isinstance(j, dict) and j.get('url')]
+                    except Exception as _wse:
+                        print(f"[search] Web search error for '{query_hint_}': {_wse}")
+                    return []
+
+                # Build search queries: one per title + one broad seniority+location query
+                _ws_queries = [f'{t} jobs in {_locs_str}' for t in titles_[:4]]
+                _ws_queries.append(
+                    f'{_seniority_hint} {" OR ".join(titles_[:2])} '
+                    f'startup Israel site:linkedin.com OR site:wellfound.com'
+                )
+
+                # Run all queries in parallel
+                _ws_raw = []
+                _ws_lock = _thr.Lock()
+                def _ws_worker(q_):
+                    results_ = _ws_one_search(q_)
+                    with _ws_lock:
+                        _ws_raw.extend(results_)
+
+                _ws_threads = [_thr.Thread(target=_ws_worker, args=(q,), daemon=True) for q in _ws_queries]
+                for _wt in _ws_threads: _wt.start()
+                for _wt in _ws_threads: _wt.join(timeout=70)
+
+                print(f"[search] Web search: {len(_ws_queries)} queries → {len(_ws_raw)} raw results")
+
+                # Pass web search results through the same AI scorer (not just blindly add them)
+                if _ws_raw:
+                    # Normalise field names to match what _score_batch expects
+                    for _wsj in _ws_raw:
+                        _wsj.setdefault('job_title', _wsj.get('title', ''))
+                        _wsj.setdefault('full_description', _wsj.get('description', ''))
+                        _wsj['source'] = 'web_search'
+                    _ws_scored = _score_batch(_ws_raw, profile_text)
+                    for _wsj in _ws_scored:
+                        _wsj.setdefault('fit_reason', 'Found via Google Search')
+                        _wsj.setdefault('found_date', today)
+                    scored_jobs.extend(_ws_scored)
+                    print(f"[search] Web search: {len(_ws_raw)} raw → {len(_ws_scored)} passed scoring")
             else:
                 print("[search] Gemini web search skipped — no GEMINI_API_KEY")
 
