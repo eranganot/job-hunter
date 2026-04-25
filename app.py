@@ -5065,6 +5065,34 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
+        # ── Admin: clear applied jobs ─────────────────────────────────────────────
+        if path == "/api/admin/clear-applied":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload   = self.read_json()
+            target_uid = payload.get("user_id")   # None → all users
+            conn = database.get_db()
+            if target_uid:
+                cur = conn.execute(
+                    "DELETE FROM jobs WHERE status='applied' AND user_id=?",
+                    (int(target_uid),)
+                )
+            else:
+                cur = conn.execute("DELETE FROM jobs WHERE status='applied'")
+            deleted = cur.rowcount
+            conn.commit()
+            conn.close()
+            database.log_activity(
+                user["id"], "admin_clear_applied",
+                f"Deleted {deleted} applied job(s)"
+                + (f" for user {target_uid}" if target_uid else " for all users")
+            )
+            print(f"[admin] clear-applied: {deleted} rows deleted"
+                  + (f" (user {target_uid})" if target_uid else " (all users)"))
+            self.send_json({"deleted": deleted})
+            return
+
         if path == "/api/admin/inject-jobs":
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)
