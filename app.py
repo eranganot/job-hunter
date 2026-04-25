@@ -3962,25 +3962,23 @@ async function setStage(id, stage) {
 
 async function runApply() {
   const btn = document.getElementById('run-apply-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = 'Applying...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Starting...'; }
   try {
     const r = await fetch('/api/run-apply', {method:'POST', headers:{'Content-Type':'application/json'}});
     const data = await r.json();
-    if (r.ok) {
-      const n = data.applied ?? 0;
-      if (n > 0) {
-        alert('Applied to ' + n + ' job' + (n === 1 ? '' : 's') + '!');
-        setTimeout(() => loadAll(), 1500);
-      } else {
-        alert(data.error ? 'Apply error: ' + data.error : 'No approved jobs to apply to -- approve some first.');
-      }
+    if (r.ok && data.started) {
+      // Applying runs in the background — results arrive as notifications
+      if (btn) { btn.innerHTML = '✅ Running...'; }
+      setTimeout(() => {
+        if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Apply All'; }
+      }, 5000);
     } else {
-      alert('Apply failed: ' + (data.error || 'Server error'));
+      alert(data.error ? 'Apply error: ' + data.error : 'Nothing to apply — approve some jobs first.');
+      if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Apply All'; }
     }
   } catch(e) {
     alert('Connection error - please try again.');
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = 'Apply Now'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Apply All'; }
   }
 }
 </script>
@@ -5059,8 +5057,11 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
-            result = run_job_apply(user["id"])
-            self.send_json(result)
+            # Fire-and-forget: Playwright can take 30–120 s per job, far beyond
+            # Railway's HTTP request timeout.  Return immediately and let the
+            # background thread deliver a notification when done.
+            threading.Thread(target=run_job_apply, args=(user["id"],), daemon=True).start()
+            self.send_json({"started": True})
             return
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
