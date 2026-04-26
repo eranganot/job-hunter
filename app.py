@@ -386,7 +386,7 @@ def run_job_search(user_id: int):
         conn = database.get_db()
         existing_urls = {r[0] for r in conn.execute(
             "SELECT url FROM jobs WHERE user_id=? AND url!='' "
-            "AND found_date >= date('now', '-60 days')", (user_id,)
+            "AND found_date >= date('now', '-30 days') AND status NOT IN ('applied','rejected')", (user_id,)
         ).fetchall()}
         conn.close()
 
@@ -916,7 +916,7 @@ def run_job_search(user_id: int):
                 if "```" in t:
                     t = t.split("```")[1]
                     if t.startswith("json"): t = t[4:]
-                si = t.rfind("["); ei = t.rfind("]")
+                si = t.find("[");  ei = t.rfind("]")
                 if si < 0 or ei <= si:
                     print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
                     return []
@@ -1008,7 +1008,7 @@ def run_job_search(user_id: int):
                         _parts.append({'text': prompt_})
                         _g_body = _js2.dumps({
                             'contents': [{'parts': _parts}],
-                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 4096}
+                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 8192}
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
@@ -1248,7 +1248,7 @@ def run_job_search(user_id: int):
                                 "  30-44: Strong overlap with minor gaps\n"
                                 "  15-29: Moderate overlap — candidate could stretch into this role\n"
                                 "   0-14: Significant mismatch in required background\n\n"
-                                "EXCLUDE only clear non-product roles: pure engineering IC, sales-quota-only, finance/legal/HR with no product scope.\n\n"
+                                "EXCLUDE only clearly wrong roles: pure engineering IC, quota-sales, finance/legal/HR. Product-adjacent leadership is OK.\n\n"
                                 "Include jobs scoring >= 25 (permissive — this is a last-resort fallback). "
                                 "Return ONLY a JSON array. Each item: "
                                 "{id (from input), score (0-100), reason (one sentence why)}\n\n"
@@ -1260,7 +1260,7 @@ def run_job_search(user_id: int):
                                 if "```" in t:
                                     t = t.split("```")[1]
                                     if t.startswith("json"): t = t[4:]
-                                si = t.rfind("["); ei = t.rfind("]")
+                                si = t.find("[");  ei = t.rfind("]")
                                 if si < 0 or ei <= si: return []
                                 try:
                                     return _js2.loads(t[si:ei+1])
@@ -1268,14 +1268,17 @@ def run_job_search(user_id: int):
                                     return []
 
                             def _apply_desc_scores(scored_ids_, batch_d2_, reason_default="Matched by description"):
-                                _id_map_d = {
-                                    item["id"]: item for item in scored_ids_
-                                    if isinstance(item, dict) and "score" in item
-                                }
+                                # coerce IDs to int — AI often returns string "0" not integer 0
+                                _id_map_d = {}
+                                for _item_d in scored_ids_:
+                                    if isinstance(_item_d, dict) and "score" in _item_d:
+                                        try: _id_map_d[int(_item_d["id"])] = _item_d
+                                        except (KeyError, ValueError, TypeError): pass
                                 out_d_ = []
                                 for _di, _dj in enumerate(batch_d2_):
                                     _ds = _id_map_d.get(_di)
-                                    if _ds and _ds.get("score", 0) >= 40:
+                                    # threshold 25 — permissive, Track B is last-resort fallback
+                                    if _ds and _ds.get("score", 0) >= 25:
                                         _jc_d = dict(_dj)
                                         _jc_d["candidate_score"] = min(_ds["score"], 95)
                                         _jc_d["match_score"]     = _jc_d["candidate_score"]
