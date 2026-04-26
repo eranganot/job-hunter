@@ -386,8 +386,7 @@ def run_job_search(user_id: int):
         conn = database.get_db()
         existing_urls = {r[0] for r in conn.execute(
             "SELECT url FROM jobs WHERE user_id=? AND url!='' "
-            "AND status NOT IN ('rejected','expired') "
-            "AND found_date >= date('now', '-45 days')", (user_id,)
+            "AND found_date >= date('now', '-60 days')", (user_id,)
         ).fetchall()}
         conn.close()
 
@@ -434,6 +433,10 @@ def run_job_search(user_id: int):
                 # Global tech with Israeli offices (Lever)
                 'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
                 'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
+            }
+            # -- SmartRecruiters public boards --
+            _SR_COMPANIES = {
+                'servicenow': 'ServiceNow',
             }
             # Build title match phrases from user preferences
             def _expand_title_variants(title):
@@ -532,13 +535,32 @@ def run_job_search(user_id: int):
                         all_raw.append({"job_title": t, "company": company_name,
                                         "location": loc, "url": jurl,
                                         "description": desc, "full_description": full_desc, "source": "lever"})
+            # -- Query SmartRecruiters boards --
+            def _query_sr(slug, company_name):
+                data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+                if not data: return
+                for j in data.get("content", []):
+                    t = j.get("name", "")
+                    if not t: continue
+                    loc_obj = j.get("location") or {}
+                    city = loc_obj.get("city", "")
+                    country = loc_obj.get("country", "")
+                    loc = f"{city}, {country}".strip(", ") if city or country else ""
+                    jurl = f"https://jobs.smartrecruiters.com/{slug}/{j.get('id', '')}"
+                    with _lk:
+                        all_raw.append({"job_title": t, "company": company_name,
+                                        "location": loc, "url": jurl,
+                                        "description": t, "full_description": t,
+                                        "source": "smartrecruiters"})
             # -- Run all API queries in parallel --
-            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever boards...")
+            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever + {len(_SR_COMPANIES)} SmartRecruiters boards...")
             threads = []
             for slug, name in _GH_COMPANIES.items():
                 threads.append(_thr.Thread(target=_query_gh, args=(slug, name), daemon=True))
             for slug, name in _LV_COMPANIES.items():
                 threads.append(_thr.Thread(target=_query_lv, args=(slug, name), daemon=True))
+            for slug, name in _SR_COMPANIES.items():
+                threads.append(_thr.Thread(target=_query_sr, args=(slug, name), daemon=True))
 
             # Launch in batches of 30
             for i in range(0, len(threads), 30):
@@ -789,18 +811,49 @@ def run_job_search(user_id: int):
                       "full_description": (j.get("full_description") or j.get("description") or "")[:2000]}
                      for j in batch_], ensure_ascii=False)
 
+                # Build a lean candidate context — CV PDF carries the full detail
+                _titles_str = profile_text_.split('\n')[0] if profile_text_ else ''
+                _locs_str_sc = next((line.replace('Locations: ','') for line in profile_text_.split('\n') if line.startswith('Locations:')), 'Israel')
+                _seniority_str = next((line.replace('Seniority: ','') for line in profile_text_.split('\n') if line.startswith('Seniority:')), 'Senior / Director')
                 prompt_ = (
-                    "You are a job matching assistant. Review these job listings and score each "
-                    f"for this candidate:\n\n{profile_text_}\n\n"
+                    "You are a precise job matching assistant. The candidate's full CV is attached as a PDF — "
+                    "read it carefully to understand their actual experience and skills.\n\n"
+                    f"Candidate target roles: {_titles_str}\n"
+                    f"Target locations: {_locs_str_sc}\n"
+                    f"Seniority level: {_seniority_str}\n\n"
                     f"Job listings (JSON):\n{jobs_json_}\n\n"
-                    "Return ONLY a JSON array with fields: job_title, company, location, url, "
-                    "publish_date (ISO date string or null if unknown), "
-                    "full_description (preserve the full_description from input if provided), "
-                    "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
-                    "Include all jobs with candidate_score >= 30. Score generously: a product manager "
-                    "role at a tech company in the right geography scores at least 30. "
-                    "Exclude only jobs that are clearly a different function (engineering, design, sales, finance). "
-                    "Return ONLY valid JSON, no markdown."
+                    "Score each job 0-100 using EXACTLY these four dimensions:\n\n"
+                    "TITLE MATCH (0-30 pts):\n"
+                    "  27-30: Title matches candidate's target roles exactly or near-exactly\n"
+                    "  15-26: Close PM variant (Group PM, Principal PM, Product Lead, Head of Product)\n"
+                    "   5-14: Broader product-adjacent (Chief of Staff, Product Strategy, Growth Lead)\n"
+                    "   0-4:  Different function — EXCLUDE this job entirely (do not return it)\n\n"
+                    "SENIORITY MATCH (0-20 pts):\n"
+                    "  17-20: Exact seniority level match\n"
+                    "  10-16: One level off (Senior vs Director)\n"
+                    "   0-9:  Major mismatch (junior/IC for a senior candidate, or C-suite for mid-level)\n\n"
+                    "LOCATION (0-20 pts):\n"
+                    "  17-20: Tel Aviv / Israel / Hybrid / explicitly Remote-friendly\n"
+                    "  10-16: Remote with no location restriction specified\n"
+                    "   0-9:  Requires relocation outside Israel, or on-site outside Tel Aviv\n\n"
+                    "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important dimension:\n"
+                    "  Read the job's required skills, years of experience, and responsibilities from full_description.\n"
+                    "  Cross-reference against the candidate's actual experience in the attached CV PDF.\n"
+                    "  27-30: Candidate's background directly covers most stated requirements\n"
+                    "  15-26: Strong overlap with minor gaps (1-2 requirements candidate hasn't done explicitly)\n"
+                    "   5-14: Moderate overlap — candidate could do the role but has notable experience gaps\n"
+                    "   0-4:  Fundamentally mismatched requirements (completely different background needed)\n\n"
+                    "HARD EXCLUDE (score 0, omit from output entirely):\n"
+                    "  Engineering, software development, data science, design, sales, marketing,\n"
+                    "  finance, legal, HR, operations — any role that is NOT product management\n"
+                    "  or direct product leadership.\n\n"
+                    "Total score = Title + Seniority + Location + CV-Requirements. "
+                    "Include jobs scoring >= 30. "
+                    "For fit_reason: one sentence citing which dimensions scored highest and why. "
+                    "Return ONLY a valid JSON array with fields: "
+                    "job_title, company, location, url, publish_date (null if unknown), "
+                    "full_description (copy from input), description (2-3 sentences), "
+                    "candidate_score (0-100), fit_reason. No markdown."
                 )
 
                 # --- Try Gemini Flash first (free tier: 1500 req/day) ---
@@ -901,7 +954,7 @@ def run_job_search(user_id: int):
 
             # Score all collected jobs in batches of 50
             # Cap ATS jobs at 300 to avoid excessive API calls; supplemental sources are uncapped
-            _ats_sources = {'greenhouse', 'lever'}
+            _ats_sources = {'greenhouse', 'lever', 'smartrecruiters'}
             _ats_jobs = [j for j in all_raw if j.get('source','') in _ats_sources]
             _other_jobs = [j for j in all_raw if j.get('source','') not in _ats_sources]
             ATS_CAP = 300
@@ -5176,6 +5229,99 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[admin] clear-applied: {deleted} rows deleted"
                   + (f" (user {target_uid})" if target_uid else " (all users)"))
             self.send_json({"deleted": deleted})
+            return
+
+        # ── Admin: re-score existing 'new' jobs with current model ───────────────
+        if path == "/api/admin/rescore":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload = self.read_json()
+            target_uid = payload.get("user_id", user["id"])
+            conn = database.get_db()
+            rows = conn.execute(
+                "SELECT id, title, company, location, url, description, full_description "
+                "FROM jobs WHERE user_id=? AND status='new'",
+                (int(target_uid),)
+            ).fetchall()
+            conn.close()
+            if not rows:
+                self.send_json({"rescored": 0, "message": "No new jobs to rescore"})
+                return
+            # Build jobs list for scoring
+            jobs_to_rescore = [
+                {"job_title": r[1], "company": r[2], "location": r[3] or "",
+                 "url": r[4] or "", "description": r[5] or "", "full_description": r[6] or "",
+                 "source": "rescore", "_db_id": r[0]}
+                for r in rows
+            ]
+            # Call Gemini directly for rescoring
+            import os as _os_rs, json as _js_rs, urllib.request as _ur_rs, base64 as _b64_rs
+            GEMINI_KEY_RS = os.environ.get('GEMINI_API_KEY', '')
+            profile_row = database.get_db().execute(
+                "SELECT job_titles, keywords, locations, cv_summary, cv_path FROM user_profiles WHERE user_id=?",
+                (int(target_uid),)
+            ).fetchone()
+            titles_rs = (profile_row[0] or '').replace('\n', ', ') if profile_row else ''
+            locs_rs = (profile_row[2] or 'Israel') if profile_row else 'Israel'
+            cv_path_rs = (profile_row[4] or '') if profile_row else ''
+            rescored = 0
+            failed = 0
+            batch_size = 20
+            for i in range(0, len(jobs_to_rescore), batch_size):
+                batch = jobs_to_rescore[i:i+batch_size]
+                jobs_json_rs = _js_rs.dumps(
+                    [{"job_title": j["job_title"], "company": j["company"],
+                      "location": j["location"], "url": j["url"],
+                      "description": j["description"],
+                      "full_description": j["full_description"][:2000]} for j in batch],
+                    ensure_ascii=False)
+                prompt_rs = (
+                    "You are a precise job matching assistant. The candidate's full CV is attached as a PDF.\n"
+                    f"Target roles: {titles_rs}\nTarget locations: {locs_rs}\n\n"
+                    f"Jobs:\n{jobs_json_rs}\n\n"
+                    "Score each job 0-100: Title match (0-30) + Seniority (0-20) + Location (0-20) + CV-Requirements match (0-30). "
+                    "Exclude non-PM roles (engineering, sales, design, finance, HR). "
+                    "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown."
+                )
+                try:
+                    _parts_rs = []
+                    if cv_path_rs and os.path.exists(cv_path_rs) and cv_path_rs.lower().endswith('.pdf'):
+                        with open(cv_path_rs, 'rb') as _f:
+                            _parts_rs.append({'inlineData': {'mimeType': 'application/pdf', 'data': _b64_rs.b64encode(_f.read()).decode()}})
+                    _parts_rs.append({'text': prompt_rs})
+                    _body_rs = _js_rs.dumps({'contents': [{'parts': _parts_rs}],
+                                             'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 4096}}).encode()
+                    _url_rs = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY_RS}'
+                    _req_rs = urllib.request.Request(_url_rs, data=_body_rs, headers={'Content-Type': 'application/json'}, method='POST')
+                    with urllib.request.urlopen(_req_rs, timeout=90) as _resp_rs:
+                        _data_rs = _js_rs.loads(_resp_rs.read().decode())
+                    _text_rs = _data_rs['candidates'][0]['content']['parts'][0]['text'].strip()
+                    si = _text_rs.rfind('['); ei = _text_rs.rfind(']')
+                    if si >= 0 and ei > si:
+                        scored_rs = _js_rs.loads(_text_rs[si:ei+1])
+                        url_to_score = {j.get('url', ''): j for j in scored_rs if isinstance(j, dict)}
+                        conn2 = database.get_db()
+                        for orig in batch:
+                            scored_j = url_to_score.get(orig['url'])
+                            if scored_j and scored_j.get('candidate_score', 0) >= 30:
+                                conn2.execute(
+                                    "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
+                                    (scored_j['candidate_score'], scored_j['candidate_score'],
+                                     scored_j.get('fit_reason', ''), orig['_db_id'])
+                                )
+                                rescored += 1
+                            else:
+                                failed += 1
+                        conn2.commit()
+                        conn2.close()
+                except Exception as _e_rs:
+                    print(f"[rescore] batch error: {_e_rs}")
+                    failed += len(batch)
+            database.log_activity(user["id"], "admin_rescore",
+                f"Rescored {rescored} jobs, {failed} unchanged for user {target_uid}")
+            print(f"[admin] rescore: {rescored} updated, {failed} unchanged (user {target_uid})")
+            self.send_json({"rescored": rescored, "unchanged": failed, "total": len(jobs_to_rescore)})
             return
 
         if path == "/api/admin/inject-jobs":
