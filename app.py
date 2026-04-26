@@ -1193,6 +1193,178 @@ def run_job_search(user_id: int):
             else:
                 print("[search] Gemini web search skipped — no GEMINI_API_KEY")
 
+
+            # ── Track B: Description-first scoring (activates when Track A < 5 results) ──
+            if len(scored_jobs) < 5:
+                print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
+                import os as _os_tb
+                _TB_GEMINI = _os_tb.environ.get('GEMINI_API_KEY', '')
+                _TB_ANTH   = _os_tb.environ.get('ANTHROPIC_API_KEY', '')
+                if _TB_GEMINI or _TB_ANTH:
+                    # Collect jobs with meaningful descriptions that Track A didn't already return
+                    _scored_urls = {j.get('url','') for j in scored_jobs}
+                    _trackb_pool = [
+                        j for j in all_raw
+                        if len(j.get('full_description') or j.get('description','')) > 100
+                        and j.get('url','') not in _scored_urls
+                    ]
+                    _trackb_pool = _trackb_pool[:150]  # cap to control API cost
+                    print(f"[search] Track B pool: {len(_trackb_pool)} jobs with descriptions")
+
+                    if _trackb_pool:
+                        def _score_batch_desc(batch_d_, profile_text_d_):
+                            """Score jobs primarily on description content vs CV."""
+                            _batch_indexed = [
+                                {"id": _bi, "title": _bj.get("job_title",""),
+                                 "company": _bj.get("company",""),
+                                 "location": _bj.get("location",""),
+                                 "description": (_bj.get("full_description") or _bj.get("description",""))[:2500]}
+                                for _bi, _bj in enumerate(batch_d_)
+                            ]
+                            _batch_json_d = _js2.dumps(_batch_indexed, ensure_ascii=False)
+                            _titles_d = profile_text_d_.split('\n')[0] if profile_text_d_ else ''
+                            _locs_d   = next((ln.replace('Locations: ','') for ln in profile_text_d_.split('\n') if ln.startswith('Locations:')), 'Israel')
+                            _prompt_d = (
+                                "You are evaluating job openings for a senior product candidate.\n"
+                                "The candidate's CV text is provided below — use it as the primary signal.\n\n"
+                                f"Candidate profile:\n{profile_text_d_}\n\n"
+                                "Score each job 0-100 on these FOUR dimensions (description is the main signal):\n\n"
+                                "TITLE/ROLE FIT (0-10 pts — loose gate):\n"
+                                "  8-10: Direct match to target role or clear leadership adjacent\n"
+                                "   4-7: Adjacent role worth exploring based on description\n"
+                                "   0-3: Clearly wrong function (exclude)\n\n"
+                                "SENIORITY MATCH (0-20 pts):\n"
+                                "  17-20: Exact seniority match\n"
+                                "  10-16: One level off\n"
+                                "   0-9:  Major mismatch\n\n"
+                                "LOCATION (0-20 pts):\n"
+                                "  17-20: Israel / Tel Aviv / Hybrid / Remote-friendly\n"
+                                "  10-16: Remote, no restriction\n"
+                                "   0-9:  Requires relocation outside Israel\n\n"
+                                "DESCRIPTION vs CV MATCH (0-50 pts — PRIMARY SIGNAL):\n"
+                                "  Read the job description carefully. Compare required skills,\n"
+                                "  responsibilities, and experience to the candidate's background.\n"
+                                "  45-50: Near-perfect match — candidate's background directly fits most requirements\n"
+                                "  30-44: Strong overlap with minor gaps\n"
+                                "  15-29: Moderate overlap — candidate could stretch into this role\n"
+                                "   0-14: Significant mismatch in required background\n\n"
+                                "HARD EXCLUDE: Engineering, sales, marketing, finance, legal, HR — any non-product role.\n\n"
+                                "Include jobs scoring >= 40. "
+                                "Return ONLY a JSON array. Each item: "
+                                "{id (from input), score (0-100), reason (one sentence why)}\n\n"
+                                f"Jobs:\n{_batch_json_d}"
+                            )
+
+                            def _parse_desc_resp(txt_):
+                                t = txt_.strip()
+                                if "```" in t:
+                                    t = t.split("```")[1]
+                                    if t.startswith("json"): t = t[4:]
+                                si = t.rfind("["); ei = t.rfind("]")
+                                if si < 0 or ei <= si: return []
+                                try:
+                                    return _js2.loads(t[si:ei+1])
+                                except Exception:
+                                    return []
+
+                            def _apply_desc_scores(scored_ids_, batch_d2_, reason_default="Matched by description"):
+                                _id_map_d = {
+                                    item["id"]: item for item in scored_ids_
+                                    if isinstance(item, dict) and "score" in item
+                                }
+                                out_d_ = []
+                                for _di, _dj in enumerate(batch_d2_):
+                                    _ds = _id_map_d.get(_di)
+                                    if _ds and _ds.get("score", 0) >= 40:
+                                        _jc_d = dict(_dj)
+                                        _jc_d["candidate_score"] = min(_ds["score"], 95)
+                                        _jc_d["match_score"]     = _jc_d["candidate_score"]
+                                        _jc_d["fit_reason"]      = _ds.get("reason", reason_default)
+                                        _jc_d["source"]          = "description_match"
+                                        _jc_d.setdefault("found_date", today)
+                                        _jc_d.setdefault("publish_date", None)
+                                        _jc_d.setdefault("description", _dj.get("description") or _dj.get("job_title",""))
+                                        out_d_.append(_jc_d)
+                                return out_d_
+
+                            _out_d = []
+                            _ai_d_used = False
+
+                            if _TB_GEMINI:
+                                try:
+                                    import base64 as _b64_d, os as _os_d2
+                                    _parts_d = [{"text": _prompt_d}]
+                                    if _cv_path:
+                                        try:
+                                            with open(_cv_path, "rb") as _cvf_d:
+                                                _parts_d.insert(0, {
+                                                    "inline_data": {
+                                                        "mime_type": "application/pdf",
+                                                        "data": _b64_d.b64encode(_cvf_d.read()).decode()
+                                                    }
+                                                })
+                                        except Exception:
+                                            pass
+                                    _body_d = _js2.dumps({
+                                        "contents": [{"parts": _parts_d}],
+                                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096}
+                                    }).encode()
+                                    _url_d = ("https://generativelanguage.googleapis.com/v1beta/models/"
+                                              "gemini-2.0-flash:generateContent?key=" + _TB_GEMINI)
+                                    _req_d = _ur2.Request(_url_d, data=_body_d,
+                                                          headers={"Content-Type": "application/json"}, method="POST")
+                                    with _ur2.urlopen(_req_d, timeout=90) as _rd:
+                                        _resp_d = _js2.loads(_rd.read().decode())
+                                    _text_d = _resp_d["candidates"][0]["content"]["parts"][0]["text"]
+                                    _scored_d = _parse_desc_resp(_text_d)
+                                    _out_d = _apply_desc_scores(_scored_d, batch_d_)
+                                    _ai_d_used = True
+                                    print(f"[search] Track B Gemini: {len(batch_d_)} -> {len(_out_d)} passed")
+                                except Exception as _de:
+                                    print(f"[search] Track B Gemini error: {_de}")
+
+                            if not _ai_d_used and _TB_ANTH:
+                                try:
+                                    _body_d2 = _js2.dumps({
+                                        "model": "claude-haiku-4-5-20251001",
+                                        "max_tokens": 4096,
+                                        "messages": [{"role": "user", "content": _prompt_d}]
+                                    }).encode()
+                                    _req_d2 = _ur2.Request(
+                                        "https://api.anthropic.com/v1/messages",
+                                        data=_body_d2,
+                                        headers={"Content-Type": "application/json",
+                                                 "x-api-key": _TB_ANTH,
+                                                 "anthropic-version": "2023-06-01"},
+                                        method="POST"
+                                    )
+                                    with _ur2.urlopen(_req_d2, timeout=90) as _rd2:
+                                        _resp_d2 = _js2.loads(_rd2.read().decode())
+                                    _text_d2 = _resp_d2["content"][0]["text"]
+                                    _scored_d2 = _parse_desc_resp(_text_d2)
+                                    _out_d = _apply_desc_scores(_scored_d2, batch_d_)
+                                    _ai_d_used = True
+                                    print(f"[search] Track B Anthropic: {len(batch_d_)} -> {len(_out_d)} passed")
+                                except Exception as _de2:
+                                    print(f"[search] Track B Anthropic error: {_de2}")
+
+                            if not _ai_d_used:
+                                print("[search] Track B: AI call failed — no description scores added")
+
+                            return _out_d
+
+                        _tb_scored = []
+                        for _tb_i in range(0, len(_trackb_pool), 50):
+                            _tb_batch = _trackb_pool[_tb_i:_tb_i+50]
+                            _tb_scored.extend(_score_batch_desc(_tb_batch, profile_text))
+
+                        print(f"[search] Track B: {len(_trackb_pool)} -> {len(_tb_scored)} passed description matching")
+                        database.log_activity(user_id, "track_b_search",
+                            f"Track B description matching: {len(_trackb_pool)} candidates -> {len(_tb_scored)} passed")
+                        scored_jobs.extend(_tb_scored)
+                else:
+                    print("[search] Track B: no AI keys — skipping")
+
             print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
             return scored_jobs
 
