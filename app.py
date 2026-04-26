@@ -1248,8 +1248,8 @@ def run_job_search(user_id: int):
                                 "  30-44: Strong overlap with minor gaps\n"
                                 "  15-29: Moderate overlap — candidate could stretch into this role\n"
                                 "   0-14: Significant mismatch in required background\n\n"
-                                "HARD EXCLUDE: Engineering, sales, marketing, finance, legal, HR — any non-product role.\n\n"
-                                "Include jobs scoring >= 40. "
+                                "EXCLUDE only clear non-product roles: pure engineering IC, sales-quota-only, finance/legal/HR with no product scope.\n\n"
+                                "Include jobs scoring >= 25 (permissive — this is a last-resort fallback). "
                                 "Return ONLY a JSON array. Each item: "
                                 "{id (from input), score (0-100), reason (one sentence why)}\n\n"
                                 f"Jobs:\n{_batch_json_d}"
@@ -1350,6 +1350,8 @@ def run_job_search(user_id: int):
 
                             if not _ai_d_used:
                                 print("[search] Track B: AI call failed — no description scores added")
+                                database.log_activity(user_id, "track_b_search",
+                                    "Track B AI call failed. Check GEMINI_API_KEY / ANTHROPIC_API_KEY in Railway.")
 
                             return _out_d
 
