@@ -426,7 +426,70 @@ def run_job_search(user_id: int):
                 'elastic': 'Elastic', 'mongodb': 'MongoDB',
                 'datadog': 'Datadog', 'cloudflare': 'Cloudflare',
                 'commvault': 'Commvault',
+                # ── Extended Israeli tech list (previously missing) ──────────────
+                'walkme': 'WalkMe', 'monday': 'monday.com', 'wix': 'Wix',
+                'imperva': 'Imperva', 'perion': 'Perion', 'amdocs': 'Amdocs',
+                'allot': 'Allot', 'cellebrite': 'Cellebrite', 'varonis': 'Varonis',
+                'cyvera': 'Cyvera', 'cyberark': 'CyberArk', 'checkpoint': 'Check Point',
+                'radware': 'Radware', 'gilat': 'Gilat', 'elbit': 'Elbit Systems',
+                'verint': 'Verint', 'atera': 'Atera', 'salto': 'Salto',
+                'gloat': 'Gloat', 'dynamic-yield': 'Dynamic Yield',
+                'overwolf': 'Overwolf', 'buildots': 'Buildots',
+                'elementor': 'Elementor', 'syte': 'Syte', 'trigo': 'Trigo',
+                'apolicy': 'Apolicy', 'cyolo': 'Cyolo', 'sealights': 'SeaLights',
+                'regotechnology': 'Rego', 'memphis': 'Memphis.dev',
+                'finout': 'Finout', 'cloudinary': 'Cloudinary',
+                'zerto': 'Zerto', 'protai': 'Protai', 'otterly': 'Otterly',
+                'glassbox': 'Glassbox', 'lusha': 'Lusha', 'demostack': 'Demostack',
+                'reef': 'Reef', 'wilco': 'Wilco', 'guesty': 'Guesty',
+                'healthy-io': 'Healthy.io', 'panorays': 'Panorays',
+                'silverfort': 'Silverfort', 'hunters': 'Hunters',
+                'sygnia': 'Sygnia', 'cymulate': 'Cymulate',
+                'morphisec': 'Morphisec', 'veriti': 'Veriti',
+                'also': 'ALSO', 'granulate': 'Granulate',
+                'coralogix': 'Coralogix', 'logz': 'Logz.io',
+                'anodot': 'Anodot', 'spot': 'Spot by NetApp',
+                'env0': 'env0', 'cyclops': 'Cyclops',
+                'orca': 'Orca Security', 'laminar': 'Laminar',
+                'normalyze': 'Normalyze', 'dig-security': 'Dig Security',
             }
+
+            # ── Dynamic Greenhouse discovery from TechMap CSV ─────────────────
+            # Fetch TechMap now (before ATS threads launch) to discover additional
+            # Greenhouse board slugs from job URLs. This keeps coverage self-updating.
+            try:
+                import csv as _csv_pre, io as _io_pre, re as _re_gh
+                _tm_disc_url  = 'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/product.csv'
+                _tm_disc_req  = _ur2.Request(_tm_disc_url, headers={"User-Agent": "JobHunter/1.0"})
+                with _ur2.urlopen(_tm_disc_req, timeout=15) as _tm_disc_resp:
+                    _tm_disc_text = _tm_disc_resp.read().decode('utf-8', errors='replace')
+                _gh_slug_re = _re_gh.compile(r'boards\.greenhouse\.io/([a-zA-Z0-9_-]+)/')
+                _lv_slug_re = _re_gh.compile(r'jobs\.lever\.co/([a-zA-Z0-9_-]+)/')
+                _tm_disc_rows = list(_csv_pre.DictReader(_io_pre.StringIO(_tm_disc_text)))
+                _new_gh = 0
+                _new_lv = 0
+                for _dr in _tm_disc_rows:
+                    _durl = (_dr.get('url') or '').strip()
+                    _dco  = (_dr.get('company') or '').strip()
+                    _gm = _gh_slug_re.search(_durl)
+                    if _gm:
+                        _slug = _gm.group(1).lower()
+                        if _slug not in _GH_COMPANIES:
+                            _GH_COMPANIES[_slug] = _dco or _slug
+                            _new_gh += 1
+                    _lm = _lv_slug_re.search(_durl)
+                    if _lm:
+                        _slug = _lm.group(1).lower()
+                        if _slug not in _LV_COMPANIES:
+                            _LV_COMPANIES[_slug] = _dco or _slug
+                            _new_lv += 1
+                print(f"[search] TechMap discovery: +{_new_gh} Greenhouse, +{_new_lv} Lever boards "
+                      f"(total: {len(_GH_COMPANIES)} GH, {len(_LV_COMPANIES)} LV)")
+                # Cache the rows so the later TechMap block can reuse them
+                _tm_prefetched_rows = _tm_disc_rows
+            except Exception as _tm_disc_err:
+                print(f"[search] TechMap discovery error (non-fatal): {_tm_disc_err}")
+                _tm_prefetched_rows = None
             # -- Israeli company slugs (Lever) --
             _LV_COMPANIES = {
                 'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
@@ -481,17 +544,80 @@ def run_job_search(user_id: int):
                 for i in range(len(words)):
                     for j in range(i+1, len(words)):
                         _bigrams.add((words[i], words[j]))
-            print(f"[search] Matching phrases: {_phrases}, bigrams: {len(_bigrams)}")
+
+            # ── Synonym map (pass 3) ──────────────────────────────────────────
+            # Maps canonical form → list of synonyms (bidirectional at match time)
+            _SYNONYM_MAP = {
+                "product manager":          ["pm", "product owner", "po", "product lead"],
+                "senior product manager":   ["senior pm", "sr pm", "sr. pm", "spm"],
+                "group product manager":    ["group pm", "gpm"],
+                "principal product manager":["principal pm", "staff pm"],
+                "vp product":               ["vp of product", "chief product officer", "cpo",
+                                             "head of product", "gm product", "gm of product"],
+                "vp r&d":                   ["head of r&d", "r&d director", "director of r&d",
+                                             "vp engineering", "vp of engineering"],
+                "director of product":      ["product director", "head of product", "gm product"],
+                "head of product":          ["product lead", "director of product", "vp product",
+                                             "product group lead"],
+                "chief product officer":    ["cpo", "vp product", "head of product"],
+                "general manager":          ["gm", "business unit manager", "bu manager",
+                                             "country manager"],
+                "product lead":             ["lead pm", "product manager lead", "head of product"],
+                "growth":                   ["growth lead", "head of growth", "vp growth",
+                                             "growth manager", "growth product manager"],
+            }
+            # Build synonym phrase set from user titles
+            _synonym_phrases = set()
+            for _p in _phrases:
+                # Forward lookup
+                for _key, _syns in _SYNONYM_MAP.items():
+                    if _key in _p or _p in _key:
+                        _synonym_phrases.update(_syns)
+                        _synonym_phrases.add(_key)
+                if _p in _SYNONYM_MAP:
+                    _synonym_phrases.update(_SYNONYM_MAP[_p])
+                # Reverse lookup
+                for _key, _syns in _SYNONYM_MAP.items():
+                    if _p in _syns:
+                        _synonym_phrases.add(_key)
+                        _synonym_phrases.update(_syns)
+            _synonym_phrases -= set(_phrases)  # don't duplicate what's already in _phrases
+
+            print(f"[search] Phrases: {len(_phrases)} | bigrams: {len(_bigrams)} | synonyms: {len(_synonym_phrases)}")
 
             def _title_match(title):
-                tl = title.lower()
-                # Full phrase match (e.g. "product manager" in title)
+                import difflib as _dl
+                import re as _re_tm
+                tl = _re_tm.sub(r"[,/&|]", " ", title.lower()).strip()
+
+                # Pass 1 — exact phrase match (original)
                 if any(phrase in tl for phrase in _phrases):
                     return True
-                # Bigram match: at least 2 words from same user title appear
+
+                # Pass 2 — bigram match (original)
                 for w1, w2 in _bigrams:
                     if w1 in tl and w2 in tl:
                         return True
+
+                # Pass 3 — synonym match
+                if any(syn in tl for syn in _synonym_phrases):
+                    return True
+
+                # Pass 4 — fuzzy match via difflib (catches abbreviations & minor variants)
+                # Compare each user phrase against a sliding window in the job title
+                for _phrase in _phrases:
+                    if len(_phrase) < 4:
+                        continue  # skip very short phrases to avoid false positives
+                    _ph_len = len(_phrase)
+                    # Try the whole title first (works for short titles)
+                    if _dl.SequenceMatcher(None, _phrase, tl).ratio() >= 0.80:
+                        return True
+                    # Sliding window for longer titles
+                    for _start in range(0, max(1, len(tl) - _ph_len + 6), 3):
+                        _window = tl[_start: _start + _ph_len + 6]
+                        if _dl.SequenceMatcher(None, _phrase, _window).ratio() >= 0.82:
+                            return True
+
                 return False
 
             def _get_json(url, timeout=20):
@@ -568,15 +694,19 @@ def run_job_search(user_id: int):
                 for t in batch: t.start()
                 for t in batch: t.join(timeout=25)
 
-            # -- TechMap product.csv (curated Israeli product jobs) --
+            # -- TechMap product.csv (reuse prefetched rows from discovery step) --
             try:
                 import csv as _csv, io as _io
-                _tm_url = 'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/product.csv'
-                _tm_req = _ur2.Request(_tm_url, headers={"User-Agent": "JobHunter/1.0"})
-                with _ur2.urlopen(_tm_req, timeout=15) as _tm_resp:
-                    _tm_text = _tm_resp.read().decode('utf-8', errors='replace')
+                _tm_rows_src = _tm_prefetched_rows
+                if _tm_rows_src is None:
+                    # Fallback: fetch again if discovery step failed
+                    _tm_url = 'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/product.csv'
+                    _tm_req = _ur2.Request(_tm_url, headers={"User-Agent": "JobHunter/1.0"})
+                    with _ur2.urlopen(_tm_req, timeout=15) as _tm_resp:
+                        _tm_text = _tm_resp.read().decode('utf-8', errors='replace')
+                    _tm_rows_src = list(_csv.DictReader(_io.StringIO(_tm_text)))
                 _tm_count = 0
-                for _row in _csv.DictReader(_io.StringIO(_tm_text)):
+                for _row in _tm_rows_src:
                     _tm_title = (_row.get('title') or '').strip()
                     if _title_match(_tm_title):
                         _tm_url_j = (_row.get('url') or '').strip()
@@ -788,11 +918,16 @@ def run_job_search(user_id: int):
                     if t.startswith("json"): t = t[4:]
                 si = t.rfind("["); ei = t.rfind("]")
                 if si < 0 or ei <= si:
+                    print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
                     return []
-                parsed = _js2.loads(t[si:ei+1])
+                try:
+                    parsed = _js2.loads(t[si:ei+1])
+                except Exception as _parse_err:
+                    print(f"[search] ⚠️  JSON parse failed: {_parse_err} | raw snippet: {t[si:si+120]!r}")
+                    return []
                 out = []
                 for j in parsed:
-                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 30:
+                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 40:
                         j.setdefault("match_score", j.get("candidate_score", 0))
                         j.setdefault("found_date", today)
                         j.setdefault("source", "greenhouse/lever")
@@ -848,7 +983,7 @@ def run_job_search(user_id: int):
                     "  finance, legal, HR, operations — any role that is NOT product management\n"
                     "  or direct product leadership.\n\n"
                     "Total score = Title + Seniority + Location + CV-Requirements. "
-                    "Include jobs scoring >= 30. "
+                    "Include jobs scoring >= 40. "
                     "For fit_reason: one sentence citing which dimensions scored highest and why. "
                     "Return ONLY a valid JSON array with fields: "
                     "job_title, company, location, url, publish_date (null if unknown), "
@@ -887,6 +1022,8 @@ def run_job_search(user_id: int):
                         return result_
                     except Exception as _ge:
                         print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
+                        database.log_activity(user_id, "scoring_warning",
+                            f"Gemini scoring failed: {_ge}. Falling back to Anthropic.")
 
                 # --- Try Anthropic Claude Haiku (secondary) ---
                 if ANTHROPIC_KEY:
@@ -911,23 +1048,24 @@ def run_job_search(user_id: int):
                             try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:200]
                             except: pass
                         print(f"[search] Anthropic scoring error: {_ae}{_ae_body} — falling back to heuristic")
+                        database.log_activity(user_id, "scoring_warning",
+                            f"Anthropic scoring failed: {_ae}. Falling back to keyword heuristic.")
 
                 # --- Rule-based heuristic (no API needed) ---
-                print(f"[search] Heuristic scoring {len(batch_)} jobs (no AI key available)")
+                print(f"[search] ⚠️  HEURISTIC scoring {len(batch_)} jobs — AI keys missing or failed.")
+                print(f"[search]    To enable AI scoring, set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway.")
+                database.log_activity(user_id, "scoring_warning",
+                    "Using keyword heuristic scoring — results may be limited. "
+                    "Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway to enable AI scoring.")
                 out_ = []
                 for j in batch_:
                     _t = (j.get("job_title") or "").lower()
                     _desc = (j.get("full_description") or j.get("description") or "").lower()
                     _loc = (j.get("location") or "").lower()
                     _score = 0
-                    # Title phrase match
-                    if any(ph in _t for ph in _phrases):
+                    # Title match — use same 4-pass logic as collection filter
+                    if _title_match(j.get("job_title", "")):
                         _score += 50
-                    else:
-                        for _w1, _w2 in _bigrams:
-                            if _w1 in _t and _w2 in _t:
-                                _score += 35
-                                break
                     # Keyword match in description (up to +20)
                     for _kw in kws_:
                         if _kw.lower() in _desc:
@@ -5507,7 +5645,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn2 = database.get_db()
                         for orig in batch:
                             scored_j = url_to_score.get(orig['url'])
-                            if scored_j and scored_j.get('candidate_score', 0) >= 30:
+                            if scored_j and scored_j.get('candidate_score', 0) >= 40:
                                 conn2.execute(
                                     "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
                                     (scored_j['candidate_score'], scored_j['candidate_score'],
