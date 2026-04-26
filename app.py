@@ -770,7 +770,7 @@ def run_job_search(user_id: int):
                 parsed = _js2.loads(t[si:ei+1])
                 out = []
                 for j in parsed:
-                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 40:
+                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 30:
                         j.setdefault("match_score", j.get("candidate_score", 0))
                         j.setdefault("found_date", today)
                         j.setdefault("source", "greenhouse/lever")
@@ -797,8 +797,9 @@ def run_job_search(user_id: int):
                     "publish_date (ISO date string or null if unknown), "
                     "full_description (preserve the full_description from input if provided), "
                     "description (2-3 sentences), candidate_score (0-100), fit_reason (1-2 sentences). "
-                    "Only include jobs with candidate_score >= 40. Be strict: only include jobs that "
-                    "closely match the candidate's target role titles and experience level. "
+                    "Include all jobs with candidate_score >= 30. Score generously: a product manager "
+                    "role at a tech company in the right geography scores at least 30. "
+                    "Exclude only jobs that are clearly a different function (engineering, design, sales, finance). "
                     "Return ONLY valid JSON, no markdown."
                 )
 
@@ -942,7 +943,7 @@ def run_job_search(user_id: int):
                             'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
                         }).encode('utf-8')
                         _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                   'gemini-2.0-flash:generateContent?key=' + _GEMINI_KEY_WS)
+                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY_WS)
                         _ws_req = _ur2.Request(_ws_url, data=_ws_body,
                                                headers={'Content-Type': 'application/json'}, method='POST')
                         with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
@@ -958,10 +959,18 @@ def run_job_search(user_id: int):
 
                 # Build search queries: one per title + one broad seniority+location query
                 _ws_queries = [f'{t} jobs in {_locs_str}' for t in titles_[:4]]
-                _ws_queries.append(
-                    f'{_seniority_hint} {" OR ".join(titles_[:2])} '
-                    f'startup Israel site:linkedin.com OR site:wellfound.com'
-                )
+                # Strip seniority prefixes from titles to avoid "Senior Senior PM" duplication
+                _level_words = {'senior', 'sr', 'sr.', 'lead', 'principal', 'staff', 'vp', 'director', 'head', 'vice', 'president', 'chief'}
+                _clean_titles = [
+                    ' '.join(w for w in t.split() if w.lower() not in _level_words)
+                    for t in titles_[:2]
+                ]
+                _clean_titles = [t for t in _clean_titles if t.strip()]
+                if _clean_titles:
+                    _ws_queries.append(
+                        f'{_seniority_hint} {" OR ".join(_clean_titles)} '
+                        f'startup Israel site:linkedin.com OR site:wellfound.com'
+                    )
 
                 # Run all queries in parallel
                 _ws_raw = []
