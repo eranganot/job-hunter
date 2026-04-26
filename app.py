@@ -1310,7 +1310,7 @@ def run_job_search(user_id: int):
                                         "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096}
                                     }).encode()
                                     _url_d = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                                              "gemini-2.0-flash:generateContent?key=" + _TB_GEMINI)
+                                              "gemini-2.5-flash:generateContent?key=" + _TB_GEMINI)
                                     _req_d = _ur2.Request(_url_d, data=_body_d,
                                                           headers={"Content-Type": "application/json"}, method="POST")
                                     with _ur2.urlopen(_req_d, timeout=90) as _rd:
