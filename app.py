@@ -2148,16 +2148,6 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-4">
-      <div>
-        <label class="label">Min salary (NIS/month)</label>
-        <input class="input" type="number" id="salary-min" placeholder="55000" step="1000"/>
-      </div>
-      <div>
-        <label class="label">Max salary (NIS/month)</label>
-        <input class="input" type="number" id="salary-max" placeholder="85000" step="1000"/>
-      </div>
-    </div>
 
     <div>
       <label class="label">LinkedIn URL</label>
