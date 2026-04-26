@@ -110,7 +110,7 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
 
     # ── 2. Claude Sonnet 4.6 fallback (only if no Gemini key) ────────────────
     if not anthropic_key:
-        raise ValueError("No AI API key configured. Set GEMINI_API_KEY or ANTHROPIC_API_KEY.")
+        raise ValueError("No AI api_key configured. Set GEMINI_API_KEY or ANTHROPIC_API_KEY.")
 
     payload = {
         "model": "claude-sonnet-4-6",
