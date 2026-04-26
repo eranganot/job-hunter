@@ -1646,97 +1646,190 @@ def error_block(msg: str) -> str:
 ONBOARDING_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>""" + _COMMON_HEAD + """
-  <title>Job Hunter — Setup</title>
+  <title>Job Hunter &#8212; Setup</title>
   <style>
-    .step { display:none; }
-    .step.active { display:block; }
-    .tag { display:inline-flex;align-items:center;gap:.4rem;background:#eff6ff;
-           color:#1d4ed8;border:1px solid #bfdbfe;border-radius:9999px;
-           padding:.25rem .5rem .25rem .75rem;font-size:.8rem;font-weight:600; }
-    .tag button { background:#dbeafe;border:none;cursor:pointer;color:#3b82f6;font-size:.85rem;
-                  line-height:1;padding:2px 5px;border-radius:9999px;transition:all .15s; }
-    .tag button:hover { background:#fecaca;color:#dc2626; }
-    .tag-input-wrap { display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem;
-                      border:1.5px solid #e2e8f0;border-radius:.75rem;
-                      cursor:text;transition:border .15s; }
-    .tag-input-wrap:focus-within { border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12); }
-    .tag-input { border:none;outline:none;flex:1;min-width:120px;font-size:.9rem;background:transparent; }
-    .drop-zone { border:2px dashed #cbd5e1;border-radius:1rem;transition:all .2s; }
-    .drop-zone.over { border-color:#2563eb;background:#eff6ff; }
-    .progress-bar { height:4px;background:#e2e8f0;border-radius:9999px;overflow:hidden; }
-    .progress-fill { height:100%;background:linear-gradient(90deg,#2563eb,#7c3aed);
-                     border-radius:9999px;transition:width .4s ease; }
+    .ob-step{display:none}.ob-step.active{display:block}
+    /* Named progress nav */
+    .step-nav{display:flex;align-items:center;padding:0 4px}
+    .step-nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1}
+    .step-nav-item:last-child{flex:none}
+    .step-dot-circle{width:22px;height:22px;border-radius:50%;border:1.5px solid #cbd5e1;
+      background:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;
+      font-weight:700;color:#94a3b8;transition:all .25s}
+    .step-nav-label{font-size:10px;color:#94a3b8;white-space:nowrap;transition:color .25s}
+    .step-nav-line{flex:1;height:1.5px;background:#e2e8f0;margin:0 2px;margin-bottom:14px}
+    .step-nav-item.active .step-dot-circle{border-color:#2563eb;background:#2563eb;color:#fff}
+    .step-nav-item.active .step-nav-label{color:#2563eb;font-weight:600}
+    .step-nav-item.done .step-dot-circle{border-color:#16a34a;background:#16a34a;color:#fff}
+    .step-nav-item.done .step-nav-label{color:#16a34a}
+    /* Tags */
+    .tag{display:inline-flex;align-items:center;gap:.4rem;background:#eff6ff;
+      color:#1d4ed8;border:1px solid #bfdbfe;border-radius:9999px;
+      padding:.25rem .5rem .25rem .75rem;font-size:.8rem;font-weight:600}
+    .tag button{background:#dbeafe;border:none;cursor:pointer;color:#3b82f6;font-size:.85rem;
+      line-height:1;padding:2px 5px;border-radius:9999px;transition:all .15s}
+    .tag button:hover{background:#fecaca;color:#dc2626}
+    .tag-input-wrap{display:flex;flex-wrap:wrap;gap:.5rem;padding:.5rem;
+      border:1.5px solid #e2e8f0;border-radius:.75rem;cursor:text;transition:border .15s}
+    .tag-input-wrap:focus-within{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+    .tag-input{border:none;outline:none;flex:1;min-width:120px;font-size:.9rem;background:transparent}
+    /* Drop zone */
+    .drop-zone{border:2px dashed #cbd5e1;border-radius:1rem;transition:all .2s}
+    .drop-zone.over{border-color:#2563eb;background:#eff6ff}
+    /* Seniority pills */
+    .sen-pills{display:flex;gap:6px;flex-wrap:wrap}
+    .sen-pill{padding:6px 14px;border-radius:9999px;border:1.5px solid #e2e8f0;
+      background:#fff;font-size:.85rem;color:#64748b;cursor:pointer;transition:all .15s;font-weight:500}
+    .sen-pill:hover{border-color:#93c5fd;color:#1d4ed8}
+    .sen-pill.selected{border-color:#2563eb;background:#eff6ff;color:#1d4ed8;font-weight:600}
+    /* Notif rows */
+    .notif-row{display:flex;align-items:center;gap:12px;padding:14px;
+      border:1.5px solid #e2e8f0;border-radius:.875rem;cursor:pointer;
+      transition:border-color .15s;background:#fff}
+    .notif-row:hover{border-color:#93c5fd}
+    .notif-row.active{border-color:#2563eb;background:#eff6ff}
+    .notif-expand{display:none;background:#f8fafc;border:1px solid #e2e8f0;
+      border-radius:.875rem;padding:16px;margin-top:-4px;margin-bottom:4px}
+    .notif-expand.open{display:block}
+    /* Done screen */
+    .done-check{width:64px;height:64px;border-radius:50%;background:#dcfce7;
+      display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+    /* Progress bar (thin) */
+    .progress-bar{height:3px;background:#e2e8f0;border-radius:9999px;overflow:hidden;margin:10px 20px 0}
+    .progress-fill{height:100%;background:linear-gradient(90deg,#2563eb,#7c3aed);
+      border-radius:9999px;transition:width .4s ease}
+    /* Welcome bullets */
+    .how-bullet{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+    .how-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;
+      justify-content:center;font-size:15px;flex-shrink:0}
   </style>
 </head>
 <body class="min-h-screen bg-slate-50">
 
-<!-- TOP BAR -->
 <header class="bg-white border-b border-slate-100 sticky top-0 z-20">
-  <div class="max-w-2xl mx-auto px-5 py-4 flex items-center justify-between">
+  <div class="max-w-2xl mx-auto px-5 py-3 flex items-center justify-between">
     <div class="flex items-center gap-2">
-      <span class="text-2xl">🎯</span>
+      <span class="text-xl">&#127919;</span>
       <span class="font-bold text-slate-900">Job Hunter</span>
     </div>
-    <div class="text-sm text-slate-400">Step <span id="step-num">1</span> of 4</div>
+    <!-- Named step nav -->
+    <div id="ob-step-nav" class="step-nav gap-0" style="max-width:320px">
+      <div class="step-nav-item active" id="nav-1"><div class="step-dot-circle">1</div><span class="step-nav-label">Welcome</span></div>
+      <div class="step-nav-line"></div>
+      <div class="step-nav-item" id="nav-2"><div class="step-dot-circle">2</div><span class="step-nav-label">CV</span></div>
+      <div class="step-nav-line"></div>
+      <div class="step-nav-item" id="nav-3"><div class="step-dot-circle">3</div><span class="step-nav-label">Profile</span></div>
+      <div class="step-nav-line"></div>
+      <div class="step-nav-item" id="nav-4"><div class="step-dot-circle">4</div><span class="step-nav-label">Schedule</span></div>
+      <div class="step-nav-line"></div>
+      <div class="step-nav-item" id="nav-5"><div class="step-dot-circle">5</div><span class="step-nav-label">Notifications</span></div>
+    </div>
   </div>
-  <div class="progress-bar mx-5 mb-3">
-    <div class="progress-fill" id="progress-fill" style="width:25%"></div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="progress-fill" style="width:0%"></div>
   </div>
 </header>
 
 <main class="max-w-2xl mx-auto px-5 py-8">
 
-<!-- ── STEP 1: Upload CV ── -->
-<div class="step active fade" id="step-1">
+<!-- ── STEP 1: Welcome ────────────────────────────────────────────────────── -->
+<div class="ob-step active" id="ob-step-1">
+  <div class="text-center mb-8">
+    <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-5 shadow-lg">
+      <span style="font-size:28px">&#127919;</span>
+    </div>
+    <h2 class="text-3xl font-bold text-slate-900 mb-2">Your AI job search assistant</h2>
+    <p class="text-slate-500">Set up takes about 2 minutes. Here&#39;s what Job Hunter does for you:</p>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-2xl p-6 mb-6">
+    <div class="how-bullet">
+      <div class="how-icon bg-blue-50">&#128269;</div>
+      <div><p class="font-semibold text-slate-800 mb-0.5">Finds matching jobs automatically</p>
+        <p class="text-sm text-slate-500">Searches Greenhouse, Lever, and more on your schedule &#8212; daily or weekly.</p></div>
+    </div>
+    <div class="how-bullet">
+      <div class="how-icon bg-amber-50">&#9989;</div>
+      <div><p class="font-semibold text-slate-800 mb-0.5">You review &amp; approve</p>
+        <p class="text-sm text-slate-500">Jobs land in your dashboard. Tap Approve on the ones you like &#8212; skip the rest.</p></div>
+    </div>
+    <div class="how-bullet" style="margin-bottom:0">
+      <div class="how-icon bg-green-50">&#128640;</div>
+      <div><p class="font-semibold text-slate-800 mb-0.5">Auto-applies for you</p>
+        <p class="text-sm text-slate-500">Approved jobs get submitted automatically at your chosen apply time.</p></div>
+    </div>
+  </div>
+
+  <button onclick="goToStep(2)" class="btn btn-primary w-full">Let&#39;s go &#8594;</button>
+</div>
+
+<!-- ── STEP 2: Upload CV ──────────────────────────────────────────────────── -->
+<div class="ob-step" id="ob-step-2">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Upload your CV</h2>
-  <p class="text-slate-500 mb-6">We'll analyze it and recommend the best job titles and search strategy for you.</p>
+  <p class="text-slate-500 mb-6">We&#39;ll analyze it with AI and pre-fill your job profile for you.</p>
 
   <div id="drop-zone" class="drop-zone bg-white rounded-2xl p-10 text-center cursor-pointer mb-4"
        onclick="document.getElementById('cv-file').click()">
-    <div id="drop-icon" class="text-5xl mb-3">📄</div>
-    <p id="drop-text" class="font-semibold text-slate-700">Drag & drop your CV here</p>
-    <p class="text-slate-400 text-sm mt-1">or click to browse — PDF only</p>
+    <div id="drop-icon" class="text-5xl mb-3">&#128196;</div>
+    <p id="drop-text" class="font-semibold text-slate-700">Drag &amp; drop your CV here</p>
+    <p class="text-slate-400 text-sm mt-1">or click to browse &#8212; PDF only</p>
     <input type="file" id="cv-file" accept=".pdf" class="hidden" onchange="handleFile(this.files[0])"/>
   </div>
 
-  <div id="upload-status" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 text-sm text-blue-700"></div>
+  <div id="upload-status" class="hidden border rounded-xl p-4 mb-4 text-sm"></div>
 
-  <button id="analyze-btn" onclick="analyzeCV()"
-    class="btn btn-primary w-full hidden">✨ Analyze with AI →</button>
-  <button id="skip-cv-btn" onclick="goToStep(2)"
-    class="btn btn-secondary w-full mt-2">Skip for now →</button>
+  <button onclick="goToStep(3)" class="btn btn-secondary w-full">Skip for now &#8594;</button>
 </div>
 
-<!-- ── STEP 2: Review Profile ── -->
-<div class="step fade" id="step-2">
+<!-- ── STEP 3: Profile ────────────────────────────────────────────────────── -->
+<div class="ob-step" id="ob-step-3">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Your job profile</h2>
-  <p class="text-slate-500 mb-6">Review and adjust the AI recommendations, or fill them in manually.</p>
+  <p class="text-slate-500 mb-5">Review AI suggestions or fill in manually.</p>
 
-  <div id="ai-summary-box" class="hidden bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 mb-6">
-    <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">✨ AI Summary</p>
+  <div id="ai-summary-box" class="hidden bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 mb-5">
+    <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">&#10024; AI summary</p>
     <p id="ai-summary-text" class="text-sm text-amber-900"></p>
+  </div>
+
+  <div id="profile-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">
+    Please add at least one job title before continuing.
   </div>
 
   <div class="space-y-5">
     <div>
-      <label class="label">Job titles to search for</label>
+      <label class="label">Job titles to search for <span class="text-red-500">*</span></label>
       <div class="tag-input-wrap" id="titles-wrap" onclick="focusTagInput('titles-input')">
-        <input class="tag-input" id="titles-input" placeholder="e.g. VP Product…" onkeydown="tagKeyDown(event,'titles-wrap')"/>
+        <input class="tag-input" id="titles-input" placeholder="e.g. VP Product&#8230;" onkeydown="tagKeyDown(event,'titles-wrap')"/>
       </div>
       <p class="text-xs text-slate-400 mt-1">Press Enter or comma to add</p>
     </div>
 
     <div>
-      <label class="label">Key skills & keywords</label>
+      <label class="label">Key skills &amp; keywords</label>
       <div class="tag-input-wrap" id="keywords-wrap" onclick="focusTagInput('keywords-input')">
-        <input class="tag-input" id="keywords-input" placeholder="e.g. B2B, Product Strategy…" onkeydown="tagKeyDown(event,'keywords-wrap')"/>
+        <input class="tag-input" id="keywords-input" placeholder="e.g. B2B, Product Strategy&#8230;" onkeydown="tagKeyDown(event,'keywords-wrap')"/>
       </div>
     </div>
 
     <div>
       <label class="label">Preferred locations</label>
       <div class="tag-input-wrap" id="locations-wrap" onclick="focusTagInput('locations-input')">
-        <input class="tag-input" id="locations-input" placeholder="e.g. Tel Aviv…" onkeydown="tagKeyDown(event,'locations-wrap')"/>
+        <input class="tag-input" id="locations-input" placeholder="e.g. Tel Aviv&#8230;" onkeydown="tagKeyDown(event,'locations-wrap')"/>
+      </div>
+    </div>
+
+    <div>
+      <label class="label">Seniority level &amp; experience</label>
+      <div class="sen-pills mb-3" id="seniority-pills">
+        <button type="button" onclick="setSeniority('Junior')"    data-val="Junior"    class="sen-pill">Junior</button>
+        <button type="button" onclick="setSeniority('Mid')"       data-val="Mid"       class="sen-pill">Mid</button>
+        <button type="button" onclick="setSeniority('Senior')"    data-val="Senior"    class="sen-pill">Senior</button>
+        <button type="button" onclick="setSeniority('Director+')" data-val="Director+" class="sen-pill">Director+</button>
+      </div>
+      <input type="hidden" id="seniority-val" value=""/>
+      <div class="flex items-center gap-3">
+        <input class="input" style="max-width:160px" type="number" id="experience-years" min="0" max="40" placeholder="Years of experience"/>
+        <span class="text-sm text-slate-500">years of experience</span>
       </div>
     </div>
 
@@ -1762,127 +1855,51 @@ ONBOARDING_HTML = """<!DOCTYPE html>
   </div>
 
   <div class="flex gap-3 mt-8">
-    <button onclick="goToStep(1)" class="btn btn-secondary">← Back</button>
-    <button onclick="saveProfile()" class="btn btn-primary flex-1">Looks good → </button>
+    <button onclick="goToStep(2)" class="btn btn-secondary">&#8592; Back</button>
+    <button onclick="saveProfile()" class="btn btn-primary flex-1">Continue &#8594;</button>
   </div>
 </div>
 
-<!-- ── STEP 3: Notifications ── -->
-<div class="step fade" id="step-3">
-  <h2 class="text-2xl font-bold text-slate-900 mb-1">Stay notified</h2>
-  <p class="text-slate-500 mb-6">Get a message after each daily search and application run.</p>
-
-  <div class="space-y-3 mb-6">
-    <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
-                  hover:border-blue-400 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
-      <input type="radio" name="notif-channel" value="telegram" onchange="showNotifForm('telegram')" class="accent-blue-600 w-4 h-4"/>
-      <div>
-        <div class="font-semibold text-slate-900">Telegram</div>
-        <div class="text-sm text-slate-500">Receive messages via a Telegram bot</div>
-      </div>
-      <span class="ml-auto text-2xl">✈️</span>
-    </label>
-
-    <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
-                  hover:border-green-400 transition-colors has-[:checked]:border-green-500 has-[:checked]:bg-green-50">
-      <input type="radio" name="notif-channel" value="whatsapp" onchange="showNotifForm('whatsapp')" class="accent-green-600 w-4 h-4"/>
-      <div>
-        <div class="font-semibold text-slate-900">WhatsApp</div>
-        <div class="text-sm text-slate-500">Receive messages via Twilio sandbox</div>
-      </div>
-      <span class="ml-auto text-2xl">💬</span>
-    </label>
-
-    <label class="flex items-center gap-4 p-4 border-2 border-slate-200 rounded-xl cursor-pointer
-                  hover:border-slate-400 transition-colors has-[:checked]:border-slate-400 has-[:checked]:bg-slate-50">
-      <input type="radio" name="notif-channel" value="none" onchange="showNotifForm('none')" checked class="accent-slate-600 w-4 h-4"/>
-      <div>
-        <div class="font-semibold text-slate-900">Skip for now</div>
-        <div class="text-sm text-slate-500">You can set this up later in Settings</div>
-      </div>
-    </label>
-  </div>
-
-  <!-- Telegram form -->
-  <div id="form-telegram" class="hidden bg-white border border-slate-200 rounded-xl p-5 space-y-4 mb-4">
-    <p class="text-sm text-slate-600 bg-blue-50 rounded-lg p-3">
-      1. Search for <strong>@BotFather</strong> on Telegram → /newbot → get your token.<br/>
-      2. Start a chat with your new bot, then send any message.<br/>
-      3. Visit <code class="bg-slate-100 px-1 rounded">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> and copy your <code class="bg-slate-100 px-1 rounded">chat_id</code>.
-    </p>
-    <div>
-      <label class="label">Bot token</label>
-      <input class="input" type="text" id="tg-token" placeholder="1234567890:AAH..."/>
-    </div>
-    <div>
-      <label class="label">Chat ID</label>
-      <input class="input" type="text" id="tg-chat-id" placeholder="123456789"/>
-    </div>
-    <button onclick="testTelegram()" class="btn btn-secondary text-sm">🧪 Send test message</button>
-    <div id="tg-test-result" class="text-sm hidden"></div>
-  </div>
-
-  <!-- WhatsApp form -->
-  <div id="form-whatsapp" class="hidden bg-white border border-slate-200 rounded-xl p-5 space-y-4 mb-4">
-    <p class="text-sm text-slate-600 bg-green-50 rounded-lg p-3">
-      1. Go to <strong>console.twilio.com</strong> → Messaging → Try it out → WhatsApp.<br/>
-      2. Send the join message to <strong>+1 415 523 8886</strong> on WhatsApp.<br/>
-      3. Paste your Twilio credentials below.
-    </p>
-    <div>
-      <label class="label">Twilio Account SID</label>
-      <input class="input" type="text" id="wa-account-sid" placeholder="ACxxxxxxxxxxxxxxxx"/>
-    </div>
-    <div>
-      <label class="label">Twilio Auth Token</label>
-      <input class="input" type="text" id="wa-auth-token" placeholder="your auth token"/>
-    </div>
-    <div>
-      <label class="label">Your WhatsApp number</label>
-      <input class="input" type="tel" id="wa-number" placeholder="+972546912084"/>
-    </div>
-    <button onclick="testWhatsapp()" class="btn btn-secondary text-sm">🧪 Send test message</button>
-    <div id="wa-test-result" class="text-sm hidden"></div>
-  </div>
-
-  <div class="flex gap-3 mt-4">
-    <button onclick="goToStep(2)" class="btn btn-secondary">← Back</button>
-    <button onclick="saveNotifications()" class="btn btn-primary flex-1">Continue →</button>
-  </div>
-</div>
-
-<!-- ── STEP 4: Schedule ── -->
-<div class="step fade" id="step-4">
+<!-- ── STEP 4: Schedule ───────────────────────────────────────────────────── -->
+<div class="ob-step" id="ob-step-4">
   <h2 class="text-2xl font-bold text-slate-900 mb-1">Set your schedule</h2>
-  <p id="ob-schedule-desc" class="text-slate-500 mb-6">Job Hunter will run automatically for you.</p>
+  <p id="ob-schedule-desc" class="text-slate-500 mb-5">Choose how often Job Hunter runs for you.</p>
 
-  <!-- Frequency choice — hidden for admin -->
+  <!-- How it works — shown FIRST so users understand what they&#39;re configuring -->
+  <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 mb-6">
+    <p class="font-semibold text-blue-900 mb-3">&#128161; Here&#39;s how the cycle works:</p>
+    <ul class="text-sm text-blue-800 space-y-2" id="ob-how-it-works">
+      <li class="flex gap-2"><span>1&#65039;&#8419;</span><span>At your <strong>search time</strong>, we find new matching jobs</span></li>
+      <li class="flex gap-2"><span>2&#65039;&#8419;</span><span>You get notified and review them in the dashboard</span></li>
+      <li class="flex gap-2"><span>3&#65039;&#8419;</span><span>Tap <strong>Approve</strong> on jobs you like (you stay in control)</span></li>
+      <li class="flex gap-2"><span>4&#65039;&#8419;</span><span>At your <strong>apply time</strong>, we auto-submit your approved jobs</span></li>
+      <li class="flex gap-2"><span>5&#65039;&#8419;</span><span>Jobs not reviewed within 3 days expire automatically</span></li>
+    </ul>
+  </div>
+
+  <!-- Frequency -->
   <div id="ob-frequency-section" class="hidden mb-5">
     <label class="label">How often should it run?</label>
     <div class="space-y-2">
       <label class="flex items-center gap-4 p-3.5 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-blue-400 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
         <input type="radio" name="ob-frequency" value="weekly" onchange="obUpdateScheduleUI()" checked class="accent-blue-600 w-4 h-4"/>
-        <div>
-          <div class="font-semibold text-sm">Weekly <span class="text-xs text-slate-400 font-normal">(recommended)</span></div>
-          <div class="text-xs text-slate-500">One search + apply cycle per week</div>
-        </div>
+        <div><div class="font-semibold text-sm">Weekly <span class="text-xs text-slate-400 font-normal">(recommended)</span></div>
+          <div class="text-xs text-slate-500">One search + apply cycle per week</div></div>
       </label>
       <label class="flex items-center gap-4 p-3.5 border-2 border-slate-200 rounded-xl cursor-pointer
                     hover:border-blue-400 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
         <input type="radio" name="ob-frequency" value="daily" onchange="obUpdateScheduleUI()" class="accent-blue-600 w-4 h-4"/>
-        <div>
-          <div class="font-semibold text-sm">Daily</div>
-          <div class="text-xs text-slate-500">Run every day — for intensive searches</div>
-        </div>
+        <div><div class="font-semibold text-sm">Daily</div>
+          <div class="text-xs text-slate-500">Run every day &#8212; for intensive searches</div></div>
       </label>
     </div>
   </div>
 
-  <!-- Day pickers — shown for weekly -->
+  <!-- Day pickers (weekly only) -->
   <div id="ob-day-section" class="bg-white border border-slate-200 rounded-2xl p-5 mb-4 space-y-5">
     <div>
-      <label class="label">🔍 Search day</label>
+      <label class="label">&#128269; Search day</label>
       <div class="flex gap-2 flex-wrap" id="ob-search-day-btns">
         <button type="button" onclick="obSelectDay('search',1)" data-day="1" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Mon</button>
         <button type="button" onclick="obSelectDay('search',2)" data-day="2" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Tue</button>
@@ -1893,7 +1910,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       <input type="hidden" id="ob-search-day" value="1"/>
     </div>
     <div>
-      <label class="label">🚀 Apply day</label>
+      <label class="label">&#128640; Apply day</label>
       <div class="flex gap-2 flex-wrap" id="ob-apply-day-btns">
         <button type="button" onclick="obSelectDay('apply',1)" data-day="1" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Mon</button>
         <button type="button" onclick="obSelectDay('apply',2)" data-day="2" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Tue</button>
@@ -1901,13 +1918,13 @@ ONBOARDING_HTML = """<!DOCTYPE html>
         <button type="button" onclick="obSelectDay('apply',4)" data-day="4" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Thu</button>
         <button type="button" onclick="obSelectDay('apply',5)" data-day="5" class="ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all">Fri</button>
       </div>
-      <input type="hidden" id="ob-apply-day" value="1"/>
+      <input type="hidden" id="ob-apply-day" value="3"/>
     </div>
   </div>
 
-  <div class="bg-white border border-slate-200 rounded-2xl p-5 space-y-5 mb-5">
+  <div class="bg-white border border-slate-200 rounded-2xl p-5 space-y-5 mb-6">
     <div>
-      <label class="label" id="ob-search-time-label">🔍 Search time</label>
+      <label class="label" id="ob-search-time-label">&#128269; Search time</label>
       <select class="input" id="search-hour">
         <option value="7">7:00 AM</option><option value="8">8:00 AM</option>
         <option value="9">9:00 AM</option><option value="10">10:00 AM</option>
@@ -1916,7 +1933,7 @@ ONBOARDING_HTML = """<!DOCTYPE html>
       </select>
     </div>
     <div>
-      <label class="label" id="ob-apply-time-label">🚀 Apply time</label>
+      <label class="label" id="ob-apply-time-label">&#128640; Apply time</label>
       <select class="input" id="apply-hour">
         <option value="12">12:00 PM</option><option value="13">1:00 PM</option>
         <option value="14" selected>2:00 PM</option><option value="15">3:00 PM</option>
@@ -1925,50 +1942,186 @@ ONBOARDING_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 mb-6">
-    <p class="font-semibold text-blue-900 mb-2">Here's how it works:</p>
-    <ul class="text-sm text-blue-800 space-y-1" id="ob-how-it-works">
-      <li>1️⃣  At your search time, we find new matching jobs</li>
-      <li>2️⃣  You get notified and review them in this dashboard</li>
-      <li>3️⃣  Tap <strong>Approve</strong> on jobs you like</li>
-      <li>4️⃣  At your apply time, we auto-apply to approved jobs</li>
-      <li>5️⃣  Jobs not reviewed in 3 days expire automatically</li>
-    </ul>
+  <div class="flex gap-3">
+    <button onclick="goToStep(3)" class="btn btn-secondary">&#8592; Back</button>
+    <button onclick="saveScheduleAndContinue()" class="btn btn-primary flex-1">Continue &#8594;</button>
+  </div>
+</div>
+
+<!-- ── STEP 5: Notifications ──────────────────────────────────────────────── -->
+<div class="ob-step" id="ob-step-5">
+  <h2 class="text-2xl font-bold text-slate-900 mb-1">Stay notified</h2>
+  <p class="text-slate-500 mb-6">Get updates after each search and apply run.</p>
+
+  <!-- Email: always active -->
+  <div class="notif-row mb-3" style="border-color:#16a34a;background:#f0fdf4;cursor:default">
+    <div style="width:20px;height:20px;border-radius:50%;background:#dcfce7;border:1.5px solid #86efac;
+      display:flex;align-items:center;justify-content:center;font-size:11px;color:#16a34a;flex-shrink:0">&#10003;</div>
+    <div class="flex-1">
+      <p class="font-semibold text-slate-900 text-sm mb-0">Email</p>
+      <p id="notif-email-addr" class="text-xs text-slate-500 m-0">Sent to your account email</p>
+    </div>
+    <span class="text-xs font-semibold px-2 py-1 rounded-full bg-green-100 text-green-700">Active</span>
+  </div>
+
+  <!-- Telegram: optional, expandable -->
+  <div class="mb-2">
+    <div class="notif-row" id="tg-row" onclick="toggleNotif('telegram')">
+      <div style="width:20px;height:20px;border-radius:50%;border:1.5px solid #cbd5e1;
+        display:flex;align-items:center;justify-content:center;font-size:12px;color:#94a3b8;flex-shrink:0">+</div>
+      <div class="flex-1">
+        <p class="font-semibold text-slate-900 text-sm mb-0">Telegram</p>
+        <p class="text-xs text-slate-500 m-0">Instant alerts via a Telegram bot</p>
+      </div>
+      <span class="text-xs font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-500">Optional</span>
+    </div>
+    <div class="notif-expand" id="form-telegram">
+      <p class="text-sm text-slate-600 bg-blue-50 rounded-lg p-3 mb-3">
+        1. Search <strong>@BotFather</strong> on Telegram &#8594; /newbot &#8594; copy your token.<br/>
+        2. Start a chat with your new bot and send any message.<br/>
+        3. Visit <code class="bg-slate-100 px-1 rounded">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> to find your <code class="bg-slate-100 px-1 rounded">chat_id</code>.
+      </p>
+      <div class="space-y-3">
+        <div><label class="label">Bot token</label>
+          <input class="input" type="text" id="tg-token" placeholder="1234567890:AAH&#8230;"/></div>
+        <div><label class="label">Chat ID</label>
+          <input class="input" type="text" id="tg-chat-id" placeholder="123456789"/></div>
+        <button onclick="testTelegram()" class="btn btn-secondary text-sm">&#129514; Send test message</button>
+        <div id="tg-test-result" class="text-sm hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WhatsApp: optional, expandable -->
+  <div class="mb-6">
+    <div class="notif-row" id="wa-row" onclick="toggleNotif('whatsapp')">
+      <div style="width:20px;height:20px;border-radius:50%;border:1.5px solid #cbd5e1;
+        display:flex;align-items:center;justify-content:center;font-size:12px;color:#94a3b8;flex-shrink:0">+</div>
+      <div class="flex-1">
+        <p class="font-semibold text-slate-900 text-sm mb-0">WhatsApp</p>
+        <p class="text-xs text-slate-500 m-0">Via Twilio sandbox</p>
+      </div>
+      <span class="text-xs font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-500">Optional</span>
+    </div>
+    <div class="notif-expand" id="form-whatsapp">
+      <p class="text-sm text-slate-600 bg-green-50 rounded-lg p-3 mb-3">
+        1. Go to <strong>console.twilio.com</strong> &#8594; Messaging &#8594; Try it out &#8594; WhatsApp.<br/>
+        2. Send the join message to <strong>+1 415 523 8886</strong> on WhatsApp.<br/>
+        3. Paste your Twilio credentials below.
+      </p>
+      <div class="space-y-3">
+        <div><label class="label">Twilio Account SID</label>
+          <input class="input" type="text" id="wa-account-sid" placeholder="ACxxxxxxxxxxxxxxxx"/></div>
+        <div><label class="label">Twilio Auth Token</label>
+          <input class="input" type="text" id="wa-auth-token" placeholder="your auth token"/></div>
+        <div><label class="label">Your WhatsApp number</label>
+          <input class="input" type="tel" id="wa-number" placeholder="+972546912084"/></div>
+        <button onclick="testWhatsapp()" class="btn btn-secondary text-sm">&#129514; Send test message</button>
+        <div id="wa-test-result" class="text-sm hidden"></div>
+      </div>
+    </div>
   </div>
 
   <div class="flex gap-3">
-    <button onclick="goToStep(3)" class="btn btn-secondary">← Back</button>
-    <button onclick="finishOnboarding()" class="btn btn-primary flex-1">🚀 Start Job Hunt!</button>
+    <button onclick="goToStep(4)" class="btn btn-secondary">&#8592; Back</button>
+    <button onclick="finishOnboarding()" class="btn btn-primary flex-1">Finish setup &#8594;</button>
   </div>
+  <p class="text-center text-xs text-slate-400 mt-3">You can add more notification channels later in Settings.</p>
+</div>
+
+<!-- ── DONE SCREEN ────────────────────────────────────────────────────────── -->
+<div class="ob-step" id="ob-step-done">
+  <div class="text-center py-4">
+    <div class="done-check">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <path d="M7 16l6 6 12-12" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2 class="text-3xl font-bold text-slate-900 mb-2">You&#39;re all set!</h2>
+    <p class="text-slate-500 mb-8">Job Hunter is ready to work for you.</p>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 mb-6">
+    <div class="flex items-start gap-3">
+      <span class="text-lg">&#128269;</span>
+      <div><p class="font-semibold text-slate-800 text-sm mb-0.5">Job profile</p>
+        <p id="done-titles" class="text-sm text-slate-500 m-0"></p></div>
+    </div>
+    <div class="border-t border-slate-100 pt-4 flex items-start gap-3">
+      <span class="text-lg">&#128197;</span>
+      <div><p class="font-semibold text-slate-800 text-sm mb-0.5">Schedule</p>
+        <p id="done-schedule" class="text-sm text-slate-500 m-0"></p></div>
+    </div>
+    <div class="border-t border-slate-100 pt-4 flex items-start gap-3">
+      <span class="text-lg">&#128276;</span>
+      <div><p class="font-semibold text-slate-800 text-sm mb-0.5">Notifications</p>
+        <p id="done-notif" class="text-sm text-slate-500 m-0"></p></div>
+    </div>
+  </div>
+
+  <a href="/dashboard" class="btn btn-primary w-full text-center block">Go to dashboard &#8594;</a>
 </div>
 
 </main>
 
 <script>
 let currentStep = 1;
-let cvUploaded = false;
-let aiData = null;
-let userRole = 'user';
+let cvUploaded  = false;
+let aiData      = null;
+let userRole    = 'user';
+let userEmail   = '';
+let _activeNotif = null;
+
+// ── Step navigation ───────────────────────────────────────────────────────────
+const STEP_NAMES = ['','Welcome','CV','Profile','Schedule','Notifications'];
 
 function goToStep(n) {
-  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-  document.getElementById('step-' + n).classList.add('active');
-  document.getElementById('step-num').textContent = n;
-  document.getElementById('progress-fill').style.width = (n * 25) + '%';
+  document.querySelectorAll('.ob-step').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('ob-step-' + n);
+  if (el) el.classList.add('active');
   currentStep = n;
   window.scrollTo({top:0, behavior:'smooth'});
-  // Initialise schedule step on first visit
+
+  // Update named nav dots
+  for (let i = 1; i <= 5; i++) {
+    const nav = document.getElementById('nav-' + i);
+    if (!nav) continue;
+    nav.classList.remove('active','done');
+    if (i < n) nav.classList.add('done');
+    else if (i === n) nav.classList.add('active');
+  }
+
+  // Mark nav done check on done screen
+  if (n === 'done') {
+    for (let i = 1; i <= 5; i++) {
+      const nav = document.getElementById('nav-' + i);
+      if (nav) { nav.classList.remove('active'); nav.classList.add('done'); }
+      const dot = nav && nav.querySelector('.step-dot-circle');
+      if (dot && i <= 5) dot.textContent = '\\u2713';
+    }
+  }
+
+  // Progress bar
+  const pct = typeof n === 'number' ? Math.round((n-1) / 5 * 100) : 100;
+  document.getElementById('progress-fill').style.width = pct + '%';
+
+  // Init schedule step on first visit
   if (n === 4) initScheduleStep();
+  // Show user email in notifications step
+  if (n === 5 && userEmail) {
+    document.getElementById('notif-email-addr').textContent = 'Sent to ' + userEmail;
+  }
 }
 
 // ── Tags ──────────────────────────────────────────────────────────────────────
 function addTag(wrapId, value) {
-  const v = value.trim().replace(/,$/,'').trim();
+  const v = value.trim().replace(/,$/, '').trim();
   if (!v) return;
   const wrap = document.getElementById(wrapId);
   const input = wrap.querySelector('.tag-input');
-  const existing = Array.from(wrap.querySelectorAll('.tag [contenteditable]')).map(s => s.textContent.trim().toLowerCase());
-  if (existing.includes(v.toLowerCase())) { input.value=''; return; }
+  const existing = Array.from(wrap.querySelectorAll('.tag [contenteditable]'))
+    .map(s => s.textContent.trim().toLowerCase());
+  if (existing.includes(v.toLowerCase())) { input.value = ''; return; }
   const tag = document.createElement('span');
   tag.className = 'tag';
   const label = document.createElement('span');
@@ -1976,26 +2129,20 @@ function addTag(wrapId, value) {
   label.textContent = v;
   label.title = 'Tap to edit';
   label.style.cssText = 'outline:none;cursor:text;min-width:1ch;white-space:nowrap;-webkit-user-select:text;user-select:text;';
-  const stopAndFocus = e => { e.stopPropagation(); e.preventDefault(); label.focus(); };
   label.addEventListener('click', e => e.stopPropagation());
   label.addEventListener('touchstart', e => e.stopPropagation(), {passive:false});
-  label.addEventListener('touchend', stopAndFocus, {passive:false});
+  label.addEventListener('touchend', e => { e.stopPropagation(); e.preventDefault(); label.focus(); }, {passive:false});
   label.addEventListener('keydown', e => {
     e.stopPropagation();
-    if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
-    if (e.key === 'Escape') { label.textContent = v; label.blur(); }
+    if (e.key==='Enter') { e.preventDefault(); label.blur(); }
+    if (e.key==='Escape') { label.textContent=v; label.blur(); }
   });
-  label.addEventListener('blur', () => {
-    const nv = label.textContent.trim();
-    if (!nv) tag.remove(); else label.textContent = nv;
-  });
+  label.addEventListener('blur', () => { const nv=label.textContent.trim(); if(!nv) tag.remove(); else label.textContent=nv; });
   const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.textContent = '×';
+  btn.type = 'button'; btn.textContent = '\\xd7';
   btn.addEventListener('click', e => { e.stopPropagation(); tag.remove(); });
   btn.addEventListener('touchend', e => { e.stopPropagation(); e.preventDefault(); tag.remove(); }, {passive:false});
-  tag.appendChild(label);
-  tag.appendChild(btn);
+  tag.appendChild(label); tag.appendChild(btn);
   wrap.insertBefore(tag, input);
   input.value = '';
 }
@@ -2003,14 +2150,13 @@ function addTag(wrapId, value) {
 function focusTagInput(id) { document.getElementById(id).focus(); }
 
 function tagKeyDown(e, wrapId) {
-  if (e.key === 'Enter' || e.key === ',') {
-    e.preventDefault();
-    addTag(wrapId, e.target.value);
-  }
+  if (e.key==='Enter' || e.key===',') { e.preventDefault(); addTag(wrapId, e.target.value); }
 }
 
 function getTags(wrapId) {
-  return Array.from(document.getElementById(wrapId).querySelectorAll('.tag [contenteditable]')).map(s => s.textContent.trim()).filter(Boolean);
+  return Array.from(document.getElementById(wrapId)
+    .querySelectorAll('.tag [contenteditable]'))
+    .map(s => s.textContent.trim()).filter(Boolean);
 }
 
 function setTags(wrapId, values) {
@@ -2019,30 +2165,31 @@ function setTags(wrapId, values) {
   (values || []).forEach(v => addTag(wrapId, v));
 }
 
-// ── CV Upload ─────────────────────────────────────────────────────────────────
+// ── Seniority pills ───────────────────────────────────────────────────────────
+function setSeniority(val) {
+  document.querySelectorAll('.sen-pill').forEach(p => {
+    p.classList.toggle('selected', p.dataset.val === val);
+  });
+  document.getElementById('seniority-val').value = val;
+}
+
+// ── CV Upload + auto-analyze ──────────────────────────────────────────────────
 const dz = document.getElementById('drop-zone');
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
 dz.addEventListener('dragleave', () => dz.classList.remove('over'));
-dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('over');
-  handleFile(e.dataTransfer.files[0]);
-});
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
 
 function handleFile(file) {
-  if (!file || !file.name.endsWith('.pdf')) {
-    showUploadStatus('Please upload a PDF file.', 'error'); return;
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    showUploadStatus('❌ File too large (max 10 MB).', 'error'); return;
-  }
-  document.getElementById('drop-icon').textContent = '⏳';
-  document.getElementById('drop-text').textContent = `Uploading ${file.name}…`;
-  showUploadStatus('Uploading…', 'info');
+  if (!file || !file.name.endsWith('.pdf')) { showUploadStatus('Please upload a PDF file.','error'); return; }
+  if (file.size > 10 * 1024 * 1024) { showUploadStatus('File too large (max 10 MB).','error'); return; }
+
+  document.getElementById('drop-icon').textContent = '\\u23f3';
+  document.getElementById('drop-text').textContent = 'Uploading ' + file.name + '\\u2026';
+  showUploadStatus('Uploading\\u2026','info');
 
   const reader = new FileReader();
   reader.onload = function() {
     const base64 = reader.result.split(',')[1];
-    const payload = JSON.stringify({filename: file.name, data: base64});
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/upload-cv', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
@@ -2052,40 +2199,28 @@ function handleFile(file) {
         const d = JSON.parse(xhr.responseText);
         if (d.success) {
           cvUploaded = true;
-          document.getElementById('drop-icon').textContent = '✅';
-          document.getElementById('drop-text').textContent = file.name + ' ready';
-          showUploadStatus('CV uploaded! Click below to analyze it.', 'success');
-          document.getElementById('analyze-btn').classList.remove('hidden');
-          document.getElementById('skip-cv-btn').textContent = 'Skip AI analysis →';
+          document.getElementById('drop-icon').textContent = '\\u23f3';
+          document.getElementById('drop-text').textContent = file.name + ' uploaded \\u2014 analyzing\\u2026';
+          showUploadStatus('\\u2728 Analyzing your CV with AI\\u2026 this takes a few seconds.','info');
+          // Auto-analyze immediately
+          analyzeCV();
         } else {
-          showUploadStatus('❌ ' + (d.error || 'Upload failed.'), 'error');
-          document.getElementById('drop-icon').textContent = '📄';
-          document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
+          showUploadStatus('\\u274c ' + (d.error || 'Upload failed.'),'error');
+          resetDropZone();
         }
-      } catch(e) {
-        showUploadStatus('❌ Server returned invalid response.', 'error');
-        document.getElementById('drop-icon').textContent = '📄';
-        document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-      }
+      } catch(e) { showUploadStatus('\\u274c Server error.','error'); resetDropZone(); }
     };
-    xhr.onerror = function() {
-      showUploadStatus('❌ Network error. Check your connection.', 'error');
-      document.getElementById('drop-icon').textContent = '📄';
-      document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-    };
-    xhr.ontimeout = function() {
-      showUploadStatus('❌ Upload timed out. Try a smaller file.', 'error');
-      document.getElementById('drop-icon').textContent = '📄';
-      document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-    };
-    xhr.send(payload);
+    xhr.onerror   = () => { showUploadStatus('\\u274c Network error.','error'); resetDropZone(); };
+    xhr.ontimeout = () => { showUploadStatus('\\u274c Upload timed out.','error'); resetDropZone(); };
+    xhr.send(JSON.stringify({filename: file.name, data: base64}));
   };
-  reader.onerror = function() {
-    showUploadStatus('❌ Could not read file.', 'error');
-    document.getElementById('drop-icon').textContent = '📄';
-    document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
-  };
+  reader.onerror = () => { showUploadStatus('\\u274c Could not read file.','error'); resetDropZone(); };
   reader.readAsDataURL(file);
+}
+
+function resetDropZone() {
+  document.getElementById('drop-icon').textContent = '\\ud83d\\udcc4';
+  document.getElementById('drop-text').textContent = 'Drag & drop your CV here';
 }
 
 function showUploadStatus(msg, type) {
@@ -2096,65 +2231,142 @@ function showUploadStatus(msg, type) {
     success: 'bg-green-50 border-green-200 text-green-700',
     error:   'bg-red-50 border-red-200 text-red-700',
   };
-  el.className = `border rounded-xl p-4 text-sm ${colors[type] || colors.info}`;
+  el.className = 'border rounded-xl p-4 text-sm ' + (colors[type] || colors.info);
   el.textContent = msg;
 }
 
 async function analyzeCV() {
-  const btn = document.getElementById('analyze-btn');
-  btn.textContent = '⏳ Analyzing your CV…';
-  btn.disabled = true;
   try {
     const resp = await fetch('/api/analyze-cv', {method:'POST'});
     const data = await resp.json();
-    if (data.error) { showUploadStatus(data.error, 'error'); btn.disabled=false; btn.textContent='✨ Analyze with AI →'; return; }
+    if (data.error) {
+      showUploadStatus('AI analysis failed \\u2014 continuing to manual entry.','error');
+      goToStep(3);
+      return;
+    }
     aiData = data;
-    populateStep2(data);
-    goToStep(2);
+    populateStep3(data);
+    document.getElementById('drop-icon').textContent = '\\u2705';
+    document.getElementById('drop-text').textContent = 'CV analyzed \\u2014 profile pre-filled!';
+    showUploadStatus('\\u2728 Analysis complete! Reviewing your profile\\u2026','success');
+    setTimeout(() => goToStep(3), 800);
   } catch(e) {
-    showUploadStatus('Analysis failed. Skipping to manual entry.', 'error');
-    goToStep(2);
+    showUploadStatus('Analysis failed \\u2014 continuing to manual entry.','error');
+    goToStep(3);
   }
-  btn.disabled = false;
-  btn.textContent = '✨ Analyze with AI →';
 }
 
-function populateStep2(data) {
+function populateStep3(data) {
   if (data.summary) {
     document.getElementById('ai-summary-box').classList.remove('hidden');
     document.getElementById('ai-summary-text').textContent = data.summary;
   }
-  setTags('titles-wrap', data.job_titles || []);
-  setTags('keywords-wrap', data.keywords || []);
-  setTags('locations-wrap', data.locations || ['Tel Aviv']);
+  setTags('titles-wrap',   data.job_titles  || []);
+  setTags('keywords-wrap', data.keywords    || []);
+  setTags('locations-wrap', data.locations  || ['Tel Aviv']);
   if (data.salary_min) document.getElementById('salary-min').value = data.salary_min;
   if (data.salary_max) document.getElementById('salary-max').value = data.salary_max;
+  if (data.seniority)  setSeniority(data.seniority);
+  if (data.experience_years) document.getElementById('experience-years').value = data.experience_years;
 }
 
-// ── Profile save ──────────────────────────────────────────────────────────────
+// ── Profile save (with validation) ───────────────────────────────────────────
 async function saveProfile() {
+  const titles = getTags('titles-wrap');
+  if (titles.length === 0) {
+    document.getElementById('profile-error').classList.remove('hidden');
+    document.getElementById('titles-wrap').scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+  document.getElementById('profile-error').classList.add('hidden');
+
   const body = {
-    job_titles:   getTags('titles-wrap'),
-    keywords:     getTags('keywords-wrap'),
-    locations:    getTags('locations-wrap'),
-    salary_min:   parseInt(document.getElementById('salary-min').value) || 0,
-    salary_max:   parseInt(document.getElementById('salary-max').value) || 0,
-    linkedin_url: document.getElementById('linkedin-url').value,
-    phone:        document.getElementById('phone').value,
+    job_titles:       titles,
+    keywords:         getTags('keywords-wrap'),
+    locations:        getTags('locations-wrap'),
+    salary_min:       parseInt(document.getElementById('salary-min').value) || 0,
+    salary_max:       parseInt(document.getElementById('salary-max').value) || 0,
+    linkedin_url:     document.getElementById('linkedin-url').value,
+    phone:            document.getElementById('phone').value,
+    seniority:        document.getElementById('seniority-val').value,
+    experience_years: parseInt(document.getElementById('experience-years').value) || 0,
   };
   await fetch('/api/save-profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  goToStep(3);
+  goToStep(4);
 }
 
-// ── Notification forms ────────────────────────────────────────────────────────
-function showNotifForm(channel) {
-  ['telegram','whatsapp'].forEach(c => {
-    document.getElementById('form-'+c).classList.toggle('hidden', c !== channel);
+// ── Schedule helpers ──────────────────────────────────────────────────────────
+async function initScheduleStep() {
+  try {
+    const r  = await fetch('/api/me');
+    const me = await r.json();
+    userRole  = me.role || 'user';
+    userEmail = me.email || '';
+  } catch(e) {}
+
+  const isAdmin = userRole === 'admin';
+  document.getElementById('ob-schedule-desc').textContent = isAdmin
+    ? 'As admin, your schedule runs daily.'
+    : 'Choose how often Job Hunter searches and applies for you.';
+  document.getElementById('ob-frequency-section').classList.toggle('hidden', isAdmin);
+  obUpdateScheduleUI();
+  obSelectDay('search', 1);
+  obSelectDay('apply', 3);
+}
+
+function obUpdateScheduleUI() {
+  const isAdmin = userRole === 'admin';
+  const freq = isAdmin ? 'daily' : (document.querySelector('input[name="ob-frequency"]:checked')?.value || 'weekly');
+  document.getElementById('ob-day-section').classList.toggle('hidden', freq !== 'weekly');
+}
+
+function obSelectDay(type, day) {
+  document.getElementById('ob-' + type + '-day').value = day;
+  const container = document.getElementById('ob-' + type + '-day-btns');
+  container.querySelectorAll('.ob-day-btn').forEach(b => {
+    const active = parseInt(b.dataset.day) === parseInt(day);
+    b.className = 'ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all ' +
+      (active ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600');
   });
 }
 
+async function saveScheduleAndContinue() {
+  const isAdmin = userRole === 'admin';
+  const freq = isAdmin ? 'daily' : (document.querySelector('input[name="ob-frequency"]:checked')?.value || 'weekly');
+  const body = {
+    schedule_frequency: freq,
+    search_hour:        parseInt(document.getElementById('search-hour').value),
+    apply_hour:         parseInt(document.getElementById('apply-hour').value),
+    search_day_of_week: parseInt(document.getElementById('ob-search-day').value || 1),
+    apply_day_of_week:  parseInt(document.getElementById('ob-apply-day').value  || 3),
+  };
+  await fetch('/api/save-schedule', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  goToStep(5);
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+function toggleNotif(channel) {
+  const expand = document.getElementById('form-' + channel);
+  const row    = document.getElementById(channel === 'telegram' ? 'tg-row' : 'wa-row');
+  const isOpen = expand.classList.contains('open');
+
+  // Close any open one first
+  ['telegram','whatsapp'].forEach(c => {
+    document.getElementById('form-' + c).classList.remove('open');
+    document.getElementById(c === 'telegram' ? 'tg-row' : 'wa-row').classList.remove('active');
+  });
+
+  if (!isOpen) {
+    expand.classList.add('open');
+    row.classList.add('active');
+    _activeNotif = channel;
+  } else {
+    _activeNotif = null;
+  }
+}
+
 async function testTelegram() {
-  const token = document.getElementById('tg-token').value;
+  const token  = document.getElementById('tg-token').value;
   const chatId = document.getElementById('tg-chat-id').value;
   if (!token || !chatId) { alert('Enter token and chat ID first.'); return; }
   const r = await fetch('/api/test-notification', {method:'POST',
@@ -2163,8 +2375,8 @@ async function testTelegram() {
   const d = await r.json();
   const el = document.getElementById('tg-test-result');
   el.classList.remove('hidden');
-  el.className = `text-sm p-3 rounded-lg mt-2 ${d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
-  el.textContent = d.success ? '✅ Message sent! Check Telegram.' : '❌ ' + (d.error || 'Failed');
+  el.className = 'text-sm p-3 rounded-lg mt-2 ' + (d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+  el.textContent = d.success ? '\\u2705 Message sent! Check Telegram.' : '\\u274c ' + (d.error || 'Failed');
 }
 
 async function testWhatsapp() {
@@ -2178,82 +2390,71 @@ async function testWhatsapp() {
   const d = await r.json();
   const el = document.getElementById('wa-test-result');
   el.classList.remove('hidden');
-  el.className = `text-sm p-3 rounded-lg mt-2 ${d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
-  el.textContent = d.success ? '✅ Message sent! Check WhatsApp.' : '❌ ' + (d.error || 'Failed');
+  el.className = 'text-sm p-3 rounded-lg mt-2 ' + (d.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+  el.textContent = d.success ? '\\u2705 Message sent! Check WhatsApp.' : '\\u274c ' + (d.error || 'Failed');
 }
 
-async function saveNotifications() {
-  const channel = document.querySelector('input[name="notif-channel"]:checked')?.value || 'none';
-  const body = { notification_channel: channel };
+async function finishOnboarding() {
+  // Determine active notification channel
+  const channel = _activeNotif || 'none';
+  const notifBody = {notification_channel: channel};
   if (channel === 'telegram') {
-    body.telegram_token   = document.getElementById('tg-token').value;
-    body.telegram_chat_id = document.getElementById('tg-chat-id').value;
+    notifBody.telegram_token   = document.getElementById('tg-token').value;
+    notifBody.telegram_chat_id = document.getElementById('tg-chat-id').value;
   } else if (channel === 'whatsapp') {
-    body.twilio_account_sid = document.getElementById('wa-account-sid').value;
-    body.twilio_auth_token  = document.getElementById('wa-auth-token').value;
-    body.whatsapp_number    = document.getElementById('wa-number').value;
+    notifBody.twilio_account_sid = document.getElementById('wa-account-sid').value;
+    notifBody.twilio_auth_token  = document.getElementById('wa-auth-token').value;
+    notifBody.whatsapp_number    = document.getElementById('wa-number').value;
   }
   await fetch('/api/save-notifications', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  goToStep(4);
-}
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(notifBody)});
 
-// ── Onboarding schedule helpers ───────────────────────────────────────────────
-async function initScheduleStep() {
-  try {
-    const r = await fetch('/api/me');
-    const me = await r.json();
-    userRole = me.role || 'user';
-  } catch(e) {}
-
-  const isAdmin = userRole === 'admin';
-  document.getElementById('ob-schedule-desc').textContent = isAdmin
-    ? 'As admin, your schedule runs daily.'
-    : 'Choose how often Job Hunter searches and applies for you.';
-
-  document.getElementById('ob-frequency-section').classList.toggle('hidden', isAdmin);
-  obUpdateScheduleUI();
-  // Default select Monday
-  obSelectDay('search', 1);
-  obSelectDay('apply',  1);
-}
-
-function obUpdateScheduleUI() {
-  const isAdmin = userRole === 'admin';
-  const freq = isAdmin ? 'daily' : (document.querySelector('input[name="ob-frequency"]:checked')?.value || 'weekly');
-  document.getElementById('ob-day-section').classList.toggle('hidden', freq !== 'weekly');
-}
-
-function obSelectDay(type, day) {
-  document.getElementById('ob-'+type+'-day').value = day;
-  const container = document.getElementById('ob-'+type+'-day-btns');
-  container.querySelectorAll('.ob-day-btn').forEach(b => {
-    const active = parseInt(b.dataset.day) === parseInt(day);
-    b.className = 'ob-day-btn px-3 py-2 rounded-lg border text-sm font-medium transition-all ' +
-      (active ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600');
-  });
-}
-
-// ── Finish ────────────────────────────────────────────────────────────────────
-async function finishOnboarding() {
-  const isAdmin = userRole === 'admin';
-  const freq = isAdmin ? 'daily' : (document.querySelector('input[name="ob-frequency"]:checked')?.value || 'weekly');
-  const body = {
-    schedule_frequency: freq,
-    search_hour:        parseInt(document.getElementById('search-hour').value),
-    apply_hour:         parseInt(document.getElementById('apply-hour').value),
-    search_day_of_week: parseInt(document.getElementById('ob-search-day').value || 1),
-    apply_day_of_week:  parseInt(document.getElementById('ob-apply-day').value  || 1),
-    onboarding_complete: 1,
-  };
+  // Mark onboarding complete
   await fetch('/api/save-schedule', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  window.location.href = '/dashboard';
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({onboarding_complete: 1})});
+
+  // Build done screen summary
+  const titles = getTags('titles-wrap');
+  document.getElementById('done-titles').textContent =
+    titles.length ? titles.slice(0,3).join(', ') + (titles.length > 3 ? ' +' + (titles.length-3) + ' more' : '') : 'No titles set';
+
+  const isAdmin = userRole === 'admin';
+  const freq = isAdmin ? 'daily' : (document.querySelector('input[name="ob-frequency"]:checked')?.value || 'weekly');
+  const days = ['','Mon','Tue','Wed','Thu','Fri'];
+  const searchDay = parseInt(document.getElementById('ob-search-day').value || 1);
+  const applyDay  = parseInt(document.getElementById('ob-apply-day').value  || 3);
+  const searchHr  = document.getElementById('search-hour').value;
+  const applyHr   = document.getElementById('apply-hour').value;
+  const fmtHr = h => { const n=parseInt(h); return (n>12?n-12:n)+':00 '+(n>=12?'PM':'AM'); };
+  document.getElementById('done-schedule').textContent = freq === 'daily'
+    ? 'Daily \\u2014 search at ' + fmtHr(searchHr) + ', apply at ' + fmtHr(applyHr)
+    : 'Weekly \\u2014 search ' + (days[searchDay]||'Mon') + ' at ' + fmtHr(searchHr)
+      + ', apply ' + (days[applyDay]||'Wed') + ' at ' + fmtHr(applyHr);
+
+  const notifLabel = {none:'Email (account)', telegram:'Email + Telegram', whatsapp:'Email + WhatsApp'};
+  document.getElementById('done-notif').textContent = notifLabel[channel] || 'Email (account)';
+
+  // Show done screen
+  document.getElementById('header')?.classList?.add('hidden');
+  goToStep('done');
 }
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    const r  = await fetch('/api/me');
+    const me = await r.json();
+    userRole  = me.role  || 'user';
+    userEmail = me.email || '';
+    if (userEmail) document.getElementById('notif-email-addr').textContent = 'Sent to ' + userEmail;
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>"""
 
+# ── Settings
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 SETTINGS_HTML = """<!DOCTYPE html>
@@ -4801,9 +5002,11 @@ class Handler(BaseHTTPRequestHandler):
                 if field in data:
                     val = data[field]
                     kwargs[field] = json.dumps(val) if isinstance(val, list) else val
-            for field in ("salary_min", "salary_max"):
+            for field in ("salary_min", "salary_max", "experience_years"):
                 if field in data:
                     kwargs[field] = int(data[field])
+            if "seniority" in data:
+                kwargs["seniority"] = data["seniority"]
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
             database.write_users_config(BASE_DIR)
