@@ -1019,7 +1019,10 @@ def run_job_search(user_id: int):
                         _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
                         result_ = _parse_scored_response(_g_text)
                         print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
-                        return result_
+                        if result_:
+                            return result_
+                        print(f"[search] Gemini returned 0 results — running heuristic safety net")
+                        # fall through to heuristic below
                     except Exception as _ge:
                         print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
                         database.log_activity(user_id, "scoring_warning",
@@ -1040,7 +1043,10 @@ def run_job_search(user_id: int):
                             if blk.get("type") == "text": _a_text += blk["text"]
                         result_ = _parse_scored_response(_a_text)
                         print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
-                        return result_
+                        if result_:
+                            return result_
+                        print(f"[search] Anthropic returned 0 results — running heuristic safety net")
+                        # fall through to heuristic below
                     except Exception as _ae:
                         import urllib.error as _ue
                         _ae_body = ""
@@ -1072,12 +1078,16 @@ def run_job_search(user_id: int):
                             _score += 5
                         if _score >= 70:
                             break
-                    # Location match
+                    # Location match — also treat Hebrew-only location as Israeli
+                    _is_hebrew_loc = bool(_loc) and all(
+                        "א" <= c <= "ת" or c in " -,.()" for c in _loc.strip()
+                    )
                     for _lp in locs_:
-                        if _lp.lower() in _loc or "remote" in _loc or "israel" in _loc:
+                        if (_lp.lower() in _loc or "remote" in _loc
+                                or "israel" in _loc or _is_hebrew_loc):
                             _score += 10
                             break
-                    if _score >= 40:
+                    if _score >= 30:
                         _jc = dict(j)
                         _jc["candidate_score"] = min(_score, 95)
                         _jc["match_score"] = _jc["candidate_score"]
