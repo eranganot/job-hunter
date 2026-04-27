@@ -3068,8 +3068,8 @@ async function loadUser() {
   setTags('s-titles-wrap',    tryParse(userData.job_titles, []));
   setTags('s-keywords-wrap',  tryParse(userData.keywords, []));
   setTags('s-locations-wrap', tryParse(userData.locations, ['Tel Aviv']));
-  if (userData.salary_min) document.getElementById('s-salary-min').value = userData.salary_min;
-  if (userData.salary_max) document.getElementById('s-salary-max').value = userData.salary_max;
+  if (userData.salary_min) { const el = document.getElementById('s-salary-min'); if(el) el.value = userData.salary_min; }
+  if (userData.salary_max) { const el = document.getElementById('s-salary-max'); if(el) el.value = userData.salary_max; }
 
   // Notifications
   const channels = (userData.notification_channel || 'none').split(',');
@@ -3248,8 +3248,6 @@ async function savePreferences() {
     body: JSON.stringify({
       job_titles: getTags('s-titles-wrap'), keywords: getTags('s-keywords-wrap'),
       locations:  getTags('s-locations-wrap'),
-      salary_min: parseInt(document.getElementById('s-salary-min').value)||0,
-      salary_max: parseInt(document.getElementById('s-salary-max').value)||0,
     })});
   showToast();
 }
