@@ -878,6 +878,8 @@ def run_job_search(user_id: int):
             print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
             all_raw = _deduped
             print(f"[search] Pre-filter: {len(all_raw)} title-matched jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} companies")
+            database.log_activity(user_id, "search_debug",
+                f"ATS collected {len(all_raw)} jobs from {len(_GH_COMPANIES)} GH + {len(_LV_COMPANIES)} LV boards")
 
             if not all_raw:
                 return []
@@ -1371,6 +1373,8 @@ def run_job_search(user_id: int):
                     print("[search] Track B: no AI keys — skipping")
 
             print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
+            database.log_activity(user_id, "search_debug",
+                f"Scoring: {len(all_raw)} collected → {len(scored_jobs)} passed AI/heuristic (threshold 40)")
             return scored_jobs
 
         all_jobs_data = []
@@ -1381,14 +1385,20 @@ def run_job_search(user_id: int):
         jobs_data = _search_jobs_with_claude_websearch(titles, locations, keywords)
         print(f"[run-search] Found {len(jobs_data)} jobs via Claude web_search")
 
+        _seen_filtered = 0
         for j in jobs_data:
             jurl = (j.get("url") or "").strip()
             jkey = (j.get("job_title","").lower().strip(), j.get("company","").lower().strip())
-            if jurl and jurl in seen_urls: continue
+            if jurl and jurl in seen_urls:
+                _seen_filtered += 1
+                continue
             if not jurl and jkey in seen_key: continue
             if jurl: seen_urls.add(jurl)
             if jkey: seen_key.add(jkey)
             all_jobs_data.append(j)
+        if _seen_filtered:
+            database.log_activity(user_id, "search_debug",
+                f"URL dedup: {_seen_filtered} scored job(s) skipped — already in your dashboard (status: new/approved)")
 
         if not all_jobs_data:
             database.log_activity(user_id, "jobs_searched", "Search returned no new results")
