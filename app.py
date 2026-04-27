@@ -1671,10 +1671,17 @@ def run_job_apply(user_id: int) -> int:
             c2.commit()
             c2.close()
 
-            database.log_activity(
-                user_id, "job_applied",
-                f"{j['title']} @ {j['company']} — {apply_status}"
-            )
+            # Log with the real outcome — not always "job_applied"
+            if apply_status in ("confirmed", "submitted"):
+                _log_type = "job_applied"
+                _log_msg  = f"{j['title']} @ {j['company']} — {apply_status}"
+            elif apply_status == "manual_required":
+                _log_type = "manual_required"
+                _log_msg  = f"Manual apply needed: {j['title']} @ {j['company']}{(' — ' + apply_error) if apply_error else ''}"
+            else:
+                _log_type = "apply_failed"
+                _log_msg  = f"Auto-apply failed: {j['title']} @ {j['company']}{(' — ' + apply_error) if apply_error else ''}"
+            database.log_activity(user_id, _log_type, _log_msg)
             count += 1
             # Increment daily application counter
             try:
@@ -1696,7 +1703,9 @@ def run_job_apply(user_id: int) -> int:
         # ── Notifications ────────────────────────────────────────────────────────────────────────────────
         # ── Single consolidated apply notification ──────────────────────────────
         today_str = datetime.now().strftime("%Y-%m-%d")
-        notif_lines = [f"🚀 Apply Run Complete — {today_str}", f"📊 {count} application(s) submitted\n"]
+        _actually_submitted = len(confirmed_list) + len(submitted_list)
+        notif_lines = [f"🚀 Apply Run Complete — {today_str}",
+                       f"📊 {_actually_submitted} submitted · {len(manual_list)} need manual · {len(failed_list)} failed\n"]
         if confirmed_list:
             notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
             for j in confirmed_list[:5]:
