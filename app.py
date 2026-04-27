@@ -1065,14 +1065,38 @@ def run_job_search(user_id: int):
                 database.log_activity(user_id, "scoring_warning",
                     "Using keyword heuristic scoring — results may be limited. "
                     "Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway to enable AI scoring.")
+                # Roles that should never pass the heuristic regardless of title fuzzy-match
+                _HEURISTIC_BLOCKLIST = {
+                    'software engineer', 'backend engineer', 'frontend engineer',
+                    'full stack engineer', 'fullstack engineer', 'full-stack engineer',
+                    'data engineer', 'machine learning engineer', 'ml engineer',
+                    'devops', 'site reliability', 'infrastructure engineer',
+                    'security engineer', 'solutions engineer', 'qa engineer',
+                    'test engineer', 'embedded engineer', 'hardware engineer',
+                    'sales development', 'business development rep',
+                    'bdr', 'sdr', 'account development', 'account executive',
+                    'account rep', 'sales rep', 'sales manager',
+                    'marketing manager', 'content manager', 'ux designer',
+                    'ui designer', 'graphic designer', 'recruiter',
+                }
                 out_ = []
                 for j in batch_:
                     _t = (j.get("job_title") or "").lower()
+                    # Hard-block clearly non-PM roles before spending any scoring budget
+                    if any(_blk in _t for _blk in _HEURISTIC_BLOCKLIST):
+                        continue
                     _desc = (j.get("full_description") or j.get("description") or "").lower()
                     _loc = (j.get("location") or "").lower()
                     _score = 0
-                    # Title match — use same 4-pass logic as collection filter
-                    if _title_match(j.get("job_title", "")):
+                    # Strict title match — Pass 1 (phrase substring) + Pass 2 (bigrams) +
+                    # Pass 3 (synonyms) only. Deliberately NO fuzzy difflib here: the
+                    # heuristic is a safety net and fuzzy matching causes false positives.
+                    _title_strict = (
+                        any(phrase in _t for phrase in _phrases)
+                        or any(syn in _t for syn in _synonym_phrases)
+                        or any(w1 in _t and w2 in _t for w1, w2 in _bigrams)
+                    )
+                    if _title_strict:
                         _score += 50
                     # Keyword match in description (up to +20)
                     for _kw in kws_:
