@@ -907,7 +907,7 @@ def run_job_search(user_id: int):
                 f"Target roles: {', '.join(titles_[:4])}\n"
                 f"Key skills: {', '.join(kws_[:10])}\n"
                 f"Locations: {', '.join(locs_)} or Remote\n"
-                f"Seniority: Senior / Director / VP / Head-of"
+                f"Seniority: {(profile['seniority'] or '').strip() or 'Senior / Director / VP / Head-of'}"
             )
             if _cv_text:
                 profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
@@ -970,9 +970,9 @@ def run_job_search(user_id: int):
                     "  10-16: One level off (Senior vs Director)\n"
                     "   0-9:  Major mismatch (junior/IC for a senior candidate, or C-suite for mid-level)\n\n"
                     "LOCATION (0-20 pts):\n"
-                    "  17-20: Tel Aviv / Israel / Hybrid / explicitly Remote-friendly\n"
+                    f"  17-20: {_locs_str_sc} / Hybrid / explicitly Remote-friendly\n"
                     "  10-16: Remote with no location restriction specified\n"
-                    "   0-9:  Requires relocation outside Israel, or on-site outside Tel Aviv\n\n"
+                    f"   0-9:  Requires relocation or on-site outside {_locs_str_sc}\n\n"
                     "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important dimension:\n"
                     "  Read the job's required skills, years of experience, and responsibilities from full_description.\n"
                     "  Cross-reference against the candidate's actual experience in the attached CV PDF.\n"
