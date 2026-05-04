@@ -939,7 +939,7 @@ def run_job_search(user_id: int):
             def _score_batch(batch_, profile_text_):
                 """Score a batch of jobs via Gemini → Anthropic → heuristic fallback."""
                 import os as _os_sb
-                _GEMINI_KEY = _os_sb.environ.get('GEMINI_API_KEY', '')
+                _GEMINI_KEY = GEMINI_KEY  # use module-level var (already loaded via _cfg())
 
                 jobs_json_ = _js2.dumps(
                     [{"job_title": j.get("job_title",""), "company": j.get("company",""),
@@ -1096,24 +1096,19 @@ def run_job_search(user_id: int):
                         or any(syn in _t for syn in _synonym_phrases)
                         or any(w1 in _t and w2 in _t for w1, w2 in _bigrams)
                     )
-                    if _title_strict:
-                        _score += 50
-                    # Keyword match in description (up to +20)
-                    for _kw in kws_:
-                        if _kw.lower() in _desc:
-                            _score += 5
-                        if _score >= 70:
-                            break
+                    # Title match is noted but not scored yet — need location too
                     # Location match — also treat Hebrew-only location as Israeli
                     _is_hebrew_loc = bool(_loc) and all(
                         "א" <= c <= "ת" or c in " -,.()" for c in _loc.strip()
                     )
-                    for _lp in locs_:
-                        if (_lp.lower() in _loc or "remote" in _loc
-                                or "israel" in _loc or _is_hebrew_loc):
-                            _score += 10
-                            break
-                    if _score >= 30:
+                    _loc_match = (not locs_) or any(
+                        _lp.lower() in _loc or "remote" in _loc
+                        or "israel" in _loc or _is_hebrew_loc
+                        for _lp in locs_
+                    )
+                    if _title_strict and _loc_match:
+                        _score = 40  # Requires BOTH title AND location match
+                    if _score >= 40:
                         _jc = dict(j)
                         _jc["candidate_score"] = min(_score, 95)
                         _jc["match_score"] = _jc["candidate_score"]
@@ -1234,8 +1229,8 @@ def run_job_search(user_id: int):
             if len(scored_jobs) < 5:
                 print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
                 import os as _os_tb
-                _TB_GEMINI = _os_tb.environ.get('GEMINI_API_KEY', '')
-                _TB_ANTH   = _os_tb.environ.get('ANTHROPIC_API_KEY', '')
+                _TB_GEMINI = GEMINI_KEY  # use module-level var (already loaded via _cfg())
+                _TB_ANTH   = ANTHROPIC_KEY  # use module-level var (already loaded via _cfg())
                 if _TB_GEMINI or _TB_ANTH:
                     # Collect jobs with meaningful descriptions that Track A didn't already return
                     _scored_urls = {j.get('url','') for j in scored_jobs}
