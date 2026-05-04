@@ -454,6 +454,13 @@ def run_job_search(user_id: int):
                 'normalyze': 'Normalyze', 'dig-security': 'Dig Security',
             }
 
+            # -- Israeli company slugs (Lever) --
+            _LV_COMPANIES = {
+                'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
+                # Global tech with Israeli offices (Lever)
+                'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
+                'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
+            }
             # ── Dynamic Greenhouse discovery from TechMap CSV ─────────────────
             # Fetch TechMap now (before ATS threads launch) to discover additional
             # Greenhouse board slugs from job URLs. This keeps coverage self-updating.
@@ -490,13 +497,6 @@ def run_job_search(user_id: int):
             except Exception as _tm_disc_err:
                 print(f"[search] TechMap discovery error (non-fatal): {_tm_disc_err}")
                 _tm_prefetched_rows = None
-            # -- Israeli company slugs (Lever) --
-            _LV_COMPANIES = {
-                'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
-                # Global tech with Israeli offices (Lever)
-                'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
-                'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
-            }
             # -- SmartRecruiters public boards --
             _SR_COMPANIES = {
                 'servicenow': 'ServiceNow',
