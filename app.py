@@ -816,7 +816,7 @@ def run_job_search(user_id: int):
             for _li_kw in titles_[:5]:
                 try:
                     _li_q = _urp2.quote(_li_kw)
-                    _li_l = _urp2.quote("Israel")
+                    _li_l = _urp2.quote((locs_ or ["Israel"])[0])
                     _li_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={_li_q}&location={_li_l}&start=0"
                     _li_req = _ur2.Request(_li_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
                     with _ur2.urlopen(_li_req, timeout=12) as _li_resp:
@@ -856,6 +856,103 @@ def run_job_search(user_id: int):
                 except Exception:
                     pass
             print(f"[search] Indeed: {_indeed_count} jobs matched")
+
+            # -- Wellfound (AngelList) public role listings --
+            try:
+                import re as _re_wf, json as _js_wf
+                _wf_count = 0
+                _wf_ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                for _t_wf in titles_[:3]:
+                    _wf_slug = _t_wf.lower().replace(' ', '-').replace('/', '-')
+                    _wf_slug = _re_wf.sub(r'[^a-z0-9-]', '', _wf_slug).strip('-')
+                    if not _wf_slug:
+                        continue
+                    try:
+                        _wf_url = f"https://wellfound.com/role/r/{_wf_slug}"
+                        _wf_req = _ur2.Request(_wf_url, headers={
+                            "User-Agent": _wf_ua,
+                            "Accept": "text/html,application/xhtml+xml",
+                            "Accept-Language": "en-US,en;q=0.9"
+                        })
+                        with _ur2.urlopen(_wf_req, timeout=20) as _wf_r:
+                            _wf_html = _wf_r.read().decode('utf-8', errors='replace')
+                        _nd_m = _re_wf.search(
+                            r'<script id="__NEXT_DATA__"[^>]*>([sS]*?)</script>', _wf_html)
+                        if _nd_m:
+                            _nd = _js_wf.loads(_nd_m.group(1))
+                            _pp = _nd.get('props', {}).get('pageProps', {})
+                            _roles = (
+                                _pp.get('jobListings') or
+                                _pp.get('startupRoles') or
+                                (_pp.get('roleListing') or {}).get('jobListings') or []
+                            )
+                            for _jl in _roles:
+                                _jurl = (_jl.get('applyUrl') or _jl.get('jobUrl') or
+                                         _jl.get('absolute_url') or '')
+                                if not _jurl or _jurl in existing_urls:
+                                    continue
+                                _st = _jl.get('startup') or {}
+                                _lnames = _jl.get('locationNames') or []
+                                all_raw.append({
+                                    "title": _jl.get('title', ''),
+                                    "company": _st.get('name', ''),
+                                    "location": _lnames[0] if _lnames else 'Israel',
+                                    "url": _jurl,
+                                    "description": (_jl.get('description') or '')[:800],
+                                    "source": "wellfound"
+                                })
+                                _wf_count += 1
+                    except Exception:
+                        pass
+                print(f"[search] Wellfound: {_wf_count} jobs added")
+            except Exception as _wf_ex:
+                print(f"[search] Wellfound error: {_wf_ex}")
+
+            # -- Glassdoor job search (embedded JSON) --
+            try:
+                import re as _re_gd, json as _js_gd
+                _gd_count = 0
+                _gd_ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                for _t_gd in titles_[:2]:
+                    for _loc_gd in (locs_ or ['Israel'])[:2]:
+                        try:
+                            _gd_q = '+'.join(_t_gd.split())
+                            _gd_loc = '+'.join(_loc_gd.split())
+                            _gd_url = (f"https://www.glassdoor.com/Job/jobs.htm"
+                                       f"?q={_gd_q}&l={_gd_loc}&fromAge=30")
+                            _gd_req = _ur2.Request(_gd_url, headers={
+                                "User-Agent": _gd_ua,
+                                "Accept": "text/html,application/xhtml+xml",
+                                "Accept-Language": "en-US,en;q=0.9"
+                            })
+                            with _ur2.urlopen(_gd_req, timeout=20) as _gd_r:
+                                _gd_html = _gd_r.read().decode('utf-8', errors='replace')
+                            _gd_m = _re_gd.search(
+                                r'"jobListings"\s*:\s*(\[[\s\S]{1,30000}?\])\s*[,}]', _gd_html)
+                            if _gd_m:
+                                for _gj in _js_gd.loads(_gd_m.group(1)):
+                                    _jl_id = str(_gj.get('jobListingId') or '')
+                                    _gj_url = (f"https://www.glassdoor.com/job-listing/j?jl={_jl_id}"
+                                               if _jl_id else '')
+                                    if not _gj_url or _gj_url in existing_urls:
+                                        continue
+                                    all_raw.append({
+                                        "title": _gj.get('jobTitle', ''),
+                                        "company": _gj.get('employerName', ''),
+                                        "location": _gj.get('location', _loc_gd),
+                                        "url": _gj_url,
+                                        "description": (_gj.get('jobDescription') or
+                                                        _gj.get('descriptionFragment') or '')[:800],
+                                        "source": "glassdoor"
+                                    })
+                                    _gd_count += 1
+                        except Exception:
+                            pass
+                print(f"[search] Glassdoor: {_gd_count} jobs added")
+            except Exception as _gd_ex:
+                print(f"[search] Glassdoor error: {_gd_ex}")
 
             # -- Second-level dedup: normalized company+title fingerprint --
             def _norm_fp(_r):
