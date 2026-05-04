@@ -1026,7 +1026,7 @@ def run_job_search(user_id: int):
                     return []
                 out = []
                 for j in parsed:
-                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 40:
+                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 50:
                         j.setdefault("match_score", j.get("candidate_score", 0))
                         j.setdefault("found_date", today)
                         j.setdefault("source", "greenhouse/lever")
@@ -1065,11 +1065,11 @@ def run_job_search(user_id: int):
                     "SENIORITY MATCH (0-20 pts):\n"
                     "  17-20: Exact seniority level match\n"
                     "  10-16: One level off (Senior vs Director)\n"
-                    "   0-9:  Major mismatch (junior/IC for a senior candidate, or C-suite for mid-level)\n\n"
+                    "   0-5:  Major mismatch — GVP / EVP / SVP / C-suite above VP, OR junior/IC role\n\n"
                     "LOCATION (0-20 pts):\n"
                     f"  17-20: {_locs_str_sc} / Hybrid / explicitly Remote-friendly\n"
                     "  10-16: Remote with no location restriction specified\n"
-                    f"   0-9:  Requires relocation or on-site outside {_locs_str_sc}\n\n"
+                    f"   0-5:  On-site/in-person required exclusively outside {_locs_str_sc}\n\n"
                     "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important dimension:\n"
                     "  Read the job's required skills, years of experience, and responsibilities from full_description.\n"
                     "  Cross-reference against the candidate's actual experience in the attached CV PDF.\n"
@@ -1078,11 +1078,13 @@ def run_job_search(user_id: int):
                     "   5-14: Moderate overlap — candidate could do the role but has notable experience gaps\n"
                     "   0-4:  Fundamentally mismatched requirements (completely different background needed)\n\n"
                     "HARD EXCLUDE (score 0, omit from output entirely):\n"
-                    "  Engineering, software development, data science, design, sales, marketing,\n"
-                    "  finance, legal, HR, operations — any role that is NOT product management\n"
-                    "  or direct product leadership.\n\n"
+                    "  - Non-PM roles: Engineering, software development, data science, design,\n"
+                    "    sales, marketing, finance, legal, HR, operations.\n"
+                    f"  - Wrong location: Role is on-site/in-person ONLY outside {_locs_str_sc}\n"
+                    f"    (no remote option stated) — e.g. a US city like Santa Clara, San Francisco.\n\n"
                     "Total score = Title + Seniority + Location + CV-Requirements. "
-                    "Include jobs scoring >= 40. "
+                    "Include only jobs scoring >= 50. "
+                    "Score calibration: be conservative — 90+ is exceptional and rare; most strong matches score 55-75. "
                     "For fit_reason: one sentence citing which dimensions scored highest and why. "
                     "Return ONLY a valid JSON array with fields: "
                     "job_title, company, location, url, publish_date (null if unknown), "
@@ -1111,10 +1113,23 @@ def run_job_search(user_id: int):
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
-                        _g_req = _ur2.Request(_g_url, data=_g_body,
-                                              headers={'Content-Type': 'application/json'}, method='POST')
-                        with _ur2.urlopen(_g_req, timeout=90) as _g_resp:
-                            _g_data = _js2.loads(_g_resp.read().decode('utf-8'))
+                        import time as _gtime
+                        _g_data = None
+                        for _g_att in range(3):
+                            try:
+                                _g_req = _ur2.Request(_g_url, data=_g_body,
+                                                      headers={'Content-Type': 'application/json'}, method='POST')
+                                with _ur2.urlopen(_g_req, timeout=90) as _g_resp:
+                                    _g_data = _js2.loads(_g_resp.read().decode('utf-8'))
+                                break
+                            except Exception as _g_retry_e:
+                                _g_code = getattr(_g_retry_e, 'code', 0)
+                                if _g_code in (429, 503) and _g_att < 2:
+                                    _g_wait = (5 if _g_code == 503 else 15) * (2 ** _g_att)
+                                    print(f"[search] Gemini {_g_code}, retry {_g_att+1}/2 in {_g_wait}s")
+                                    _gtime.sleep(_g_wait)
+                                else:
+                                    raise
                         _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
                         result_ = _parse_scored_response(_g_text)
                         print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
@@ -1500,7 +1515,7 @@ def run_job_search(user_id: int):
 
             print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
             database.log_activity(user_id, "search_debug",
-                f"Scoring: {len(all_raw)} collected → {len(scored_jobs)} passed AI/heuristic (threshold 40)")
+                f"Scoring: {len(all_raw)} collected → {len(scored_jobs)} passed AI/heuristic (threshold 50)")
             return scored_jobs
 
         all_jobs_data = []
@@ -5955,7 +5970,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn2 = database.get_db()
                         for orig in batch:
                             scored_j = url_to_score.get(orig['url'])
-                            if scored_j and scored_j.get('candidate_score', 0) >= 40:
+                            if scored_j and scored_j.get('candidate_score', 0) >= 50:
                                 conn2.execute(
                                     "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
                                     (scored_j['candidate_score'], scored_j['candidate_score'],
