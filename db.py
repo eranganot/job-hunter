@@ -133,7 +133,33 @@ def init_db():
         "ALTER TABLE user_profiles ADD COLUMN onboarding_dismissed INTEGER DEFAULT 0",
         "ALTER TABLE jobs ADD COLUMN cover_letter TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_result TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_date TEXT DEFAULT NULL"
+        "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_date TEXT DEFAULT NULL",
+        # ── Phase-1 robustness migrations ─────────────────────────────────────
+        "ALTER TABLE jobs ADD COLUMN apply_strategy TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_next_attempt_at TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_evidence_path TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_resolved_url TEXT DEFAULT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN applications_per_run INTEGER DEFAULT 10",
+        # career_url_cache: created separately below (CREATE TABLE IF NOT EXISTS)
+        "CREATE TABLE IF NOT EXISTS career_url_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, job_title TEXT NOT NULL, resolved_url TEXT NOT NULL, created_date TEXT DEFAULT (datetime(\'now\')), UNIQUE(company, job_title))",
+        # application_answers: canonical applicant profile (§4.6)
+        """CREATE TABLE IF NOT EXISTS application_answers (
+  user_id INTEGER PRIMARY KEY,
+  first_name TEXT, last_name TEXT, preferred_name TEXT,
+  phone_country_code TEXT, phone TEXT, email TEXT,
+  city TEXT, state_region TEXT, country TEXT, postal_code TEXT, address_line TEXT,
+  work_auth_il INTEGER, work_auth_us INTEGER, work_auth_eu INTEGER,
+  visa_required INTEGER, willing_to_relocate INTEGER,
+  current_title TEXT, current_company TEXT, years_experience INTEGER,
+  salary_expectation_min INTEGER, salary_expectation_currency TEXT,
+  notice_period_days INTEGER, available_start_date TEXT,
+  linkedin_url TEXT, github_url TEXT, portfolio_url TEXT, twitter_url TEXT,
+  eeo_race TEXT, eeo_gender TEXT, eeo_veteran TEXT, eeo_disability TEXT,
+  how_heard TEXT DEFAULT \'Company website\',
+  cover_letter_default TEXT, why_company_default TEXT,
+  updated_date TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)"""
     ]:
         try:
             conn.execute(_migration)
@@ -212,6 +238,17 @@ def _migrate(conn: sqlite3.Connection):
             print(f"[db] Migration: added {col_name} to {table}")
         except Exception:
             pass  # Column already exists — that's fine
+
+    # Backfill: approved jobs with no apply_status get 'queued' so the scheduler picks them up
+    try:
+        result = conn.execute(
+            "UPDATE jobs SET apply_status=\'queued\' WHERE status=\'approved\' AND apply_status IS NULL"
+        )
+        if result.rowcount > 0:
+            conn.commit()
+            print(f"[db] Backfill: {result.rowcount} approved job(s) set to apply_status=\'queued\'")
+    except Exception as e:
+        print(f"[db] Backfill error: {e}")
 
 
 # ── Activity log ──────────────────────────────────────────────────────────────

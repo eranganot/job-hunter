@@ -341,6 +341,25 @@ def _check_scheduled_jobs() -> None:
                 if run_apply:
                     print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
                     threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
+            elif auto_apply:
+                # Even outside the scheduled apply_hour, check if any retry jobs are due
+                try:
+                    from datetime import timezone as _tz
+                    _now_iso = datetime.now(_tz.utc).isoformat()
+                    _rconn = database.get_db()
+                    _retry_due = _rconn.execute(
+                        """SELECT COUNT(*) FROM jobs j
+                           WHERE j.user_id=? AND j.status='approved'
+                             AND j.apply_status IN ('retry_1','retry_2','retry_3')
+                             AND (j.apply_next_attempt_at IS NULL OR j.apply_next_attempt_at <= ?)""",
+                        (uid, _now_iso)
+                    ).fetchone()[0]
+                    _rconn.close()
+                    if _retry_due > 0:
+                        print(f'[scheduler] {_retry_due} retry job(s) due for user {uid}')
+                        threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
+                except Exception as _re:
+                    print(f'[scheduler] retry check error: {_re}')
     except Exception as e:
         print(f'[scheduler] Error: {e}')
 
@@ -1665,20 +1684,53 @@ def run_job_search(user_id: int):
     finally:
         _search_running.discard(user_id)
 
-def run_job_apply(user_id: int) -> int:
-    """Submit applications to all approved jobs using browser automation + Claude."""
-    # ── Rate-limit + auto_apply gate ──────────────────────────────────────────
-    from datetime import timezone as _tz
+def _send_manual_alert(user_id: int, job: dict, error: str, failure_type: str | None, resolved_url: str):
+    """Send a Telegram alert when a job lands in manual_required."""
+    try:
+        title   = job["title"] if hasattr(job, "__getitem__") else str(job)
+        company = job["company"] if hasattr(job, "__getitem__") else ""
+        job_id  = job["id"] if hasattr(job, "__getitem__") else 0
+        reason  = failure_type or "unknown"
+        apply_url = resolved_url or (job["url"] if hasattr(job, "__getitem__") else "")
+        manual_link = f"/manual/{job_id}"
+        msg = (
+            f"[Job Hunter] Manual action needed: {title} @ {company}\n"
+            f"Why: {reason}{(': ' + error[:120]) if error else ''}\n"
+            f"Apply here: {apply_url}\n"
+            f"Review in app: {manual_link}"
+        )
+        deliver_notification(user_id, msg, url_suffix=manual_link)
+    except Exception as e:
+        print(f"[manual-alert] {e}")
+
+
+def run_job_apply(user_id: int) -> dict:
+    """
+    Drain the apply queue for a user: pick up jobs with apply_status IN
+    ('queued', 'retry_1', 'retry_2', 'retry_3') and attempt to apply.
+
+    Retry policy
+    ─────────────
+    • attempt 1  → named-ATS handler (Greenhouse / Lever / Workday) if URL matches,
+                    else generic Claude strategy.
+    • attempt 2  → retry_1 state, backoff 5 min, same strategy (engine retries automatically).
+    • attempt 3  → retry_2 state, backoff 30 min.
+    • After attempt 3 fails → manual_required, Telegram alert.
+    """
+    from datetime import timezone as _tz, timedelta as _td
     today_utc = datetime.now(_tz.utc).strftime("%Y-%m-%d")
+    now_iso   = datetime.now(_tz.utc).isoformat()
+
     _rc = database.get_db()
     _prof = _rc.execute(
-        "SELECT auto_apply_enabled, applications_sent_today, applications_reset_date "
+        "SELECT auto_apply_enabled, applications_sent_today, applications_reset_date, "
+        "applications_per_run "
         "FROM user_profiles WHERE user_id=?", (user_id,)
     ).fetchone()
     _urow = _rc.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
     _is_admin = (_urow and _urow["email"] and _urow["email"].lower() == (ADMIN_EMAIL or "").lower())
 
-    # SILENT MODE: auto-apply off => return immediately, no notification
+    # auto-apply gate
     if not _prof or not _prof["auto_apply_enabled"]:
         _rc.close()
         return {"applied": 0, "error": "", "skipped": "auto_apply_disabled"}
@@ -1695,28 +1747,63 @@ def run_job_apply(user_id: int) -> int:
 
     DAILY_CAP = 3
     _remaining = None if _is_admin else max(0, DAILY_CAP - _sent_today)
+    if _remaining is not None and _remaining <= 0:
+        _rc.close()
+        return {"applied": 0, "error": "", "skipped": "daily_limit_reached"}
+
+    # Per-run cap (default 10, or user setting)
+    _per_run = (_prof["applications_per_run"] or 10) if _prof else 10
     _rc.close()
 
-    if _remaining is not None and _remaining <= 0:
-        return {"applied": 0, "error": "", "skipped": "daily_limit_reached"}
+    # ── Retry backoff constants ───────────────────────────────────────────────
+    _RETRY_BACKOFF = {
+        "retry_1": _td(minutes=5),
+        "retry_2": _td(minutes=30),
+        "retry_3": _td(hours=2),
+    }
+    _RETRY_NEXT = {"queued": "retry_1", "retry_1": "retry_2", "retry_2": "retry_3"}
+    _ATTEMPT_NUM = {"queued": 1, "retry_1": 2, "retry_2": 3, "retry_3": 3}
 
     try:
         import apply_engine
         conn = database.get_db()
+
+        # Pick up queued + retry jobs (retry jobs must be past their backoff time)
         jobs = conn.execute(
-            "SELECT id, title, company, url FROM jobs WHERE user_id=? AND status='approved'",
-            (user_id,)
+            """
+            SELECT id, title, company, url, apply_status, apply_attempts,
+                   apply_next_attempt_at
+            FROM jobs
+            WHERE user_id=?
+              AND status='approved'
+              AND (
+                apply_status = 'queued'
+                OR (apply_status IN ('retry_1','retry_2','retry_3')
+                    AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
+              )
+            ORDER BY
+              CASE apply_status
+                WHEN 'queued'   THEN 0
+                WHEN 'retry_1'  THEN 1
+                WHEN 'retry_2'  THEN 2
+                WHEN 'retry_3'  THEN 3
+              END,
+              match_score DESC NULLS LAST
+            """,
+            (user_id, now_iso)
         ).fetchall()
 
-        # Cap jobs to daily remaining quota (non-admin only)
+        # Apply per-run + daily caps
         if _remaining is not None:
-            jobs = jobs[:_remaining]
+            jobs = jobs[:min(_per_run, _remaining)]
+        else:
+            jobs = jobs[:_per_run]
 
         if not jobs:
             conn.close()
             return {"applied": 0, "error": ""}
 
-        # Gather user + CV data for form filling
+        # Gather user + CV data
         user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         profile = conn.execute(
             "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
@@ -1726,33 +1813,45 @@ def run_job_apply(user_id: int) -> int:
         cv_text   = (profile["cv_summary"] or "") if profile else ""
         email     = user["email"] if user else ""
         applicant = apply_engine.extract_applicant_data(cv_text, email)
+        cv_path   = (profile["cv_path"] or None) if profile else None
+        today     = datetime.now().strftime("%Y-%m-%d")
 
-        cv_path = None
-        if profile and profile["cv_path"]:
-            cv_path = profile["cv_path"]
-
-        today = datetime.now().strftime("%Y-%m-%d")
         count = 0
         confirmed_list, submitted_list, manual_list, failed_list = [], [], [], []
 
         for j in jobs:
-            job_url = j["url"] or ""
+            job_url      = j["url"] or ""
+            cur_status   = j["apply_status"] or "queued"
+            attempt_num  = _ATTEMPT_NUM.get(cur_status, 1)
+
+            # Mark as 'applying' so UI shows spinner
+            c_mark = database.get_db()
+            c_mark.execute(
+                "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
+                (j["id"], user_id)
+            )
+            c_mark.commit()
+            c_mark.close()
+
             if job_url:
                 res = apply_engine.submit_application(
                     job_url, j["title"], j["company"],
-                    applicant, cv_path, ANTHROPIC_KEY
+                    applicant, cv_path, ANTHROPIC_KEY,
+                    user_id=user_id, job_id=j["id"], attempt=attempt_num,
                 )
-                apply_status       = res["status"]
-                apply_confirmation = res.get("confirmation_text", "")[:1000]
-                apply_error        = res.get("error", "")[:500]
-                apply_failure_type   = res.get("apply_failure_type")
-                apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
-                notes = f"Applied via Job Hunter — {apply_status}"
             else:
-                apply_status       = "submitted"
-                apply_confirmation = ""
-                apply_error        = "No URL available"
-                notes = "Applied via Job Hunter (no URL)"
+                res = {"status": "submitted", "confirmation_text": "",
+                       "error": "No URL", "apply_failure_type": None,
+                       "apply_failure_detail": None, "evidence_path": ""}
+
+            apply_status         = res["status"]
+            apply_confirmation   = res.get("confirmation_text", "")[:1000]
+            apply_error          = res.get("error", "")[:500]
+            apply_failure_type   = res.get("apply_failure_type")
+            apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
+            evidence_path        = res.get("evidence_path", "")
+            resolved_url         = res.get("resolved_url", job_url)
+            notes                = f"Applied via Job Hunter — {apply_status}"
 
             c2 = database.get_db()
             if apply_status in ("submitted", "confirmed"):
@@ -1760,85 +1859,117 @@ def run_job_apply(user_id: int) -> int:
                     "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
                     "apply_failure_type=?, apply_failure_detail=?, "
+                    "apply_evidence_path=?, apply_resolved_url=?, "
                     "apply_attempts=COALESCE(apply_attempts,0)+1 "
                     "WHERE id=? AND user_id=?",
-                    (today, notes, apply_status, apply_confirmation,
-                     apply_error, apply_failure_type, apply_failure_detail, j["id"], user_id)
+                    (today, notes, apply_status, apply_confirmation, apply_error,
+                     apply_failure_type, apply_failure_detail,
+                     evidence_path, resolved_url, j["id"], user_id)
                 )
-            else:
-                # Failed — keep status='approved' so user can retry
-                c2.execute(
-                    "UPDATE jobs SET notes=?, "
-                    "apply_status=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                    "WHERE id=? AND user_id=?",
-                    (notes, apply_status, apply_error, apply_failure_type, apply_failure_detail, j["id"], user_id)
-                )
-            c2.commit()
-            c2.close()
+                c2.commit(); c2.close()
 
-            # Log with the real outcome — not always "job_applied"
-            if apply_status in ("confirmed", "submitted"):
-                _log_type = "job_applied"
-                _log_msg  = f"{j['title']} @ {j['company']} — {apply_status}"
+                # Increment daily counter
+                try:
+                    _uc = database.get_db()
+                    _uc.execute(
+                        "UPDATE user_profiles SET applications_sent_today = applications_sent_today + 1 "
+                        "WHERE user_id=?", (user_id,))
+                    _uc.commit(); _uc.close()
+                except Exception:
+                    pass
+
+                database.log_activity(user_id, "job_applied",
+                    f"{j['title']} @ {j['company']} — {apply_status}")
+                count += 1
+                (confirmed_list if apply_status == "confirmed" else submitted_list).append(j)
+
             elif apply_status == "manual_required":
-                _log_type = "manual_required"
-                _log_msg  = f"Manual apply needed: {j['title']} @ {j['company']}{(' — ' + apply_error) if apply_error else ''}"
-            else:
-                _log_type = "apply_failed"
-                _log_msg  = f"Auto-apply failed: {j['title']} @ {j['company']}{(' — ' + apply_error) if apply_error else ''}"
-            database.log_activity(user_id, _log_type, _log_msg)
-            count += 1
-            # Increment daily application counter
-            try:
-                _uc = database.get_db()
-                _uc.execute("UPDATE user_profiles SET applications_sent_today = applications_sent_today + 1 WHERE user_id=?", (user_id,))
-                _uc.commit()
-                _uc.close()
-            except Exception:
-                pass
-            if apply_status == "confirmed":
-                confirmed_list.append(j)
-            elif apply_status == "submitted":
-                submitted_list.append(j)
-            elif apply_status == "manual_required":
+                # CAPTCHA / login-wall / unresolvable — don't retry, go straight to manual
+                c2.execute(
+                    "UPDATE jobs SET apply_status='manual_required', apply_error=?, "
+                    "apply_failure_type=?, apply_failure_detail=?, "
+                    "apply_evidence_path=?, apply_resolved_url=?, "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "WHERE id=? AND user_id=?",
+                    (apply_error, apply_failure_type, apply_failure_detail,
+                     evidence_path, resolved_url, j["id"], user_id)
+                )
+                c2.commit(); c2.close()
+                database.log_activity(user_id, "manual_required",
+                    f"Manual needed: {j['title']} @ {j['company']} — {apply_error}")
+                count += 1
                 manual_list.append(j)
+                # Telegram handoff
+                _send_manual_alert(user_id, j, apply_error, apply_failure_type, resolved_url)
+
             else:
+                # Failed — schedule a retry if attempts remain
+                next_status = _RETRY_NEXT.get(cur_status)
+                if next_status:
+                    backoff    = _RETRY_BACKOFF[next_status]
+                    next_time  = (datetime.now(_tz.utc) + backoff).isoformat()
+                    c2.execute(
+                        "UPDATE jobs SET apply_status=?, apply_error=?, "
+                        "apply_failure_type=?, apply_failure_detail=?, "
+                        "apply_evidence_path=?, apply_resolved_url=?, "
+                        "apply_next_attempt_at=?, "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                        "WHERE id=? AND user_id=?",
+                        (next_status, apply_error, apply_failure_type, apply_failure_detail,
+                         evidence_path, resolved_url, next_time, j["id"], user_id)
+                    )
+                    database.log_activity(user_id, "apply_retry_scheduled",
+                        f"Retry {next_status}: {j['title']} @ {j['company']} in {backoff}")
+                else:
+                    # All 3 attempts exhausted — escalate to manual
+                    c2.execute(
+                        "UPDATE jobs SET apply_status='manual_required', apply_error=?, "
+                        "apply_failure_type=?, apply_failure_detail=?, "
+                        "apply_evidence_path=?, apply_resolved_url=?, "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                        "WHERE id=? AND user_id=?",
+                        (apply_error, apply_failure_type, apply_failure_detail,
+                         evidence_path, resolved_url, j["id"], user_id)
+                    )
+                    database.log_activity(user_id, "manual_required",
+                        f"3 attempts failed: {j['title']} @ {j['company']} — {apply_error}")
+                    _send_manual_alert(user_id, j, apply_error, apply_failure_type, resolved_url)
+                c2.commit(); c2.close()
+                count += 1
                 failed_list.append(j)
 
-        # ── Notifications ────────────────────────────────────────────────────────────────────────────────
-        # ── Single consolidated apply notification ──────────────────────────────
+        # ── Consolidated notification ─────────────────────────────────────────
         today_str = datetime.now().strftime("%Y-%m-%d")
         _actually_submitted = len(confirmed_list) + len(submitted_list)
-        notif_lines = [f"🚀 Apply Run Complete — {today_str}",
-                       f"📊 {_actually_submitted} submitted · {len(manual_list)} need manual · {len(failed_list)} failed\n"]
+        notif_lines = [
+            f"🚀 Apply Run Complete — {today_str}",
+            f"📊 {_actually_submitted} submitted · {len(manual_list)} need manual · {len(failed_list)} failed/retrying\n"
+        ]
         if confirmed_list:
             notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
-            for j in confirmed_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
+            for jj in confirmed_list[:5]:
+                notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
             if len(confirmed_list) > 5:
                 notif_lines.append(f"  … +{len(confirmed_list)-5} more")
         if submitted_list:
             notif_lines.append(f"\n📤 {len(submitted_list)} Submitted (awaiting confirmation):")
-            for j in submitted_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(submitted_list) > 5:
-                notif_lines.append(f"  … +{len(submitted_list)-5} more")
+            for jj in submitted_list[:5]:
+                notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
         if manual_list:
             notif_lines.append(f"\n👤 {len(manual_list)} Need Manual Apply:")
-            for j in manual_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(manual_list) > 5:
-                notif_lines.append(f"  … +{len(manual_list)-5} more")
+            for jj in manual_list[:3]:
+                notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
         if failed_list:
-            notif_lines.append(f"\n❌ {len(failed_list)} Failed:")
-            for j in failed_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(failed_list) > 5:
-                notif_lines.append(f"  … +{len(failed_list)-5} more")
-        deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#applied")
-        print(f"[run-apply] user {user_id}: {count} — confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed={len(failed_list)}")
+            notif_lines.append(f"\n🔄 {len(failed_list)} Scheduled for retry:")
+            for jj in failed_list[:3]:
+                notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
+
+        if _actually_submitted > 0 or manual_list:
+            deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#applied")
+
+        database.log_activity(user_id, "apply_run_completed",
+            f"Run done: {_actually_submitted} submitted, {len(manual_list)} manual, {len(failed_list)} retry")
+        print(f"[run-apply] user {user_id}: {count} — confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed/retry={len(failed_list)}")
         return {"applied": count, "error": ""}
 
     except Exception as e:
@@ -1846,111 +1977,15 @@ def run_job_apply(user_id: int) -> int:
         import traceback; traceback.print_exc()
         return {"applied": 0, "error": str(e)}
 
-
-# ── Immediate single-job apply (triggered on approval) ───────────────────────
+# ── _trigger_apply_bg removed — approval now only queues jobs ────────────────
+# The scheduler (run_job_apply) is the sole trigger.
+# Use POST /api/jobs/{id}/apply-now for immediate single-job apply.
 
 def _trigger_apply_bg(user_id: int, job_id: int):
-    """Fire-and-forget: apply to a single job in a background thread.
-    Called immediately when a user approves a job so they don't wait for the
-    scheduled batch window.
+    """Stub: kept for safety in case any stale code path still calls this.
+    Approval no longer auto-triggers apply — jobs are queued for the scheduler.
     """
-    def _run():
-        try:
-            import apply_engine
-            conn = database.get_db()
-            job  = conn.execute(
-                "SELECT id, title, company, url, apply_status FROM jobs "
-                "WHERE id=? AND user_id=?", (job_id, user_id)
-            ).fetchone()
-            if not job:
-                conn.close()
-                return
-            # Guard: already applied or currently in flight
-            if job["apply_status"] in ("applying", "confirmed", "submitted"):
-                conn.close()
-                return
-
-            # Mark as 'applying' so the UI shows a spinner
-            conn.execute(
-                "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
-                (job_id, user_id)
-            )
-            conn.commit()
-
-            user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-            profile = conn.execute(
-                "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
-            ).fetchone()
-            conn.close()
-
-            cv_text   = (profile["cv_summary"] or "") if profile else ""
-            email     = user["email"] if user else ""
-            applicant = apply_engine.extract_applicant_data(cv_text, email)
-            cv_path   = (profile["cv_path"] or None) if profile else None
-
-            res = apply_engine.submit_application(
-                job["url"], job["title"], job["company"],
-                applicant, cv_path, ANTHROPIC_KEY
-            )
-
-            apply_status         = res["status"]
-            apply_confirmation   = res.get("confirmation_text", "")[:1000]
-            apply_error          = res.get("error", "")[:500]
-            apply_failure_type   = res.get("apply_failure_type")
-            apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
-            resolved_url         = res.get("resolved_url", job["url"])
-            today                = datetime.now().strftime("%Y-%m-%d")
-
-            c2 = database.get_db()
-            if apply_status in ("submitted", "confirmed"):
-                c2.execute(
-                    "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                    "apply_status=?, apply_confirmation=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                    "WHERE id=? AND user_id=?",
-                    (today, f"Applied via Job Hunter — {apply_status}",
-                     apply_status, apply_confirmation, apply_error,
-                     apply_failure_type, apply_failure_detail, job_id, user_id)
-                )
-            else:
-                # Failed / manual_required — keep status='approved' so user can retry
-                c2.execute(
-                    "UPDATE jobs SET apply_status=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                    "WHERE id=? AND user_id=?",
-                    (apply_status, apply_error, apply_failure_type,
-                     apply_failure_detail, job_id, user_id)
-                )
-            c2.commit()
-            c2.close()
-
-            database.log_activity(
-                user_id, "job_applied",
-                f"{job['title']} @ {job['company']} — {apply_status}"
-                + (f" (via {resolved_url})" if resolved_url != job['url'] else "")
-            )
-            print(f"[apply-bg] job {job_id}: {apply_status}")
-
-        except Exception as e:
-            import traceback
-            print(f"[apply-bg] job {job_id} error: {e}")
-            traceback.print_exc()
-            # Make sure we don't leave the job stuck in 'applying'
-            try:
-                c3 = database.get_db()
-                c3.execute(
-                    "UPDATE jobs SET apply_status='failed', apply_error=? "
-                    "WHERE id=? AND user_id=? AND apply_status='applying'",
-                    (str(e)[:500], job_id, user_id)
-                )
-                c3.commit()
-                c3.close()
-            except Exception:
-                pass
-
-    threading.Thread(target=_run, daemon=True).start()
+    print(f"[apply-bg] _trigger_apply_bg called for job {job_id} — ignored (use scheduler or apply-now)")
 
 
 # ── Multipart parser ──────────────────────────────────────────────────────────
@@ -4210,8 +4245,9 @@ function actionBar(job) {
   if (job.status === 'approved') {
     const _ftLabels = {captcha:'🤖 Captcha',timeout:'⏱ Timeout',login_wall:'🔐 Login Wall',form_validation:'📋 Form Error',network_error:'🌐 Network Error',other:'❌ Other'};
     const failTypeBadge = job.apply_failure_type ? `<span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 mt-1">${_ftLabels[job.apply_failure_type] || job.apply_failure_type}</span>` : '';
-    const failInfo = job.apply_status === 'failed' ? `<div class="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-2">⚠️ Auto-apply failed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}. Apply manually or remove.</div>` : '';
-    const manualInfo = job.apply_status === 'manual_required' ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">👤 Manual apply needed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}.</div>` : '';
+    const isRetrying = job.apply_status && job.apply_status.startsWith('retry_');
+    const failInfo = (job.apply_status === 'failed' || isRetrying) ? `<div class="text-xs text-orange-600 bg-orange-50 rounded-lg px-3 py-2 mb-2">⚠️ Apply attempt failed — ${isRetrying ? 'retrying automatically' : 'retry pending'}${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}.</div>` : '';
+    const manualInfo = job.apply_status === 'manual_required' ? `<div class="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-2">👤 Manual apply needed${job.apply_error ? ': '+job.apply_error.substring(0,80) : ''}. <a href="/manual/${job.id}" class="underline font-medium">Review →</a></div>` : '';
     // While applying: show spinner, disable actions
     if (job.apply_status === 'applying') {
       return `
@@ -4228,7 +4264,9 @@ function actionBar(job) {
       ${failTypeBadge}
       <div class="space-y-2">
         <button onclick="markApplied(${job.id})" class="btn-touch w-full bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">Mark as Applied</button>
-        ${(job.apply_status === 'failed' || job.apply_status === 'manual_required') ? `<button onclick="applyNow(${job.id})" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">🔄 Retry Auto-Apply</button>` : ''}
+        ${(job.apply_status === 'failed' || job.apply_status === 'manual_required' || (job.apply_status && job.apply_status.startsWith('retry_'))) ? `<button onclick="applyNow(${job.id})" class="btn-touch w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl px-4 py-2.5">🔄 Apply Now</button>` : ''}
+        ${(job.apply_status === 'queued' || (job.apply_status && job.apply_status.startsWith('retry_'))) ? `<button onclick="cancelApply(${job.id})" class="btn-touch w-full bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-semibold rounded-xl px-4 py-2.5 mt-1">✖ Cancel Queue</button>` : ''}
+        ${job.apply_evidence_path ? `<a href="/api/jobs/${job.id}/evidence" target="_blank" class="block text-center text-xs text-blue-600 underline mt-1">📸 View evidence</a>` : ''}
         <button onclick="openPassModal(${job.id})" class="btn-touch w-full bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium rounded-xl px-4 py-2.5">Remove</button>
           ${_dashAdmin ? '<button onclick="openCoverLetter('+job.id+')" class="btn-touch w-full bg-purple-50 hover:bg-purple-100 text-purple-600 text-sm font-medium rounded-xl px-4 py-2.5 mt-1">\u270D\uFE0F Cover Letter</button>' : ''}
       </div>
@@ -4355,8 +4393,8 @@ function urlVerifiedBadge(job) {
   return '';
 }
 function applyStatusBadge(job) {
-  const map = {applying:'⏳ Applying…',confirmed:'✅ Confirmed',submitted:'📤 Submitted',manual_required:'👤 Manual needed',failed:'❌ Failed'};
-  const cls = {applying:'bg-blue-50 text-blue-600 border-blue-200 animate-pulse',confirmed:'bg-green-50 text-green-700 border-green-200',submitted:'bg-blue-50 text-blue-700 border-blue-200',manual_required:'bg-amber-50 text-amber-700 border-amber-200',failed:'bg-red-50 text-red-700 border-red-200'};
+  const map = {queued:'🕐 Queued',applying:'⏳ Applying…',confirmed:'✅ Confirmed',submitted:'📤 Submitted',manual_required:'👤 Manual needed',failed:'❌ Failed',retry_1:'🔄 Retry 1/3',retry_2:'🔄 Retry 2/3',retry_3:'🔄 Retry 3/3',cancelled:'🚫 Cancelled'};
+  const cls = {queued:'bg-slate-50 text-slate-500 border-slate-200',applying:'bg-blue-50 text-blue-600 border-blue-200 animate-pulse',confirmed:'bg-green-50 text-green-700 border-green-200',submitted:'bg-blue-50 text-blue-700 border-blue-200',manual_required:'bg-amber-50 text-amber-700 border-amber-200',failed:'bg-red-50 text-red-700 border-red-200',retry_1:'bg-orange-50 text-orange-600 border-orange-200',retry_2:'bg-orange-50 text-orange-600 border-orange-200',retry_3:'bg-orange-50 text-orange-600 border-orange-200',cancelled:'bg-slate-50 text-slate-400 border-slate-200'};
   if (!job.apply_status || !map[job.apply_status]) return '';
   return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${cls[job.apply_status]}">${map[job.apply_status]}</span>`;
 }
@@ -4476,6 +4514,13 @@ function retryApply(id) {
   applyNow(id);
 }
 
+async function cancelApply(id) {
+  if (!confirm('Cancel the queued apply for this job?')) return;
+  try {
+    await api('/api/jobs/'+id+'/cancel-apply', 'POST', {});
+    loadAll();
+  } catch(e) { alert('Cancel failed: ' + e.message); }
+}
 async function applyNow(id) {
   var card = document.getElementById('job-'+id);
   if (card) { card.style.opacity='.7'; card.style.pointerEvents='none'; }
@@ -5678,28 +5723,32 @@ class Handler(BaseHTTPRequestHandler):
                 if reason:
                     database.record_pass_reason_stat(conn, user_id, reason)
             elif action == "approve":
+                # Queue for the next scheduled apply window (decoupled from approval)
+                conn.execute(
+                    "UPDATE jobs SET apply_status='queued' WHERE id=? AND user_id=? AND apply_status IS NULL",
+                    (job_id, user_id)
+                )
                 database.log_activity(user_id, "job_approved",
-                    f"Approved {job['title']} at {job['company']}")
+                    f"Approved {job['title']} at {job['company']} — queued for apply")
 
             conn.commit()
             conn.close()
             database.write_approved_jobs(BASE_DIR)
             bump_onboarding(user_id, "first_job_reviewed")
 
-            # On approval: immediately kick off background application
-            if action == "approve":
-                _trigger_apply_bg(user_id, job_id)
+            # NOTE: _trigger_apply_bg removed — approval only queues jobs.
+            # The scheduler drains the queue at apply_hour. Use "Apply now" for immediate apply.
 
             self.send_json({"success": True})
             return
 
-        # ── Manual "Apply Now" trigger (also used by Retry) ─────────────────
+        # ── Manual "Apply Now" — single-job override, bypasses schedule ────────
         m = re.match(r"^/api/jobs/(\d+)/apply-now$", path)
         if m:
             job_id = int(m.group(1))
             conn   = database.get_db()
             job    = conn.execute(
-                "SELECT id, title, company, url, status, apply_status "
+                "SELECT id, title, company, url, status, apply_status, apply_attempts "
                 "FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
             ).fetchone()
             conn.close()
@@ -5709,8 +5758,121 @@ class Handler(BaseHTTPRequestHandler):
             if job["apply_status"] == "applying":
                 self.send_json({"error": "Already applying"}, 409)
                 return
-            _trigger_apply_bg(user_id, job_id)
+            if job["status"] not in ("approved",):
+                self.send_json({"error": "Job must be approved first"}, 400)
+                return
+
+            def _run_now():
+                try:
+                    import apply_engine
+                    attempt_num = (job["apply_attempts"] or 0) + 1
+                    c = database.get_db()
+                    c.execute(
+                        "UPDATE jobs SET apply_status='applying', apply_next_attempt_at=NULL "
+                        "WHERE id=? AND user_id=?", (job_id, user_id))
+                    c.commit()
+                    user_row    = c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                    profile_row = c.execute(
+                        "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
+                    ).fetchone()
+                    c.close()
+
+                    cv_text   = (profile_row["cv_summary"] or "") if profile_row else ""
+                    email     = user_row["email"] if user_row else ""
+                    applicant = apply_engine.extract_applicant_data(cv_text, email)
+                    cv_path   = (profile_row["cv_path"] or None) if profile_row else None
+
+                    res = apply_engine.submit_application(
+                        job["url"], job["title"], job["company"],
+                        applicant, cv_path, ANTHROPIC_KEY,
+                        user_id=user_id, job_id=job_id, attempt=attempt_num,
+                    )
+
+                    apply_status         = res["status"]
+                    apply_confirmation   = res.get("confirmation_text", "")[:1000]
+                    apply_error          = res.get("error", "")[:500]
+                    apply_failure_type   = res.get("apply_failure_type")
+                    apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
+                    evidence_path        = res.get("evidence_path", "")
+                    resolved_url         = res.get("resolved_url", job["url"])
+                    today                = datetime.now().strftime("%Y-%m-%d")
+
+                    c2 = database.get_db()
+                    if apply_status in ("submitted", "confirmed"):
+                        c2.execute(
+                            "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                            "apply_status=?, apply_confirmation=?, apply_error=?, "
+                            "apply_failure_type=?, apply_failure_detail=?, "
+                            "apply_evidence_path=?, apply_resolved_url=?, "
+                            "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                            "WHERE id=? AND user_id=?",
+                            (today, f"Applied via Job Hunter — {apply_status}",
+                             apply_status, apply_confirmation, apply_error,
+                             apply_failure_type, apply_failure_detail,
+                             evidence_path, resolved_url, job_id, user_id)
+                        )
+                    elif apply_status == "manual_required":
+                        c2.execute(
+                            "UPDATE jobs SET apply_status='manual_required', apply_error=?, "
+                            "apply_failure_type=?, apply_failure_detail=?, "
+                            "apply_evidence_path=?, apply_resolved_url=?, "
+                            "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                            "WHERE id=? AND user_id=?",
+                            (apply_error, apply_failure_type, apply_failure_detail,
+                             evidence_path, resolved_url, job_id, user_id)
+                        )
+                        _send_manual_alert(user_id, job, apply_error, apply_failure_type, resolved_url)
+                    else:
+                        # Failed — put back to queued so scheduler can retry
+                        c2.execute(
+                            "UPDATE jobs SET apply_status='queued', apply_error=?, "
+                            "apply_failure_type=?, apply_failure_detail=?, "
+                            "apply_evidence_path=?, apply_resolved_url=?, "
+                            "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                            "WHERE id=? AND user_id=?",
+                            (apply_error, apply_failure_type, apply_failure_detail,
+                             evidence_path, resolved_url, job_id, user_id)
+                        )
+                    c2.commit(); c2.close()
+                    database.log_activity(user_id, "job_applied",
+                        f"{job['title']} @ {job['company']} — {apply_status} (manual trigger)")
+                    print(f"[apply-now] job {job_id}: {apply_status}")
+                except Exception as e:
+                    import traceback; traceback.print_exc()
+                    try:
+                        c3 = database.get_db()
+                        c3.execute(
+                            "UPDATE jobs SET apply_status='queued', apply_error=? "
+                            "WHERE id=? AND user_id=? AND apply_status='applying'",
+                            (str(e)[:500], job_id, user_id))
+                        c3.commit(); c3.close()
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_run_now, daemon=True).start()
             self.send_json({"success": True, "message": "Application started"})
+            return
+
+        # ── Cancel queued apply ────────────────────────────────────────────────
+        m = re.match(r"^/api/jobs/(\d+)/cancel-apply$", path)
+        if m:
+            job_id = int(m.group(1))
+            conn   = database.get_db()
+            job    = conn.execute(
+                "SELECT id FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            if not job:
+                conn.close()
+                self.send_json({"error": "Not found"}, 404)
+                return
+            conn.execute(
+                "UPDATE jobs SET apply_status='cancelled', apply_next_attempt_at=NULL "
+                "WHERE id=? AND user_id=? AND apply_status NOT IN ('applying','submitted','confirmed')",
+                (job_id, user_id)
+            )
+            conn.commit(); conn.close()
+            database.log_activity(user_id, "apply_cancelled", f"Apply cancelled for job {job_id}")
+            self.send_json({"success": True})
             return
 
         # ── Check if job is still open (calls Claude + fetches URL) ──────────
@@ -5815,7 +5977,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     continue
                 conn.execute("UPDATE jobs SET status=? WHERE id=?", (new_status, job_id))
-                if action == "reject":
+                if action == "approve":
+                    # Queue for the scheduler (decoupled from approval)
+                    conn.execute(
+                        "UPDATE jobs SET apply_status='queued' WHERE id=? AND apply_status IS NULL",
+                        (job_id,)
+                    )
+                elif action == "reject":
                     conn.execute(
                         "INSERT INTO rejected_patterns (user_id,company,title,notes,created_date) VALUES (?,?,?,?,?)",
                         (user_id, job["company"], job["title"], "Bulk pass", datetime.now().isoformat())
