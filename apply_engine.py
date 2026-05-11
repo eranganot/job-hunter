@@ -23,6 +23,119 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
+# ── Evidence capture ─────────────────────────────────────────────────────────
+
+import pathlib
+
+def _evidence_dir(user_id, job_id, attempt) -> pathlib.Path:
+    """Return (and create) the directory for storing apply evidence."""
+    base = pathlib.Path(os.environ.get("EVIDENCE_BASE_DIR", "/data/evidence"))
+    d = base / str(user_id) / str(job_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+def _screenshot(page, user_id, job_id, attempt: int, label: str) -> str | None:
+    """Save a screenshot and return the file path, or None on error."""
+    try:
+        d = _evidence_dir(user_id, job_id, attempt)
+        path = d / f"{attempt}_{label}.png"
+        page.screenshot(path=str(path), full_page=False)
+        return str(path)
+    except Exception as e:
+        print(f"[apply-engine] screenshot failed ({label}): {e}")
+        return None
+
+def _dump_html(page, user_id, job_id, attempt: int, label: str) -> str | None:
+    """Save a full HTML dump and return the file path, or None on error."""
+    try:
+        d = _evidence_dir(user_id, job_id, attempt)
+        path = d / f"{attempt}_{label}.html"
+        path.write_text(page.content(), encoding="utf-8", errors="replace")
+        return str(path)
+    except Exception as e:
+        print(f"[apply-engine] html dump failed ({label}): {e}")
+        return None
+
+def _evidence_path_str(user_id, job_id, attempt: int) -> str:
+    """Return the evidence directory path as a string."""
+    try:
+        return str(_evidence_dir(user_id, job_id, attempt))
+    except Exception:
+        return ""
+
+
+# ── CAPTCHA / login-wall detection ────────────────────────────────────────────
+
+def _detect_blocker(page) -> tuple[str | None, str | None]:
+    """
+    Pre-submit check for hard blockers.
+    Returns (failure_type, detail) or (None, None) if clear.
+    failure_type: 'captcha' | 'login_wall' | None
+    """
+    try:
+        # CAPTCHA widgets
+        captcha_selectors = [
+            'iframe[src*="recaptcha"]',
+            'iframe[src*="hcaptcha"]',
+            'iframe[src*="challenges.cloudflare.com"]',
+            '#cf-challenge-running',
+            '#cf-error-details',
+            '[data-sitekey]',
+            '.g-recaptcha',
+            '.h-captcha',
+        ]
+        for sel in captcha_selectors:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    return 'captcha', f'Detected: {sel}'
+            except Exception:
+                continue
+
+        # Cloudflare JS challenge (no iframe, just page text)
+        try:
+            body_text = page.evaluate("document.body.innerText") or ""
+            lower = body_text.lower()
+            if any(p in lower for p in (
+                'verify you are human', 'checking your browser',
+                'enable javascript and cookies', 'cloudflare ray id',
+            )):
+                return 'captcha', 'Cloudflare challenge page detected'
+        except Exception:
+            pass
+
+        # Login wall — visible password field OR login-phrase in text
+        try:
+            pw_el = page.query_selector('input[type="password"]')
+            if pw_el and pw_el.is_visible():
+                return 'login_wall', 'Password field visible — login required'
+        except Exception:
+            pass
+
+        _login_phrases = [
+            'sign in to apply', 'log in to apply', 'login to apply',
+            'create an account to apply', 'register to apply',
+            'please log in', 'please sign in',
+            # Hebrew
+            'התחבר כדי להגיש', 'היכנס כדי להגיש',
+            # redirect clues
+            '/login', '/signin', '/sign-in', '/account/login',
+        ]
+        try:
+            page_url = page.url.lower()
+            page_text_lower = (page.evaluate("document.body.innerText") or "").lower()
+            for phrase in _login_phrases:
+                if phrase in page_text_lower or phrase in page_url:
+                    return 'login_wall', f'Login phrase detected: {phrase[:60]}'
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+
+    return None, None
+
+
 # ── ATS detection ─────────────────────────────────────────────────────────────
 
 def _is_greenhouse(url: str) -> bool:
@@ -177,6 +290,13 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
                 except Exception:
                     continue
 
+        # CAPTCHA / login-wall check before submitting
+        bt, bd = _detect_blocker(page)
+        if bt:
+            result.update(status="manual_required", apply_failure_type=bt,
+                          apply_failure_detail=bd, error=f"Greenhouse blocker: {bd}")
+            return result
+
         # Submit
         submitted = False
         for sel in ['button[type="submit"]', 'input[type="submit"]',
@@ -235,6 +355,13 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
                     break
                 except Exception:
                     continue
+
+        # CAPTCHA / login-wall check before submitting
+        bt, bd = _detect_blocker(page)
+        if bt:
+            result.update(status="manual_required", apply_failure_type=bt,
+                          apply_failure_detail=bd, error=f"Lever blocker: {bd}")
+            return result
 
         # Submit
         submitted = False
@@ -306,6 +433,13 @@ def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
             if any(p in lower for p in _BLOCKER_PHRASES):
                 result.update(status="manual_required",
                                error="Workday: login or account required")
+                return result
+
+            # ── CAPTCHA / login-wall check on each page ──────────────────
+            wbt, wbd = _detect_blocker(page)
+            if wbt:
+                result.update(status="manual_required", apply_failure_type=wbt,
+                              apply_failure_detail=wbd, error=f"Workday blocker: {wbd}")
                 return result
 
             # ── Fill fields on current page ───────────────────────────────
@@ -540,6 +674,10 @@ def submit_application(
     applicant: dict,
     cv_path: str | None,
     api_key: str = "",
+    *,
+    user_id: int = 0,
+    job_id: int = 0,
+    attempt: int = 1,
 ) -> dict:
     """
     Submit a job application using headless Chromium + Claude.
@@ -547,13 +685,17 @@ def submit_application(
     If job_url is from a job board (LinkedIn, Indeed, etc.), automatically
     searches for and navigates to the company's own career page instead.
 
+    Args:
+        user_id / job_id / attempt: used for evidence path (screenshots).
+
     Returns:
         {
             "success": bool,
             "status": "confirmed" | "submitted" | "failed" | "manual_required",
             "confirmation_text": str,
             "error": str,
-            "resolved_url": str,  # actual URL used (may differ from job_url)
+            "resolved_url": str,   # actual URL used (may differ from job_url)
+            "evidence_path": str,  # directory containing screenshots
         }
     """
     global ANTHROPIC_KEY
@@ -563,6 +705,7 @@ def submit_application(
     _base = {
         "success": False, "status": "failed", "confirmation_text": "", "error": "",
         "apply_failure_type": None, "apply_failure_detail": None, "resolved_url": job_url,
+        "evidence_path": _evidence_path_str(user_id, job_id, attempt),
     }
 
     if not PLAYWRIGHT_AVAILABLE:
@@ -611,32 +754,55 @@ def submit_application(
             page_text = page.evaluate("document.body.innerText") or ""
             lower = page_text.lower()
 
-            # 2. Check for login walls ─────────────────────────────────────────
-            if any(p in lower for p in _BLOCKER_PHRASES):
+            # 2. Check for CAPTCHA / login walls ───────────────────────────────
+            blocker_type, blocker_detail = _detect_blocker(page)
+            if blocker_type:
+                _screenshot(page, user_id, job_id, attempt, "blocker")
+                _dump_html(page, user_id, job_id, attempt, "blocker")
                 browser.close()
                 return {**_base, "status": "manual_required",
+                        "apply_failure_type": blocker_type,
+                        "apply_failure_detail": blocker_detail,
+                        "error": f"Blocked: {blocker_detail}"}
+
+            # Legacy phrase check (belt-and-suspenders)
+            if any(p in lower for p in _BLOCKER_PHRASES):
+                _screenshot(page, user_id, job_id, attempt, "login_wall")
+                browser.close()
+                return {**_base, "status": "manual_required",
+                        "apply_failure_type": "login_wall",
+                        "apply_failure_detail": "Login phrase matched in page text",
                         "error": "Login or account creation required to apply"}
 
             # 2b. ATS-specific fast path ──────────────────────────────────────
             if _is_greenhouse(actual_url):
                 print(f"[apply-engine] Detected Greenhouse ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
                 res = _apply_greenhouse(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
                 browser.close()
                 res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
                 return _add_failure_type(res)
 
             if _is_lever(actual_url):
                 print(f"[apply-engine] Detected Lever ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
                 res = _apply_lever(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
                 browser.close()
                 res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
                 return _add_failure_type(res)
 
             if _is_workday(actual_url):
                 print(f"[apply-engine] Detected Workday ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
                 res = _apply_workday(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
                 browser.close()
                 res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
                 return _add_failure_type(res)
 
             # 3. Click Apply button if no form visible yet ─────────────────────
@@ -702,6 +868,18 @@ def submit_application(
                         "error": "No form interactions generated"}
 
             # 5. Execute interactions ──────────────────────────────────────────
+            # Re-check for blockers now that page may have changed after Apply button click
+            blocker_type2, blocker_detail2 = _detect_blocker(page)
+            if blocker_type2:
+                _screenshot(page, user_id, job_id, attempt, "pre_submit_blocker")
+                browser.close()
+                return {**_base, "status": "manual_required",
+                        "apply_failure_type": blocker_type2,
+                        "apply_failure_detail": blocker_detail2,
+                        "error": f"Blocked before submit: {blocker_detail2}"}
+
+            _screenshot(page, user_id, job_id, attempt, "pre_submit")
+
             submitted = False
             for instr in instructions:
                 action = instr.get("action", "")
@@ -753,6 +931,7 @@ def submit_application(
 
             result_text = page.evaluate("document.body.innerText") or ""
             result_url  = page.url
+            _screenshot(page, user_id, job_id, attempt, "post_submit")
 
             # 7. Verify confirmation ───────────────────────────────────────────
             phrase_ok = any(p in result_text.lower() for p in _CONFIRMATION_PHRASES)
@@ -777,11 +956,19 @@ def submit_application(
                 "confirmation_text": msg,
                 "error": "",
                 "resolved_url": actual_url,
+                "evidence_path": _evidence_path_str(user_id, job_id, attempt),
             }
 
     except Exception as e:
         err = str(e)
         ft, fd = _classify_failure(err)
         status = "manual_required" if ft in ("captcha", "login_wall") else "failed"
+        # Try to capture a screenshot if the browser/page is still accessible
+        try:
+            _screenshot(page, user_id, job_id, attempt, "error")
+            _dump_html(page, user_id, job_id, attempt, "error")
+        except Exception:
+            pass
         return {**_base, "status": status, "error": err,
-                "apply_failure_type": ft, "apply_failure_detail": fd}
+                "apply_failure_type": ft, "apply_failure_detail": fd,
+                "evidence_path": _evidence_path_str(user_id, job_id, attempt)}
