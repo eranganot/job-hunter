@@ -169,80 +169,202 @@ def _is_job_board(url: str) -> bool:
 
 # ── Company career page resolver ──────────────────────────────────────────────
 
-def _find_company_apply_url(company: str, job_title: str) -> str | None:
-    """Search for the company's direct job listing URL (bypassing job boards).
+# ── Known ATS domains (shared across resolver tiers) ─────────────────────────
+_ATS_DOMAINS = [
+    'greenhouse.io', 'lever.co', 'myworkdayjobs.com', 'myworkday.com',
+    'ashbyhq.com', 'bamboohr.com', 'smartrecruiters.com',
+    'icims.com', 'taleo.net', 'successfactors.com', 'jobvite.com',
+    'comeet.com', 'comeet.co',
+]
 
-    Strategy:
-      1. Google-search for the role on the company's own ATS
-      2. Prefer Greenhouse / Lever / Workday / Ashby links
-      3. Fall back to any career-looking URL that isn't a job board
-    """
-    if not PLAYWRIGHT_AVAILABLE:
-        return None
-    # Build a targeted search query
-    query = (
-        f'"{company}" "{job_title}" apply '
-        f'site:greenhouse.io OR site:lever.co OR site:workday.com '
-        f'OR site:ashbyhq.com OR site:bamboohr.com OR site:smartrecruiters.com'
-    )
-    search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}&num=8&hl=en"
+def _is_ats_url(url: str) -> bool:
+    return any(d in url for d in _ATS_DOMAINS)
 
+def _verify_url(url: str, timeout: int = 6) -> bool:
+    """HEAD/GET check that a URL is reachable."""
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox",
-                      "--disable-dev-shm-usage", "--disable-gpu"],
-            )
-            ctx = browser.new_context(user_agent=_UA)
-            page = ctx.new_page()
-            page.set_default_timeout(15_000)
+        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status < 400
+    except urllib.error.HTTPError as e:
+        return e.code < 400
+    except Exception:
+        return False
 
-            try:
-                page.goto(search_url, wait_until="domcontentloaded", timeout=20_000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=5_000)
-                except PWTimeout:
-                    pass
-            except Exception as e:
-                print(f"[apply-engine] career search navigate error: {e}")
-                browser.close()
-                return None
+def _extract_ats_links(html: str) -> list[str]:
+    """Pull all href links from raw HTML that look like ATS or career URLs."""
+    links = re.findall(r'href=["\']?(https?://[^\s"\'<>]+)', html)
+    good = []
+    for link in links:
+        if any(d in link for d in _ATS_DOMAINS):
+            good.append(link)
+    return good
 
-            # Extract all result links, excluding Google's own pages
-            links: list[str] = page.evaluate("""
-                () => Array.from(document.querySelectorAll('a[href]'))
-                    .map(a => a.href)
-                    .filter(h => h.startsWith('http') && !h.includes('google.com')
-                              && !h.includes('youtube.com') && !h.includes('wikipedia.org'))
-                    .slice(0, 20)
-            """)
-            browser.close()
+# ── Tier 2: DuckDuckGo HTML search ───────────────────────────────────────────
 
-            # Tier 1: known ATS domains — highest confidence
-            _ATS_DOMAINS = [
-                'greenhouse.io', 'lever.co', 'workday.com',
-                'ashbyhq.com', 'bamboohr.com', 'smartrecruiters.com',
-                'icims.com', 'taleo.net', 'successfactors.com', 'jobvite.com',
-            ]
-            for link in links:
-                if any(d in link for d in _ATS_DOMAINS):
-                    print(f"[apply-engine] Found ATS URL: {link}")
+def _ddg_search(company: str, job_title: str) -> str | None:
+    """Search DuckDuckGo HTML endpoint (no JS, much less CAPTCHA than Google)."""
+    query = f'"{company}" "{job_title}" site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:bamboohr.com OR site:smartrecruiters.com OR site:workday.com'
+    url   = f"https://duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": _UA,
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=12) as r:
+            html = r.read().decode("utf-8", errors="replace")
+        links = re.findall(r'href=["\']?(https?://[^\s"\'<>]+)', html)
+        for link in links:
+            if _is_ats_url(link) and not _is_job_board(link):
+                print(f"[resolver] DDG found: {link}")
+                return link
+        # Broader fallback: any career URL
+        for link in links:
+            if any(kw in link.lower() for kw in ["career", "job", "apply"]):
+                if not _is_job_board(link):
                     return link
-
-            # Tier 2: any careers/jobs URL that isn't a job board
-            for link in links:
-                if any(kw in link.lower() for kw in ['career', 'job', 'position', 'apply', '/work']):
-                    if not _is_job_board(link):
-                        print(f"[apply-engine] Found career URL: {link}")
-                        return link
-
-            print(f"[apply-engine] No direct career URL found for {company} / {job_title}")
-            return None
-
     except Exception as e:
-        print(f"[apply-engine] _find_company_apply_url error: {e}")
+        print(f"[resolver] DDG error: {e}")
+    return None
+
+# ── Tier 3: Gemini grounding ──────────────────────────────────────────────────
+
+def _gemini_resolve(company: str, job_title: str, api_key: str = "") -> str | None:
+    """Ask Gemini (with Google Search grounding) for the direct apply URL."""
+    key = api_key or os.environ.get("GEMINI_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+    if not key:
         return None
+    payload = json.dumps({
+        "contents": [{"parts": [{"text":
+            f'What is the direct ATS application URL for the "{job_title}" role at "{company}"? '
+            f'Return ONLY a single URL (starting with https://) for an ATS like Greenhouse, Lever, Workday, Ashby, or the company careers page. No explanation.'
+        }]}],
+        "tools": [{"google_search": {}}],
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read())
+        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        # Extract first URL from the response
+        m = re.search(r'https?://[^\s"\'<>]+', text)
+        if m:
+            url = m.group(0).rstrip(".")
+            if _verify_url(url):
+                print(f"[resolver] Gemini found: {url}")
+                return url
+    except Exception as e:
+        print(f"[resolver] Gemini error: {e}")
+    return None
+
+# ── Tier 4: Company homepage scrape ──────────────────────────────────────────
+
+def _homepage_scrape(company: str, job_title: str) -> str | None:
+    """Try common career page patterns on the company's own domain."""
+    slug = re.sub(r'[^a-z0-9]+', '-', company.lower()).strip('-')
+    candidates = [
+        f"https://{slug}.com/careers",
+        f"https://{slug}.com/jobs",
+        f"https://{slug}.io/careers",
+        f"https://careers.{slug}.com",
+        f"https://jobs.{slug}.com",
+    ]
+    for base_url in candidates:
+        try:
+            req = urllib.request.Request(base_url, headers={"User-Agent": _UA})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                if r.status >= 400:
+                    continue
+                html = r.read().decode("utf-8", errors="replace")
+            # Look for a link matching the job title
+            title_slug = re.sub(r'[^a-z0-9]+', '.', job_title.lower())
+            pattern    = re.compile(title_slug[:20], re.IGNORECASE)
+            links      = re.findall(r'href=["\']?(https?://[^\s"\'<>]+|/[^\s"\'<>]*)', html)
+            for link in links:
+                if pattern.search(link):
+                    full = link if link.startswith("http") else base_url.rstrip("/careers/jobs") + link
+                    print(f"[resolver] Homepage scrape found: {full}")
+                    return full
+            # If we found the careers page itself, return it as fallback
+            print(f"[resolver] Homepage careers page: {base_url}")
+            return base_url
+        except Exception:
+            continue
+    return None
+
+# ── Cache helpers ─────────────────────────────────────────────────────────────
+
+def _cache_get(company: str, job_title: str) -> str | None:
+    """Return cached resolved URL if < 7 days old, else None."""
+    try:
+        import sqlite3 as _sq
+        db_path = os.environ.get("DB_PATH") or "/data/jobs.db"
+        conn = _sq.connect(db_path)
+        conn.row_factory = _sq.Row
+        from datetime import timedelta as _td2
+        cutoff = (datetime.now() - _td2(days=7)).isoformat()
+        row = conn.execute(
+            "SELECT resolved_url FROM career_url_cache WHERE company=? AND job_title=? AND created_date>=?",
+            (company, job_title, cutoff)
+        ).fetchone()
+        conn.close()
+        return row["resolved_url"] if row else None
+    except Exception:
+        return None
+
+def _cache_set(company: str, job_title: str, url: str):
+    """Upsert a resolved URL into the cache."""
+    try:
+        import sqlite3 as _sq
+        db_path = os.environ.get("DB_PATH") or "/data/jobs.db"
+        conn = _sq.connect(db_path)
+        conn.execute(
+            "INSERT OR REPLACE INTO career_url_cache (company, job_title, resolved_url, created_date) VALUES (?,?,?,?)",
+            (company, job_title, url, datetime.now().isoformat())
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+# ── Master resolver ───────────────────────────────────────────────────────────
+
+def _find_company_apply_url(company: str, job_title: str) -> str | None:
+    """
+    4-tier career page resolver (replaces Google-only scrape):
+      Tier 0 — 7-day DB cache
+      Tier 1 — Direct ATS URL check (if the job URL already IS an ATS URL, caller skips this)
+      Tier 2 — DuckDuckGo HTML search (far less CAPTCHA than Google)
+      Tier 3 — Gemini Google Search grounding
+      Tier 4 — Company homepage scrape
+    """
+    # Tier 0: cache
+    cached = _cache_get(company, job_title)
+    if cached:
+        print(f"[resolver] Cache hit: {cached}")
+        return cached
+
+    result = None
+
+    # Tier 2: DuckDuckGo
+    result = _ddg_search(company, job_title)
+
+    # Tier 3: Gemini (if DDG failed)
+    if not result:
+        result = _gemini_resolve(company, job_title)
+
+    # Tier 4: Homepage scrape (last resort)
+    if not result:
+        result = _homepage_scrape(company, job_title)
+
+    if result:
+        _cache_set(company, job_title, result)
+
+    return result
 
 # ── ATS-specific form handlers ────────────────────────────────────────────────
 

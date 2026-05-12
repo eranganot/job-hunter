@@ -1812,9 +1812,22 @@ def run_job_apply(user_id: int) -> dict:
 
         cv_text   = (profile["cv_summary"] or "") if profile else ""
         email     = user["email"] if user else ""
-        applicant = apply_engine.extract_applicant_data(cv_text, email)
         cv_path   = (profile["cv_path"] or None) if profile else None
         today     = datetime.now().strftime("%Y-%m-%d")
+        # Prefer canonical application_answers; fall back to CV extraction
+        _ap_conn = database.get_db()
+        _ap_row  = _ap_conn.execute(
+            "SELECT * FROM application_answers WHERE user_id=?", (user_id,)
+        ).fetchone()
+        _ap_conn.close()
+        if _ap_row and (_ap_row["first_name"] or _ap_row["email"]):
+            applicant = dict(_ap_row)
+            applicant.setdefault("email", email)
+            # Ensure compatibility keys
+            applicant["full_name"] = f"{applicant.get('first_name','')} {applicant.get('last_name','')}".strip()
+            applicant["location"]  = ", ".join(filter(None, [applicant.get("city"), applicant.get("country")]))
+        else:
+            applicant = apply_engine.extract_applicant_data(cv_text, email)
 
         count = 0
         confirmed_list, submitted_list, manual_list, failed_list = [], [], [], []
@@ -3050,6 +3063,59 @@ SETTINGS_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Application Profile panel -->
+  <div class="panel bg-white rounded-2xl p-6 shadow-sm border border-slate-100" id="panel-app-profile">
+    <h3 class="font-bold text-slate-900 mb-1">Application Profile</h3>
+    <p class="text-sm text-slate-500 mb-5">These fields are used to auto-fill job application forms. Pre-fill from your CV or edit directly.</p>
+    <button onclick="prefillProfileFromCV()" id="ap-prefill-btn" class="btn btn-secondary text-sm mb-5">✨ Pre-fill from CV</button>
+
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">First name</label><input class="input" id="ap-first-name" placeholder="Eran"/></div>
+        <div><label class="label">Last name</label><input class="input" id="ap-last-name" placeholder="Ganot"/></div>
+      </div>
+      <div><label class="label">Phone (with country code)</label><input class="input" id="ap-phone" placeholder="+972-54-000-0000"/></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">City</label><input class="input" id="ap-city" placeholder="Tel Aviv"/></div>
+        <div><label class="label">Country</label><input class="input" id="ap-country" placeholder="Israel"/></div>
+      </div>
+      <div><label class="label">LinkedIn URL</label><input class="input" id="ap-linkedin" placeholder="https://linkedin.com/in/yourname"/></div>
+      <div><label class="label">GitHub URL</label><input class="input" id="ap-github" placeholder="https://github.com/yourname"/></div>
+      <div><label class="label">Portfolio URL</label><input class="input" id="ap-portfolio" placeholder="https://yoursite.com"/></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">Current title</label><input class="input" id="ap-current-title" placeholder="Senior Product Manager"/></div>
+        <div><label class="label">Current company</label><input class="input" id="ap-current-company" placeholder="Acme Corp"/></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">Years experience</label><input class="input" type="number" id="ap-years-exp" placeholder="8"/></div>
+        <div><label class="label">Notice period (days)</label><input class="input" type="number" id="ap-notice-period" placeholder="30"/></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">Salary expectation (USD)</label><input class="input" type="number" id="ap-salary-min" placeholder="180000"/></div>
+        <div><label class="label">Currency</label>
+          <select class="input" id="ap-salary-currency">
+            <option>USD</option><option>ILS</option><option>EUR</option><option>GBP</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="label">Work authorization</label>
+        <div class="flex gap-4 mt-1">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ap-auth-il" class="accent-blue-600"/> Israel</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ap-auth-us" class="accent-blue-600"/> USA</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ap-auth-eu" class="accent-blue-600"/> EU</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ap-visa" class="accent-amber-600"/> Needs visa sponsorship</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="ap-relocate" class="accent-green-600"/> Willing to relocate</label>
+        </div>
+      </div>
+      <div><label class="label">Default cover letter / intro paragraph</label>
+        <textarea class="input" id="ap-cover-letter" rows="4" placeholder="I am excited to apply for this role because…"></textarea>
+      </div>
+    </div>
+    <button onclick="saveAppProfile()" class="btn btn-primary mt-6">Save application profile</button>
+    <span id="ap-save-status" class="text-sm text-green-600 ml-3 hidden">✅ Saved!</span>
+  </div>
+
   <!-- Job Preferences panel -->
   <div class="panel bg-white rounded-2xl p-6 shadow-sm border border-slate-100" id="panel-preferences">
     <h3 class="font-bold text-slate-900 mb-4">Job Search Preferences</h3>
@@ -3284,6 +3350,33 @@ async function loadUser() {
   if (userData.whatsapp_number)    document.getElementById('sn-wa-number').value = userData.whatsapp_number;
   if (userData.email_address) document.getElementById('sn-email-addr').value = userData.email_address;
 
+  // Application Profile — load from API
+  fetch('/api/application-profile').then(r=>r.json()).then(ap=>{
+    if (!ap) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el && v !== null && v !== undefined) el.value = v; };
+    const chk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    set('ap-first-name',       ap.first_name);
+    set('ap-last-name',        ap.last_name);
+    set('ap-phone',            ap.phone);
+    set('ap-city',             ap.city);
+    set('ap-country',          ap.country);
+    set('ap-linkedin',         ap.linkedin_url);
+    set('ap-github',           ap.github_url);
+    set('ap-portfolio',        ap.portfolio_url);
+    set('ap-current-title',    ap.current_title);
+    set('ap-current-company',  ap.current_company);
+    set('ap-years-exp',        ap.years_experience);
+    set('ap-notice-period',    ap.notice_period_days);
+    set('ap-salary-min',       ap.salary_expectation_min);
+    set('ap-salary-currency',  ap.salary_expectation_currency || 'USD');
+    set('ap-cover-letter',     ap.cover_letter_default);
+    chk('ap-auth-il',   ap.work_auth_il);
+    chk('ap-auth-us',   ap.work_auth_us);
+    chk('ap-auth-eu',   ap.work_auth_eu);
+    chk('ap-visa',      ap.visa_required);
+    chk('ap-relocate',  ap.willing_to_relocate);
+  }).catch(()=>{});
+
   // CV
   if (userData.cv_path) {
     document.getElementById('cv-current').textContent = '✅ CV on file — upload a new PDF to replace it.';
@@ -3436,6 +3529,53 @@ async function saveProfile() {
       phone: document.getElementById('s-phone').value,
       linkedin_url: document.getElementById('s-linkedin').value})});
   showToast();
+}
+
+async function saveAppProfile() {
+  const g = id => (document.getElementById(id) || {}).value || null;
+  const c = id => document.getElementById(id) ? (document.getElementById(id).checked ? 1 : 0) : null;
+  const body = {
+    first_name: g('ap-first-name'), last_name: g('ap-last-name'),
+    phone: g('ap-phone'), city: g('ap-city'), country: g('ap-country'),
+    linkedin_url: g('ap-linkedin'), github_url: g('ap-github'), portfolio_url: g('ap-portfolio'),
+    current_title: g('ap-current-title'), current_company: g('ap-current-company'),
+    years_experience: parseInt(g('ap-years-exp')||'0')||null,
+    notice_period_days: parseInt(g('ap-notice-period')||'0')||null,
+    salary_expectation_min: parseInt(g('ap-salary-min')||'0')||null,
+    salary_expectation_currency: g('ap-salary-currency') || 'USD',
+    cover_letter_default: g('ap-cover-letter'),
+    work_auth_il: c('ap-auth-il'), work_auth_us: c('ap-auth-us'), work_auth_eu: c('ap-auth-eu'),
+    visa_required: c('ap-visa'), willing_to_relocate: c('ap-relocate'),
+  };
+  await fetch('/api/application-profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const st = document.getElementById('ap-save-status');
+  st.classList.remove('hidden'); setTimeout(()=>st.classList.add('hidden'), 2500);
+}
+
+async function prefillProfileFromCV() {
+  const btn = document.getElementById('ap-prefill-btn');
+  btn.disabled = true; btn.textContent = '⏳ Extracting from CV…';
+  try {
+    const r = await fetch('/api/application-profile/prefill', {method:'POST'});
+    const data = await r.json();
+    if (data.success) {
+      // Reload the form fields
+      await fetch('/api/application-profile').then(r=>r.json()).then(ap=>{
+        if (!ap) return;
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+        set('ap-first-name', ap.first_name); set('ap-last-name', ap.last_name);
+        set('ap-phone', ap.phone); set('ap-city', ap.city); set('ap-country', ap.country);
+        set('ap-linkedin', ap.linkedin_url); set('ap-github', ap.github_url);
+        set('ap-current-title', ap.current_title); set('ap-current-company', ap.current_company);
+        set('ap-years-exp', ap.years_experience);
+        set('ap-cover-letter', ap.cover_letter_default);
+      });
+      btn.textContent = '✅ Pre-filled! Review and save.';
+    } else {
+      btn.textContent = '⚠️ ' + (data.error || 'Could not extract — upload CV first');
+    }
+  } catch(e) { btn.textContent = '⚠️ Error: ' + e.message; }
+  setTimeout(()=>{ btn.disabled=false; btn.textContent='✨ Pre-fill from CV'; }, 3000);
 }
 
 async function savePreferences() {
@@ -5522,6 +5662,116 @@ class Handler(BaseHTTPRequestHandler):
             bump_onboarding(user_id, "search_configured")
             return
 
+        # ── GET application profile ──────────────────────────────────────────
+        if path == "/api/application-profile" and self.command == "GET":
+            conn = database.get_db()
+            row  = conn.execute(
+                "SELECT * FROM application_answers WHERE user_id=?", (user_id,)
+            ).fetchone()
+            conn.close()
+            self.send_json(dict(row) if row else {})
+            return
+
+        # ── POST application profile ─────────────────────────────────────────
+        if path == "/api/application-profile" and self.command == "POST":
+            data   = self.read_json()
+            fields = [
+                "first_name","last_name","preferred_name",
+                "phone_country_code","phone","email",
+                "city","state_region","country","postal_code","address_line",
+                "work_auth_il","work_auth_us","work_auth_eu",
+                "visa_required","willing_to_relocate",
+                "current_title","current_company","years_experience",
+                "salary_expectation_min","salary_expectation_currency",
+                "notice_period_days","available_start_date",
+                "linkedin_url","github_url","portfolio_url","twitter_url",
+                "eeo_race","eeo_gender","eeo_veteran","eeo_disability",
+                "how_heard","cover_letter_default","why_company_default",
+            ]
+            cols = [f for f in fields if f in data]
+            if not cols:
+                self.send_json({"success": True})
+                return
+            conn = database.get_db()
+            existing = conn.execute(
+                "SELECT user_id FROM application_answers WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if existing:
+                set_clause = ", ".join(f"{c}=?" for c in cols)
+                vals       = [data[c] for c in cols] + [datetime.now().isoformat(), user_id]
+                conn.execute(
+                    f"UPDATE application_answers SET {set_clause}, updated_date=? WHERE user_id=?",
+                    vals
+                )
+            else:
+                all_cols = cols + ["user_id", "updated_date"]
+                placeholders = ", ".join("?" for _ in all_cols)
+                vals = [data[c] for c in cols] + [user_id, datetime.now().isoformat()]
+                conn.execute(
+                    f"INSERT INTO application_answers ({', '.join(all_cols)}) VALUES ({placeholders})",
+                    vals
+                )
+            conn.commit()
+            conn.close()
+            database.log_activity(user_id, "profile_updated", "Application profile saved")
+            self.send_json({"success": True})
+            return
+
+        # ── POST /api/application-profile/prefill (from CV) ──────────────────
+        if path == "/api/application-profile/prefill":
+            import apply_engine as _ae
+            conn    = database.get_db()
+            profile = conn.execute(
+                "SELECT cv_summary FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            conn.close()
+            cv_text = (profile["cv_summary"] or "") if profile else ""
+            if not cv_text:
+                self.send_json({"success": False, "error": "No CV on file — upload one first"})
+                return
+            try:
+                extracted = _ae.extract_applicant_data(cv_text, user["email"])
+                # Map extracted fields into application_answers columns
+                mapping = {
+                    "first_name":       extracted.get("first_name", ""),
+                    "last_name":        extracted.get("last_name", ""),
+                    "phone":            extracted.get("phone", ""),
+                    "city":             (extracted.get("location") or "").split(",")[0].strip(),
+                    "country":          (extracted.get("location") or "").split(",")[-1].strip(),
+                    "linkedin_url":     extracted.get("linkedin_url", ""),
+                    "current_title":    extracted.get("current_title", ""),
+                    "current_company":  extracted.get("current_company", ""),
+                    "years_experience": extracted.get("years_experience") or 0,
+                    "email":            user["email"],
+                }
+                conn2 = database.get_db()
+                existing = conn2.execute(
+                    "SELECT user_id FROM application_answers WHERE user_id=?", (user_id,)
+                ).fetchone()
+                cols = list(mapping.keys())
+                if existing:
+                    set_clause = ", ".join(f"{c}=?" for c in cols)
+                    vals = list(mapping.values()) + [datetime.now().isoformat(), user_id]
+                    conn2.execute(
+                        f"UPDATE application_answers SET {set_clause}, updated_date=? WHERE user_id=?",
+                        vals
+                    )
+                else:
+                    all_cols = cols + ["user_id", "updated_date"]
+                    placeholders = ", ".join("?" for _ in all_cols)
+                    vals = list(mapping.values()) + [user_id, datetime.now().isoformat()]
+                    conn2.execute(
+                        f"INSERT INTO application_answers ({', '.join(all_cols)}) VALUES ({placeholders})",
+                        vals
+                    )
+                conn2.commit()
+                conn2.close()
+                database.log_activity(user_id, "profile_updated", "Application profile pre-filled from CV")
+                self.send_json({"success": True, "extracted": mapping})
+            except Exception as e:
+                self.send_json({"success": False, "error": str(e)})
+            return
+
         # ── Save notifications ──
         if path == "/api/save-notifications":
             data = self.read_json()
@@ -5779,8 +6029,19 @@ class Handler(BaseHTTPRequestHandler):
 
                     cv_text   = (profile_row["cv_summary"] or "") if profile_row else ""
                     email     = user_row["email"] if user_row else ""
-                    applicant = apply_engine.extract_applicant_data(cv_text, email)
                     cv_path   = (profile_row["cv_path"] or None) if profile_row else None
+                    _ap2_conn = database.get_db()
+                    _ap2_row  = _ap2_conn.execute(
+                        "SELECT * FROM application_answers WHERE user_id=?", (user_id,)
+                    ).fetchone()
+                    _ap2_conn.close()
+                    if _ap2_row and (_ap2_row["first_name"] or _ap2_row["email"]):
+                        applicant = dict(_ap2_row)
+                        applicant.setdefault("email", email)
+                        applicant["full_name"] = f"{applicant.get('first_name','')} {applicant.get('last_name','')}".strip()
+                        applicant["location"]  = ", ".join(filter(None, [applicant.get("city"), applicant.get("country")]))
+                    else:
+                        applicant = apply_engine.extract_applicant_data(cv_text, email)
 
                     res = apply_engine.submit_application(
                         job["url"], job["title"], job["company"],
