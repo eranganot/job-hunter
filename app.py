@@ -3080,19 +3080,19 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <div class="space-y-4">
       <div>
         <label class="label">Full name</label>
-        <input class="input" type="text" id="s-name" placeholder="Your name"/>
+        <input class="input" type="text" id="s-name" name="full-name" autocomplete="name" placeholder="Your name"/>
       </div>
       <div>
         <label class="label">Email <span class="text-slate-400 font-normal">(cannot change)</span></label>
-        <input class="input bg-slate-50 cursor-not-allowed" type="email" id="s-email" readonly/>
+        <input class="input bg-slate-50 cursor-not-allowed" type="email" id="s-email" name="email" autocomplete="email" readonly/>
       </div>
       <div>
         <label class="label">Phone</label>
-        <input class="input" type="tel" id="s-phone" placeholder="+972-54-000-0000"/>
+        <input class="input" type="tel" id="s-phone" name="phone" autocomplete="tel" placeholder="+972-54-000-0000"/>
       </div>
       <div>
         <label class="label">LinkedIn URL</label>
-        <input class="input" type="url" id="s-linkedin" placeholder="https://linkedin.com/in/yourname"/>
+        <input class="input" type="url" id="s-linkedin" name="linkedin" autocomplete="off" placeholder="https://linkedin.com/in/yourname"/>
       </div>
     </div>
     <button onclick="saveProfile()" class="btn btn-primary mt-6">Save changes</button>
@@ -3446,7 +3446,7 @@ async function loadUser() {
 
   // CV — show filename in both Profile and Apply Profile tabs
   if (userData.cv_path) {
-    const cvFilename = userData.cv_path.split('/').pop().split('\\').pop() || 'cv.pdf';
+    const cvFilename = userData.cv_path.split('/').pop().split('\\\\').pop() || 'cv.pdf';
     document.getElementById('cv-current').textContent = '✅ CV on file: ' + cvFilename;
     document.getElementById('cv-analyze-btn').classList.remove('hidden');
     const apFn = document.getElementById('ap-cv-filename');
@@ -5758,9 +5758,11 @@ async function mark(status) {{
                 self.send_html(html)
                 return
             token = auth.create_session(user["id"])
+            # Re-read via session JOIN so user_profiles.onboarding_complete is available
+            session_user = auth.get_session_user(token) or {}
+            dest = "/dashboard" if session_user.get("onboarding_complete") else "/onboarding"
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
-            dest = "/dashboard" if user.get("onboarding_complete") else "/onboarding"
             self.send_header("Location", dest)
             self.end_headers()
             return
