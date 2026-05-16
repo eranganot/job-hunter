@@ -5596,12 +5596,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json([dict(r) for r in rows])
             return
 
-        self.send_response(404)
-        self.end_headers()
-
-    # ── POST ──────────────────────────────────────────────────────────────────
-
-
         # ── Manual handoff page ───────────────────────────────────────────────────
         m_manual = re.match(r'^/manual/(\d+)$', path)
         if m_manual:
@@ -5731,6 +5725,10 @@ async function mark(status) {{
             conn.close()
             self.send_json(dict(row) if row else {})
             return
+
+        self.send_response(404)
+        self.end_headers()
+    # ── POST ──────────────────────────────────────────────────────────────────
 
     def do_POST(self):
         try:
@@ -5932,18 +5930,8 @@ async function mark(status) {{
             bump_onboarding(user_id, "search_configured")
             return
 
-        # ── GET application profile ──────────────────────────────────────────
-        if path == "/api/application-profile" and self.command == "GET":
-            conn = database.get_db()
-            row  = conn.execute(
-                "SELECT * FROM application_answers WHERE user_id=?", (user_id,)
-            ).fetchone()
-            conn.close()
-            self.send_json(dict(row) if row else {})
-            return
-
         # ── POST application profile ─────────────────────────────────────────
-        if path == "/api/application-profile" and self.command == "POST":
+        if path == "/api/application-profile":
             data   = self.read_json()
             fields = [
                 "first_name","last_name","preferred_name",
