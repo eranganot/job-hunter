@@ -1704,7 +1704,7 @@ def _send_manual_alert(user_id: int, job: dict, error: str, failure_type: str | 
         print(f"[manual-alert] {e}")
 
 
-def run_job_apply(user_id: int) -> dict:
+def run_job_apply(user_id: int, force: bool = False) -> dict:
     """
     Drain the apply queue for a user: pick up jobs with apply_status IN
     ('queued', 'retry_1', 'retry_2', 'retry_3') and attempt to apply.
@@ -1730,8 +1730,8 @@ def run_job_apply(user_id: int) -> dict:
     _urow = _rc.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
     _is_admin = (_urow and _urow["email"] and _urow["email"].lower() == (ADMIN_EMAIL or "").lower())
 
-    # auto-apply gate
-    if not _prof or not _prof["auto_apply_enabled"]:
+    # auto-apply gate (skipped when force=True, e.g. manual 'Apply All' button)
+    if not force and (not _prof or not _prof["auto_apply_enabled"]):
         _rc.close()
         return {"applied": 0, "error": "", "skipped": "auto_apply_disabled"}
 
@@ -1778,7 +1778,8 @@ def run_job_apply(user_id: int) -> dict:
             WHERE user_id=?
               AND status='approved'
               AND (
-                apply_status = 'queued'
+                (apply_status = 'queued'
+                 AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
                 OR (apply_status IN ('retry_1','retry_2','retry_3')
                     AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
               )
@@ -1791,7 +1792,7 @@ def run_job_apply(user_id: int) -> dict:
               END,
               match_score DESC NULLS LAST
             """,
-            (user_id, now_iso)
+            (user_id, now_iso, now_iso)
         ).fetchall()
 
         # Apply per-run + daily caps
@@ -3036,6 +3037,7 @@ SETTINGS_HTML = """<!DOCTYPE html>
     <button onclick="setTab('notifications')" id="tab-notifications" class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm whitespace-nowrap">Notifications</button>
     <button onclick="setTab('schedule')"      id="tab-schedule"      class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm whitespace-nowrap">Schedule</button>
     <button onclick="setTab('account')"       id="tab-account"       class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm whitespace-nowrap">Account</button>
+    <button onclick="setTab('app-profile')"   id="tab-app-profile"   class="tab-btn text-slate-600 flex-1 px-3 py-2 rounded-lg text-sm whitespace-nowrap">Apply Profile</button>
   </div>
 
   <!-- Profile panel -->
@@ -5481,6 +5483,124 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── POST ──────────────────────────────────────────────────────────────────
 
+
+        # ── Manual handoff page ───────────────────────────────────────────────────
+        m_manual = re.match(r'^/manual/(\d+)$', path)
+        if m_manual:
+            user = self.require_auth()
+            if not user:
+                return
+            job_id = int(m_manual.group(1))
+            conn   = database.get_db()
+            job    = conn.execute(
+                "SELECT id, title, company, url, apply_status, apply_error, "
+                "apply_failure_type, apply_failure_detail, apply_evidence_path, "
+                "apply_resolved_url, apply_attempts FROM jobs WHERE id=? AND user_id=?",
+                (job_id, user["id"])
+            ).fetchone()
+            conn.close()
+            if not job:
+                self.send_response(404)
+                self.end_headers()
+                return
+            import glob as _glob, base64 as _b64, os as _os
+            evidence_dir = job["apply_evidence_path"] or ""
+            screenshots  = []
+            if evidence_dir and _os.path.isdir(evidence_dir):
+                for f in sorted(_glob.glob(_os.path.join(evidence_dir, "*.png"))):
+                    try:
+                        with open(f, "rb") as fh:
+                            screenshots.append((
+                                _os.path.basename(f),
+                                "data:image/png;base64," + _b64.b64encode(fh.read()).decode()
+                            ))
+                    except Exception:
+                        pass
+            apply_url  = job["apply_resolved_url"] or job["url"] or "#"
+            reason     = job["apply_error"] or "Unknown failure"
+            fail_type  = job["apply_failure_type"] or "other"
+            shots_html = ""
+            for name, b64 in screenshots:
+                shots_html += f'<div><p class="text-xs text-slate-500 mb-1">{name}</p><img src="{b64}" class="rounded-lg border border-slate-200 w-full max-w-xl"></div>'
+            if not shots_html:
+                shots_html = '<p class="text-slate-400 text-sm">No screenshots captured.</p>'
+            page = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Manual Apply — {job["title"]}</title>
+<script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-slate-50 min-h-screen p-6">
+<div class="max-w-2xl mx-auto">
+  <a href="/dashboard#approved" class="text-blue-600 text-sm hover:underline">&larr; Back to dashboard</a>
+  <h1 class="text-2xl font-bold text-slate-900 mt-4 mb-1">{job["title"]}</h1>
+  <p class="text-slate-500 mb-6">{job["company"]} &middot; Attempt {job["apply_attempts"] or 1}</p>
+  <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6">
+    <p class="font-semibold text-amber-800 mb-1">Why manual apply is needed</p>
+    <p class="text-amber-700 text-sm"><strong>Type:</strong> {fail_type}</p>
+    <p class="text-amber-700 text-sm mt-1"><strong>Detail:</strong> {reason}</p>
+  </div>
+  <a href="{apply_url}" target="_blank" rel="noopener"
+     class="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl mb-4 transition-all">
+    🔗 Open Application Page
+  </a>
+  <div class="flex gap-3 mb-8">
+    <button onclick="mark('submitted')"
+      class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 rounded-xl transition-all">
+      ✅ Mark as Submitted
+    </button>
+    <button onclick="mark('failed')"
+      class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold py-2.5 rounded-xl transition-all">
+      ❌ Mark as Failed
+    </button>
+  </div>
+  <h2 class="font-bold text-slate-800 mb-3">Evidence Screenshots</h2>
+  <div class="space-y-4">{shots_html}</div>
+</div>
+<script>
+async function mark(status) {{
+  const r = await fetch('/api/jobs/{job_id}/manual-mark', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{status}})
+  }});
+  const d = await r.json();
+  if (r.ok) {{ window.location = '/dashboard#applied'; }}
+  else {{ alert(d.error || 'Error'); }}
+}}
+</script>
+</body></html>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(page.encode("utf-8"))
+            return
+
+
+        # ── GET /api/jobs/{id}/evidence — screenshot gallery JSON ─────────────────
+        m_ev = re.match(r'^/api/jobs/(\d+)/evidence$', path)
+        if m_ev and self.command == "GET":
+            user = self.require_auth()
+            if not user:
+                return
+            job_id = int(m_ev.group(1))
+            conn   = database.get_db()
+            job    = conn.execute(
+                "SELECT apply_evidence_path FROM jobs WHERE id=? AND user_id=?",
+                (job_id, user["id"])
+            ).fetchone()
+            conn.close()
+            if not job:
+                self.send_json({"error": "Not found"}, 404)
+                return
+            import glob as _glob, os as _os
+            evidence_dir = job["apply_evidence_path"] or ""
+            files = []
+            if evidence_dir and _os.path.isdir(evidence_dir):
+                files = sorted(_glob.glob(_os.path.join(evidence_dir, "*.png")))
+            self.send_json({"evidence_dir": evidence_dir,
+                            "screenshots": [_os.path.basename(f) for f in files],
+                            "manual_url": f"/manual/{job_id}"})
+            return
+
     def do_POST(self):
         try:
             self._do_POST_inner()
@@ -5988,9 +6108,12 @@ class Handler(BaseHTTPRequestHandler):
                     database.record_pass_reason_stat(conn, user_id, reason)
             elif action == "approve":
                 # Queue for the next scheduled apply window (decoupled from approval)
+                _grace = (datetime.now(__import__('datetime').timezone.utc)
+                          + __import__('datetime').timedelta(minutes=2)).isoformat()
                 conn.execute(
-                    "UPDATE jobs SET apply_status='queued' WHERE id=? AND user_id=? AND apply_status IS NULL",
-                    (job_id, user_id)
+                    "UPDATE jobs SET apply_status='queued', apply_next_attempt_at=? "
+                    "WHERE id=? AND user_id=? AND apply_status IS NULL",
+                    (_grace, job_id, user_id)
                 )
                 database.log_activity(user_id, "job_approved",
                     f"Approved {job['title']} at {job['company']} — queued for apply")
@@ -6307,8 +6430,42 @@ class Handler(BaseHTTPRequestHandler):
             # Fire-and-forget: Playwright can take 30–120 s per job, far beyond
             # Railway's HTTP request timeout.  Return immediately and let the
             # background thread deliver a notification when done.
-            threading.Thread(target=run_job_apply, args=(user["id"],), daemon=True).start()
+            threading.Thread(target=run_job_apply, args=(user["id"],), kwargs={"force": True}, daemon=True).start()
             self.send_json({"started": True})
+            return
+
+
+        # ── POST /api/jobs/{id}/manual-mark ───────────────────────────────────────
+        m_mm = re.match(r'^/api/jobs/(\d+)/manual-mark$', path)
+        if m_mm:
+            user = self.require_auth()
+            if not user:
+                return
+            job_id  = int(m_mm.group(1))
+            payload = self.read_json()
+            status  = payload.get("status", "")
+            if status not in ("submitted", "failed"):
+                self.send_json({"error": "status must be submitted or failed"}, 400)
+                return
+            conn = database.get_db()
+            if status == "submitted":
+                conn.execute(
+                    "UPDATE jobs SET status='applied', apply_status='submitted', "
+                    "apply_confirmation='Manually submitted by user', applied_date=date('now') "
+                    "WHERE id=? AND user_id=?", (job_id, user["id"])
+                )
+                database.log_activity(user["id"], "job_applied",
+                    f"Manually submitted job {job_id}")
+            else:
+                conn.execute(
+                    "UPDATE jobs SET apply_status='manual_required', apply_error='User marked as failed' "
+                    "WHERE id=? AND user_id=?", (job_id, user["id"])
+                )
+                database.log_activity(user["id"], "job_rejected",
+                    f"User manually marked job {job_id} as failed")
+            conn.commit()
+            conn.close()
+            self.send_json({"success": True})
             return
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
