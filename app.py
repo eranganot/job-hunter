@@ -2316,7 +2316,23 @@ ONBOARDING_HTML = """<!DOCTYPE html>
 
   <div id="upload-status" class="hidden border rounded-xl p-4 mb-4 text-sm"></div>
 
-  <button onclick="goToStep(3)" class="btn btn-secondary w-full">Skip for now &#8594;</button>
+  <!-- CV analysis results card (shown after AI analyzes) -->
+  <div id="cv-results-card" class="hidden bg-white border border-slate-200 rounded-2xl p-6 mb-4 shadow-sm">
+    <div class="flex items-center gap-4 mb-4">
+      <div id="cv-score-badge" class="w-16 h-16 rounded-full flex flex-col items-center justify-center text-white font-bold shadow-md flex-shrink-0" style="background:#94a3b8">
+        <span id="cv-score-num" class="text-2xl leading-none">0</span>
+        <span class="text-xs leading-none mt-1 opacity-80">/ 100</span>
+      </div>
+      <div>
+        <p id="cv-score-label" class="font-bold text-slate-800 text-lg leading-tight"></p>
+        <p class="text-slate-400 text-sm">CV strength score</p>
+      </div>
+    </div>
+    <p id="cv-score-summary" class="text-sm text-slate-600 mb-5 leading-relaxed"></p>
+    <button onclick="goToStep(3)" class="btn btn-primary w-full">Continue to your profile &#8594;</button>
+  </div>
+
+  <button id="skip-cv-btn" onclick="goToStep(3)" class="btn btn-secondary w-full">Skip for now &#8594;</button>
 </div>
 
 <!-- ── STEP 3: Profile ────────────────────────────────────────────────────── -->
@@ -2768,19 +2784,35 @@ async function analyzeCV() {
     const resp = await fetch('/api/analyze-cv', {method:'POST'});
     const data = await resp.json();
     if (data.error) {
-      showUploadStatus('AI analysis failed \\u2014 continuing to manual entry.','error');
-      goToStep(3);
+      showUploadStatus('\\u274c AI analysis failed \\u2014 you can fill in your profile manually.','error');
+      document.getElementById('skip-cv-btn').textContent = 'Continue to profile \\u2192';
       return;
     }
     aiData = data;
-    populateStep3(data);
+    populateStep3(data);  // pre-fill step 3 in the background
+
+    // Determine score colour
+    const score = data.score || 0;
+    let bgCol = '#ef4444';          // red  — weak (0-40)
+    if (score >= 91)      bgCol = '#7c3aed';  // purple — excellent
+    else if (score >= 76) bgCol = '#10b981';  // green  — strong
+    else if (score >= 61) bgCol = '#3b82f6';  // blue   — good
+    else if (score >= 41) bgCol = '#f59e0b';  // amber  — average
+
+    const badge = document.getElementById('cv-score-badge');
+    badge.style.backgroundColor = bgCol;
+    document.getElementById('cv-score-num').textContent   = score;
+    document.getElementById('cv-score-label').textContent = data.score_label || 'Profile Analyzed';
+    document.getElementById('cv-score-summary').textContent = data.summary   || '';
+
     document.getElementById('drop-icon').textContent = '\\u2705';
-    document.getElementById('drop-text').textContent = 'CV analyzed \\u2014 profile pre-filled!';
-    showUploadStatus('\\u2728 Analysis complete! Reviewing your profile\\u2026','success');
-    setTimeout(() => goToStep(3), 800);
+    document.getElementById('drop-text').textContent = 'CV analyzed successfully!';
+    showUploadStatus('\\u2728 AI analysis complete! See your CV score below.','success');
+    document.getElementById('cv-results-card').classList.remove('hidden');
+    document.getElementById('skip-cv-btn').classList.add('hidden');
   } catch(e) {
-    showUploadStatus('Analysis failed \\u2014 continuing to manual entry.','error');
-    goToStep(3);
+    showUploadStatus('\\u274c Analysis failed \\u2014 you can fill in your profile manually.','error');
+    document.getElementById('skip-cv-btn').textContent = 'Continue to profile \\u2192';
   }
 }
 
@@ -2789,13 +2821,13 @@ function populateStep3(data) {
     document.getElementById('ai-summary-box').classList.remove('hidden');
     document.getElementById('ai-summary-text').textContent = data.summary;
   }
-  setTags('titles-wrap',   data.job_titles  || []);
-  setTags('keywords-wrap', data.keywords    || []);
+  setTags('titles-wrap',    data.job_titles || []);
+  setTags('keywords-wrap',  data.keywords   || []);
   setTags('locations-wrap', data.locations  || ['Tel Aviv']);
-  if (data.salary_min) document.getElementById('salary-min').value = data.salary_min;
-  if (data.salary_max) document.getElementById('salary-max').value = data.salary_max;
-  if (data.seniority)  setSeniority(data.seniority);
+  if (data.seniority)       setSeniority(data.seniority);
   if (data.experience_years) document.getElementById('experience-years').value = data.experience_years;
+  if (data.linkedin_url)    document.getElementById('linkedin-url').value = data.linkedin_url;
+  if (data.phone)           document.getElementById('phone').value = data.phone;
 }
 
 // ── Profile save (with validation) ───────────────────────────────────────────
@@ -2812,9 +2844,9 @@ async function saveProfile() {
     job_titles:       titles,
     keywords:         getTags('keywords-wrap'),
     locations:        getTags('locations-wrap'),
-    linkedin_url:     document.getElementById('linkedin-url').value,
-    phone:            document.getElementById('phone').value,
-    seniority:        document.getElementById('seniority-val').value,
+    linkedin_url:     (document.getElementById('linkedin-url') || {}).value || '',
+    phone:            (document.getElementById('phone') || {}).value || '',
+    seniority:        (document.getElementById('seniority-val') || {}).value || '',
     experience_years: parseInt((document.getElementById('experience-years') || {}).value) || 0,
   };
   try {
@@ -5194,6 +5226,8 @@ class Handler(BaseHTTPRequestHandler):
         body = html.encode('utf-8')
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
@@ -5845,19 +5879,22 @@ async function mark(status) {{
                 return
             try:
                 data = analyze_cv(cv_path, ANTHROPIC_KEY)
-                # Save to profile
-                auth.update_profile(
-                    user_id,
+                # Save to profile — including linkedin_url and phone if extracted
+                _profile_update = dict(
                     cv_analyzed=1,
                     cv_summary=data.get("summary", ""),
                     job_titles=json.dumps(data.get("job_titles", [])),
                     keywords=json.dumps(data.get("keywords", [])),
                     locations=json.dumps(data.get("locations", ["Tel Aviv"])),
-                    salary_min=data.get("salary_min", 0),
-                    salary_max=data.get("salary_max", 0),
                     experience_years=data.get("experience_years", 0),
                     seniority=data.get("seniority", ""),
                 )
+                # Overwrite linkedin_url and phone only when the AI actually found them
+                if data.get("linkedin_url"):
+                    _profile_update["linkedin_url"] = data["linkedin_url"]
+                if data.get("phone"):
+                    _profile_update["phone"] = data["phone"]
+                auth.update_profile(user_id, **_profile_update)
                 database.write_users_config(BASE_DIR)
                 database.log_activity(user_id, "cv_analyzed",
                     f"AI extracted {len(data.get('job_titles',[]))} job titles, "
@@ -6796,6 +6833,7 @@ async function mark(status) {{
 
         self.send_response(404)
         self.end_headers()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENTRY POINT

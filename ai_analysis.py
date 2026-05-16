@@ -17,12 +17,14 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
         job_titles       list[str]  — 6-8 relevant job titles to search for
         keywords         list[str]  — top 8-12 skills / technologies
         locations        list[str]  — preferred work locations
-        salary_min       int        — monthly NIS (lower bound)
-        salary_max       int        — monthly NIS (upper bound)
         experience_years int        — estimated years of experience
         seniority        str        — junior | mid | senior | director | executive
         summary          str        — 2-3 sentence profile
         recommendations  list[str]  — 3-4 job search tips
+        score            int        — overall profile strength 0-100
+        score_label      str        — e.g. "Strong Profile"
+        linkedin_url     str        — LinkedIn URL if present in CV, else ""
+        phone            str        — phone number if present in CV, else ""
     """
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"CV file not found: {pdf_path}")
@@ -38,19 +40,19 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
         '  "job_titles": ["6-8 specific job titles relevant to this person\'s background"],\n'
         '  "keywords": ["8-12 key skills, technologies, methodologies, or domain keywords"],\n'
         '  "locations": ["preferred work locations — default to Tel Aviv if unclear"],\n'
-        '  "salary_min": <integer, estimated minimum monthly salary in NIS>,\n'
-        '  "salary_max": <integer, estimated maximum monthly salary in NIS>,\n'
         '  "experience_years": <integer, total years of professional experience>,\n'
         '  "seniority": "<junior|mid|senior|director|executive>",\n'
         '  "summary": "2-3 sentences describing this person\'s professional profile",\n'
-        '  "recommendations": ["3-4 specific, actionable job search tips for this person"]\n'
+        '  "recommendations": ["3-4 specific, actionable job search tips for this person"],\n'
+        '  "score": <integer 0-100, overall CV/profile strength for job hunting>,\n'
+        '  "score_label": "<Weak Profile|Average Profile|Good Profile|Strong Profile|Excellent Profile>",\n'
+        '  "linkedin_url": "<LinkedIn profile URL found in CV, or empty string if not present>",\n'
+        '  "phone": "<phone number found in CV, or empty string if not present>"\n'
         "}\n\n"
-        "For Israeli market salary benchmarks (monthly NIS):\n"
-        "  Product Manager (5y+): 35,000-55,000\n"
-        "  Senior PM / Group PM: 45,000-65,000\n"
-        "  Head of Product / Director: 55,000-85,000\n"
-        "  VP Product: 70,000-100,000\n"
-        "  CPO: 90,000-140,000\n\n"
+        "Score guidance: 0-40 weak, 41-60 average, 61-75 good, 76-90 strong, 91-100 excellent. "
+        "Score based on: clarity, relevance of experience, skills depth, career progression, "
+        "and searchability for the Israeli/global tech market. "
+        "For linkedin_url and phone: extract exactly as written in the CV. "
         "Be specific with job titles — use real market titles. "
         "Return ONLY the JSON object."
     )
@@ -62,12 +64,17 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
         data.setdefault("job_titles", [])
         data.setdefault("keywords", [])
         data.setdefault("locations", ["Tel Aviv"])
-        data.setdefault("salary_min", 0)
-        data.setdefault("salary_max", 0)
         data.setdefault("experience_years", 0)
         data.setdefault("seniority", "senior")
         data.setdefault("summary", "")
         data.setdefault("recommendations", [])
+        data.setdefault("score", 0)
+        data.setdefault("score_label", "")
+        data.setdefault("linkedin_url", "")
+        data.setdefault("phone", "")
+        # Remove salary fields if returned (no longer part of this response)
+        data.pop("salary_min", None)
+        data.pop("salary_max", None)
         return data
 
     def _strip_fences(raw: str) -> str:
@@ -87,7 +94,7 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
             }],
             "generationConfig": {
                 "thinkingConfig": {"thinkingBudget": 0},
-                "maxOutputTokens": 1024,
+                "maxOutputTokens": 1536,
                 "temperature": 0.1,
             },
         }).encode()
