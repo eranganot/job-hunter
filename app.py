@@ -3083,6 +3083,21 @@ SETTINGS_HTML = """<!DOCTYPE html>
   <div class="panel bg-white rounded-2xl p-6 shadow-sm border border-slate-100" id="panel-app-profile">
     <h3 class="font-bold text-slate-900 mb-1">Application Profile</h3>
     <p class="text-sm text-slate-500 mb-5">These fields are used to auto-fill job application forms. Pre-fill from your CV or edit directly.</p>
+
+    <!-- CV upload (compact, inline) -->
+    <div class="mb-5 p-4 bg-slate-50 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-medium text-slate-700">📄 Your CV</span>
+        <span id="ap-cv-filename" class="text-xs text-slate-500 italic">No CV on file</span>
+      </div>
+      <div id="ap-cv-drop" class="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+           onclick="document.getElementById('ap-cv-file-input').click()">
+        <p class="text-slate-600 text-xs font-medium">Click to upload CV (PDF)</p>
+        <input type="file" id="ap-cv-file-input" accept=".pdf" class="hidden" onchange="uploadCVFromApplyProfile(this.files[0])"/>
+      </div>
+      <div id="ap-cv-upload-status" class="hidden text-xs p-2 rounded-lg mt-2"></div>
+    </div>
+
     <button onclick="prefillProfileFromCV()" id="ap-prefill-btn" class="btn btn-secondary text-sm mb-5">✨ Pre-fill from CV</button>
 
     <div class="space-y-4">
@@ -3393,10 +3408,13 @@ async function loadUser() {
     chk('ap-relocate',  ap.willing_to_relocate);
   }).catch(()=>{});
 
-  // CV
+  // CV — show filename in both Profile and Apply Profile tabs
   if (userData.cv_path) {
-    document.getElementById('cv-current').textContent = '✅ CV on file — upload a new PDF to replace it.';
+    const cvFilename = userData.cv_path.split('/').pop().split('\\').pop() || 'cv.pdf';
+    document.getElementById('cv-current').textContent = '✅ CV on file: ' + cvFilename;
     document.getElementById('cv-analyze-btn').classList.remove('hidden');
+    const apFn = document.getElementById('ap-cv-filename');
+    if (apFn) apFn.textContent = cvFilename;
   }
 
   // Schedule — role-aware
@@ -3680,8 +3698,11 @@ function uploadCV(file) {
         const d = JSON.parse(xhr.responseText);
         if (d.success) {
           showCVStatus('✅ CV uploaded successfully!', 'success');
-          document.getElementById('cv-current').textContent = '✅ New CV on file.';
+          document.getElementById('cv-current').textContent = '✅ CV on file: ' + file.name;
           document.getElementById('cv-analyze-btn').classList.remove('hidden');
+          // Also sync the Apply Profile CV indicator
+          const apFn = document.getElementById('ap-cv-filename');
+          if (apFn) apFn.textContent = file.name;
         } else {
           showCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
         }
@@ -3695,6 +3716,57 @@ function uploadCV(file) {
   };
   reader.onerror = function() { showCVStatus('❌ Could not read file.', 'error'); };
   reader.readAsDataURL(file);
+}
+
+function uploadCVFromApplyProfile(file) {
+  if (!file || !file.name.endsWith('.pdf')) {
+    showApCVStatus('Please upload a PDF file.', 'error'); return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showApCVStatus('❌ File too large (max 10 MB).', 'error'); return;
+  }
+  showApCVStatus('Uploading…', 'info');
+  const reader = new FileReader();
+  reader.onload = function() {
+    const base64 = reader.result.split(',')[1];
+    const payload = JSON.stringify({filename: file.name, data: base64});
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload-cv', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.timeout = 30000;
+    xhr.onload = function() {
+      try {
+        const d = JSON.parse(xhr.responseText);
+        if (d.success) {
+          showApCVStatus('✅ Uploaded!', 'success');
+          document.getElementById('ap-cv-filename').textContent = file.name;
+          // Also update Profile tab indicator
+          const cvCur = document.getElementById('cv-current');
+          if (cvCur) cvCur.textContent = '✅ CV on file: ' + file.name;
+          const analyzeBtn = document.getElementById('cv-analyze-btn');
+          if (analyzeBtn) analyzeBtn.classList.remove('hidden');
+        } else {
+          showApCVStatus('❌ ' + (d.error||'Upload failed.'), 'error');
+        }
+      } catch(e) { showApCVStatus('❌ Server error.', 'error'); }
+    };
+    xhr.onerror = function() { showApCVStatus('❌ Network error.', 'error'); };
+    xhr.ontimeout = function() { showApCVStatus('❌ Timed out.', 'error'); };
+    xhr.send(payload);
+  };
+  reader.onerror = function() { showApCVStatus('❌ Could not read file.', 'error'); };
+  reader.readAsDataURL(file);
+}
+
+function showApCVStatus(msg, type) {
+  const el = document.getElementById('ap-cv-upload-status');
+  if (!el) return;
+  el.classList.remove('hidden');
+  const c = {info:'bg-blue-50 border border-blue-200 text-blue-700',
+             success:'bg-green-50 border border-green-200 text-green-700',
+             error:'bg-red-50 border border-red-200 text-red-700'};
+  el.className = `text-xs p-2 rounded-lg mt-2 ${c[type]||c.info}`;
+  el.textContent = msg;
 }
 
 async function reanalyzeCV() {
@@ -5599,6 +5671,19 @@ async function mark(status) {{
             self.send_json({"evidence_dir": evidence_dir,
                             "screenshots": [_os.path.basename(f) for f in files],
                             "manual_url": f"/manual/{job_id}"})
+            return
+
+        # ── GET /api/application-profile ─────────────────────────────────────
+        if path == "/api/application-profile":
+            user = self.require_auth()
+            if not user:
+                return
+            conn = database.get_db()
+            row  = conn.execute(
+                "SELECT * FROM application_answers WHERE user_id=?", (user["id"],)
+            ).fetchone()
+            conn.close()
+            self.send_json(dict(row) if row else {})
             return
 
     def do_POST(self):
