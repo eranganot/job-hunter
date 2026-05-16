@@ -2812,14 +2812,16 @@ async function saveProfile() {
     job_titles:       titles,
     keywords:         getTags('keywords-wrap'),
     locations:        getTags('locations-wrap'),
-    salary_min:       parseInt(document.getElementById('salary-min').value) || 0,
-    salary_max:       parseInt(document.getElementById('salary-max').value) || 0,
     linkedin_url:     document.getElementById('linkedin-url').value,
     phone:            document.getElementById('phone').value,
     seniority:        document.getElementById('seniority-val').value,
-    experience_years: parseInt(document.getElementById('experience-years').value) || 0,
+    experience_years: parseInt((document.getElementById('experience-years') || {}).value) || 0,
   };
-  await fetch('/api/save-profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  try {
+    await fetch('/api/save-profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  } catch(e) {
+    console.error('[onboarding] saveProfile fetch error:', e);
+  }
   goToStep(4);
 }
 
@@ -3345,7 +3347,9 @@ SETTINGS_HTML = """<!DOCTYPE html>
 let userData = {};
 
 async function loadUser() {
+  try {
   const r = await fetch('/api/me');
+  if (!r.ok) { console.error('[settings] /api/me returned', r.status); return; }
   userData = await r.json();
   document.getElementById('user-name-display').textContent = userData.name;
   document.getElementById('user-name-display').classList.remove('hidden');
@@ -3446,6 +3450,9 @@ async function loadUser() {
   // Set days
   selectDay('search', userData.search_day_of_week || 1);
   selectDay('apply',  userData.apply_day_of_week  || 1);
+  } catch(err) {
+    console.error('[settings] loadUser() error:', err);
+  }
 }
 
 function updateScheduleUI() {
