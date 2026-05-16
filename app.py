@@ -3919,8 +3919,6 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.dropdown')) document.querySelectorAll('.dropdown').forEach(d => d.classList.remove('open'));
 });
 
-loadMe().then(() => loadAll());
-setInterval(loadAll, 5 * 60 * 1000);
 
 </script>
 </body>
