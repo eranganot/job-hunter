@@ -139,6 +139,7 @@ def init_db():
         "ALTER TABLE jobs ADD COLUMN apply_next_attempt_at TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_evidence_path TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_resolved_url TEXT DEFAULT NULL",
+        "ALTER TABLE jobs ADD COLUMN apply_submitted_at TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN applications_per_run INTEGER DEFAULT 10",
         # career_url_cache: created separately below (CREATE TABLE IF NOT EXISTS)
         "CREATE TABLE IF NOT EXISTS career_url_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, job_title TEXT NOT NULL, resolved_url TEXT NOT NULL, created_date TEXT DEFAULT (datetime(\'now\')), UNIQUE(company, job_title))",

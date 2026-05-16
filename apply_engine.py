@@ -23,6 +23,14 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
+try:
+    from playwright_stealth import stealth_sync as _stealth_sync
+    _STEALTH_AVAILABLE = True
+except ImportError:
+    _STEALTH_AVAILABLE = False
+    def _stealth_sync(page): pass  # no-op fallback
+
+
 # ── Evidence capture ─────────────────────────────────────────────────────────
 
 import pathlib
@@ -149,6 +157,30 @@ def _is_lever(url: str) -> bool:
 def _is_workday(url: str) -> bool:
     """Check if URL is a Workday job board."""
     return bool(re.search(r'myworkdayjobs\.com|\.myworkday\.com/.*?/job/', url))
+
+def _is_ashby(url: str) -> bool:
+    """Check if URL is an Ashby-hosted job page."""
+    return bool(re.search(r'jobs\.ashbyhq\.com|ashbyhq\.com/.*?/application', url))
+
+def _is_smartrecruiters(url: str) -> bool:
+    """Check if URL is a SmartRecruiters job page."""
+    return bool(re.search(r'jobs\.smartrecruiters\.com', url))
+
+def _is_bamboohr(url: str) -> bool:
+    """Check if URL is a BambooHR job page."""
+    return bool(re.search(r'\.bamboohr\.com/careers|bamboohr\.com/jobs', url))
+
+def _is_icims(url: str) -> bool:
+    """Check if URL is an iCIMS job page."""
+    return bool(re.search(r'\.icims\.com/jobs|careers\.icims\.com', url))
+
+def _is_comeet(url: str) -> bool:
+    """Check if URL is a Comeet job page."""
+    return bool(re.search(r'comeet\.com/jobs|comeet\.co/jobs', url))
+
+def _is_jobvite(url: str) -> bool:
+    """Check if URL is a Jobvite job page."""
+    return bool(re.search(r'jobs\.jobvite\.com|app\.jobvite\.com', url))
 
 # Job board domains — URLs from these domains get resolved to the company's own career page
 _JOB_BOARD_DOMAINS = {
@@ -375,6 +407,7 @@ def _gh_fill(page, selector: str, value: str):
     try:
         el = page.query_selector(selector)
         if el and el.is_visible():
+            _human_delay(0.05, 0.18)
             el.fill(value)
     except Exception:
         pass
@@ -642,6 +675,240 @@ def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
         return result
 
 
+
+# ── Named ATS handlers — Issue #9 ────────────────────────────────────────────
+
+def _apply_ashby(page, applicant: dict, cv_path) -> dict:
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['a[data-testid="apply-button"]','button[data-testid="apply-button"]',
+                    'a:has-text("Apply")','button:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=8000); break
+            except: continue
+        _gh_fill(page,'input[name="name"],input[placeholder*="Name" i]',
+                 f"{applicant.get('first_name','')} {applicant.get('last_name','')}".strip())
+        _gh_fill(page,'input[name="email"],input[type="email"]',applicant.get('email',''))
+        _gh_fill(page,'input[name="phone"],input[type="tel"]',applicant.get('phone',''))
+        _gh_fill(page,'input[name*="linkedin" i],input[placeholder*="LinkedIn" i]',applicant.get('linkedin_url',''))
+        _gh_fill(page,'input[name*="github" i],input[placeholder*="GitHub" i]',applicant.get('github_url',''))
+        _gh_fill(page,'input[name*="location" i],input[name*="city" i]',applicant.get('location',''))
+        if cv_path:
+            for sel in ['input[type="file"]','input[name*="resume" i]','input[name*="cv" i]']:
+                try: page.set_input_files(sel,cv_path); print("[apply-engine] Ashby: uploaded CV"); break
+                except: continue
+        bt,bd = _detect_blocker(page)
+        if bt: result.update(status="manual_required",apply_failure_type=bt,apply_failure_detail=bd,error=f"Ashby blocker: {bd}"); return result
+        for sel in ['button[type="submit"]','button:has-text("Submit Application")','button:has-text("Submit")','button:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=10000); break
+            except: continue
+        c = page.evaluate("document.body.innerText") or ""
+        if any(w in c.lower() for w in ["thank","received","submitted","application"]):
+            result.update(success=True,status="confirmed",confirmation_text=c[:500])
+        else:
+            result.update(success=True,status="submitted",confirmation_text=c[:500])
+        return result
+    except Exception as e:
+        result["error"] = f"Ashby handler error: {e}"; return result
+
+
+def _apply_smartrecruiters(page, applicant: dict, cv_path) -> dict:
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['a.btn-apply','a[data-qa="btn-apply"]','button[data-qa="btn-apply"]',
+                    'a:has-text("Apply Now")','button:has-text("Apply Now")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=8000); break
+            except: continue
+        _gh_fill(page,'[data-qa="firstName"],input[name="firstName"]',applicant.get('first_name',''))
+        _gh_fill(page,'[data-qa="lastName"],input[name="lastName"]',applicant.get('last_name',''))
+        _gh_fill(page,'[data-qa="email"],input[name="email"],input[type="email"]',applicant.get('email',''))
+        _gh_fill(page,'[data-qa="phone"],input[name="phone"],input[type="tel"]',applicant.get('phone',''))
+        _gh_fill(page,'input[name*="location" i],input[name*="city" i]',applicant.get('location',''))
+        if cv_path:
+            for sel in ['input[type="file"]','[data-qa="file-upload"]']:
+                try: page.set_input_files(sel,cv_path); print("[apply-engine] SmartRecruiters: uploaded CV"); break
+                except: continue
+        bt,bd = _detect_blocker(page)
+        if bt: result.update(status="manual_required",apply_failure_type=bt,apply_failure_detail=bd,error=f"SmartRecruiters blocker: {bd}"); return result
+        for sel in ['[data-qa="btn-submit"]','button[type="submit"]',
+                    'button:has-text("Send Application")','button:has-text("Submit")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=10000); break
+            except: continue
+        c = page.evaluate("document.body.innerText") or ""
+        if any(w in c.lower() for w in ["thank","received","submitted","application"]):
+            result.update(success=True,status="confirmed",confirmation_text=c[:500])
+        else:
+            result.update(success=True,status="submitted",confirmation_text=c[:500])
+        return result
+    except Exception as e:
+        result["error"] = f"SmartRecruiters handler error: {e}"; return result
+
+
+def _apply_bamboohr(page, applicant: dict, cv_path) -> dict:
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['a.btn-primary:has-text("Apply")','a:has-text("Apply")','button:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=8000); break
+            except: continue
+        _gh_fill(page,'input[id="firstName"],input[name="firstName"]',applicant.get('first_name',''))
+        _gh_fill(page,'input[id="lastName"],input[name="lastName"]',applicant.get('last_name',''))
+        _gh_fill(page,'input[id="email"],input[name="email"],input[type="email"]',applicant.get('email',''))
+        _gh_fill(page,'input[id="phone"],input[name="phone"],input[type="tel"]',applicant.get('phone',''))
+        _gh_fill(page,'input[id="address"],input[name*="location" i]',applicant.get('location',''))
+        _gh_fill(page,'input[name*="linkedin" i]',applicant.get('linkedin_url',''))
+        if cv_path:
+            for sel in ['input[type="file"]','input[name="resumeFile"]','input[name*="resume" i]']:
+                try: page.set_input_files(sel,cv_path); print("[apply-engine] BambooHR: uploaded CV"); break
+                except: continue
+        bt,bd = _detect_blocker(page)
+        if bt: result.update(status="manual_required",apply_failure_type=bt,apply_failure_detail=bd,error=f"BambooHR blocker: {bd}"); return result
+        for sel in ['button[type="submit"]','input[type="submit"]','button:has-text("Submit")','button:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=10000); break
+            except: continue
+        c = page.evaluate("document.body.innerText") or ""
+        if any(w in c.lower() for w in ["thank","received","submitted","application"]):
+            result.update(success=True,status="confirmed",confirmation_text=c[:500])
+        else:
+            result.update(success=True,status="submitted",confirmation_text=c[:500])
+        return result
+    except Exception as e:
+        result["error"] = f"BambooHR handler error: {e}"; return result
+
+
+def _apply_icims(page, applicant: dict, cv_path) -> dict:
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['.iCIMS_PrimaryApply a','a.iCIMS_PrimaryApply',
+                    'a:has-text("Apply Now")','button:has-text("Apply Now")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=8000); break
+            except: continue
+        for _step in range(8):
+            try: page.wait_for_load_state("networkidle",timeout=6000)
+            except: pass
+            page_text = page.evaluate("document.body.innerText") or ""
+            if any(p in page_text.lower() for p in _CONFIRMATION_PHRASES):
+                result.update(success=True,status="confirmed",confirmation_text=page_text[:500]); return result
+            bt,bd = _detect_blocker(page)
+            if bt: result.update(status="manual_required",apply_failure_type=bt,apply_failure_detail=bd,error=f"iCIMS blocker: {bd}"); return result
+            _gh_fill(page,'input[name*="firstname" i],input[id*="firstname" i]',applicant.get('first_name',''))
+            _gh_fill(page,'input[name*="lastname" i],input[id*="lastname" i]',applicant.get('last_name',''))
+            _gh_fill(page,'input[type="email"]',applicant.get('email',''))
+            _gh_fill(page,'input[type="tel"]',applicant.get('phone',''))
+            _gh_fill(page,'input[name*="city" i],input[name*="location" i]',applicant.get('location',''))
+            if cv_path:
+                for sel in ['input[type="file"]','input[name*="resume" i]']:
+                    try: page.set_input_files(sel,cv_path); print("[apply-engine] iCIMS: uploaded CV"); break
+                    except: continue
+            submitted = False
+            for sel in ['input[value*="Submit" i]','button:has-text("Submit")','a:has-text("Submit")','input[type="submit"]']:
+                try:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible(): el.click(); submitted=True; break
+                except: continue
+            if submitted:
+                try: page.wait_for_load_state("networkidle",timeout=10000)
+                except: pass
+                c = page.evaluate("document.body.innerText") or ""
+                if any(p in c.lower() for p in _CONFIRMATION_PHRASES):
+                    result.update(success=True,status="confirmed",confirmation_text=c[:500])
+                else:
+                    result.update(success=True,status="submitted",confirmation_text=c[:500])
+                return result
+            advanced = False
+            for sel in ['input[value*="Next" i]','button:has-text("Next")','a:has-text("Next")','button:has-text("Continue")']:
+                try:
+                    el = page.query_selector(sel)
+                    if el and el.is_visible(): el.click(); advanced=True; break
+                except: continue
+            if not advanced: break
+        result["error"] = "iCIMS: could not complete wizard after 8 steps"; return result
+    except Exception as e:
+        result["error"] = f"iCIMS handler error: {e}"; return result
+
+
+def _apply_comeet(page, applicant: dict, cv_path) -> dict:
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['a.apply-btn','button.apply-btn','a:has-text("Apply")','button:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=8000); break
+            except: continue
+        _gh_fill(page,'input[name*="first" i],input[placeholder*="First" i]',applicant.get('first_name',''))
+        _gh_fill(page,'input[name*="last" i],input[placeholder*="Last" i]',applicant.get('last_name',''))
+        _gh_fill(page,'input[type="email"]',applicant.get('email',''))
+        _gh_fill(page,'input[type="tel"]',applicant.get('phone',''))
+        _gh_fill(page,'input[name*="linkedin" i],input[placeholder*="LinkedIn" i]',applicant.get('linkedin_url',''))
+        _gh_fill(page,'input[name*="location" i],input[name*="city" i]',applicant.get('location',''))
+        if cv_path:
+            for sel in ['input[type="file"]','input[name*="resume" i]','input[name*="cv" i]']:
+                try: page.set_input_files(sel,cv_path); print("[apply-engine] Comeet: uploaded CV"); break
+                except: continue
+        bt,bd = _detect_blocker(page)
+        if bt: result.update(status="manual_required",apply_failure_type=bt,apply_failure_detail=bd,error=f"Comeet blocker: {bd}"); return result
+        for sel in ['button[type="submit"]','button:has-text("Submit")','button:has-text("Send Application")','input[type="submit"]']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=10000); break
+            except: continue
+        c = page.evaluate("document.body.innerText") or ""
+        if any(w in c.lower() for w in ["thank","received","submitted","application"]):
+            result.update(success=True,status="confirmed",confirmation_text=c[:500])
+        else:
+            result.update(success=True,status="submitted",confirmation_text=c[:500])
+        return result
+    except Exception as e:
+        result["error"] = f"Comeet handler error: {e}"; return result
+
+
+def _apply_jobvite(page, applicant: dict, cv_path) -> dict:
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['a.jv-btn-apply','a:has-text("Apply Now")','button:has-text("Apply Now")','a:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=8000); break
+            except: continue
+        _gh_fill(page,'input[id="firstName"],input[name="firstName"]',applicant.get('first_name',''))
+        _gh_fill(page,'input[id="lastName"],input[name="lastName"]',applicant.get('last_name',''))
+        _gh_fill(page,'input[id="email"],input[type="email"]',applicant.get('email',''))
+        _gh_fill(page,'input[id="phone"],input[type="tel"]',applicant.get('phone',''))
+        _gh_fill(page,'input[name*="location" i],input[name*="city" i]',applicant.get('location',''))
+        _gh_fill(page,'input[name*="linkedin" i],input[id*="linkedin" i]',applicant.get('linkedin_url',''))
+        if cv_path:
+            for sel in ['input[type="file"]','input[name*="resume" i]','input[id*="resume" i]']:
+                try: page.set_input_files(sel,cv_path); print("[apply-engine] Jobvite: uploaded CV"); break
+                except: continue
+        bt,bd = _detect_blocker(page)
+        if bt: result.update(status="manual_required",apply_failure_type=bt,apply_failure_detail=bd,error=f"Jobvite blocker: {bd}"); return result
+        for sel in ['button[type="submit"]','input[type="submit"]','button:has-text("Submit Application")','button:has-text("Submit")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible(): el.click(); page.wait_for_load_state("networkidle",timeout=10000); break
+            except: continue
+        c = page.evaluate("document.body.innerText") or ""
+        if any(w in c.lower() for w in ["thank","received","submitted","application"]):
+            result.update(success=True,status="confirmed",confirmation_text=c[:500])
+        else:
+            result.update(success=True,status="submitted",confirmation_text=c[:500])
+        return result
+    except Exception as e:
+        result["error"] = f"Jobvite handler error: {e}"; return result
+
+
 # ── Failure classifier ────────────────────────────────────────────────────────
 
 def _classify_failure(error: str, page_text: str = "") -> tuple[str, str]:
@@ -681,6 +948,24 @@ def _add_failure_type(res: dict) -> dict:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+
+
+import random as _random
+
+def _human_delay(lo: float = 0.05, hi: float = 0.25):
+    """Sleep for a random human-like interval between actions."""
+    time.sleep(_random.uniform(lo, hi))
+
+
+def _browser_profile_dir(user_id: int) -> str:
+    """Return (and create) a per-user browser profile directory for cookie persistence."""
+    base = os.environ.get("BROWSER_PROFILES_DIR",
+                          os.path.join(os.environ.get("EVIDENCE_BASE_DIR", "/data/evidence"),
+                                       "..", "browser-profiles"))
+    d = os.path.join(base, str(user_id) if user_id else "default")
+    os.makedirs(d, exist_ok=True)
+    return d
+
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -789,6 +1074,322 @@ def check_url_alive(url: str, timeout: int = 8) -> bool:
 
 # ── Core application submission ───────────────────────────────────────────────
 
+
+def _exec_interactions(page, instructions: list, cv_path) -> bool:
+    """Execute a list of form-interaction dicts. Returns True if submit was hit."""
+    submitted = False
+    for instr in instructions:
+        action = instr.get("action", "")
+        sel    = instr.get("selector", "")
+        _human_delay(0.06, 0.22)
+        try:
+            if action == "fill":
+                page.fill(sel, str(instr.get("value", "")))
+            elif action == "select":
+                try:
+                    page.select_option(sel, value=str(instr.get("value", "")))
+                except Exception:
+                    page.select_option(sel, label=str(instr.get("value", "")))
+            elif action == "upload" and instr.get("file") == "cv":
+                if cv_path and os.path.exists(cv_path):
+                    page.set_input_files(sel, cv_path)
+            elif action == "check":
+                page.check(sel)
+            elif action == "click":
+                page.click(sel)
+            elif action == "submit":
+                page.click(sel)
+                submitted = True
+                time.sleep(0.3)
+        except Exception as e:
+            print(f"[apply-engine] instr {instr}: {e}")
+    return submitted
+
+
+def _apply_generic_single_shot(page, applicant: dict, cv_path,
+                                job_title: str, company: str,
+                                page_html: str) -> dict:
+    """Attempt 1: send first 8 KB of HTML to Claude, execute returned interactions."""
+    result = {"success": False, "status": "failed", "confirmation_text": "",
+              "error": "", "submitted": False}
+    try:
+        prompt = (
+            f'Fill job application for "{job_title}" at "{company}".\n\n'
+            f'Applicant data:\n{json.dumps(applicant, indent=2)}\n\n'
+            f'Page HTML (first 8000 chars):\n{page_html[:8000]}\n\n'
+            'Return a JSON ARRAY of interactions (no explanation):\n'
+            ' {"action":"fill","selector":"CSS","value":"text"}\n'
+            ' {"action":"select","selector":"CSS","value":"option value or label"}\n'
+            ' {"action":"upload","selector":"CSS","file":"cv"}\n'
+            ' {"action":"check","selector":"CSS"}\n'
+            ' {"action":"click","selector":"CSS"}\n'
+            ' {"action":"submit","selector":"CSS of submit button"}\n\n'
+            'Rules: only visible/required fields; end with submit.\n'
+            'If impossible (login/captcha/no form), return {"error":"reason"}'
+        )
+        instructions = _claude_json(prompt, max_tokens=2048)
+    except Exception as e:
+        result.update(error=f"Form analysis failed: {e}", status="manual_required")
+        return result
+
+    if isinstance(instructions, dict) and "error" in instructions:
+        result.update(error=instructions["error"], status="manual_required")
+        return result
+    if not isinstance(instructions, list) or not instructions:
+        result.update(error="No form interactions generated", status="manual_required")
+        return result
+
+    bt, bd = _detect_blocker(page)
+    if bt:
+        result.update(status="manual_required", apply_failure_type=bt,
+                      apply_failure_detail=bd, error=f"Blocked before submit: {bd}")
+        return result
+
+    submitted = _exec_interactions(page, instructions, cv_path)
+    if not submitted:
+        for s in ['button[type="submit"]', 'input[type="submit"]',
+                  'button:has-text("Submit")', 'button:has-text("Apply")']:
+            try:
+                page.click(s, timeout=3_000); submitted = True; break
+            except Exception:
+                continue
+    result["submitted"] = submitted
+    if not submitted:
+        result["error"] = "Could not find or click submit button"
+    return result
+
+
+def _apply_generic_chunked(page, applicant: dict, cv_path,
+                            job_title: str, company: str) -> dict:
+    """Attempt 2: chunk full HTML into 6 KB slices, gather all field interactions,
+    deduplicate by selector, then execute. Catches fields beyond first 8 KB."""
+    CHUNK = 6000
+    result = {"success": False, "status": "failed", "confirmation_text": "",
+              "error": "", "submitted": False}
+    try:
+        full_html = page.content()
+        chunks = [full_html[i:i+CHUNK] for i in range(0, min(len(full_html), 90_000), CHUNK)]
+        print(f"[apply-engine] Chunked: {len(chunks)} chunks from {len(full_html)} chars")
+
+        seen: set = set()
+        all_interactions: list = []
+
+        for idx, chunk in enumerate(chunks):
+            try:
+                prompt = (
+                    f'Extract form interactions from HTML chunk {idx+1}/{len(chunks)} '
+                    f'for a job application for "{job_title}" at "{company}".\n'
+                    f'Applicant: {json.dumps({k:v for k,v in applicant.items() if v})}\n'
+                    f'HTML chunk:\n{chunk}\n\n'
+                    'Return a JSON ARRAY of NEW interactions.\n'
+                    ' {"action":"fill","selector":"CSS","value":"text"}\n'
+                    ' {"action":"select","selector":"CSS","value":"option"}\n'
+                    ' {"action":"upload","selector":"CSS","file":"cv"}\n'
+                    ' {"action":"submit","selector":"CSS"}\n'
+                    'Return [] if no new fields. No explanation.'
+                )
+                chunk_result = _claude_json(prompt, max_tokens=1024)
+            except Exception as e:
+                print(f"[apply-engine] Chunk {idx+1} error: {e}")
+                continue
+            if not isinstance(chunk_result, list):
+                continue
+            for instr in chunk_result:
+                sel = instr.get("selector", "")
+                if sel and sel not in seen:
+                    seen.add(sel)
+                    all_interactions.append(instr)
+
+        if not all_interactions:
+            result.update(error="Chunked: no interactions found across all chunks",
+                          status="manual_required")
+            return result
+
+        submits = [i for i in all_interactions if i.get("action") == "submit"]
+        non_sub = [i for i in all_interactions if i.get("action") != "submit"]
+        ordered = non_sub + submits
+        print(f"[apply-engine] Chunked: {len(ordered)} interactions ({len(submits)} submit)")
+
+        bt, bd = _detect_blocker(page)
+        if bt:
+            result.update(status="manual_required", apply_failure_type=bt,
+                          apply_failure_detail=bd, error=f"Chunked blocked: {bd}")
+            return result
+
+        submitted = _exec_interactions(page, ordered, cv_path)
+        if not submitted:
+            for s in ['button[type="submit"]', 'input[type="submit"]',
+                      'button:has-text("Submit")', 'button:has-text("Apply")']:
+                try:
+                    page.click(s, timeout=3_000); submitted = True; break
+                except Exception:
+                    continue
+        result["submitted"] = submitted
+        if not submitted:
+            result["error"] = "Chunked: could not find submit button"
+        return result
+    except Exception as e:
+        result.update(error=f"Chunked strategy error: {e}")
+        return result
+
+
+def _apply_generic_agent(page, applicant: dict, cv_path,
+                          job_title: str, company: str) -> dict:
+    """Attempt 3: Claude tool-use agent drives Playwright, max 25 turns."""
+    MAX_TURNS = 25
+    result = {"success": False, "status": "failed", "confirmation_text": "",
+              "error": "", "submitted": False}
+
+    if not ANTHROPIC_KEY:
+        result.update(error="No Anthropic API key for agent strategy",
+                      status="manual_required")
+        return result
+
+    TOOLS = [
+        {"name": "read_page",
+         "description": "Return current page text and visible form HTML.",
+         "input_schema": {"type": "object", "properties": {}, "required": []}},
+        {"name": "fill_field",
+         "description": "Fill a form input field with a value.",
+         "input_schema": {"type": "object",
+             "properties": {"selector": {"type": "string"}, "value": {"type": "string"}},
+             "required": ["selector", "value"]}},
+        {"name": "click_element",
+         "description": "Click any visible element (button, link, etc.).",
+         "input_schema": {"type": "object",
+             "properties": {"selector": {"type": "string"}},
+             "required": ["selector"]}},
+        {"name": "select_option",
+         "description": "Select a dropdown option by value or label.",
+         "input_schema": {"type": "object",
+             "properties": {"selector": {"type": "string"}, "value": {"type": "string"}},
+             "required": ["selector", "value"]}},
+        {"name": "upload_cv",
+         "description": "Upload candidate resume to a file input.",
+         "input_schema": {"type": "object",
+             "properties": {"selector": {"type": "string"}},
+             "required": ["selector"]}},
+        {"name": "submit_form",
+         "description": "Click the submit button and signal form completion.",
+         "input_schema": {"type": "object",
+             "properties": {"selector": {"type": "string"}},
+             "required": ["selector"]}},
+    ]
+
+    NL = chr(10)
+    applicant_json = json.dumps(applicant, indent=2)
+    system_prompt = (
+        f'You are filling a job application for "{job_title}" at "{company}".' + NL
+        + f'Applicant info:' + NL + applicant_json + NL
+        + 'Use tools to: (1) read_page, (2) fill all required fields, (3) call submit_form.' + NL
+        + 'If blocked by CAPTCHA or login, call read_page and explain in your response.'
+    )
+    messages = [{"role": "user", "content": "Please fill and submit this job application."}]
+
+    for turn in range(MAX_TURNS):
+        payload = json.dumps({
+            "model": "claude-haiku-4-5",
+            "max_tokens": 1024,
+            "system": system_prompt,
+            "tools": TOOLS,
+            "messages": messages,
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages", data=payload,
+                headers={
+                    "x-api-key": ANTHROPIC_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                    "anthropic-beta": "tools-2024-04-04",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                api_resp = json.loads(resp.read())
+        except Exception as e:
+            result.update(error="Agent API error turn %d: %s" % (turn + 1, e))
+            return result
+
+        stop_reason = api_resp.get("stop_reason")
+        content     = api_resp.get("content", [])
+        messages.append({"role": "assistant", "content": content})
+
+        if stop_reason == "end_turn":
+            text = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
+            print("[apply-engine] Agent ended turn %d: %s" % (turn + 1, text[:120]))
+            break
+
+        if stop_reason != "tool_use":
+            break
+
+        tool_results = []
+        for block in content:
+            if block.get("type") != "tool_use":
+                continue
+            name = block["name"]
+            inp  = block.get("input", {})
+            tid  = block["id"]
+            print("[apply-engine] Agent t%d: %s(%s)" % (turn + 1, name, inp))
+            try:
+                if name == "read_page":
+                    pt = page.evaluate("document.body.innerText") or ""
+                    form_el = page.query_selector("form")
+                    fhtml = form_el.inner_html()[:3000] if form_el else page.content()[:3000]
+                    out = "PAGE:" + NL + pt[:2000] + NL + "FORM HTML:" + NL + fhtml
+                elif name == "fill_field":
+                    page.fill(inp["selector"], inp["value"])
+                    out = "Filled " + inp["selector"]
+                elif name == "click_element":
+                    page.click(inp["selector"], timeout=5_000)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=5_000)
+                    except Exception:
+                        pass
+                    out = "Clicked " + inp["selector"]
+                elif name == "select_option":
+                    try:
+                        page.select_option(inp["selector"], value=inp["value"])
+                    except Exception:
+                        page.select_option(inp["selector"], label=inp["value"])
+                    out = "Selected " + inp["value"]
+                elif name == "upload_cv":
+                    if cv_path and os.path.exists(cv_path):
+                        page.set_input_files(inp["selector"], cv_path)
+                        out = "CV uploaded"
+                    else:
+                        out = "No CV file available"
+                elif name == "submit_form":
+                    sel = inp.get("selector") or 'button[type="submit"]'
+                    page.click(sel, timeout=5_000)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=12_000)
+                    except Exception:
+                        pass
+                    c = page.evaluate("document.body.innerText") or ""
+                    if any(p in c.lower() for p in _CONFIRMATION_PHRASES):
+                        result.update(success=True, status="confirmed",
+                                      confirmation_text=c[:500], submitted=True)
+                    else:
+                        result.update(success=True, status="submitted",
+                                      confirmation_text=c[:500], submitted=True)
+                    return result
+                else:
+                    out = "Unknown tool: " + name
+            except Exception as e:
+                out = "Tool error: " + str(e)
+                print("[apply-engine] Agent tool error %s: %s" % (name, e))
+
+            tool_results.append({"type": "tool_result", "tool_use_id": tid, "content": out})
+
+        if tool_results:
+            messages.append({"role": "user", "content": tool_results})
+
+    result.update(error="Agent did not submit after %d turns" % MAX_TURNS,
+                  status="manual_required")
+    return result
+
+
+
 def submit_application(
     job_url: str,
     job_title: str,
@@ -850,14 +1451,24 @@ def submit_application(
 
     try:
         with sync_playwright() as pw:
-            print(f"[apply-engine] Launching Chromium…")
-            browser = pw.chromium.launch(
+            profile_dir = _browser_profile_dir(user_id)
+            print(f"[apply-engine] Launching Chromium (profile: {profile_dir})…")
+            # Use a persistent context so cookies/localStorage carry over between runs,
+            # making the browser fingerprint look like a returning human user.
+            ctx = pw.chromium.launch_persistent_context(
+                profile_dir,
                 headless=True,
+                user_agent=_UA,
                 args=["--no-sandbox", "--disable-setuid-sandbox",
                       "--disable-dev-shm-usage", "--disable-gpu"],
+                viewport={"width": 1280, "height": 800},
+                locale="en-US",
+                timezone_id="America/New_York",
             )
-            ctx = browser.new_context(user_agent=_UA)
+            browser = ctx  # alias so browser.close() still works
             page = ctx.new_page()
+            if _STEALTH_AVAILABLE:
+                _stealth_sync(page)
             page.set_default_timeout(20_000)
 
             # 1. Navigate ─────────────────────────────────────────────────────
@@ -927,6 +1538,66 @@ def submit_application(
                 res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
                 return _add_failure_type(res)
 
+            if _is_ashby(actual_url):
+                print(f"[apply-engine] Detected Ashby ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
+                res = _apply_ashby(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
+                browser.close()
+                res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
+                return _add_failure_type(res)
+
+            if _is_smartrecruiters(actual_url):
+                print(f"[apply-engine] Detected SmartRecruiters ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
+                res = _apply_smartrecruiters(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
+                browser.close()
+                res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
+                return _add_failure_type(res)
+
+            if _is_bamboohr(actual_url):
+                print(f"[apply-engine] Detected BambooHR ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
+                res = _apply_bamboohr(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
+                browser.close()
+                res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
+                return _add_failure_type(res)
+
+            if _is_icims(actual_url):
+                print(f"[apply-engine] Detected iCIMS ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
+                res = _apply_icims(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
+                browser.close()
+                res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
+                return _add_failure_type(res)
+
+            if _is_comeet(actual_url):
+                print(f"[apply-engine] Detected Comeet ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
+                res = _apply_comeet(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
+                browser.close()
+                res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
+                return _add_failure_type(res)
+
+            if _is_jobvite(actual_url):
+                print(f"[apply-engine] Detected Jobvite ATS")
+                _screenshot(page, user_id, job_id, attempt, "pre_submit")
+                res = _apply_jobvite(page, applicant, cv_path)
+                _screenshot(page, user_id, job_id, attempt, "post_submit")
+                browser.close()
+                res["resolved_url"] = actual_url
+                res["evidence_path"] = _evidence_path_str(user_id, job_id, attempt)
+                return _add_failure_type(res)
+
             # 3. Click Apply button if no form visible yet ─────────────────────
             page_html = page.content()
             if not page.query_selector("form"):
@@ -958,94 +1629,48 @@ def submit_application(
                 except Exception as e:
                     print(f"[apply-engine] apply-button error: {e}")
 
-            # 4. Ask Claude for form-filling instructions ──────────────────────
-            try:
-                instructions = _claude_json(
-                    f'Fill job application for "{job_title}" at "{company}".\n\n'
-                    f'Applicant data:\n{json.dumps(applicant, indent=2)}\n\n'
-                    f'Page HTML (first 8000 chars):\n{page_html[:8000]}\n\n'
-                    f'Return a JSON ARRAY of interactions (no explanation):\n'
-                    f' {{"action":"fill","selector":"CSS","value":"text"}}\n'
-                    f' {{"action":"select","selector":"CSS","value":"option value or label"}}\n'
-                    f' {{"action":"upload","selector":"CSS","file":"cv"}}\n'
-                    f' {{"action":"check","selector":"CSS"}}\n'
-                    f' {{"action":"click","selector":"CSS"}}\n'
-                    f' {{"action":"submit","selector":"CSS of submit button"}}\n\n'
-                    f'Rules: only include visible/required fields; end with submit.\n'
-                    f'If impossible (login/captcha/no form), return {{"error":"reason"}}',
-                    max_tokens=2048,
-                )
-            except Exception as e:
-                browser.close()
-                return {**_base, "status": "manual_required",
-                        "error": f"Form analysis failed: {e}"}
-
-            if isinstance(instructions, dict) and "error" in instructions:
-                browser.close()
-                return {**_base, "status": "manual_required", "error": instructions["error"]}
-
-            if not isinstance(instructions, list) or not instructions:
-                browser.close()
-                return {**_base, "status": "manual_required",
-                        "error": "No form interactions generated"}
-
-            # 5. Execute interactions ──────────────────────────────────────────
-            # Re-check for blockers now that page may have changed after Apply button click
-            blocker_type2, blocker_detail2 = _detect_blocker(page)
-            if blocker_type2:
-                _screenshot(page, user_id, job_id, attempt, "pre_submit_blocker")
-                browser.close()
-                return {**_base, "status": "manual_required",
-                        "apply_failure_type": blocker_type2,
-                        "apply_failure_detail": blocker_detail2,
-                        "error": f"Blocked before submit: {blocker_detail2}"}
-
+            # 4. Strategy dispatch based on attempt number ─────────────────────
+            #    attempt 1 → single-shot (first 8 KB)
+            #    attempt 2 → chunked HTML (full page, 6 KB slices)
+            #    attempt 3 → LLM browser agent (tool-use loop, max 25 turns)
             _screenshot(page, user_id, job_id, attempt, "pre_submit")
+            strategy_name = {1: "single-shot", 2: "chunked", 3: "agent"}.get(attempt, "single-shot")
+            print(f"[apply-engine] Generic strategy: {strategy_name} (attempt {attempt})")
 
-            submitted = False
-            for instr in instructions:
-                action = instr.get("action", "")
-                sel    = instr.get("selector", "")
-                try:
-                    if action == "fill":
-                        page.fill(sel, str(instr.get("value", "")))
-                    elif action == "select":
-                        try:
-                            page.select_option(sel, value=str(instr.get("value", "")))
-                        except Exception:
-                            page.select_option(sel, label=str(instr.get("value", "")))
-                    elif action == "upload" and instr.get("file") == "cv":
-                        if cv_path and os.path.exists(cv_path):
-                            page.set_input_files(sel, cv_path)
-                    elif action == "check":
-                        page.check(sel)
-                    elif action == "click":
-                        page.click(sel)
-                    elif action == "submit":
-                        page.click(sel)
-                        submitted = True
-                        time.sleep(0.2)
-                except Exception as e:
-                    print(f"[apply-engine] instr {instr}: {e}")
+            if attempt == 2:
+                strat_res = _apply_generic_chunked(page, applicant, cv_path,
+                                                   job_title, company)
+            elif attempt >= 3:
+                strat_res = _apply_generic_agent(page, applicant, cv_path,
+                                                  job_title, company)
+            else:
+                strat_res = _apply_generic_single_shot(page, applicant, cv_path,
+                                                        job_title, company, page_html)
 
-            # Fallback submit if explicit action missed
-            if not submitted:
-                for s in ['button[type="submit"]', 'input[type="submit"]',
-                          'button:has-text("Submit")', 'button:has-text("Apply")']:
-                    try:
-                        page.click(s, timeout=3_000)
-                        submitted = True
-                        break
-                    except Exception:
-                        continue
-
-            if not submitted:
+            if not strat_res.get("submitted"):
                 browser.close()
-                ft, fd = _classify_failure("Could not find or click submit button")
-                return {**_base, "apply_failure_type": ft, "apply_failure_detail": fd,
-                        "error": "Could not find or click submit button"}
+                err = strat_res.get("error", "Strategy failed")
+                ft  = strat_res.get("apply_failure_type") or _classify_failure(err)[0]
+                fd  = strat_res.get("apply_failure_detail") or _classify_failure(err)[1]
+                status = strat_res.get("status", "failed")
+                return {**_base, "status": status, "error": err,
+                        "apply_failure_type": ft, "apply_failure_detail": fd}
 
-            # 6. Wait for result page ──────────────────────────────────────────
+            # If agent already confirmed (submit_form returned early), propagate
+            if strat_res.get("success") and strat_res.get("status") in ("confirmed","submitted"):
+                browser.close()
+                return {
+                    "success": strat_res["success"],
+                    "status":  strat_res["status"],
+                    "confirmation_text": strat_res.get("confirmation_text",""),
+                    "error": "",
+                    "resolved_url": actual_url,
+                    "evidence_path": _evidence_path_str(user_id, job_id, attempt),
+                    "apply_failure_type": None,
+                    "apply_failure_detail": None,
+                }
+
+            # 5. Wait for result page ──────────────────────────────────────────
             try:
                 page.wait_for_load_state("networkidle", timeout=12_000)
             except PWTimeout:
@@ -1055,13 +1680,13 @@ def submit_application(
             result_url  = page.url
             _screenshot(page, user_id, job_id, attempt, "post_submit")
 
-            # 7. Verify confirmation ───────────────────────────────────────────
+            # 6. Verify confirmation ───────────────────────────────────────────
             phrase_ok = any(p in result_text.lower() for p in _CONFIRMATION_PHRASES)
             try:
                 v = _claude_json(
                     f'After submitting application for "{job_title}" at "{company}":\n'
                     f'URL: {result_url}\nPage: {result_text[:2000]}\n\n'
-                    f'Was the application successfully received by the company?\n'
+                    f'Was the application successfully received?\n'
                     f'Return JSON: {{"confirmed":true/false,"message":"confirmation or reason"}}',
                     max_tokens=200,
                 )
@@ -1079,13 +1704,14 @@ def submit_application(
                 "error": "",
                 "resolved_url": actual_url,
                 "evidence_path": _evidence_path_str(user_id, job_id, attempt),
+                "apply_failure_type": None,
+                "apply_failure_detail": None,
             }
 
     except Exception as e:
         err = str(e)
         ft, fd = _classify_failure(err)
         status = "manual_required" if ft in ("captcha", "login_wall") else "failed"
-        # Try to capture a screenshot if the browser/page is still accessible
         try:
             _screenshot(page, user_id, job_id, attempt, "error")
             _dump_html(page, user_id, job_id, attempt, "error")

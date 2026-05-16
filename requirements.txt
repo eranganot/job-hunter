@@ -6,3 +6,6 @@ playwright==1.49.1
 
 # Email sending via Resend
 resend==2.10.0
+
+# Anti-bot stealth patches for Playwright
+playwright-stealth==1.0.6

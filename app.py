@@ -1746,6 +1746,7 @@ def run_job_apply(user_id: int) -> dict:
         _sent_today = _prof["applications_sent_today"] or 0
 
     DAILY_CAP = 3
+    MAX_APPLIES_PER_HOUR = int(os.environ.get('MAX_APPLIES_PER_HOUR', '5'))
     _remaining = None if _is_admin else max(0, DAILY_CAP - _sent_today)
     if _remaining is not None and _remaining <= 0:
         _rc.close()
@@ -1846,6 +1847,18 @@ def run_job_apply(user_id: int) -> dict:
             c_mark.commit()
             c_mark.close()
 
+            # ── Global hourly rate limit ───────────────────────────────────
+            _hour_ago = (datetime.now(_tz.utc) - _td(hours=1)).isoformat()
+            _submitted_last_hour = conn.execute(
+                "SELECT COUNT(*) FROM jobs "
+                "WHERE apply_submitted_at IS NOT NULL AND apply_submitted_at >= ?",
+                (_hour_ago,)
+            ).fetchone()[0] or 0
+            if _submitted_last_hour >= MAX_APPLIES_PER_HOUR:
+                print(f'[apply] Global hourly cap reached '
+                      f'({_submitted_last_hour}/{MAX_APPLIES_PER_HOUR}), stopping run')
+                break
+
             if job_url:
                 res = apply_engine.submit_application(
                     job_url, j["title"], j["company"],
@@ -1873,6 +1886,7 @@ def run_job_apply(user_id: int) -> dict:
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
                     "apply_failure_type=?, apply_failure_detail=?, "
                     "apply_evidence_path=?, apply_resolved_url=?, "
+                    "apply_submitted_at=datetime('now'), "
                     "apply_attempts=COALESCE(apply_attempts,0)+1 "
                     "WHERE id=? AND user_id=?",
                     (today, notes, apply_status, apply_confirmation, apply_error,
