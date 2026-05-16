@@ -5042,11 +5042,18 @@ async function runApply() {
     const r = await fetch('/api/run-apply', {method:'POST', headers:{'Content-Type':'application/json'}});
     const data = await r.json();
     if (r.ok && data.started) {
-      // Applying runs in the background — results arrive as notifications
-      if (btn) { btn.innerHTML = '✅ Running...'; }
-      setTimeout(() => {
-        if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Apply All'; }
-      }, 5000);
+      if (btn) { btn.innerHTML = '⚙️ Applying...'; }
+      // Poll aggressively for the first 3 minutes so job cards update as the engine works
+      let _pollCount = 0;
+      const _runPoller = setInterval(async () => {
+        _pollCount++;
+        await loadJobs(tab);
+        if (_pollCount >= 45) { // 45 × 4s = 3 min max
+          clearInterval(_runPoller);
+          if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Apply All'; }
+          loadAll();
+        }
+      }, 4000);
     } else {
       alert(data.error ? 'Apply error: ' + data.error : 'Nothing to apply — approve some jobs first.');
       if (btn) { btn.disabled = false; btn.innerHTML = '🚀 Apply All'; }
