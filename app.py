@@ -1769,31 +1769,55 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
         import apply_engine
         conn = database.get_db()
 
-        # Pick up queued + retry jobs (retry jobs must be past their backoff time)
-        jobs = conn.execute(
-            """
-            SELECT id, title, company, url, apply_status, apply_attempts,
-                   apply_next_attempt_at
-            FROM jobs
-            WHERE user_id=?
-              AND status='approved'
-              AND (
-                (apply_status = 'queued'
-                 AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
-                OR (apply_status IN ('retry_1','retry_2','retry_3')
-                    AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
-              )
-            ORDER BY
-              CASE apply_status
-                WHEN 'queued'   THEN 0
-                WHEN 'retry_1'  THEN 1
-                WHEN 'retry_2'  THEN 2
-                WHEN 'retry_3'  THEN 3
-              END,
-              match_score DESC NULLS LAST
-            """,
-            (user_id, now_iso, now_iso)
-        ).fetchall()
+        # Pick up queued + retry jobs.
+        # When force=True (manual Apply All click), bypass the per-job backoff so the user
+        # gets all approved jobs tried, not just the ones whose retry timer has elapsed.
+        if force:
+            jobs = conn.execute(
+                """
+                SELECT id, title, company, url, apply_status, apply_attempts,
+                       apply_next_attempt_at
+                FROM jobs
+                WHERE user_id=?
+                  AND status='approved'
+                  AND (apply_status = 'queued'
+                       OR apply_status IN ('retry_1','retry_2','retry_3'))
+                ORDER BY
+                  CASE apply_status
+                    WHEN 'queued'   THEN 0
+                    WHEN 'retry_1'  THEN 1
+                    WHEN 'retry_2'  THEN 2
+                    WHEN 'retry_3'  THEN 3
+                  END,
+                  match_score DESC NULLS LAST
+                """,
+                (user_id,)
+            ).fetchall()
+        else:
+            jobs = conn.execute(
+                """
+                SELECT id, title, company, url, apply_status, apply_attempts,
+                       apply_next_attempt_at
+                FROM jobs
+                WHERE user_id=?
+                  AND status='approved'
+                  AND (
+                    (apply_status = 'queued'
+                     AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
+                    OR (apply_status IN ('retry_1','retry_2','retry_3')
+                        AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?))
+                  )
+                ORDER BY
+                  CASE apply_status
+                    WHEN 'queued'   THEN 0
+                    WHEN 'retry_1'  THEN 1
+                    WHEN 'retry_2'  THEN 2
+                    WHEN 'retry_3'  THEN 3
+                  END,
+                  match_score DESC NULLS LAST
+                """,
+                (user_id, now_iso, now_iso)
+            ).fetchall()
 
         # Apply per-run + daily caps
         if _remaining is not None:
