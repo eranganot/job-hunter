@@ -1780,14 +1780,17 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
                 FROM jobs
                 WHERE user_id=?
                   AND status='approved'
-                  AND (apply_status = 'queued'
-                       OR apply_status IN ('retry_1','retry_2','retry_3'))
+                  AND (apply_status IS NULL
+                       OR apply_status IN ('queued','retry_1','retry_2','retry_3','failed','manual_required'))
                 ORDER BY
                   CASE apply_status
-                    WHEN 'queued'   THEN 0
-                    WHEN 'retry_1'  THEN 1
-                    WHEN 'retry_2'  THEN 2
-                    WHEN 'retry_3'  THEN 3
+                    WHEN 'queued'           THEN 0
+                    WHEN 'retry_1'          THEN 1
+                    WHEN 'retry_2'          THEN 2
+                    WHEN 'retry_3'          THEN 3
+                    WHEN 'failed'           THEN 4
+                    WHEN 'manual_required'  THEN 5
+                    ELSE                         6
                   END,
                   match_score DESC NULLS LAST
                 """,
