@@ -1850,11 +1850,13 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
 
             # ── Global hourly rate limit ───────────────────────────────────
             _hour_ago = (datetime.now(_tz.utc) - _td(hours=1)).isoformat()
-            _submitted_last_hour = conn.execute(
+            _hr_conn = database.get_db()
+            _submitted_last_hour = _hr_conn.execute(
                 "SELECT COUNT(*) FROM jobs "
                 "WHERE apply_submitted_at IS NOT NULL AND apply_submitted_at >= ?",
                 (_hour_ago,)
             ).fetchone()[0] or 0
+            _hr_conn.close()
             if _submitted_last_hour >= MAX_APPLIES_PER_HOUR:
                 print(f'[apply] Global hourly cap reached '
                       f'({_submitted_last_hour}/{MAX_APPLIES_PER_HOUR}), stopping run')
@@ -2003,6 +2005,20 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
     except Exception as e:
         print(f"[run-apply] Error: {e}")
         import traceback; traceback.print_exc()
+        # Recovery: reset any rows we marked 'applying' but never finished,
+        # or the UI spinner shows forever and the next run can't pick them up.
+        try:
+            _rec = database.get_db()
+            _stuck_n = _rec.execute(
+                "UPDATE jobs SET apply_status='queued' "
+                "WHERE user_id=? AND apply_status='applying'",
+                (user_id,)
+            ).rowcount
+            _rec.commit(); _rec.close()
+            if _stuck_n:
+                print(f"[run-apply] reset {_stuck_n} stuck 'applying' row(s) for user {user_id}")
+        except Exception as _re:
+            print(f"[run-apply] recovery failed: {_re}")
         return {"applied": 0, "error": str(e)}
 
 # ── _trigger_apply_bg removed — approval now only queues jobs ────────────────
