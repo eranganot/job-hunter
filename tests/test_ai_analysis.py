@@ -311,20 +311,23 @@ class TestAnalyzeCv:
             "job_titles": ["Senior PM", "Group PM"],
             "keywords": ["B2B SaaS", "OKRs", "Agile"],
             "locations": ["Tel Aviv"],
-            "salary_min": 50000,
-            "salary_max": 80000,
             "experience_years": 8,
             "seniority": "senior",
             "summary": "8-year product leader.",
             "recommendations": ["Focus on Series B+", "Highlight metrics"],
+            "score": 78,
+            "score_label": "Strong Profile",
+            "linkedin_url": "https://linkedin.com/in/example",
+            "phone": "+1-555-0100",
         }
         mock_response = _make_urlopen_mock(_api_response(json.dumps(api_data)))
 
         with patch("urllib.request.urlopen", return_value=mock_response):
             result = analyze_cv(str(pdf), "fake-key")
 
-        for key in ["job_titles", "keywords", "locations", "salary_min", "salary_max",
-                    "experience_years", "seniority", "summary", "recommendations"]:
+        for key in ["job_titles", "keywords", "locations",
+                    "experience_years", "seniority", "summary", "recommendations",
+                    "score", "score_label", "linkedin_url", "phone"]:
             assert key in result, f"Missing key: {key}"
 
     def test_handles_markdown_code_fences(self, tmp_path):
