@@ -6854,9 +6854,10 @@ if __name__ == "__main__":
         _mconn = database.get_db()
         _mconn.execute("UPDATE jobs SET status='rejected', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
         _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status IN ('failed','manual_required')")
-        # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
+        # Reset any jobs stuck in 'applying' back to 'queued' so the next Apply All can retry them.
+        # (Setting to NULL would orphan them — run_job_apply only picks up 'queued'/'retry_*'.)
         _stuck = _mconn.execute(
-            "UPDATE jobs SET apply_status=NULL WHERE apply_status='applying'"
+            "UPDATE jobs SET apply_status='queued' WHERE apply_status='applying'"
         ).rowcount
         if _stuck:
             print(f"[startup] Reset {_stuck} job(s) stuck in 'applying' state")
