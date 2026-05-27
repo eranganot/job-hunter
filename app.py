@@ -1279,6 +1279,12 @@ def run_job_search(user_id: int):
                                 'maxOutputTokens': 16384,          # was 8192 — was truncating mid-JSON for 50-job batches
                                 'responseMimeType': 'application/json',
                                 'responseSchema': _gemini_schema,
+                                # Gemini 2.5 series spends 'thinking tokens' from the output
+                                # budget BEFORE producing visible text. Without this, a 50-job
+                                # batch hits MAX_TOKENS after thinking eats ~10k tokens and
+                                # the visible JSON truncates mid-array. thinkingBudget=0
+                                # disables that internal reasoning for this call.
+                                'thinkingConfig': {'thinkingBudget': 0},
                             },
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
@@ -1454,8 +1460,13 @@ def run_job_search(user_id: int):
             _jobs_to_score = _ats_jobs + _other_jobs
             print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other)")
             scored_jobs = []
-            for batch_i in range(0, len(_jobs_to_score), 50):
-                batch = _jobs_to_score[batch_i:batch_i+50]
+            # Batch of 25 (was 50) keeps the Gemini output JSON well under the
+            # maxOutputTokens ceiling even on verbose job descriptions. Combined
+            # with thinkingBudget=0 in _score_batch this eliminates the
+            # 'finishReason=MAX_TOKENS' truncations seen in prod 2026-05-27.
+            _SCORE_BATCH_SIZE = 25
+            for batch_i in range(0, len(_jobs_to_score), _SCORE_BATCH_SIZE):
+                batch = _jobs_to_score[batch_i:batch_i+_SCORE_BATCH_SIZE]
                 scored_jobs.extend(_score_batch(batch, profile_text))
 
             # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
@@ -1608,15 +1619,24 @@ def run_job_search(user_id: int):
                             )
 
                             def _parse_desc_resp(txt_):
+                                if not txt_:
+                                    return []
                                 t = txt_.strip()
                                 if "```" in t:
                                     t = t.split("```")[1]
                                     if t.startswith("json"): t = t[4:]
                                 si = t.find("[");  ei = t.rfind("]")
-                                if si < 0 or ei <= si: return []
+                                if si < 0 or ei <= si:
+                                    _snip = txt_.strip().replace("\n", " ")[:300]
+                                    print(f"[search] ⚠️  Track B: no JSON array in response — "
+                                          f"len={len(txt_)}, raw[:300]: {_snip!r}")
+                                    return []
                                 try:
                                     return _js2.loads(t[si:ei+1])
-                                except Exception:
+                                except Exception as _pe:
+                                    _snip = t[si:si+300].replace("\n", " ")
+                                    print(f"[search] ⚠️  Track B JSON parse failed: {_pe} | "
+                                          f"extracted[:300]: {_snip!r}")
                                     return []
 
                             def _apply_desc_scores(scored_ids_, batch_d2_, reason_default="Matched by description"):
@@ -1660,9 +1680,30 @@ def run_job_search(user_id: int):
                                                 })
                                         except Exception:
                                             pass
+                                    # Track B output is small: {id, score, reason} per job.
+                                    # Strict JSON schema + thinkingBudget=0 prevents the same
+                                    # MAX_TOKENS truncation we saw in the main scorer.
+                                    _tb_schema = {
+                                        "type": "ARRAY",
+                                        "items": {
+                                            "type": "OBJECT",
+                                            "properties": {
+                                                "id":     {"type": "INTEGER"},
+                                                "score":  {"type": "INTEGER"},
+                                                "reason": {"type": "STRING"},
+                                            },
+                                            "required": ["id", "score", "reason"],
+                                        },
+                                    }
                                     _body_d = _js2.dumps({
                                         "contents": [{"parts": _parts_d}],
-                                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096}
+                                        "generationConfig": {
+                                            "temperature": 0.1,
+                                            "maxOutputTokens": 8192,                 # was 4096
+                                            "responseMimeType": "application/json",
+                                            "responseSchema": _tb_schema,
+                                            "thinkingConfig": {"thinkingBudget": 0},  # see _score_batch for rationale
+                                        },
                                     }).encode()
                                     _url_d = ("https://generativelanguage.googleapis.com/v1beta/models/"
                                               "gemini-2.5-flash:generateContent?key=" + _TB_GEMINI)
@@ -1670,7 +1711,23 @@ def run_job_search(user_id: int):
                                                           headers={"Content-Type": "application/json"}, method="POST")
                                     with _ur2.urlopen(_req_d, timeout=90) as _rd:
                                         _resp_d = _js2.loads(_rd.read().decode())
-                                    _text_d = _resp_d["candidates"][0]["content"]["parts"][0]["text"]
+                                    # Defensive extraction (Gemini can SAFETY/RECITATION-block silently)
+                                    _cands_d = (_resp_d or {}).get("candidates") or []
+                                    if not _cands_d:
+                                        _pf_d = (_resp_d or {}).get('promptFeedback', {})
+                                        print(f"[search] ⚠️  Track B Gemini: 0 candidates "
+                                              f"(promptFeedback={_js2.dumps(_pf_d)[:200]})")
+                                        _text_d = ""
+                                    else:
+                                        _cd = _cands_d[0]
+                                        _fr_d = _cd.get("finishReason", "")
+                                        _ct_d = _cd.get("content") or {}
+                                        _pt_d = _ct_d.get("parts") or []
+                                        _text_d = (_pt_d[0].get("text", "") if _pt_d else "")
+                                        if _fr_d == "MAX_TOKENS":
+                                            print(f"[search] ⚠️  Track B Gemini hit MAX_TOKENS — response truncated (len={len(_text_d)})")
+                                        elif _fr_d and _fr_d != "STOP":
+                                            print(f"[search] ⚠️  Track B Gemini finishReason={_fr_d!r}")
                                     _scored_d = _parse_desc_resp(_text_d)
                                     _out_d = _apply_desc_scores(_scored_d, batch_d_)
                                     _ai_d_used = True
@@ -1711,8 +1768,11 @@ def run_job_search(user_id: int):
                             return _out_d
 
                         _tb_scored = []
-                        for _tb_i in range(0, len(_trackb_pool), 50):
-                            _tb_batch = _trackb_pool[_tb_i:_tb_i+50]
+                        # Same 25-job batch size as the main scorer — keeps Gemini
+                        # output well under maxOutputTokens with thinkingBudget=0.
+                        _TB_BATCH = 25
+                        for _tb_i in range(0, len(_trackb_pool), _TB_BATCH):
+                            _tb_batch = _trackb_pool[_tb_i:_tb_i+_TB_BATCH]
                             _tb_scored.extend(_score_batch_desc(_tb_batch, profile_text))
 
                         print(f"[search] Track B: {len(_trackb_pool)} -> {len(_tb_scored)} passed description matching")
