@@ -948,6 +948,16 @@ def _add_failure_type(res: dict) -> dict:
 # ── Config ────────────────────────────────────────────────────────────────────
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+# Gemini is the primary scorer in the rest of the project; the apply engine
+# now uses it as the JSON-output AI too, so removing ANTHROPIC_API_KEY no
+# longer breaks the single-shot 'analyze form HTML' strategy. The tool-use
+# agent strategy still requires Anthropic (uses Claude's tools API which is
+# vendor-specific); without it the engine cleanly degrades to manual_required.
+GEMINI_KEY = (
+    os.environ.get("GEMINI_API_KEY")
+    or os.environ.get("GEMINI_KEY")
+    or os.environ.get("GOOGLE_API_KEY", "")
+)
 
 
 import random as _random
@@ -1012,8 +1022,78 @@ def _claude(prompt: str, max_tokens: int = 1024) -> str:
         text = re.sub(r"\n?```$", "", text.strip())
     return text.strip()
 
+def _gemini_json(prompt: str, max_tokens: int = 2048):
+    """Call Gemini 2.5 Flash with JSON mode + thinking disabled, parse response.
+
+    Used by _claude_json as primary so the apply engine works without an
+    Anthropic key. Mirrors the patterns from app.py's search scorer.
+    """
+    if not GEMINI_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set")
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            # 2x because thinkingBudget=0 disables the reasoning portion but we
+            # still want headroom for verbose form-instruction output
+            "maxOutputTokens": max(max_tokens * 2, 4096),
+            "responseMimeType": "application/json",
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }).encode()
+    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+           "gemini-2.5-flash:generateContent?key=" + GEMINI_KEY)
+    req = urllib.request.Request(url, data=body,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    with urllib.request.urlopen(req, timeout=90) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    # Defensive extraction — Gemini can SAFETY/RECITATION-block silently
+    candidates = data.get("candidates") or []
+    if not candidates:
+        pf = data.get("promptFeedback", {})
+        raise ValueError(f"Gemini returned 0 candidates (promptFeedback={json.dumps(pf)[:200]})")
+    cand = candidates[0]
+    finish = cand.get("finishReason", "")
+    content = cand.get("content") or {}
+    parts = content.get("parts") or []
+    text = (parts[0].get("text", "") if parts else "").strip()
+    if not text:
+        raise ValueError(f"Gemini returned empty text (finishReason={finish!r})")
+    # With responseMimeType=application/json the text should already be parseable
+    try:
+        return json.loads(text)
+    except Exception:
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+        m = re.search(r'\[.*\]', text, re.DOTALL)
+        if m:
+            return json.loads(m.group())
+        raise ValueError(f"No JSON in Gemini response: {text[:200]}")
+
+
 def _claude_json(prompt: str, max_tokens: int = 1024):
-    """Call Claude and parse the JSON response."""
+    """Call AI and parse JSON. Gemini primary, Anthropic fallback.
+
+    This name is kept for historical reasons (lots of callers). It now
+    dispatches: Gemini first when GEMINI_API_KEY is set (free tier and
+    the project's primary AI), Anthropic as fallback when present.
+    """
+    # 1) Prefer Gemini (free tier, project's primary scorer)
+    if GEMINI_KEY:
+        try:
+            return _gemini_json(prompt, max_tokens)
+        except Exception as e:
+            print(f"[apply-engine] Gemini JSON call failed: {e}")
+            # Only fall through if we have an Anthropic key to try
+            if not ANTHROPIC_KEY:
+                raise
+
+    # 2) Fall back to Anthropic if configured
+    if not ANTHROPIC_KEY:
+        raise RuntimeError(
+            "No AI key available — set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway")
     text = _claude(prompt, max_tokens)
     try:
         return json.loads(text)
@@ -1035,7 +1115,8 @@ def extract_applicant_data(cv_text: str, email: str) -> dict:
         "phone": "", "linkedin_url": "", "location": "", "current_title": "",
         "current_company": "", "years_experience": 0, "summary": "",
     }
-    if not cv_text or not ANTHROPIC_KEY:
+    # _claude_json now routes through Gemini first — accept either key
+    if not cv_text or (not ANTHROPIC_KEY and not GEMINI_KEY):
         return empty
     try:
         result = _claude_json(
