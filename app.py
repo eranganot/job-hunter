@@ -6822,8 +6822,12 @@ async function mark(status) {{
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
-            if not ANTHROPIC_KEY:
-                self.send_json({"error": "Anthropic API key not configured"}, 400)
+            # Search needs AT LEAST ONE AI scorer to be meaningful. Gemini is the
+            # primary; Anthropic is the fallback. Either one is enough. If neither
+            # is set, we'd fall straight to the keyword heuristic which produces
+            # near-empty results — fail fast with a clear error instead.
+            if not GEMINI_KEY and not ANTHROPIC_KEY:
+                self.send_json({"error": "No AI key configured. Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway."}, 400)
                 return
             uid = user["id"]
             threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
