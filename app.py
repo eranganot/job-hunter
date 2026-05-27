@@ -1133,20 +1133,35 @@ def run_job_search(user_id: int):
             if _cv_text:
                 profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
 
-            def _parse_scored_response(text_):
-                """Extract a valid JSON array of scored jobs from an AI response string."""
+            def _parse_scored_response(text_, source_hint_=""):
+                """Extract a valid JSON array of scored jobs from an AI response string.
+
+                If parsing fails the raw response (truncated) is logged so the
+                exact failure mode is visible in Railway logs.
+                """
+                if not text_:
+                    print(f"[search] ⚠️  AI response was EMPTY (source: {source_hint_ or 'unknown'}) — skipping batch")
+                    return []
                 t = text_.strip()
+                # Strip ``` fences if the model wrapped its output in markdown
                 if "```" in t:
                     t = t.split("```")[1]
-                    if t.startswith("json"): t = t[4:]
-                si = t.find("[");  ei = t.rfind("]")
+                    if t.startswith("json"):
+                        t = t[4:]
+                si = t.find("[")
+                ei = t.rfind("]")
                 if si < 0 or ei <= si:
-                    print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
+                    # Show what Gemini/Anthropic actually returned so the issue is debuggable
+                    _snippet = text_.strip().replace("\n", " ")[:400]
+                    print(f"[search] ⚠️  AI response had no JSON array (source: {source_hint_ or 'unknown'}) — "
+                          f"len={len(text_)} chars, raw[:400]: {_snippet!r}")
                     return []
                 try:
                     parsed = _js2.loads(t[si:ei+1])
                 except Exception as _parse_err:
-                    print(f"[search] ⚠️  JSON parse failed: {_parse_err} | raw snippet: {t[si:si+120]!r}")
+                    _snippet = t[si:si+400].replace("\n", " ")
+                    print(f"[search] ⚠️  JSON parse failed (source: {source_hint_ or 'unknown'}): "
+                          f"{_parse_err} | extracted[:400]: {_snippet!r}")
                     return []
                 out = []
                 for j in parsed:
@@ -1217,7 +1232,11 @@ def run_job_search(user_id: int):
                 )
 
                 # --- Try Gemini Flash first (free tier: 1500 req/day) ---
+                # Gemini is told to return strict JSON via responseMimeType + responseSchema
+                # so we never have to "find a JSON array inside prose". maxOutputTokens is
+                # bumped to 16384 so a batch of 50 jobs can't get truncated mid-JSON.
                 if _GEMINI_KEY:
+                    _gemini_attempted_ok = False
                     try:
                         import base64 as _b64_sc, os as _os_sc
                         _parts = []
@@ -1231,9 +1250,36 @@ def run_job_search(user_id: int):
                         else:
                             print(f"[search] Scoring with CV text (no PDF at '{_cv_path_sc}')")
                         _parts.append({'text': prompt_})
+                        # Structured-output schema: forces Gemini to return a JSON array
+                        # of objects with this exact shape. Eliminates "no JSON array"
+                        # parse failures caused by prose responses or markdown wrapping.
+                        _gemini_schema = {
+                            "type": "ARRAY",
+                            "items": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "job_title":        {"type": "STRING"},
+                                    "company":          {"type": "STRING"},
+                                    "location":         {"type": "STRING"},
+                                    "url":              {"type": "STRING"},
+                                    "publish_date":     {"type": "STRING", "nullable": True},
+                                    "full_description": {"type": "STRING"},
+                                    "description":      {"type": "STRING"},
+                                    "candidate_score":  {"type": "INTEGER"},
+                                    "fit_reason":       {"type": "STRING"},
+                                },
+                                "required": ["job_title", "company", "url",
+                                             "candidate_score", "fit_reason"],
+                            },
+                        }
                         _g_body = _js2.dumps({
                             'contents': [{'parts': _parts}],
-                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 8192}
+                            'generationConfig': {
+                                'temperature': 0.2,
+                                'maxOutputTokens': 16384,          # was 8192 — was truncating mid-JSON for 50-job batches
+                                'responseMimeType': 'application/json',
+                                'responseSchema': _gemini_schema,
+                            },
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
@@ -1254,15 +1300,44 @@ def run_job_search(user_id: int):
                                     _gtime.sleep(_g_wait)
                                 else:
                                     raise
-                        _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
-                        result_ = _parse_scored_response(_g_text)
+                        _gemini_attempted_ok = True
+                        # Defensive extraction — Gemini can return:
+                        #   - empty candidates list (rare)
+                        #   - candidate with finishReason='SAFETY'/'RECITATION'/'MAX_TOKENS'
+                        #     and NO 'content' key
+                        #   - normal content.parts[0].text
+                        _candidates = (_g_data or {}).get('candidates') or []
+                        if not _candidates:
+                            _prompt_fb = (_g_data or {}).get('promptFeedback', {})
+                            print(f"[search] ⚠️  Gemini returned 0 candidates "
+                                  f"(promptFeedback={_js2.dumps(_prompt_fb)[:200]}) — skipping batch")
+                            _g_text = ""
+                        else:
+                            _cand = _candidates[0]
+                            _finish = _cand.get('finishReason', '')
+                            _content = _cand.get('content') or {}
+                            _g_parts = _content.get('parts') or []
+                            _g_text = (_g_parts[0].get('text', '') if _g_parts else '')
+                            if not _g_text:
+                                _safety = _cand.get('safetyRatings', [])
+                                print(f"[search] ⚠️  Gemini returned no text — "
+                                      f"finishReason={_finish!r}, safetyRatings={_js2.dumps(_safety)[:200]}")
+                            elif _finish == 'MAX_TOKENS':
+                                print(f"[search] ⚠️  Gemini hit MAX_TOKENS — response truncated "
+                                      f"(consider smaller batch or higher maxOutputTokens). len={len(_g_text)}")
+                            elif _finish and _finish != 'STOP':
+                                print(f"[search] ⚠️  Gemini finishReason={_finish!r} (text len={len(_g_text)})")
+                        result_ = _parse_scored_response(_g_text, source_hint_="gemini")
                         print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
                         if result_:
                             return result_
                         print(f"[search] Gemini returned 0 results — running heuristic safety net")
                         # fall through to heuristic below
                     except Exception as _ge:
-                        print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
+                        if not _gemini_attempted_ok:
+                            print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
+                        else:
+                            print(f"[search] Gemini post-call error: {_ge} — trying Anthropic")
                         database.log_activity(user_id, "scoring_warning",
                             f"Gemini scoring failed: {_ge}. Falling back to Anthropic.")
 
@@ -1279,7 +1354,7 @@ def run_job_search(user_id: int):
                         _a_text = ""
                         for blk in _a_result.get("content", []):
                             if blk.get("type") == "text": _a_text += blk["text"]
-                        result_ = _parse_scored_response(_a_text)
+                        result_ = _parse_scored_response(_a_text, source_hint_="anthropic")
                         print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
                         if result_:
                             return result_
@@ -1296,11 +1371,21 @@ def run_job_search(user_id: int):
                             f"Anthropic scoring failed: {_ae}. Falling back to keyword heuristic.")
 
                 # --- Rule-based heuristic (no API needed) ---
-                print(f"[search] ⚠️  HEURISTIC scoring {len(batch_)} jobs — AI keys missing or failed.")
-                print(f"[search]    To enable AI scoring, set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway.")
+                # Differentiate "no AI key configured" from "AI key configured but failed"
+                # so the operator log message tells the truth about what's happening.
+                _have_gemini = bool(_GEMINI_KEY)
+                _have_anth   = bool(ANTHROPIC_KEY)
+                if _have_gemini and _have_anth:
+                    _reason = "both Gemini and Anthropic calls returned no usable result"
+                elif _have_gemini:
+                    _reason = "Gemini returned no usable result (Anthropic not configured)"
+                elif _have_anth:
+                    _reason = "Anthropic returned no usable result (Gemini not configured)"
+                else:
+                    _reason = "no AI keys configured (set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway)"
+                print(f"[search] ⚠️  HEURISTIC scoring {len(batch_)} jobs — {_reason}.")
                 database.log_activity(user_id, "scoring_warning",
-                    "Using keyword heuristic scoring — results may be limited. "
-                    "Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway to enable AI scoring.")
+                    f"Falling back to keyword heuristic — {_reason}.")
                 # Roles that should never pass the heuristic regardless of title fuzzy-match
                 _HEURISTIC_BLOCKLIST = {
                     'software engineer', 'backend engineer', 'frontend engineer',
