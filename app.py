@@ -1856,7 +1856,20 @@ def run_job_search(user_id: int):
         conn.close()
 
         # ── Insert new jobs (skip rejected patterns) ─────────────────────
-        conn = database.get_db(); inserted = 0; new_jobs_info = []; skipped_rej = 0
+        # Per-bucket counters so the Telegram count, the activity-log breakdown,
+        # and the dashboard 'New' count all reconcile. Fixed 2026-05-27 where
+        # 21 jobs were reported inserted but only 20 landed: INSERT OR IGNORE
+        # was silently dropping URL collisions outside the 30-day dedup window
+        # while the 'inserted' counter incremented unconditionally.
+        conn = database.get_db()
+        inserted = 0
+        new_jobs_info = []
+        skipped_rej      = 0   # matched a rejected_patterns row
+        skipped_lowscore = 0   # match_score <= 0
+        skipped_dead     = 0   # URL returned non-200 during url-alive check
+        skipped_dup_pair = 0   # (title, company) already in DB (different source)
+        skipped_dup_url  = 0   # UNIQUE(user_id, url) collision after all in-code filters
+        errored          = 0   # raised an exception during insert
         for j in all_jobs_data:
             _jc = j.get("company","").strip().lower()
             _jt = j.get("job_title","").strip().lower()
@@ -1864,10 +1877,12 @@ def run_job_search(user_id: int):
                 skipped_rej += 1
                 continue
             if j.get("match_score", 0) <= 0:
+                skipped_lowscore += 1
                 continue
             try:
                 _jurl = (j.get("url") or "").strip()
                 if _jurl and _url_ok.get(_jurl) == 0:
+                    skipped_dead += 1
                     continue  # skip dead links
                 # Dedup: skip if same company+title already exists for this user
                 _jtitle = j.get("job_title", "").strip().lower()
@@ -1878,8 +1893,9 @@ def run_job_search(user_id: int):
                         (user_id, _jtitle, _jcomp)
                     ).fetchone()
                     if dup:
+                        skipped_dup_pair += 1
                         continue  # duplicate job from different source
-                conn.execute(
+                _ins_cur = conn.execute(
                     "INSERT OR IGNORE INTO jobs "
                     "(user_id,title,company,location,url,description,why_relevant,source,"
                     "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date,full_description) "
@@ -1889,9 +1905,23 @@ def run_job_search(user_id: int):
                      j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
                      _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None,
                      j.get("publish_date"), (j.get("full_description") or "")[:5000]))
-                inserted += 1
-                new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
-            except Exception as e: print(f"[run-search] insert error: {e}")
+                # Only count + notify if the row ACTUALLY went in. INSERT OR IGNORE
+                # silently no-ops on UNIQUE(user_id, url) collisions; rowcount==0
+                # in that case. Without this check Telegram/activity-log inflate
+                # the count relative to the dashboard.
+                if _ins_cur.rowcount > 0:
+                    inserted += 1
+                    new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
+                else:
+                    skipped_dup_url += 1
+            except Exception as e:
+                errored += 1
+                print(f"[run-search] insert error: {e}")
+        print(f"[run-search] insert breakdown: "
+              f"inserted={inserted} | skipped_rej={skipped_rej} | "
+              f"skipped_lowscore={skipped_lowscore} | skipped_dead={skipped_dead} | "
+              f"skipped_dup_pair={skipped_dup_pair} | skipped_dup_url={skipped_dup_url} | "
+              f"errored={errored}")
         # Secret Tel Aviv jobs have no auto-apply ATS — flag them as manual_required
         # so the auto-apply engine skips them. Done after the insert loop so it
         # covers brand-new rows in this run as well as any pre-existing untagged
