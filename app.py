@@ -1905,6 +1905,11 @@ def run_job_search(user_id: int):
                      j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
                      _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None,
                      j.get("publish_date"), (j.get("full_description") or "")[:5000]))
+                # Commit PER ROW. Otherwise the entire insert loop is one giant
+                # write transaction, and concurrent /api/stats or /approve calls
+                # hit 'database is locked' (seen in prod 2026-05-27). Per-row
+                # commits keep the write lock window in the millisecond range.
+                conn.commit()
                 # Only count + notify if the row ACTUALLY went in. INSERT OR IGNORE
                 # silently no-ops on UNIQUE(user_id, url) collisions; rowcount==0
                 # in that case. Without this check Telegram/activity-log inflate
@@ -1953,11 +1958,19 @@ def run_job_search(user_id: int):
                 for _f2, _r2 in _futs2.items():
                     try:    hist_results[_r2["id"]] = 1 if _f2.result(timeout=12) else 0
                     except: hist_results[_r2["id"]] = 0
+            # Commit in 25-row batches. Holding the write lock for hundreds of
+            # row updates in one transaction was the primary cause of
+            # 'database is locked' on concurrent /api/stats and /approve calls.
             conn = database.get_db()
+            _hist_batch = 0
             for job_id, ok in hist_results.items():
                 conn.execute("UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",(ok,_chk_date,job_id))
                 if ok: hist_alive += 1
                 else:  hist_dead  += 1
+                _hist_batch += 1
+                if _hist_batch >= 25:
+                    conn.commit()
+                    _hist_batch = 0
             conn.commit(); conn.close()
 
         database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")

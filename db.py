@@ -269,17 +269,36 @@ def _migrate(conn: sqlite3.Connection):
 # ── Activity log ──────────────────────────────────────────────────────────────
 
 def log_activity(user_id: int, event_type: str, details: str = ""):
-    """Append an entry to the activity log for a user."""
-    try:
-        conn = get_db()
-        conn.execute(
-            "INSERT INTO activity_log (user_id, event_type, details) VALUES (?,?,?)",
-            (user_id, event_type, details)
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"[activity] Log error: {e}")
+    """Append an entry to the activity log for a user.
+
+    Retries up to 3 times on 'database is locked' since activity-log writes
+    are the highest-frequency writers and the most likely to lose a race
+    against a long-running search transaction (PRAGMA busy_timeout=10000
+    already covers most cases, this is belt-and-suspenders).
+    """
+    import time as _t
+    import sqlite3 as _sq
+    for _attempt in range(3):
+        try:
+            conn = get_db()
+            try:
+                conn.execute(
+                    "INSERT INTO activity_log (user_id, event_type, details) VALUES (?,?,?)",
+                    (user_id, event_type, details)
+                )
+                conn.commit()
+                return
+            finally:
+                conn.close()
+        except _sq.OperationalError as e:
+            if "database is locked" in str(e).lower() and _attempt < 2:
+                _t.sleep(0.5 * (2 ** _attempt))   # 0.5s, 1.0s
+                continue
+            print(f"[activity] Log error: {e}")
+            return
+        except Exception as e:
+            print(f"[activity] Log error: {e}")
+            return
 
 
 def get_activity(user_id: int, limit: int = 100):
