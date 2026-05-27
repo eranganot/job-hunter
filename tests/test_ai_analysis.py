@@ -307,10 +307,16 @@ class TestAnalyzeCv:
         pdf = tmp_path / "cv.pdf"
         pdf.write_bytes(b"%PDF-1.4 fake content")
 
+        # salary_min/salary_max are intentionally stripped by analyze_cv's
+        # _normalise() — they're no longer part of the CV-analysis response
+        # contract (see ai_analysis.py docstring). We send them in the mock
+        # to confirm they're stripped, then assert only the contracted keys.
         api_data = {
             "job_titles": ["Senior PM", "Group PM"],
             "keywords": ["B2B SaaS", "OKRs", "Agile"],
             "locations": ["Tel Aviv"],
+            "salary_min": 50000,   # should be stripped from result by _normalise()
+            "salary_max": 80000,   # should be stripped from result by _normalise()
             "experience_years": 8,
             "seniority": "senior",
             "summary": "8-year product leader.",
@@ -325,10 +331,14 @@ class TestAnalyzeCv:
         with patch("urllib.request.urlopen", return_value=mock_response):
             result = analyze_cv(str(pdf), "fake-key")
 
+        # Required keys per the documented contract in ai_analysis.py
         for key in ["job_titles", "keywords", "locations",
                     "experience_years", "seniority", "summary", "recommendations",
                     "score", "score_label", "linkedin_url", "phone"]:
             assert key in result, f"Missing key: {key}"
+        # Salary fields must be stripped — they're not part of the contract
+        assert "salary_min" not in result, "salary_min should be stripped by _normalise()"
+        assert "salary_max" not in result, "salary_max should be stripped by _normalise()"
 
     def test_handles_markdown_code_fences(self, tmp_path):
         from ai_analysis import analyze_cv

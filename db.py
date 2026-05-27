@@ -141,6 +141,8 @@ def init_db():
         "ALTER TABLE jobs ADD COLUMN apply_resolved_url TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_submitted_at TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN applications_per_run INTEGER DEFAULT 10",
+        # ── Passed-history cleanup (preserves historical 'total' across deletions) ──
+        "ALTER TABLE user_profiles ADD COLUMN passed_archived_count INTEGER DEFAULT 0",
         # career_url_cache: created separately below (CREATE TABLE IF NOT EXISTS)
         "CREATE TABLE IF NOT EXISTS career_url_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, job_title TEXT NOT NULL, resolved_url TEXT NOT NULL, created_date TEXT DEFAULT (datetime(\'now\')), UNIQUE(company, job_title))",
         # application_answers: canonical applicant profile (§4.6)
@@ -292,13 +294,75 @@ def expire_old_jobs(conn: sqlite3.Connection, user_id: int):
 
 def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
     expire_old_jobs(conn, user_id)
+    # Historical counter so cleanup of old 'passed' (rejected) rows doesn't shrink
+    # the user-visible 'total'. Column is created by the migration in init_db().
+    try:
+        archived = conn.execute(
+            "SELECT COALESCE(passed_archived_count, 0) FROM user_profiles WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+        archived_count = archived[0] if archived else 0
+    except Exception:
+        archived_count = 0
     return {
         "new":      conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='new'",      (user_id,)).fetchone()[0],
         "approved": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='approved'", (user_id,)).fetchone()[0],
         "applied":  conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='applied'",  (user_id,)).fetchone()[0],
-        "rejected": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='rejected'", (user_id,)).fetchone()[0],
-        "total":    conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=?",                       (user_id,)).fetchone()[0],
+        "rejected": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='rejected'", (user_id,)).fetchone()[0] + archived_count,
+        "total":    conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=?",                       (user_id,)).fetchone()[0] + archived_count,
     }
+
+
+def cleanup_passed_jobs(conn: sqlite3.Connection, user_id: int = None, days: int = 30) -> int:
+    """Delete passed jobs (status='rejected') older than `days`, incrementing
+    user_profiles.passed_archived_count by the deleted row count per user so the
+    'total' stat stays truthful.
+
+    The 'learning' (rejected_patterns + pass_reason_stats) lives in separate
+    tables and is unaffected by this deletion.
+
+    Args:
+        conn:    open sqlite3 connection.
+        user_id: target user, or None to clean for all users.
+        days:    age threshold in days (default 30).
+
+    Returns:
+        Total number of rows deleted across all targeted users.
+    """
+    days = int(days or 30)
+    cutoff_expr = f"date('now', '-{days} days')"
+    total_deleted = 0
+    try:
+        if user_id is not None:
+            user_ids = [int(user_id)]
+        else:
+            user_ids = [r[0] for r in conn.execute(
+                "SELECT DISTINCT user_id FROM jobs WHERE status='rejected'"
+            ).fetchall()]
+        for uid in user_ids:
+            cnt_row = conn.execute(
+                f"SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='rejected' "
+                f"AND found_date IS NOT NULL AND found_date < {cutoff_expr}",
+                (uid,)
+            ).fetchone()
+            cnt = cnt_row[0] if cnt_row else 0
+            if cnt <= 0:
+                continue
+            conn.execute(
+                "UPDATE user_profiles SET passed_archived_count = COALESCE(passed_archived_count, 0) + ? "
+                "WHERE user_id=?",
+                (cnt, uid)
+            )
+            conn.execute(
+                f"DELETE FROM jobs WHERE user_id=? AND status='rejected' "
+                f"AND found_date IS NOT NULL AND found_date < {cutoff_expr}",
+                (uid,)
+            )
+            total_deleted += cnt
+        conn.commit()
+    except Exception as e:
+        print(f"[db] cleanup_passed_jobs error: {e}")
+    return total_deleted
 
 
 def write_approved_jobs(base_dir: str):

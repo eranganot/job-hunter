@@ -298,12 +298,40 @@ def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
         return False
 
 
+def _daily_passed_cleanup(today: str, hour: int) -> None:
+    """Once per day (at 03:00 Israel time) delete passed jobs older than 30 days
+    across all users. Idempotent: a marker is written to activity_log so re-entry
+    in the same day is a no-op even after a server restart.
+
+    Per-user counters in user_profiles.passed_archived_count are bumped inside
+    db.cleanup_passed_jobs, so get_stats('total') is unchanged after cleanup.
+    """
+    if hour != 3:
+        return
+    # Use a synthetic user_id=0 marker so we don't have to scan every user.
+    if _scheduler_already_ran(0, 'passed_cleanup_daily', today):
+        return
+    try:
+        conn = database.get_db()
+        deleted = database.cleanup_passed_jobs(conn, user_id=None, days=30)
+        conn.close()
+        # Always write the marker — even on 0 deletions — so we don't re-run today.
+        database.log_activity(0, 'passed_cleanup_daily',
+                              f"Daily auto-cleanup: deleted {deleted} passed job(s) older than 30 days")
+        if deleted > 0:
+            print(f"[scheduler] passed_cleanup_daily: {deleted} row(s) deleted")
+    except Exception as e:
+        print(f"[scheduler] passed_cleanup_daily error: {e}")
+
+
 def _check_scheduled_jobs() -> None:
     """Auto-trigger search/apply for each active user when their scheduled hour arrives."""
     try:
         now = datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=3)))  # Israel time (GMT+3)
         today = now.strftime('%Y-%m-%d')
         current_hour = now.hour
+        # Daily housekeeping: clear passed jobs older than 30 days at 03:00 IL.
+        _daily_passed_cleanup(today, current_hour)
         conn = database.get_db()
         rows = conn.execute(
             "SELECT u.id, p.search_hour, p.apply_hour, "
@@ -773,6 +801,83 @@ def run_job_search(user_id: int):
                                     "description": "Career opportunity at SpeakNow", "source": "speaknow"})
             except Exception as _sne:
                 print(f"[search] SpeakNow error: {_sne}")
+
+            # -- Secret Tel Aviv (WordPress careers board, JSON-LD parsing) --
+            # Job pages embed schema.org JobPosting JSON-LD, which gives us a
+            # clean title / company / location / description / publish-date.
+            # Jobs from this source are tagged source='secrettlv' and later
+            # marked apply_status='manual_required' (no API/ATS to auto-apply).
+            _STLV_CATEGORIES = ['product-and-design', 'product-manager']
+            _STLV_BASE = 'https://jobs.secrettelaviv.com'
+            _STLV_MAX_JOBS_PER_CAT = 60  # safety cap to keep the scorer queue sane
+            _stlv_count = 0
+            try:
+                import re as _re_stlv, json as _js_stlv, html as _html_stlv
+                _stlv_seen = set()
+                _stlv_link_re = _re_stlv.compile(
+                    r'href="(https://jobs\.secrettelaviv\.com/job/[^"#?]+)"')
+                _stlv_ld_re = _re_stlv.compile(
+                    r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
+                    _re_stlv.S)
+                for _cat in _STLV_CATEGORIES:
+                    _list_url = f'{_STLV_BASE}/list/category/{_cat}/'
+                    try:
+                        _lreq = _ur2.Request(_list_url, headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
+                        with _ur2.urlopen(_lreq, timeout=15) as _lr:
+                            _lhtml = _lr.read().decode('utf-8', errors='replace')
+                    except Exception as _le:
+                        print(f"[search] secrettlv list fetch failed for {_cat}: {_le}")
+                        continue
+                    _job_urls = list({m for m in _stlv_link_re.findall(_lhtml)})
+                    for _ju in _job_urls[:_STLV_MAX_JOBS_PER_CAT]:
+                        if _ju in _stlv_seen:
+                            continue
+                        _stlv_seen.add(_ju)
+                        try:
+                            _jreq = _ur2.Request(_ju, headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
+                            with _ur2.urlopen(_jreq, timeout=10) as _jr:
+                                _jhtml = _jr.read().decode('utf-8', errors='replace')
+                            _ld = None
+                            for _m in _stlv_ld_re.finditer(_jhtml):
+                                _body = _m.group(1).strip()
+                                if '"JobPosting"' not in _body and "'JobPosting'" not in _body:
+                                    continue
+                                try:
+                                    _ld = _js_stlv.loads(_body)
+                                    break
+                                except Exception:
+                                    continue
+                            if not _ld or _ld.get('@type') != 'JobPosting':
+                                continue
+                            _title = (_ld.get('title') or '').strip()
+                            if not _title:
+                                continue
+                            _desc_raw = _ld.get('description', '') or ''
+                            _desc = _re_stlv.sub(r'<[^>]+>', ' ', _desc_raw)
+                            _desc = _html_stlv.unescape(_desc).strip()
+                            _hiring = _ld.get('hiringOrganization') or {}
+                            _comp = (_hiring.get('name') if isinstance(_hiring, dict) else '') or 'Secret Tel Aviv (employer hidden)'
+                            _loc_obj = _ld.get('jobLocation') or {}
+                            if isinstance(_loc_obj, list) and _loc_obj:
+                                _loc_obj = _loc_obj[0]
+                            _addr = (_loc_obj.get('address') if isinstance(_loc_obj, dict) else None) or {}
+                            _loc = (_addr.get('addressLocality') or _addr.get('addressRegion')
+                                    or 'Israel') if isinstance(_addr, dict) else 'Israel'
+                            _pub = _ld.get('datePosted', '') or ''
+                            all_raw.append({
+                                "job_title": _title, "company": _comp,
+                                "location": _loc, "url": _ju,
+                                "description": (_desc[:300] if _desc else _title),
+                                "full_description": _desc[:5000] or _title,
+                                "publish_date": _pub, "source": "secrettlv",
+                            })
+                            _stlv_count += 1
+                        except Exception:
+                            continue
+                print(f"[search] Secret Tel Aviv: {_stlv_count} jobs collected "
+                      f"from {len(_STLV_CATEGORIES)} categor(ies)")
+            except Exception as _stlve:
+                print(f"[search] Secret Tel Aviv error: {_stlve}")
 
             # -- Sparkhire careers (best-effort) --
             _SPARKHIRE_COMPANIES = [
@@ -1627,6 +1732,21 @@ def run_job_search(user_id: int):
                 inserted += 1
                 new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
             except Exception as e: print(f"[run-search] insert error: {e}")
+        # Secret Tel Aviv jobs have no auto-apply ATS — flag them as manual_required
+        # so the auto-apply engine skips them. Done after the insert loop so it
+        # covers brand-new rows in this run as well as any pre-existing untagged
+        # rows from earlier runs (idempotent: apply_status IS NULL guard).
+        try:
+            _mr_cur = conn.execute(
+                "UPDATE jobs SET apply_status='manual_required' "
+                "WHERE user_id=? AND source='secrettlv' "
+                "AND (apply_status IS NULL OR apply_status='')",
+                (user_id,)
+            )
+            if _mr_cur.rowcount:
+                print(f"[run-search] secrettlv: tagged {_mr_cur.rowcount} row(s) as manual_required")
+        except Exception as _mre:
+            print(f"[run-search] secrettlv manual_required tag error: {_mre}")
         conn.commit(); conn.close()
 
         # ── URL check ALL historical unverified jobs ─────────────────────
@@ -4169,6 +4289,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <button onclick="setSort('match')"   id="sort-match"   class="sort-btn active-sort text-xs px-3 py-1.5 rounded-lg border font-medium">🎯 Match</button>
   <button onclick="setSort('company')" id="sort-company" class="sort-btn text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:border-blue-400">🏢 Company</button>
   <button onclick="toggleSelect()" id="bulk-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 font-medium hover:border-blue-400 transition-all">☐ Select</button>
+  <button onclick="clearPassedOlderThan30()" id="clear-passed-btn" class="hidden ml-auto text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-600 font-medium hover:bg-red-50 transition-all" title="Admin only — deletes passed jobs older than 30 days. Total count and learning are preserved.">🧹 Clear &gt; 30 days</button>
 </div>
 
 <div id="cv-warning" class="hidden max-w-4xl mx-auto px-4 pt-3">
@@ -4991,6 +5112,12 @@ function setTab(t) {
   document.getElementById('empty-state').classList.toggle('hidden', true);
   const bulkToggle = document.getElementById('bulk-toggle');
   if (bulkToggle) bulkToggle.classList.toggle('hidden', !isNew);
+  // Admin-only "Clear passed > 30 days" button — visible only on the Passed tab.
+  const clearBtn = document.getElementById('clear-passed-btn');
+  if (clearBtn) {
+    const showClear = (t === 'rejected') && (userRole === 'admin');
+    clearBtn.classList.toggle('hidden', !showClear);
+  }
   // search button is in empty state only
   if (!isNew && selectMode) clearSelect();
 
@@ -5004,6 +5131,35 @@ function setTab(t) {
 async function loadAll() {
   await Promise.all([loadStats(), tab === 'activity' ? loadActivity() : loadJobs(tab)]);
       loadOnboarding();
+}
+
+// Admin: delete passed jobs older than 30 days.
+// Per-user counter (passed_archived_count) is bumped server-side, so the
+// 'total' stat stays the same. Learning tables are untouched.
+async function clearPassedOlderThan30() {
+  if (userRole !== 'admin') return;
+  if (!confirm('Delete all passed jobs older than 30 days?\\n\\nTotal count and learning (rejected_patterns, pass_reason_stats) are preserved.')) return;
+  const btn = document.getElementById('clear-passed-btn');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳'; }
+  try {
+    const r = await fetch('/api/admin/clear-passed', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({days: 30})
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      showToast('Failed: ' + (j.error || r.status));
+    } else {
+      showToast('Deleted ' + (j.deleted || 0) + ' passed job(s) older than ' + (j.days || 30) + ' days');
+      await loadAll();
+    }
+  } catch (e) {
+    showToast('Network error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
+  }
 }
 
 
@@ -6662,6 +6818,35 @@ async function mark(status) {{
             print(f"[admin] clear-applied: {deleted} rows deleted"
                   + (f" (user {target_uid})" if target_uid else " (all users)"))
             self.send_json({"deleted": deleted})
+            return
+
+        # ── Admin: clear passed (rejected) jobs older than N days ───────────────
+        # Increments user_profiles.passed_archived_count so the 'total' stat is
+        # preserved. Learning tables (rejected_patterns, pass_reason_stats) are
+        # untouched.
+        if path == "/api/admin/clear-passed":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload = self.read_json()
+            target_uid = payload.get("user_id")        # None → all users
+            try:
+                days = int(payload.get("days", 30))
+            except (TypeError, ValueError):
+                days = 30
+            if days < 1:
+                days = 1
+            conn = database.get_db()
+            deleted = database.cleanup_passed_jobs(conn, user_id=target_uid, days=days)
+            conn.close()
+            database.log_activity(
+                user["id"], "admin_clear_passed",
+                f"Deleted {deleted} passed job(s) older than {days} day(s)"
+                + (f" for user {target_uid}" if target_uid else " for all users")
+            )
+            print(f"[admin] clear-passed: {deleted} rows deleted (days>{days})"
+                  + (f" (user {target_uid})" if target_uid else " (all users)"))
+            self.send_json({"deleted": deleted, "days": days})
             return
 
         # ── Admin: re-score existing 'new' jobs with current model ───────────────
