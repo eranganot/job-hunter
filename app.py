@@ -6612,6 +6612,11 @@ async function mark(status) {{
             new_status = status_map[action]
             reason     = data.get("reason", "") or data.get("notes", "")
 
+            # ─── Phase 1: ALL DB writes via this single 'conn' transaction ─────
+            # Avoid calling helpers that open NEW connections (e.g. log_activity)
+            # before this transaction commits — doing so causes self-induced
+            # 'database is locked' errors visible to the user as failed
+            # approve/reject buttons (prod 2026-05-27).
             if action in ("applied", "failed"):
                 conn.execute("UPDATE jobs SET status=?, applied_date=?, notes=?, apply_status=? WHERE id=?",
                              (new_status, datetime.now().isoformat(), reason,
@@ -6626,12 +6631,19 @@ async function mark(status) {{
                     (user_id, job["company"], job["title"],
                      reason or "No reason given", datetime.now().isoformat())
                 )
-                detail = f"Passed on {job['title']} at {job['company']}"
                 if reason:
-                    detail += f" — {reason}"
-                database.log_activity(user_id, "job_rejected", detail)
-                if reason:
-                    database.record_pass_reason_stat(conn, user_id, reason)
+                    # Inlined version of database.record_pass_reason_stat that
+                    # does NOT commit. The helper calls conn.commit() which
+                    # would prematurely release this transaction's lock and
+                    # split semantics — keep all writes atomic in this txn.
+                    conn.execute(
+                        """INSERT INTO pass_reason_stats (user_id, reason, count, last_hit_date)
+                           VALUES (?, ?, 1, ?)
+                           ON CONFLICT(user_id, reason) DO UPDATE SET
+                               count = count + 1,
+                               last_hit_date = excluded.last_hit_date""",
+                        (user_id, reason, datetime.now().isoformat())
+                    )
             elif action == "approve":
                 # Queue for the next scheduled apply window (decoupled from approval)
                 _grace = (datetime.now(__import__('datetime').timezone.utc)
@@ -6641,11 +6653,20 @@ async function mark(status) {{
                     "WHERE id=? AND user_id=? AND apply_status IS NULL",
                     (_grace, job_id, user_id)
                 )
-                database.log_activity(user_id, "job_approved",
-                    f"Approved {job['title']} at {job['company']} — queued for apply")
 
             conn.commit()
             conn.close()
+
+            # ─── Phase 2: side effects (separate connections — lock released) ─
+            if action == "reject":
+                detail = f"Passed on {job['title']} at {job['company']}"
+                if reason:
+                    detail += f" — {reason}"
+                database.log_activity(user_id, "job_rejected", detail)
+            elif action == "approve":
+                database.log_activity(user_id, "job_approved",
+                    f"Approved {job['title']} at {job['company']} — queued for apply")
+
             database.write_approved_jobs(BASE_DIR)
             bump_onboarding(user_id, "first_job_reviewed")
 

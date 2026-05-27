@@ -315,12 +315,24 @@ def get_activity(user_id: int, limit: int = 100):
 # ── Job helpers ───────────────────────────────────────────────────────────────
 
 def expire_old_jobs(conn: sqlite3.Connection, user_id: int):
+    """Move stale 'new' jobs to 'expired'. Lock-tolerant: this is called from
+    every /api/stats poll, so if another writer is holding the write lock
+    we silently skip rather than 500-ing the dashboard. The next stats poll
+    will retry the cleanup naturally.
+    """
     cutoff = (datetime.now() - timedelta(days=3)).isoformat()
-    conn.execute(
-        "UPDATE jobs SET status='expired' WHERE user_id=? AND status='new' AND found_date < ?",
-        (user_id, cutoff)
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            "UPDATE jobs SET status='expired' WHERE user_id=? AND status='new' AND found_date < ?",
+            (user_id, cutoff)
+        )
+        conn.commit()
+    except sqlite3.OperationalError as e:
+        if "database is locked" in str(e).lower():
+            # Non-critical cleanup — skip this round, next /api/stats will retry
+            print(f"[db] expire_old_jobs: lock contended, skipping for now")
+            return
+        raise
 
 
 def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
@@ -515,7 +527,13 @@ def get_blocklist(conn: sqlite3.Connection, user_id: int) -> list:
 
 
 def record_pass_reason_stat(conn: sqlite3.Connection, user_id: int, reason: str) -> None:
-    """Increment (or insert) the pass-reason count for a user."""
+    """Increment (or insert) the pass-reason count for a user.
+
+    WARNING: This helper calls `conn.commit()`. Do NOT call it from inside an
+    outer transaction on the same connection — it will prematurely commit
+    your other pending writes, causing partial-state bugs. If you need this
+    inside another transaction, inline the SQL (see app.py approve/reject).
+    """
     from datetime import datetime
     conn.execute(
         """INSERT INTO pass_reason_stats (user_id, reason, count, last_hit_date)
