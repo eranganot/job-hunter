@@ -15,10 +15,22 @@ def set_db_path(path: str):
 
 
 def get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    # timeout=30 — Python-level lock wait (some platforms ignore busy_timeout
+    # otherwise). Pair it with PRAGMA busy_timeout for belt-and-suspenders.
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode=WAL")
+    # When multiple threads (search, apply, activity-log) try to write at the
+    # same time, the default behaviour is to raise 'database is locked'
+    # immediately. busy_timeout makes writers wait up to N ms for the lock to
+    # clear instead — eliminates the spurious lock errors seen in prod logs
+    # (2026-05-27) without changing semantics.
+    conn.execute("PRAGMA busy_timeout = 10000")    # 10 seconds
+    # NORMAL is safe under WAL and noticeably faster than the default FULL;
+    # the only thing it relaxes is fsync on every commit (durability across a
+    # power cut, which Railway's host already protects against).
+    conn.execute("PRAGMA synchronous = NORMAL")
     return conn
 
 

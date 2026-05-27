@@ -1133,15 +1133,26 @@ def run_job_search(user_id: int):
             if _cv_text:
                 profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
 
-            def _parse_scored_response(text_, source_hint_=""):
-                """Extract a valid JSON array of scored jobs from an AI response string.
+            # Sentinel returned by _parse_scored_response when the AI call FAILED
+            # (vs. succeeded with an empty list). The caller uses this to decide
+            # whether to run the heuristic safety net: only on actual failures,
+            # not when the model legitimately said "no good matches in this batch".
+            _PARSE_FAIL = object()
 
-                If parsing fails the raw response (truncated) is logged so the
-                exact failure mode is visible in Railway logs.
+            def _parse_scored_response(text_, source_hint_=""):
+                """Extract a valid JSON array of scored jobs from an AI response.
+
+                Returns:
+                    list — successfully parsed (possibly empty) list of scored jobs.
+                    _PARSE_FAIL — the response was empty / not JSON / failed to parse.
+                                 Caller should treat this as 'AI failed, run fallback'.
+
+                On any failure path the raw response (first 400 chars) is logged with
+                a source_hint_ so the actual cause is visible in Railway logs.
                 """
                 if not text_:
                     print(f"[search] ⚠️  AI response was EMPTY (source: {source_hint_ or 'unknown'}) — skipping batch")
-                    return []
+                    return _PARSE_FAIL
                 t = text_.strip()
                 # Strip ``` fences if the model wrapped its output in markdown
                 if "```" in t:
@@ -1151,18 +1162,17 @@ def run_job_search(user_id: int):
                 si = t.find("[")
                 ei = t.rfind("]")
                 if si < 0 or ei <= si:
-                    # Show what Gemini/Anthropic actually returned so the issue is debuggable
                     _snippet = text_.strip().replace("\n", " ")[:400]
                     print(f"[search] ⚠️  AI response had no JSON array (source: {source_hint_ or 'unknown'}) — "
                           f"len={len(text_)} chars, raw[:400]: {_snippet!r}")
-                    return []
+                    return _PARSE_FAIL
                 try:
                     parsed = _js2.loads(t[si:ei+1])
                 except Exception as _parse_err:
                     _snippet = t[si:si+400].replace("\n", " ")
                     print(f"[search] ⚠️  JSON parse failed (source: {source_hint_ or 'unknown'}): "
                           f"{_parse_err} | extracted[:400]: {_snippet!r}")
-                    return []
+                    return _PARSE_FAIL
                 out = []
                 for j in parsed:
                     if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 50:
@@ -1334,11 +1344,15 @@ def run_job_search(user_id: int):
                             elif _finish and _finish != 'STOP':
                                 print(f"[search] ⚠️  Gemini finishReason={_finish!r} (text len={len(_g_text)})")
                         result_ = _parse_scored_response(_g_text, source_hint_="gemini")
-                        print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
-                        if result_:
+                        if result_ is _PARSE_FAIL:
+                            print(f"[search] Gemini parse failed for batch of {len(batch_)} — trying Anthropic / heuristic")
+                            # Treat as AI failure → try Anthropic, then heuristic
+                        else:
+                            print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
+                            # Trust the model's verdict — even if it's "no good matches".
+                            # Don't run heuristic when Gemini SUCCEEDED with empty result,
+                            # the heuristic adds noise and produces 0 valid matches anyway.
                             return result_
-                        print(f"[search] Gemini returned 0 results — running heuristic safety net")
-                        # fall through to heuristic below
                     except Exception as _ge:
                         if not _gemini_attempted_ok:
                             print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
@@ -1361,11 +1375,12 @@ def run_job_search(user_id: int):
                         for blk in _a_result.get("content", []):
                             if blk.get("type") == "text": _a_text += blk["text"]
                         result_ = _parse_scored_response(_a_text, source_hint_="anthropic")
-                        print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
-                        if result_:
+                        if result_ is _PARSE_FAIL:
+                            print(f"[search] Anthropic parse failed for batch of {len(batch_)} — falling back to heuristic")
+                        else:
+                            print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
+                            # Trust the model — empty result means no matches in batch
                             return result_
-                        print(f"[search] Anthropic returned 0 results — running heuristic safety net")
-                        # fall through to heuristic below
                     except Exception as _ae:
                         import urllib.error as _ue
                         _ae_body = ""
