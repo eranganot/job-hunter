@@ -86,18 +86,47 @@ auth.set_admin_email(ADMIN_EMAIL)
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 def send_telegram(token: str, chat_id: str, message: str):
+    """Send a Telegram message. Chunks at line boundaries if the message
+    exceeds Telegram's 4096-char limit (e.g. an apply-run summary listing
+    every job in a 50-job batch).
+    """
+    TELEGRAM_MAX = 4000   # leave headroom under the 4096 limit
     try:
         url  = f"https://api.telegram.org/bot{token}/sendMessage"
         clean = re.sub(r"<[^>]+>", "", message)
-        data  = urllib.parse.urlencode({"chat_id": chat_id, "text": clean}).encode()
-        req   = urllib.request.Request(url, data=data, method="POST")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-            if result.get("ok"):
-                print("[telegram] ✅ Sent")
-            else:
-                print(f"[telegram] ⚠️  {result}")
+        # Split on line boundaries so we don't cut a job entry in half
+        chunks = []
+        if len(clean) <= TELEGRAM_MAX:
+            chunks = [clean]
+        else:
+            buf = ""
+            for line in clean.split("\n"):
+                # If a single line is itself oversize (rare), hard-cut it
+                if len(line) > TELEGRAM_MAX:
+                    if buf:
+                        chunks.append(buf); buf = ""
+                    for i in range(0, len(line), TELEGRAM_MAX):
+                        chunks.append(line[i:i+TELEGRAM_MAX])
+                    continue
+                if len(buf) + len(line) + 1 > TELEGRAM_MAX:
+                    chunks.append(buf)
+                    buf = line
+                else:
+                    buf = (buf + "\n" + line) if buf else line
+            if buf:
+                chunks.append(buf)
+        total = len(chunks)
+        for idx, ch in enumerate(chunks, 1):
+            text_to_send = ch if total == 1 else f"[{idx}/{total}] {ch}"
+            data = urllib.parse.urlencode({"chat_id": chat_id, "text": text_to_send}).encode()
+            req  = urllib.request.Request(url, data=data, method="POST")
+            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read())
+                if result.get("ok"):
+                    print(f"[telegram] ✅ Sent ({idx}/{total})")
+                else:
+                    print(f"[telegram] ⚠️  {result}")
     except Exception as e:
         print(f"[telegram] Error: {e}")
 
@@ -2270,7 +2299,11 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
                 database.log_activity(user_id, "job_applied",
                     f"{j['title']} @ {j['company']} — {apply_status}")
                 count += 1
-                (confirmed_list if apply_status == "confirmed" else submitted_list).append(j)
+                # Enriched entry so the end-of-run summary can include the reason
+                _entry = {"title": j["title"], "company": j["company"],
+                          "url": resolved_url or (j.get("url") if hasattr(j, "get") else ""),
+                          "reason": "", "failure_type": None}
+                (confirmed_list if apply_status == "confirmed" else submitted_list).append(_entry)
 
             elif apply_status == "manual_required":
                 # CAPTCHA / login-wall / unresolvable — don't retry, go straight to manual
@@ -2287,9 +2320,14 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
                 database.log_activity(user_id, "manual_required",
                     f"Manual needed: {j['title']} @ {j['company']} — {apply_error}")
                 count += 1
-                manual_list.append(j)
-                # Telegram handoff
-                _send_manual_alert(user_id, j, apply_error, apply_failure_type, resolved_url)
+                manual_list.append({"title": j["title"], "company": j["company"],
+                                    "url": resolved_url or (j.get("url") if hasattr(j, "get") else ""),
+                                    "reason": apply_error or "Manual review needed",
+                                    "failure_type": apply_failure_type})
+                # Per-job Telegram alert SUPPRESSED on scheduled batch runs (per
+                # user request 2026-05-27) — single end-of-run summary instead.
+                # The single-job 'Apply Now' endpoint still fires _send_manual_alert
+                # for instant feedback on user-triggered manual actions.
 
             else:
                 # Failed — schedule a retry if attempts remain
@@ -2309,6 +2347,8 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
                     )
                     database.log_activity(user_id, "apply_retry_scheduled",
                         f"Retry {next_status}: {j['title']} @ {j['company']} in {backoff}")
+                    _retry_reason = f"attempt {(j.get('apply_attempts') or 0) + 1} failed, will retry — {apply_error or apply_failure_type or 'unknown error'}"
+                    _failed_status = "retrying"
                 else:
                     # All 3 attempts exhausted — escalate to manual
                     c2.execute(
@@ -2322,38 +2362,63 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
                     )
                     database.log_activity(user_id, "manual_required",
                         f"3 attempts failed: {j['title']} @ {j['company']} — {apply_error}")
-                    _send_manual_alert(user_id, j, apply_error, apply_failure_type, resolved_url)
+                    _retry_reason = f"3 attempts exhausted — {apply_error or apply_failure_type or 'unknown error'}"
+                    _failed_status = "exhausted"
+                    # Per-job _send_manual_alert SUPPRESSED on scheduled runs
+                    # (see comment in manual_required branch above).
                 c2.commit(); c2.close()
                 count += 1
-                failed_list.append(j)
+                failed_list.append({"title": j["title"], "company": j["company"],
+                                    "url": resolved_url or (j.get("url") if hasattr(j, "get") else ""),
+                                    "reason": _retry_reason,
+                                    "failure_type": apply_failure_type,
+                                    "status": _failed_status})
 
-        # ── Consolidated notification ─────────────────────────────────────────
+        # ── Single end-of-run summary notification ─────────────────────────────
+        # Per-job alerts on scheduled runs were suppressed above. This is the
+        # only Telegram/WhatsApp/email notification fired for the entire batch.
+        # Each line shows: title @ company + status + (for failures) the reason.
+        # No per-bucket caps — show EVERY job (user request 2026-05-27).
         today_str = datetime.now().strftime("%Y-%m-%d")
         _actually_submitted = len(confirmed_list) + len(submitted_list)
         notif_lines = [
             f"🚀 Apply Run Complete — {today_str}",
-            f"📊 {_actually_submitted} submitted · {len(manual_list)} need manual · {len(failed_list)} failed/retrying\n"
+            f"📊 {_actually_submitted} submitted · {len(manual_list)} need manual · {len(failed_list)} failed/retrying",
+            "",
         ]
         if confirmed_list:
             notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
-            for jj in confirmed_list[:5]:
+            for jj in confirmed_list:
                 notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
-            if len(confirmed_list) > 5:
-                notif_lines.append(f"  … +{len(confirmed_list)-5} more")
+            notif_lines.append("")
         if submitted_list:
-            notif_lines.append(f"\n📤 {len(submitted_list)} Submitted (awaiting confirmation):")
-            for jj in submitted_list[:5]:
+            notif_lines.append(f"📤 {len(submitted_list)} Submitted (awaiting confirmation):")
+            for jj in submitted_list:
                 notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
+            notif_lines.append("")
         if manual_list:
-            notif_lines.append(f"\n👤 {len(manual_list)} Need Manual Apply:")
-            for jj in manual_list[:3]:
-                notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
+            notif_lines.append(f"👤 {len(manual_list)} Need Manual Apply:")
+            for jj in manual_list:
+                _reason = (jj.get("reason") or "").strip()
+                if _reason:
+                    notif_lines.append(f"  • {jj['title']} @ {jj['company']} — {_reason[:200]}")
+                else:
+                    notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
+            notif_lines.append("")
         if failed_list:
-            notif_lines.append(f"\n🔄 {len(failed_list)} Scheduled for retry:")
-            for jj in failed_list[:3]:
-                notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
+            notif_lines.append(f"🔄 {len(failed_list)} Failed / Retrying:")
+            for jj in failed_list:
+                _reason = (jj.get("reason") or "").strip()
+                if _reason:
+                    notif_lines.append(f"  • {jj['title']} @ {jj['company']} — {_reason[:200]}")
+                else:
+                    notif_lines.append(f"  • {jj['title']} @ {jj['company']}")
+            notif_lines.append("")
 
-        if _actually_submitted > 0 or manual_list:
+        if _actually_submitted > 0 or manual_list or failed_list:
+            # Trim trailing blank lines for a tidy message
+            while notif_lines and notif_lines[-1] == "":
+                notif_lines.pop()
             deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#applied")
 
         database.log_activity(user_id, "apply_run_completed",
