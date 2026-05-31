@@ -24,8 +24,21 @@ def _make_urlopen_mock(response_payload: dict):
 
 
 def _api_response(text: str) -> dict:
-    """Wrap raw text in the Anthropic API response envelope."""
+    """Wrap raw text in the Anthropic API response envelope.
+
+    Kept for legacy callers that still mock the (removed) Anthropic path.
+    For new tests targeting analyze_cv use _gemini_response instead.
+    """
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _gemini_response(text: str) -> dict:
+    """Wrap raw text in the Gemini generateContent response envelope.
+
+    Use this for tests that mock the analyze_cv / generate_cover_letter /
+    check_job_status paths (all migrated to Gemini-only per 2026-05-27).
+    """
+    return {"candidates": [{"content": {"parts": [{"text": text}]}}]}
 
 
 # ââ Fixtures ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
@@ -289,11 +302,15 @@ class TestCheckJobStatus:
 
 class TestAnalyzeCv:
 
-    def test_no_api_key_raises_value_error(self, tmp_path):
+    def test_no_api_key_raises_value_error(self, tmp_path, monkeypatch):
         from ai_analysis import analyze_cv
+        # Ensure env-loaded GEMINI keys don't satisfy the guard during the test
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_KEY", raising=False)
         pdf = tmp_path / "cv.pdf"
         pdf.write_bytes(b"%PDF-1.4 fake")
-        with pytest.raises(ValueError, match="api_key"):
+        # After Gemini-only refactor (2026-05-27) the error mentions GEMINI not 'api_key'
+        with pytest.raises(ValueError, match="GEMINI"):
             analyze_cv(str(pdf), "")
 
     def test_missing_pdf_raises_file_not_found(self):
@@ -326,7 +343,8 @@ class TestAnalyzeCv:
             "linkedin_url": "https://linkedin.com/in/example",
             "phone": "+1-555-0100",
         }
-        mock_response = _make_urlopen_mock(_api_response(json.dumps(api_data)))
+        # Gemini-shaped response envelope (was Anthropic before 2026-05-27)
+        mock_response = _make_urlopen_mock(_gemini_response(json.dumps(api_data)))
 
         with patch("urllib.request.urlopen", return_value=mock_response):
             result = analyze_cv(str(pdf), "fake-key")
@@ -358,7 +376,8 @@ class TestAnalyzeCv:
             "recommendations": [],
         }) + "\n```"
 
-        mock_response = _make_urlopen_mock(_api_response(wrapped))
+        # Gemini-shaped envelope; analyze_cv strips the markdown fences
+        mock_response = _make_urlopen_mock(_gemini_response(wrapped))
         with patch("urllib.request.urlopen", return_value=mock_response):
             result = analyze_cv(str(pdf), "fake-key")
 
@@ -373,7 +392,8 @@ class TestAnalyzeCv:
 
         # Minimal response â missing several keys
         partial = {"job_titles": ["Engineer"], "seniority": "senior"}
-        mock_response = _make_urlopen_mock(_api_response(json.dumps(partial)))
+        # Gemini-shaped envelope (was Anthropic before 2026-05-27)
+        mock_response = _make_urlopen_mock(_gemini_response(json.dumps(partial)))
 
         with patch("urllib.request.urlopen", return_value=mock_response):
             result = analyze_cv(str(pdf), "fake-key")
