@@ -1173,13 +1173,33 @@ def run_job_search(user_id: int):
                     print(f"[search] ⚠️  JSON parse failed (source: {source_hint_ or 'unknown'}): "
                           f"{_parse_err} | extracted[:400]: {_snippet!r}")
                     return _PARSE_FAIL
+                # Post-filter: drop any job whose role_function is not product-related,
+                # regardless of how the model scored it. This is the safety net for
+                # cases where Gemini misclassified-then-overscored an engineering /
+                # data-science / security role (observed 2026-05-29 — see commit
+                # for examples). The role_function field is required by the schema.
+                _ALLOWED_ROLE_FUNCTIONS = {"product_manager", "product_owner", "product_adjacent"}
                 out = []
+                _dropped_by_role = 0
+                _dropped_by_score = 0
                 for j in parsed:
-                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 50:
-                        j.setdefault("match_score", j.get("candidate_score", 0))
-                        j.setdefault("found_date", today)
-                        j.setdefault("source", "greenhouse/lever")
-                        out.append(j)
+                    if not isinstance(j, dict) or not j.get("url"):
+                        continue
+                    _role_fn = (j.get("role_function") or "").strip().lower()
+                    if _role_fn and _role_fn not in _ALLOWED_ROLE_FUNCTIONS:
+                        _dropped_by_role += 1
+                        continue
+                    if j.get("candidate_score", 0) < 50:
+                        _dropped_by_score += 1
+                        continue
+                    j.setdefault("match_score", j.get("candidate_score", 0))
+                    j.setdefault("found_date", today)
+                    j.setdefault("source", "greenhouse/lever")
+                    out.append(j)
+                if _dropped_by_role or _dropped_by_score:
+                    print(f"[search] post-filter (source: {source_hint_ or 'unknown'}): "
+                          f"kept={len(out)} dropped_by_role_function={_dropped_by_role} "
+                          f"dropped_by_low_score={_dropped_by_score}")
                 return out
 
             def _score_batch(batch_, profile_text_):
@@ -1199,46 +1219,85 @@ def run_job_search(user_id: int):
                 _locs_str_sc = next((line.replace('Locations: ','') for line in profile_text_.split('\n') if line.startswith('Locations:')), 'Israel')
                 _seniority_str = next((line.replace('Seniority: ','') for line in profile_text_.split('\n') if line.startswith('Seniority:')), 'Senior / Director')
                 prompt_ = (
-                    "You are a precise job matching assistant. The candidate's full CV is attached as a PDF — "
-                    "read it carefully to understand their actual experience and skills.\n\n"
+                    "You are a precise PRODUCT-MANAGEMENT job matching assistant. "
+                    "The candidate's full CV is attached as a PDF — read it carefully.\n\n"
                     f"Candidate target roles: {_titles_str}\n"
                     f"Target locations: {_locs_str_sc}\n"
                     f"Seniority level: {_seniority_str}\n\n"
-                    f"Job listings (JSON):\n{jobs_json_}\n\n"
-                    "Score each job 0-100 using EXACTLY these four dimensions:\n\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "STEP 1 — CLASSIFY EACH JOB'S role_function BEFORE SCORING:\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "Set role_function to ONE of these values based on the job's PRIMARY function\n"
+                    "(read full_description, NOT just title — many titles contain 'AI' or 'Lead'\n"
+                    "without being product roles):\n\n"
+                    "  product_manager  — PM, Group PM, Senior PM, Director of Product,\n"
+                    "                     Head of Product, VP Product, CPO, Principal PM,\n"
+                    "                     Product Lead (role owns product strategy/roadmap)\n"
+                    "  product_owner    — Product Owner (Agile/Scrum focused, often more\n"
+                    "                     tactical than PM; junior Product Owner = wrong level)\n"
+                    "  product_adjacent — Chief of Staff to CPO, Product Operations,\n"
+                    "                     Product Marketing, Product Strategy, Growth Lead\n"
+                    "  engineering      — Software/Backend/Frontend/Full-stack Engineer,\n"
+                    "                     DevOps, SRE, ML Engineer, Data Engineer,\n"
+                    "                     Security Engineer, Solutions Engineer, QA,\n"
+                    "                     ANY *_Engineer / *_Developer / *_Architect\n"
+                    "                     (THIS INCLUDES 'AI Engineer', 'Agentic AI Engineer',\n"
+                    "                     'AI Applied Engineer', 'Analytics Engineer' —\n"
+                    "                     ALL ARE ENGINEERING, NOT PM!)\n"
+                    "  data_science     — Data Scientist, Applied Scientist, ML Scientist,\n"
+                    "                     Research Scientist, Analytics roles whose primary\n"
+                    "                     output is models/insights (NOT product roadmaps).\n"
+                    "                     'AI Applied Scientist' is data_science, NOT PM.\n"
+                    "  design           — UX Designer, UI Designer, Product Designer,\n"
+                    "                     Visual Designer, Graphic Designer\n"
+                    "  sales            — AE, BDR, SDR, Sales Manager, Account Executive\n"
+                    "  marketing        — Marketing Manager, Content Manager, Growth\n"
+                    "                     Marketing (NOT product marketing — that's adjacent)\n"
+                    "  security         — Security Tech Lead, SecOps, Security Engineer\n"
+                    "                     ('AI SecOps Tech-lead' is security, NOT PM)\n"
+                    "  other            — Anything else (HR, finance, legal, ops, customer\n"
+                    "                     success, support, content creation like 'AI Video\n"
+                    "                     Creator', etc.)\n\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "STEP 2 — ONLY IF role_function IS 'product_manager' OR 'product_owner'\n"
+                    "OR 'product_adjacent', score the job 0–100 using these four dimensions:\n"
+                    "═══════════════════════════════════════════════════════════════\n\n"
+                    "If role_function is anything else, set candidate_score = 0 and skip to STEP 3 — \n"
+                    "we will drop the job in post-processing. DO NOT inflate the score because a\n"
+                    "candidate could 'stretch into' an engineering role — they explicitly want PM.\n\n"
                     "TITLE MATCH (0-30 pts):\n"
                     "  27-30: Title matches candidate's target roles exactly or near-exactly\n"
                     "  15-26: Close PM variant (Group PM, Principal PM, Product Lead, Head of Product)\n"
                     "   5-14: Broader product-adjacent (Chief of Staff, Product Strategy, Growth Lead)\n"
-                    "   0-4:  Different function — EXCLUDE this job entirely (do not return it)\n\n"
+                    "   0-4:  Different function (should never reach this branch — drop in classification)\n\n"
                     "SENIORITY MATCH (0-20 pts):\n"
-                    "  17-20: Exact seniority level match\n"
-                    "  10-16: One level off (Senior vs Director)\n"
-                    "   0-5:  Major mismatch — GVP / EVP / SVP / C-suite above VP, OR junior/IC role\n\n"
+                    "  17-20: Exact seniority match (Senior PM if user wants Senior; Director if Director)\n"
+                    "  10-16: One level off (e.g. Senior vs Director, Lead vs Senior)\n"
+                    "   0-5:  Major mismatch — Junior, Associate, Intern, IC entry-level, OR\n"
+                    "         GVP/EVP/SVP/Chief above what candidate targets.\n"
+                    "         ('Junior Product Owner' for a Senior PM candidate scores 0-5 here.)\n\n"
                     "LOCATION (0-20 pts):\n"
                     f"  17-20: {_locs_str_sc} / Hybrid / explicitly Remote-friendly\n"
                     "  10-16: Remote with no location restriction specified\n"
                     f"   0-5:  On-site/in-person required exclusively outside {_locs_str_sc}\n\n"
-                    "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important dimension:\n"
-                    "  Read the job's required skills, years of experience, and responsibilities from full_description.\n"
+                    "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important when above bars are met:\n"
+                    "  Read the job's required skills, years of experience, and responsibilities.\n"
                     "  Cross-reference against the candidate's actual experience in the attached CV PDF.\n"
-                    "  27-30: Candidate's background directly covers most stated requirements\n"
-                    "  15-26: Strong overlap with minor gaps (1-2 requirements candidate hasn't done explicitly)\n"
-                    "   5-14: Moderate overlap — candidate could do the role but has notable experience gaps\n"
-                    "   0-4:  Fundamentally mismatched requirements (completely different background needed)\n\n"
-                    "HARD EXCLUDE (score 0, omit from output entirely):\n"
-                    "  - Non-PM roles: Engineering, software development, data science, design,\n"
-                    "    sales, marketing, finance, legal, HR, operations.\n"
-                    f"  - Wrong location: Role is on-site/in-person ONLY outside {_locs_str_sc}\n"
-                    f"    (no remote option stated) — e.g. a US city like Santa Clara, San Francisco.\n\n"
-                    "Total score = Title + Seniority + Location + CV-Requirements. "
-                    "Include only jobs scoring >= 50. "
-                    "Score calibration: be conservative — 90+ is exceptional and rare; most strong matches score 55-75. "
-                    "For fit_reason: one sentence citing which dimensions scored highest and why. "
-                    "Return ONLY a valid JSON array with fields: "
-                    "job_title, company, location, url, publish_date (null if unknown), "
-                    "full_description (copy from input), description (2-3 sentences), "
-                    "candidate_score (0-100), fit_reason. No markdown."
+                    "  27-30: Background directly covers most stated requirements\n"
+                    "  15-26: Strong overlap with minor gaps\n"
+                    "   5-14: Moderate overlap — candidate could do the role but has notable gaps\n"
+                    "   0-4:  Fundamentally mismatched requirements\n\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "STEP 3 — OUTPUT\n"
+                    "═══════════════════════════════════════════════════════════════\n"
+                    "Total score = Title + Seniority + Location + CV-Requirements (max 100).\n"
+                    "Include EVERY job in the output (the code post-filters), but be HONEST:\n"
+                    " - Engineering / data_science / security / sales / marketing / design / other\n"
+                    "   → candidate_score = 0 (we filter them out by role_function anyway)\n"
+                    " - product_*  → real 0-100 score per rubric above\n"
+                    "Score calibration: 90+ is exceptional and rare; most strong matches score 55-75.\n"
+                    "Be conservative — when in doubt, score LOWER, not higher.\n\n"
+                    f"Job listings (JSON):\n{jobs_json_}\n"
                 )
 
                 # --- Try Gemini Flash first (free tier: 1500 req/day) ---
@@ -1263,6 +1322,16 @@ def run_job_search(user_id: int):
                         # Structured-output schema: forces Gemini to return a JSON array
                         # of objects with this exact shape. Eliminates "no JSON array"
                         # parse failures caused by prose responses or markdown wrapping.
+                        # role_function is enforced as an enum so Gemini MUST classify
+                        # each job into one of these buckets. Combined with the post-filter
+                        # in _parse_scored_response, this guarantees that engineering /
+                        # data_science / security / sales / marketing / design / other
+                        # roles are dropped regardless of how high Gemini scored them.
+                        _ROLE_ENUM = [
+                            "product_manager", "product_owner", "product_adjacent",
+                            "engineering", "data_science", "design",
+                            "sales", "marketing", "security", "other",
+                        ]
                         _gemini_schema = {
                             "type": "ARRAY",
                             "items": {
@@ -1275,11 +1344,12 @@ def run_job_search(user_id: int):
                                     "publish_date":     {"type": "STRING", "nullable": True},
                                     "full_description": {"type": "STRING"},
                                     "description":      {"type": "STRING"},
+                                    "role_function":    {"type": "STRING", "enum": _ROLE_ENUM},
                                     "candidate_score":  {"type": "INTEGER"},
                                     "fit_reason":       {"type": "STRING"},
                                 },
                                 "required": ["job_title", "company", "url",
-                                             "candidate_score", "fit_reason"],
+                                             "role_function", "candidate_score", "fit_reason"],
                             },
                         }
                         _g_body = _js2.dumps({
