@@ -57,8 +57,8 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
         "Return ONLY the JSON object."
     )
 
-    gemini_key    = os.environ.get("GEMINI_API_KEY", "")
-    anthropic_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    # api_key param accepts either the explicit Gemini key or env-loaded one
+    gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
 
     def _normalise(data: dict) -> dict:
         data.setdefault("job_titles", [])
@@ -115,48 +115,8 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
         except Exception as e:
             raise RuntimeError(f"Gemini error: {e}")
 
-    # ── 2. Claude Sonnet 4.6 fallback (only if no Gemini key) ────────────────
-    if not anthropic_key:
-        raise ValueError("No AI api_key configured. Set GEMINI_API_KEY or ANTHROPIC_API_KEY.")
-
-    payload = {
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 1024,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": pdf_b64,
-                    }
-                },
-                {"type": "text", "text": prompt},
-            ]
-        }]
-    }
-    body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        method="POST"
-    )
-    req.add_header("Content-Type", "application/json")
-    req.add_header("x-api-key", anthropic_key)
-    req.add_header("anthropic-version", "2023-06-01")
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            result = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        raise RuntimeError(f"Claude API error {e.code}: {error_body}")
-
-    raw = result["content"][0]["text"].strip()
-    raw = _strip_fences(raw)
-    print("[analyze-cv] Done via Claude Sonnet 4.6")
-    return _normalise(json.loads(raw))
+    # Anthropic fallback removed — project is Gemini-only per request 2026-05-27.
+    raise ValueError("GEMINI_API_KEY not configured. Set it in Railway environment.")
 
 
 # ── Local scoring (no API needed) ─────────────────────────────────────────────
@@ -173,20 +133,23 @@ def _parse_json_list(raw) -> list:
 
 
 
-def _haiku_match_score(
+def _gemini_match_score(
     job_text: str,
     user_keywords: list,
     user_titles: list,
     seniority: str,
     job_title: str,
-    api_key: str,
+    api_key: str = "",
 ) -> "tuple[int, int, int] | None":
-    """Use Claude Haiku for semantic job-fit scoring.
+    """Use Gemini 2.5 Flash for semantic job-fit scoring.
 
     Returns (kw_score_0_60, title_score_0_30, seniority_score_0_10)
     or None on any failure (caller falls back to keyword matching).
+    Was _haiku_match_score; replaced with Gemini per Gemini-only refactor
+    (2026-05-27).
     """
-    if not api_key:
+    key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
+    if not key:
         return None
 
     kw_sample  = ", ".join(user_keywords[:30]) or "N/A"
@@ -202,29 +165,47 @@ def _haiku_match_score(
         "Score on three dimensions:\n"
         "  keyword_score  0-60  semantic skills/tools match\n"
         "  title_score    0-30  job title relevance to candidate's targets\n"
-        "  seniority_score 0-10 seniority level fit\n\n"
-        'Return ONLY valid JSON: {"keyword_score":0,"title_score":0,"seniority_score":0}'
+        "  seniority_score 0-10 seniority level fit"
     )
     try:
-        body = json.dumps({
-            "model": "claude-haiku-4-5-20251001",
-            "max_tokens": 64,
-            "messages": [{"role": "user", "content": prompt}],
-        }).encode()
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=body,
-            headers={
-                "x-api-key":          api_key,
-                "anthropic-version":  "2023-06-01",
-                "content-type":       "application/json",
+        # Enforce strict JSON shape with responseSchema so we never have to
+        # parse prose. Thinking disabled to avoid MAX_TOKENS truncation.
+        schema = {
+            "type": "OBJECT",
+            "properties": {
+                "keyword_score":   {"type": "INTEGER"},
+                "title_score":     {"type": "INTEGER"},
+                "seniority_score": {"type": "INTEGER"},
             },
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            resp_data = json.loads(resp.read())
-        text = resp_data["content"][0]["text"].strip()
-        m = re.search(r"\{.*?\}", text, re.DOTALL)
-        scores = json.loads(m.group()) if m else {}
+            "required": ["keyword_score", "title_score", "seniority_score"],
+        }
+        body = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 256,
+                "responseMimeType": "application/json",
+                "responseSchema": schema,
+                "thinkingConfig": {"thinkingBudget": 0},
+            },
+        }).encode()
+        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+               "gemini-2.5-flash:generateContent?key=" + key)
+        req = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type": "application/json"},
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            resp_data = json.loads(resp.read().decode("utf-8"))
+        candidates = resp_data.get("candidates") or []
+        if not candidates:
+            return None
+        cand = candidates[0]
+        content = cand.get("content") or {}
+        parts = content.get("parts") or []
+        text = (parts[0].get("text", "") if parts else "").strip()
+        if not text:
+            return None
+        scores = json.loads(text)
         return (
             min(60, max(0, int(scores.get("keyword_score", 0)))),
             min(30, max(0, int(scores.get("title_score", 0)))),
@@ -232,6 +213,10 @@ def _haiku_match_score(
         )
     except Exception:
         return None
+
+
+# Backward-compat alias — some callers still use the old name
+_haiku_match_score = _gemini_match_score
 
 def compute_match_score(job: dict, user_profile: dict, api_key: str = "") -> int:
     """
@@ -257,13 +242,13 @@ def compute_match_score(job: dict, user_profile: dict, api_key: str = "") -> int
         job.get("why_relevant", ""),
     ])).lower()
 
-    # ── Try Haiku semantic scoring first ────────────────────────────────────
-    haiku_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_KEY", "")
+    # ── Try Gemini semantic scoring first (was Anthropic Haiku) ─────────────
+    gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
     job_title_lower = (job.get("title") or "").lower()
     seniority = (user_profile.get("seniority") or "").lower()
-    haiku = _haiku_match_score(job_text, user_keywords, user_titles, seniority, job_title_lower, haiku_key)
-    if haiku is not None:
-        kw_score, title_score, seniority_score = haiku
+    gemini_result = _gemini_match_score(job_text, user_keywords, user_titles, seniority, job_title_lower, gemini_key)
+    if gemini_result is not None:
+        kw_score, title_score, seniority_score = gemini_result
         return min(100, max(0, kw_score + title_score + seniority_score))
 
     # 60% — keyword overlap (fallback)
@@ -337,8 +322,8 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
         confidence str          — 'high' | 'medium' | 'low'
         status_check str        — 'open' | 'closed' | 'unknown'
     """
-    if not api_key:
-        raise ValueError("Anthropic API key not configured.")
+    if not api_key and not os.environ.get("GEMINI_API_KEY"):
+        raise ValueError("GEMINI_API_KEY not configured.")
     if not job_url:
         return {"is_open": None, "reason": "No URL provided.", "confidence": "low", "status_check": "unknown"}
 
@@ -378,30 +363,55 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
         'confidence: high=clear signal found, medium=indirect signal, low=could not determine.'
     )
 
-    payload = {
-        "model": "claude-haiku-4-5-20251001",
-        "max_tokens": 256,
-        "messages": [{"role": "user", "content": prompt}],
+    # Gemini call (replaced Anthropic Haiku per Gemini-only refactor 2026-05-27)
+    gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
+    if not gemini_key:
+        raise ValueError("GEMINI_API_KEY not configured.")
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "is_open":    {"type": "BOOLEAN", "nullable": True},
+            "reason":     {"type": "STRING"},
+            "confidence": {"type": "STRING", "enum": ["high", "medium", "low"]},
+        },
+        "required": ["reason", "confidence"],
     }
-
-    body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        method="POST",
-    )
-    req.add_header("Content-Type", "application/json")
-    req.add_header("x-api-key", api_key)
-    req.add_header("anthropic-version", "2023-06-01")
-
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 512,
+            "responseMimeType": "application/json",
+            "responseSchema": schema,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }).encode()
+    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+           "gemini-2.5-flash:generateContent?key=" + gemini_key)
+    req = urllib.request.Request(url, data=body,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
+            result = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
-        raise RuntimeError(f"Claude API error {e.code}: {error_body}")
+        raise RuntimeError(f"Gemini API error {e.code}: {error_body}")
 
-    raw = result["content"][0]["text"].strip()
+    candidates = result.get("candidates") or []
+    if not candidates:
+        return {"is_open": None,
+                "reason": "Gemini returned no candidates",
+                "confidence": "low",
+                "status_check": "unknown"}
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    raw = (parts[0].get("text", "") if parts else "").strip()
+    if not raw:
+        return {"is_open": None,
+                "reason": "Gemini returned empty text",
+                "confidence": "low",
+                "status_check": "unknown"}
     if raw.startswith("```"):
         lines = raw.split("\n")
         raw = "\n".join(lines[1:-1])
@@ -418,8 +428,8 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
 
     Raises RuntimeError with the full error message so the UI status bar shows it.
     """
-    gemini_key    = os.environ.get("GEMINI_API_KEY", "")
-    anthropic_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    # api_key param accepts either the explicit Gemini key or env-loaded one
+    gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
 
     cv_block  = (profile.get("cv_summary") or "")[:4000] or "No CV summary on file."
     jd_text   = (job.get("full_description") or job.get("description") or job.get("title", ""))[:4000]
@@ -512,31 +522,7 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
             print("[cover-letter] " + gemini_err)
             raise RuntimeError(gemini_err)
 
-    # ── 2. Claude Sonnet 4.6 fallback (only if no Gemini key) ────────────────
-    if anthropic_key:
-        try:
-            body = json.dumps({
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 1500,
-                "system": system_instruction + "\n\nAlways write the complete three-paragraph letter.",
-                "messages": [{"role": "user", "content": user_prompt}],
-            }).encode()
-            areq = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages", data=body, method="POST",
-                headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"}
-            )
-            with urllib.request.urlopen(areq, timeout=45) as resp:
-                adata = json.loads(resp.read())
-            text = adata["content"][0]["text"].strip()
-            print("[cover-letter] Generated via Claude Sonnet 4.6 (" + str(len(text)) + " chars)")
-            return text
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("Claude HTTP " + str(e.code) + ": " + err_body[:300])
-        except Exception as e:
-            raise RuntimeError("Claude error: " + str(e))
-
+    # Anthropic fallback removed — project is Gemini-only per request 2026-05-27.
     raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
 
 

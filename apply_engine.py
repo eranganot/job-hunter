@@ -999,24 +999,34 @@ _CONFIRMATION_PHRASES = [
 # ── Claude helpers ────────────────────────────────────────────────────────────
 
 def _claude(prompt: str, max_tokens: int = 1024) -> str:
-    """Call Claude and return the text response."""
-    payload = json.dumps({
-        "model": "claude-haiku-4-5",  # fixed: was claude-haiku-4-5-20251001
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
+    """Call Gemini and return the text response.
+
+    Name kept for compatibility — was an Anthropic call, now routes through
+    Gemini 2.5 Flash (Gemini-only refactor, 2026-05-27).
+    """
+    if not GEMINI_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set")
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": max(max_tokens * 2, 2048),
+            "thinkingConfig": {"thinkingBudget": 0},
         },
-    )
+    }).encode()
+    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+           "gemini-2.5-flash:generateContent?key=" + GEMINI_KEY)
+    req = urllib.request.Request(url, data=body,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
     with urllib.request.urlopen(req, timeout=90) as resp:
-        result = json.loads(resp.read())
-    text = result["content"][0]["text"].strip()
+        data = json.loads(resp.read().decode("utf-8"))
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise RuntimeError(f"Gemini returned 0 candidates: {json.dumps(data.get('promptFeedback', {}))[:200]}")
+    content = candidates[0].get("content") or {}
+    parts = content.get("parts") or []
+    text = (parts[0].get("text", "") if parts else "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text.strip())
@@ -1074,37 +1084,14 @@ def _gemini_json(prompt: str, max_tokens: int = 2048):
 
 
 def _claude_json(prompt: str, max_tokens: int = 1024):
-    """Call AI and parse JSON. Gemini primary, Anthropic fallback.
+    """Call Gemini and parse JSON. Name kept for caller-compat.
 
-    This name is kept for historical reasons (lots of callers). It now
-    dispatches: Gemini first when GEMINI_API_KEY is set (free tier and
-    the project's primary AI), Anthropic as fallback when present.
+    Was Anthropic + Gemini fallback. Per Gemini-only refactor (2026-05-27)
+    this dispatches solely to Gemini.
     """
-    # 1) Prefer Gemini (free tier, project's primary scorer)
-    if GEMINI_KEY:
-        try:
-            return _gemini_json(prompt, max_tokens)
-        except Exception as e:
-            print(f"[apply-engine] Gemini JSON call failed: {e}")
-            # Only fall through if we have an Anthropic key to try
-            if not ANTHROPIC_KEY:
-                raise
-
-    # 2) Fall back to Anthropic if configured
-    if not ANTHROPIC_KEY:
-        raise RuntimeError(
-            "No AI key available — set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway")
-    text = _claude(prompt, max_tokens)
-    try:
-        return json.loads(text)
-    except Exception:
-        m = re.search(r'\{.*\}', text, re.DOTALL)
-        if m:
-            return json.loads(m.group())
-        m = re.search(r'\[.*\]', text, re.DOTALL)
-        if m:
-            return json.loads(m.group())
-        raise ValueError(f"No JSON found: {text[:200]}")
+    if not GEMINI_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set in Railway environment")
+    return _gemini_json(prompt, max_tokens)
 
 # ── Applicant data extraction ─────────────────────────────────────────────────
 
@@ -1115,8 +1102,8 @@ def extract_applicant_data(cv_text: str, email: str) -> dict:
         "phone": "", "linkedin_url": "", "location": "", "current_title": "",
         "current_company": "", "years_experience": 0, "summary": "",
     }
-    # _claude_json now routes through Gemini first — accept either key
-    if not cv_text or (not ANTHROPIC_KEY and not GEMINI_KEY):
+    # _claude_json routes through Gemini only — require GEMINI_KEY
+    if not cv_text or not GEMINI_KEY:
         return empty
     try:
         result = _claude_json(
@@ -1316,156 +1303,80 @@ def _apply_generic_chunked(page, applicant: dict, cv_path,
 
 def _apply_generic_agent(page, applicant: dict, cv_path,
                           job_title: str, company: str) -> dict:
-    """Attempt 3: Claude tool-use agent drives Playwright, max 25 turns."""
-    MAX_TURNS = 25
+    """Attempt 3: Gemini-driven 'last-chance' retry of the chunked strategy
+    with a more aggressive prompt that includes the full visible form HTML.
+
+    Was a Claude tool-use agent — replaced with a Gemini single-shot per
+    Gemini-only refactor (2026-05-27). The Claude tools API isn't available
+    on Gemini, so when both prior attempts (single-shot + chunked) failed,
+    we send the FULL page HTML (up to 30 KB) to Gemini one more time with
+    instructions emphasising it's the last automated chance before manual
+    fallback. If even this fails, the job goes to manual_required cleanly.
+    """
     result = {"success": False, "status": "failed", "confirmation_text": "",
               "error": "", "submitted": False}
 
-    if not ANTHROPIC_KEY:
-        result.update(error="No Anthropic API key for agent strategy",
+    if not GEMINI_KEY:
+        result.update(error="No GEMINI_API_KEY for last-chance retry",
                       status="manual_required")
         return result
 
-    TOOLS = [
-        {"name": "read_page",
-         "description": "Return current page text and visible form HTML.",
-         "input_schema": {"type": "object", "properties": {}, "required": []}},
-        {"name": "fill_field",
-         "description": "Fill a form input field with a value.",
-         "input_schema": {"type": "object",
-             "properties": {"selector": {"type": "string"}, "value": {"type": "string"}},
-             "required": ["selector", "value"]}},
-        {"name": "click_element",
-         "description": "Click any visible element (button, link, etc.).",
-         "input_schema": {"type": "object",
-             "properties": {"selector": {"type": "string"}},
-             "required": ["selector"]}},
-        {"name": "select_option",
-         "description": "Select a dropdown option by value or label.",
-         "input_schema": {"type": "object",
-             "properties": {"selector": {"type": "string"}, "value": {"type": "string"}},
-             "required": ["selector", "value"]}},
-        {"name": "upload_cv",
-         "description": "Upload candidate resume to a file input.",
-         "input_schema": {"type": "object",
-             "properties": {"selector": {"type": "string"}},
-             "required": ["selector"]}},
-        {"name": "submit_form",
-         "description": "Click the submit button and signal form completion.",
-         "input_schema": {"type": "object",
-             "properties": {"selector": {"type": "string"}},
-             "required": ["selector"]}},
-    ]
+    # Gemini-driven "last chance" — single shot with the FULL form HTML
+    # (~30KB), and a more aggressive prompt than the prior attempts.
+    try:
+        full_html = page.content()[:30000]
+        page_text = (page.evaluate("document.body.innerText") or "")[:2000]
+        prompt = (
+            f'LAST AUTOMATED ATTEMPT to fill job application for "{job_title}" at "{company}".\n'
+            f'Prior attempts (single-shot + chunked) both failed.\n\n'
+            f'Applicant data:\n{json.dumps(applicant, indent=2)}\n\n'
+            f'Page text (first 2000 chars):\n{page_text}\n\n'
+            f'Full HTML (up to 30000 chars):\n{full_html}\n\n'
+            'Return a JSON ARRAY of interactions (no explanation):\n'
+            ' {"action":"fill","selector":"CSS","value":"text"}\n'
+            ' {"action":"select","selector":"CSS","value":"option value or label"}\n'
+            ' {"action":"upload","selector":"CSS","file":"cv"}\n'
+            ' {"action":"check","selector":"CSS"}\n'
+            ' {"action":"click","selector":"CSS"}\n'
+            ' {"action":"submit","selector":"CSS of submit button"}\n\n'
+            'Rules:\n'
+            '- Fill EVERY required field you can identify\n'
+            '- Use precise CSS selectors (prefer id over class, class over tag)\n'
+            '- End with a submit action\n'
+            '- If page has CAPTCHA / login wall / human-only step, return {"error":"reason"}\n'
+        )
+        instructions = _claude_json(prompt, max_tokens=4096)
+    except Exception as e:
+        result.update(error=f"Last-chance Gemini call failed: {e}",
+                      status="manual_required")
+        return result
 
-    NL = chr(10)
-    applicant_json = json.dumps(applicant, indent=2)
-    system_prompt = (
-        f'You are filling a job application for "{job_title}" at "{company}".' + NL
-        + f'Applicant info:' + NL + applicant_json + NL
-        + 'Use tools to: (1) read_page, (2) fill all required fields, (3) call submit_form.' + NL
-        + 'If blocked by CAPTCHA or login, call read_page and explain in your response.'
-    )
-    messages = [{"role": "user", "content": "Please fill and submit this job application."}]
+    if isinstance(instructions, dict) and instructions.get("error"):
+        result.update(error=f"Page not automatable: {instructions['error']}",
+                      status="manual_required")
+        return result
 
-    for turn in range(MAX_TURNS):
-        payload = json.dumps({
-            "model": "claude-haiku-4-5",
-            "max_tokens": 1024,
-            "system": system_prompt,
-            "tools": TOOLS,
-            "messages": messages,
-        }).encode()
+    if not isinstance(instructions, list):
+        result.update(error="Gemini did not return interactions list",
+                      status="manual_required")
+        return result
+
+    submitted = _exec_interactions(page, instructions, cv_path)
+    if submitted:
         try:
-            req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages", data=payload,
-                headers={
-                    "x-api-key": ANTHROPIC_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                    "anthropic-beta": "tools-2024-04-04",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                api_resp = json.loads(resp.read())
-        except Exception as e:
-            result.update(error="Agent API error turn %d: %s" % (turn + 1, e))
-            return result
+            page.wait_for_load_state("networkidle", timeout=12_000)
+        except Exception:
+            pass
+        confirmation = page.evaluate("document.body.innerText") or ""
+        if any(p in confirmation.lower() for p in _CONFIRMATION_PHRASES):
+            result.update(success=True, status="confirmed",
+                          confirmation_text=confirmation[:500], submitted=True)
+        else:
+            result.update(success=True, status="submitted",
+                          confirmation_text=confirmation[:500], submitted=True)
+        return result
 
-        stop_reason = api_resp.get("stop_reason")
-        content     = api_resp.get("content", [])
-        messages.append({"role": "assistant", "content": content})
-
-        if stop_reason == "end_turn":
-            text = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
-            print("[apply-engine] Agent ended turn %d: %s" % (turn + 1, text[:120]))
-            break
-
-        if stop_reason != "tool_use":
-            break
-
-        tool_results = []
-        for block in content:
-            if block.get("type") != "tool_use":
-                continue
-            name = block["name"]
-            inp  = block.get("input", {})
-            tid  = block["id"]
-            print("[apply-engine] Agent t%d: %s(%s)" % (turn + 1, name, inp))
-            try:
-                if name == "read_page":
-                    pt = page.evaluate("document.body.innerText") or ""
-                    form_el = page.query_selector("form")
-                    fhtml = form_el.inner_html()[:3000] if form_el else page.content()[:3000]
-                    out = "PAGE:" + NL + pt[:2000] + NL + "FORM HTML:" + NL + fhtml
-                elif name == "fill_field":
-                    page.fill(inp["selector"], inp["value"])
-                    out = "Filled " + inp["selector"]
-                elif name == "click_element":
-                    page.click(inp["selector"], timeout=5_000)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=5_000)
-                    except Exception:
-                        pass
-                    out = "Clicked " + inp["selector"]
-                elif name == "select_option":
-                    try:
-                        page.select_option(inp["selector"], value=inp["value"])
-                    except Exception:
-                        page.select_option(inp["selector"], label=inp["value"])
-                    out = "Selected " + inp["value"]
-                elif name == "upload_cv":
-                    if cv_path and os.path.exists(cv_path):
-                        page.set_input_files(inp["selector"], cv_path)
-                        out = "CV uploaded"
-                    else:
-                        out = "No CV file available"
-                elif name == "submit_form":
-                    sel = inp.get("selector") or 'button[type="submit"]'
-                    page.click(sel, timeout=5_000)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=12_000)
-                    except Exception:
-                        pass
-                    c = page.evaluate("document.body.innerText") or ""
-                    if any(p in c.lower() for p in _CONFIRMATION_PHRASES):
-                        result.update(success=True, status="confirmed",
-                                      confirmation_text=c[:500], submitted=True)
-                    else:
-                        result.update(success=True, status="submitted",
-                                      confirmation_text=c[:500], submitted=True)
-                    return result
-                else:
-                    out = "Unknown tool: " + name
-            except Exception as e:
-                out = "Tool error: " + str(e)
-                print("[apply-engine] Agent tool error %s: %s" % (name, e))
-
-            tool_results.append({"type": "tool_result", "tool_use_id": tid, "content": out})
-
-        if tool_results:
-            messages.append({"role": "user", "content": tool_results})
-
-    result.update(error="Agent did not submit after %d turns" % MAX_TURNS,
+    result.update(error="Gemini returned instructions but submit was never reached",
                   status="manual_required")
     return result
 
@@ -1502,9 +1413,11 @@ def submit_application(
             "evidence_path": str,  # directory containing screenshots
         }
     """
-    global ANTHROPIC_KEY
+    # api_key is now the Gemini key (Gemini-only refactor 2026-05-27).
+    # Override the module-level GEMINI_KEY if a key was passed explicitly.
+    global GEMINI_KEY
     if api_key:
-        ANTHROPIC_KEY = api_key
+        GEMINI_KEY = api_key
 
     _base = {
         "success": False, "status": "failed", "confirmation_text": "", "error": "",

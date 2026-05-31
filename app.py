@@ -1415,8 +1415,7 @@ def run_job_search(user_id: int):
                                 print(f"[search] ⚠️  Gemini finishReason={_finish!r} (text len={len(_g_text)})")
                         result_ = _parse_scored_response(_g_text, source_hint_="gemini")
                         if result_ is _PARSE_FAIL:
-                            print(f"[search] Gemini parse failed for batch of {len(batch_)} — trying Anthropic / heuristic")
-                            # Treat as AI failure → try Anthropic, then heuristic
+                            print(f"[search] Gemini parse failed for batch of {len(batch_)} — falling back to heuristic")
                         else:
                             print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
                             # Trust the model's verdict — even if it's "no good matches".
@@ -1425,55 +1424,19 @@ def run_job_search(user_id: int):
                             return result_
                     except Exception as _ge:
                         if not _gemini_attempted_ok:
-                            print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
+                            print(f"[search] Gemini scoring error: {_ge} — falling back to heuristic")
                         else:
-                            print(f"[search] Gemini post-call error: {_ge} — trying Anthropic")
+                            print(f"[search] Gemini post-call error: {_ge} — falling back to heuristic")
                         database.log_activity(user_id, "scoring_warning",
-                            f"Gemini scoring failed: {_ge}. Falling back to Anthropic.")
+                            f"Gemini scoring failed: {_ge}. Falling back to heuristic.")
 
-                # --- Try Anthropic Claude Haiku (secondary) ---
-                if ANTHROPIC_KEY:
-                    try:
-                        _a_body = _js2.dumps({"model": "claude-haiku-4-5", "max_tokens": 4096,
-                            "messages": [{"role": "user", "content": prompt_}]}).encode()
-                        _a_req = _ur2.Request("https://api.anthropic.com/v1/messages", data=_a_body, method="POST",
-                            headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
-                                     "content-type": "application/json"})
-                        with _ur2.urlopen(_a_req, timeout=60) as _a_resp:
-                            _a_result = _js2.loads(_a_resp.read())
-                        _a_text = ""
-                        for blk in _a_result.get("content", []):
-                            if blk.get("type") == "text": _a_text += blk["text"]
-                        result_ = _parse_scored_response(_a_text, source_hint_="anthropic")
-                        if result_ is _PARSE_FAIL:
-                            print(f"[search] Anthropic parse failed for batch of {len(batch_)} — falling back to heuristic")
-                        else:
-                            print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
-                            # Trust the model — empty result means no matches in batch
-                            return result_
-                    except Exception as _ae:
-                        import urllib.error as _ue
-                        _ae_body = ""
-                        if isinstance(_ae, _ue.HTTPError):
-                            try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:200]
-                            except: pass
-                        print(f"[search] Anthropic scoring error: {_ae}{_ae_body} — falling back to heuristic")
-                        database.log_activity(user_id, "scoring_warning",
-                            f"Anthropic scoring failed: {_ae}. Falling back to keyword heuristic.")
+                # --- Anthropic fallback removed (Gemini-only refactor 2026-05-27) ---
 
                 # --- Rule-based heuristic (no API needed) ---
-                # Differentiate "no AI key configured" from "AI key configured but failed"
-                # so the operator log message tells the truth about what's happening.
-                _have_gemini = bool(_GEMINI_KEY)
-                _have_anth   = bool(ANTHROPIC_KEY)
-                if _have_gemini and _have_anth:
-                    _reason = "both Gemini and Anthropic calls returned no usable result"
-                elif _have_gemini:
-                    _reason = "Gemini returned no usable result (Anthropic not configured)"
-                elif _have_anth:
-                    _reason = "Anthropic returned no usable result (Gemini not configured)"
+                if not _GEMINI_KEY:
+                    _reason = "no GEMINI_API_KEY configured (set it in Railway)"
                 else:
-                    _reason = "no AI keys configured (set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway)"
+                    _reason = "Gemini returned no usable result"
                 print(f"[search] ⚠️  HEURISTIC scoring {len(batch_)} jobs — {_reason}.")
                 database.log_activity(user_id, "scoring_warning",
                     f"Falling back to keyword heuristic — {_reason}.")
@@ -1647,8 +1610,8 @@ def run_job_search(user_id: int):
                 print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
                 import os as _os_tb
                 _TB_GEMINI = GEMINI_KEY  # use module-level var (already loaded via _cfg())
-                _TB_ANTH   = ANTHROPIC_KEY  # use module-level var (already loaded via _cfg())
-                if _TB_GEMINI or _TB_ANTH:
+                # Anthropic fallback removed — Gemini-only (2026-05-27)
+                if _TB_GEMINI:
                     # Collect jobs with meaningful descriptions that Track A didn't already return
                     _scored_urls = {j.get('url','') for j in scored_jobs}
                     _trackb_pool = [
@@ -1820,35 +1783,11 @@ def run_job_search(user_id: int):
                                 except Exception as _de:
                                     print(f"[search] Track B Gemini error: {_de}")
 
-                            if not _ai_d_used and _TB_ANTH:
-                                try:
-                                    _body_d2 = _js2.dumps({
-                                        "model": "claude-haiku-4-5-20251001",
-                                        "max_tokens": 4096,
-                                        "messages": [{"role": "user", "content": _prompt_d}]
-                                    }).encode()
-                                    _req_d2 = _ur2.Request(
-                                        "https://api.anthropic.com/v1/messages",
-                                        data=_body_d2,
-                                        headers={"Content-Type": "application/json",
-                                                 "x-api-key": _TB_ANTH,
-                                                 "anthropic-version": "2023-06-01"},
-                                        method="POST"
-                                    )
-                                    with _ur2.urlopen(_req_d2, timeout=90) as _rd2:
-                                        _resp_d2 = _js2.loads(_rd2.read().decode())
-                                    _text_d2 = _resp_d2["content"][0]["text"]
-                                    _scored_d2 = _parse_desc_resp(_text_d2)
-                                    _out_d = _apply_desc_scores(_scored_d2, batch_d_)
-                                    _ai_d_used = True
-                                    print(f"[search] Track B Anthropic: {len(batch_d_)} -> {len(_out_d)} passed")
-                                except Exception as _de2:
-                                    print(f"[search] Track B Anthropic error: {_de2}")
-
+                            # Track B Anthropic fallback removed (Gemini-only refactor 2026-05-27)
                             if not _ai_d_used:
-                                print("[search] Track B: AI call failed — no description scores added")
+                                print("[search] Track B: Gemini call failed — no description scores added")
                                 database.log_activity(user_id, "track_b_search",
-                                    "Track B AI call failed. Check GEMINI_API_KEY / ANTHROPIC_API_KEY in Railway.")
+                                    "Track B Gemini call failed. Check GEMINI_API_KEY in Railway.")
 
                             return _out_d
 
@@ -2285,7 +2224,7 @@ def run_job_apply(user_id: int, force: bool = False) -> dict:
             if job_url:
                 res = apply_engine.submit_application(
                     job_url, j["title"], j["company"],
-                    applicant, cv_path, ANTHROPIC_KEY,
+                    applicant, cv_path, GEMINI_KEY,
                     user_id=user_id, job_id=j["id"], attempt=attempt_num,
                 )
             else:
@@ -6338,8 +6277,8 @@ async function mark(status) {{
 
         # ── CV Analyze ──
         if path == "/api/analyze-cv":
-            if not GEMINI_KEY and not ANTHROPIC_KEY:
-                self.send_json({"error": "No AI API key configured. Set GEMINI_API_KEY in Railway environment variables."})
+            if not GEMINI_KEY:
+                self.send_json({"error": "GEMINI_API_KEY not configured. Set it in Railway environment variables."})
                 return
             # Get CV path from profile
             conn = database.get_db()
@@ -6350,7 +6289,7 @@ async function mark(status) {{
                 self.send_json({"error": "No CV uploaded yet. Please upload your PDF first."})
                 return
             try:
-                data = analyze_cv(cv_path, ANTHROPIC_KEY)
+                data = analyze_cv(cv_path, GEMINI_KEY)
                 # Save to profile — including linkedin_url and phone if extracted
                 _profile_update = dict(
                     cv_analyzed=1,
@@ -6799,7 +6738,7 @@ async function mark(status) {{
 
                     res = apply_engine.submit_application(
                         job["url"], job["title"], job["company"],
-                        applicant, cv_path, ANTHROPIC_KEY,
+                        applicant, cv_path, GEMINI_KEY,
                         user_id=user_id, job_id=job_id, attempt=attempt_num,
                     )
 
@@ -6942,7 +6881,7 @@ async function mark(status) {{
             conn.close()
             try:
                 from ai_analysis import generate_cover_letter
-                letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, ANTHROPIC_KEY)
+                letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, GEMINI_KEY)
             except Exception as gen_err:
                 self.send_json({"error": str(gen_err)}, 500)
                 return
@@ -7031,12 +6970,11 @@ async function mark(status) {{
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
-            # Search needs AT LEAST ONE AI scorer to be meaningful. Gemini is the
-            # primary; Anthropic is the fallback. Either one is enough. If neither
-            # is set, we'd fall straight to the keyword heuristic which produces
-            # near-empty results — fail fast with a clear error instead.
-            if not GEMINI_KEY and not ANTHROPIC_KEY:
-                self.send_json({"error": "No AI key configured. Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway."}, 400)
+            # Search needs Gemini configured (project is Gemini-only since
+            # 2026-05-27). Without it we'd fall straight to the keyword heuristic,
+            # which produces near-empty results — fail fast with a clear error.
+            if not GEMINI_KEY:
+                self.send_json({"error": "GEMINI_API_KEY not configured. Set it in Railway environment."}, 400)
                 return
             uid = user["id"]
             threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
@@ -7385,13 +7323,10 @@ if __name__ == "__main__":
     t = threading.Thread(target=file_watcher, daemon=True)
     t.start()
 
-    ai_status = "✅ Configured" if ANTHROPIC_KEY else "⚠️  Not set — add to config.json"
-
     gemini_status = "✅ Configured" if GEMINI_KEY else "⚠️  Not set — add GEMINI_API_KEY"
     print(f"\n📂  Folder:        {BASE_DIR}")
     print(f"🗄️   Database:      {DB_FILE}")
     print(f"📁  Uploads:       {UPLOADS_DIR}")
-    print(f"🤖  Anthropic AI:  {ai_status}")
     print(f"🤖  Gemini AI:     {gemini_status}")
     print(f"\n🖥️   Desktop:       http://localhost:{PORT}")
     print(f"📱  Mobile:        {MOBILE_URL}   ← open on your phone")
