@@ -1198,7 +1198,11 @@ def run_job_search(user_id: int):
                     """Run one Gemini Google Search and return raw job dicts."""
                     _ws_prompt = (
                         f'Search for current job openings matching this query: "{query_hint_}". '
-                        f'Focus on: linkedin.com/jobs, glassdoor.com, wellfound.com, and company career pages. '
+                        f'STRONGLY PREFER direct application URLs on company career pages and applicant-tracking systems '
+                        f'(boards.greenhouse.io, jobs.lever.co, *.myworkdayjobs.com, comeet.com, smartrecruiters.com, '
+                        f'ashbyhq.com, and company "/careers" pages). These let the candidate apply directly. '
+                        f'AVOID job-board aggregator links (linkedin.com/jobs, indeed.com, glassdoor.com) unless no direct URL exists, '
+                        f'because those require manual application. Return the direct apply URL whenever possible. '
                         f'Candidate context — seniority: {_seniority_hint}; location: {_locs_str}. '
                         + (f'Background: {_cv_snippet} ' if _cv_snippet else '')
                         + 'Return ONLY a JSON array of up to 8 results. '
@@ -1237,7 +1241,7 @@ def run_job_search(user_id: int):
                 if _clean_titles:
                     _ws_queries.append(
                         f'{_seniority_hint} {" OR ".join(_clean_titles)} '
-                        f'startup Israel site:linkedin.com OR site:wellfound.com'
+                        f'startup Israel site:greenhouse.io OR site:lever.co OR site:comeet.com OR site:myworkdayjobs.com'
                     )
 
                 # Run all queries in parallel
@@ -1765,7 +1769,14 @@ def run_job_apply(user_id: int) -> int:
         # ── Notifications ────────────────────────────────────────────────────────────────────────────────
         # ── Single consolidated apply notification ──────────────────────────────
         today_str = datetime.now().strftime("%Y-%m-%d")
-        notif_lines = [f"🚀 Apply Run Complete — {today_str}", f"📊 {count} application(s) submitted\n"]
+        _real_submits = len(confirmed_list) + len(submitted_list)
+        if _real_submits > 0:
+            _headline = f"📊 {_real_submits} auto-submitted · {len(manual_list)} need manual · {len(failed_list)} failed\n"
+        elif manual_list:
+            _headline = f"📊 0 auto-submitted — {len(manual_list)} job(s) need manual apply (job-board listings)\n"
+        else:
+            _headline = f"📊 {count} job(s) processed\n"
+        notif_lines = [f"🚀 Apply Run Complete — {today_str}", _headline]
         if confirmed_list:
             notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
             for j in confirmed_list[:5]:
@@ -4102,19 +4113,23 @@ async function loadActivity() {
   }
   const icons = {jobs_searched:'🔍',job_approved:'✅',job_rejected:'❌',job_applied:'🚀',notification_sent:'🔔',cv_uploaded:'📄',profile_updated:'⚙️',jobs_injected:'📋',job_stage_updated:'🔄',cv_analyzed:'🧠',bulk_approve:'✅',bulk_reject:'❌',job_status_checked:'📋'};
   panel.innerHTML = items.map(item => {
-    const icon = icons[item.event_type] || '📋';
+    const _isManualItem = item.details && /manual_required|manual apply|manual needed/i.test(item.details) && !/failed|error/i.test(item.details);
+    const icon = _isManualItem ? '👤' : (icons[item.event_type] || '📋');
     const dt = new Date(item.created_date);
     const dateStr = dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'}) + ' ' +
       dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     const labels = {'jobs_searched':'Job Search','job_approved':'Job Approved','job_rejected':'Job Rejected','job_applied':'Applied','cv_uploaded':'CV Uploaded','cv_analyzed':'CV Analyzed','job_status_checked':'Status Check','bulk_approve':'Bulk Approve','bulk_reject':'Bulk Reject','jobs_injected':'Jobs Imported','job_stage_updated':'Stage Updated'};
-    const label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());
+    let label = labels[item.event_type] || item.event_type.replace(/_/g,' ').replace(/\\b\\w/g, c=>c.toUpperCase());
+    if (_isManualItem && item.event_type === 'job_applied') label = 'Manual Apply Needed';
+    const detailsManual = item.details && /manual_required|manual apply|manual needed/i.test(item.details);
     const detailsFailed = item.details && /failed|error/i.test(item.details);
-    const detailsSuccess = item.details && /submitted|success/i.test(item.details);
-    const isFail = detailsFailed || (!detailsSuccess && ['job_rejected','bulk_reject'].includes(item.event_type));
-    const isSuccess = !isFail && (detailsSuccess || ['job_approved','job_applied','bulk_approve','cv_uploaded','cv_analyzed'].includes(item.event_type));
-    const rowBg = isSuccess ? 'bg-emerald-50 border-emerald-200' : isFail ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100';
-    const detailColor = isSuccess ? 'text-emerald-600' : isFail ? 'text-red-500' : 'text-slate-500';
-    const labelColor = isSuccess ? 'text-emerald-800' : isFail ? 'text-red-700' : 'text-slate-800';
+    const detailsSuccess = item.details && /submitted|confirmed|success/i.test(item.details);
+    const isManual = detailsManual && !detailsFailed;
+    const isFail = !isManual && (detailsFailed || (!detailsSuccess && ['job_rejected','bulk_reject'].includes(item.event_type)));
+    const isSuccess = !isFail && !isManual && (detailsSuccess || ['job_approved','job_applied','bulk_approve','cv_uploaded','cv_analyzed'].includes(item.event_type));
+    const rowBg = isManual ? 'bg-amber-50 border-amber-200' : isSuccess ? 'bg-emerald-50 border-emerald-200' : isFail ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100';
+    const detailColor = isManual ? 'text-amber-700' : isSuccess ? 'text-emerald-600' : isFail ? 'text-red-500' : 'text-slate-500';
+    const labelColor = isManual ? 'text-amber-800' : isSuccess ? 'text-emerald-800' : isFail ? 'text-red-700' : 'text-slate-800';
     return `<div class="${rowBg} rounded-xl border px-4 py-3 flex items-center gap-3 fade">
       <span class="text-xl w-8 text-center shrink-0">${icon}</span>
       <div class="flex-1 min-w-0">
