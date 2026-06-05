@@ -155,6 +155,9 @@ def init_db():
         "ALTER TABLE user_profiles ADD COLUMN applications_per_run INTEGER DEFAULT 10",
         # ── Passed-history cleanup (preserves historical 'total' across deletions) ──
         "ALTER TABLE user_profiles ADD COLUMN passed_archived_count INTEGER DEFAULT 0",
+        # ── Feedback learning loop: per-job penalty derived from pass history ──
+        "ALTER TABLE jobs ADD COLUMN feedback_penalty INTEGER DEFAULT 0",
+        "ALTER TABLE jobs ADD COLUMN feedback_reason TEXT DEFAULT ''",
         # career_url_cache: created separately below (CREATE TABLE IF NOT EXISTS)
         "CREATE TABLE IF NOT EXISTS career_url_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, job_title TEXT NOT NULL, resolved_url TEXT NOT NULL, created_date TEXT DEFAULT (datetime(\'now\')), UNIQUE(company, job_title))",
         # application_answers: canonical applicant profile (§4.6)
@@ -553,3 +556,64 @@ def get_pass_reason_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         (user_id,)
     ).fetchall()
     return {row[0]: row[1] for row in rows}
+
+
+def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
+    """Aggregate a user's pass/reject history into structured learning signals.
+
+    This is the read side of the feedback learning loop. It is deterministic and
+    cheap (two small SELECTs), so it is safe to call on every job-list render.
+
+    Returns a dict:
+      bad_companies          set[str]      - companies passed with a "Bad company" reason (lowercased)
+      passed_companies       dict[str,int] - every passed company -> times passed (lowercased)
+      disliked_title_tokens  set[str]      - title words (len>3) seen in >=2 distinct passed roles
+      reason_counts          dict[str,int] - pass_reason_stats {reason: count}
+      examples               list[dict]    - up to 12 recent {company,title,reason} for AI context
+    """
+    import re as _re
+    from collections import Counter as _Counter
+
+    rows = conn.execute(
+        "SELECT company, title, notes FROM rejected_patterns "
+        "WHERE user_id=? ORDER BY created_date DESC",
+        (user_id,)
+    ).fetchall()
+
+    bad_companies: set = set()
+    passed_companies: dict = {}
+    title_token_docs: list = []
+    examples: list = []
+
+    for r in rows:
+        comp = (r["company"] or "").strip().lower()
+        ttl  = (r["title"] or "").strip().lower()
+        note = (r["notes"] or "").strip()
+        if comp:
+            passed_companies[comp] = passed_companies.get(comp, 0) + 1
+            if "bad company" in note.lower():
+                bad_companies.add(comp)
+        if ttl:
+            toks = {w for w in _re.split(r"[^a-z0-9]+", ttl) if len(w) > 3}
+            if toks:
+                title_token_docs.append(toks)
+        if len(examples) < 12:
+            examples.append({
+                "company": r["company"] or "",
+                "title":   r["title"] or "",
+                "reason":  note,
+            })
+
+    tok_counter: "_Counter" = _Counter()
+    for toks in title_token_docs:
+        for t in toks:
+            tok_counter[t] += 1
+    disliked_title_tokens = {t for t, c in tok_counter.items() if c >= 2}
+
+    return {
+        "bad_companies":         bad_companies,
+        "passed_companies":      passed_companies,
+        "disliked_title_tokens": disliked_title_tokens,
+        "reason_counts":         get_pass_reason_stats(conn, user_id),
+        "examples":              examples,
+    }

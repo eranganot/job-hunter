@@ -133,6 +133,97 @@ def _parse_json_list(raw) -> list:
 
 
 
+def _feedback_notes(signals: "dict | None") -> str:
+    """Render a short natural-language summary of the user's pass history for the
+    AI scorer. This is the AI half of the hybrid learning loop: it lets Gemini
+    catch fuzzy patterns (e.g. crypto shops, agencies, low-salary tells) that the
+    deterministic penalty rules can't express. Returns "" when there's nothing to
+    learn from yet."""
+    if not signals:
+        return ""
+    parts = []
+    rc = signals.get("reason_counts") or {}
+    if rc:
+        top = ", ".join(f"{k} (x{v})" for k, v in list(rc.items())[:5])
+        parts.append("Recurring reasons they pass on jobs: " + top + ".")
+    ex = signals.get("examples") or []
+    if ex:
+        lines = []
+        for e in ex[:8]:
+            seg = f"{e.get('title','')} @ {e.get('company','')}".strip(" @")
+            if e.get("reason"):
+                seg += f" (reason: {e['reason']})"
+            if seg:
+                lines.append(seg)
+        if lines:
+            parts.append("Roles they recently rejected: " + "; ".join(lines) + ".")
+    if not parts:
+        return ""
+    return (
+        "\n\nCANDIDATE FEEDBACK HISTORY - learn from this. If THIS job resembles a "
+        "company or role the candidate has rejected, or clearly matches one of their "
+        "recurring rejection reasons, lower the scores accordingly:\n" + " ".join(parts)
+    )
+
+
+def compute_feedback_penalty(
+    job: dict,
+    signals: "dict | None",
+    user_profile: "dict | None" = None,
+) -> "tuple[int, str]":
+    """Deterministic point penalty (0-60) for a job based on the user's pass history.
+
+    This is the rule-based half of the hybrid learning loop. It is applied on top
+    of the (already feedback-aware) match score and the final effective score is
+    floored at 1 by callers, so a penalized job is demoted but never hidden.
+
+    Returns (penalty, human_reason). penalty is subtracted from match_score for
+    ranking; human_reason powers the "demoted" badge in the UI.
+    """
+    if not signals:
+        return 0, ""
+    company = (job.get("company") or "").strip().lower()
+    title   = (job.get("title") or "").strip().lower()
+
+    penalty = 0
+    reason  = ""
+
+    bad    = signals.get("bad_companies") or set()
+    passed = signals.get("passed_companies") or {}
+
+    if company and company in bad:
+        penalty += 45
+        reason = "Company you flagged as bad"
+    elif company:
+        n = passed.get(company, 0)
+        if n >= 2:
+            penalty += 20
+            reason = "You've passed on this company before"
+        elif n == 1:
+            penalty += 8
+
+    # Similar-title penalty - exclude the user's own target-title tokens so we
+    # never penalize the exact roles they're hunting for.
+    disliked = set(signals.get("disliked_title_tokens") or set())
+    if disliked and user_profile is not None:
+        target_tokens = set()
+        for ut in _parse_json_list(user_profile.get("job_titles")):
+            for w in re.split(r"[^a-z0-9]+", (ut or "").lower()):
+                if len(w) > 3:
+                    target_tokens.add(w)
+        disliked -= target_tokens
+    if disliked and title:
+        ttoks = {w for w in re.split(r"[^a-z0-9]+", title) if len(w) > 3}
+        hits = len(ttoks & disliked)
+        if hits:
+            penalty += min(12, 6 * hits)
+            if not reason:
+                reason = "Similar to roles you've passed"
+
+    penalty = min(60, penalty)
+    return penalty, (reason if penalty > 0 else "")
+
+
 def _gemini_match_score(
     job_text: str,
     user_keywords: list,
@@ -140,6 +231,7 @@ def _gemini_match_score(
     seniority: str,
     job_title: str,
     api_key: str = "",
+    feedback_notes: str = "",
 ) -> "tuple[int, int, int] | None":
     """Use Gemini 2.5 Flash for semantic job-fit scoring.
 
@@ -166,6 +258,7 @@ def _gemini_match_score(
         "  keyword_score  0-60  semantic skills/tools match\n"
         "  title_score    0-30  job title relevance to candidate's targets\n"
         "  seniority_score 0-10 seniority level fit"
+        + (feedback_notes or "")
     )
     try:
         # Enforce strict JSON shape with responseSchema so we never have to
@@ -218,7 +311,7 @@ def _gemini_match_score(
 # Backward-compat alias — some callers still use the old name
 _haiku_match_score = _gemini_match_score
 
-def compute_match_score(job: dict, user_profile: dict, api_key: str = "") -> int:
+def compute_match_score(job: dict, user_profile: dict, api_key: str = "", signals: "dict | None" = None) -> int:
     """
     Compute 0-100 match score using Claude Haiku for semantic scoring.
     Falls back to keyword overlap (60/30/10) when the API is unavailable.
@@ -246,7 +339,8 @@ def compute_match_score(job: dict, user_profile: dict, api_key: str = "") -> int
     gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
     job_title_lower = (job.get("title") or "").lower()
     seniority = (user_profile.get("seniority") or "").lower()
-    gemini_result = _gemini_match_score(job_text, user_keywords, user_titles, seniority, job_title_lower, gemini_key)
+    feedback_notes = _feedback_notes(signals)
+    gemini_result = _gemini_match_score(job_text, user_keywords, user_titles, seniority, job_title_lower, gemini_key, feedback_notes)
     if gemini_result is not None:
         kw_score, title_score, seniority_score = gemini_result
         return min(100, max(0, kw_score + title_score + seniority_score))

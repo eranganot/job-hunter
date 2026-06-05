@@ -1499,7 +1499,14 @@ def run_job_search(user_id: int):
         ).fetchall()
         _rej_set = {(r["c"], r["t"]) for r in _rej_patterns}
         _rej_companies = {r["c"] for r in _rej_patterns if r["c"]}
+        # ── Feedback learning signals (for pre-scoring new jobs) ─────────
+        _fb_signals = database.get_feedback_signals(conn, user_id)
+        _fb_prof_row = conn.execute(
+            "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        _fb_prof = dict(_fb_prof_row) if _fb_prof_row else {}
         conn.close()
+        from ai_analysis import compute_feedback_penalty as _compute_fb_penalty
 
         # ── Insert new jobs (skip rejected patterns) ─────────────────────
         conn = database.get_db(); inserted = 0; new_jobs_info = []; skipped_rej = 0
@@ -1525,16 +1532,23 @@ def run_job_search(user_id: int):
                     ).fetchone()
                     if dup:
                         continue  # duplicate job from different source
+                # ── Learned feedback penalty (deterministic; demotes, never hides) ──
+                _fb_pen, _fb_rsn = _compute_fb_penalty(
+                    {"company": j.get("company",""), "title": j.get("job_title","")},
+                    _fb_signals, _fb_prof
+                )
                 conn.execute(
                     "INSERT OR IGNORE INTO jobs "
                     "(user_id,title,company,location,url,description,why_relevant,source,"
-                    "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date,full_description) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?)",
+                    "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date,full_description,"
+                    "feedback_penalty,feedback_reason) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?,?,?)",
                     (user_id, j.get("job_title",""), j.get("company",""), j.get("location",""),
                      _jurl, j.get("description",""), j.get("fit_reason",""), j.get("source",""),
                      j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
                      _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None,
-                     j.get("publish_date"), (j.get("full_description") or "")[:5000]))
+                     j.get("publish_date"), (j.get("full_description") or "")[:5000],
+                     _fb_pen, _fb_rsn))
                 inserted += 1
                 new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
             except Exception as e: print(f"[run-search] insert error: {e}")
@@ -4239,6 +4253,13 @@ function matchBadge(pct) {
   return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border ${cls}" title="Match between this role and your profile">${pct}% match</span>`;
 }
 
+function feedbackBadge(job) {
+  const p = job.feedback_penalty || 0;
+  if (p <= 0) return '';
+  const r = job.feedback_reason || 'Adjusted from your feedback';
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border bg-orange-50 text-orange-600 border-orange-200" title="Demoted ${p} pts based on your past feedback">\u2b07 ${r}</span>`;
+}
+
 function candidateBadge(score) {
   if (score == null) return '';
   const cls = score >= 70 ? 'bg-blue-100 text-blue-700 border-blue-200'
@@ -4331,7 +4352,7 @@ function applyStatusBadge(job) {
 function renderJob(job) {
   // Cache cover letter safely — skip stale error strings that were previously saved to DB
   if (job.cover_letter && !job.cover_letter.startsWith('[Error]')) _clLetterCache[job.id] = job.cover_letter;
-  const badges = [matchBadge(job.match_score), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
+  const badges = [matchBadge(job.match_score), feedbackBadge(job), statusCheckBadge(job), urlVerifiedBadge(job)].filter(Boolean).join('');
   const verifyBtn = job.url
     ? `<button id="verify-btn-${job.id}" onclick="checkStatus(${job.id})" class="btn-touch shrink-0 text-slate-400 hover:text-blue-600 transition-colors text-base" title="Verify if role is still open">🔍</button>`
     : '';
@@ -5100,7 +5121,7 @@ class Handler(BaseHTTPRequestHandler):
             status  = qs.get("status", ["new"])[0]
             sort_by = qs.get("sort",   ["date"])[0]
             order_map = {
-                "match":   "COALESCE(match_score, -1) DESC",
+                "match":   "(COALESCE(match_score, -1) - COALESCE(feedback_penalty, 0)) DESC",
                 "company": "company ASC",
                 "date":    "found_date DESC",
             }
@@ -5119,6 +5140,39 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
             jobs_list = [dict(r) for r in rows]
 
+            # ── Live feedback learning: recompute deterministic penalties so the
+            #    New/Approved tabs reflect the user's latest pass feedback on every
+            #    load (no API calls - cheap and immediate). Demotes, never hides. ──
+            try:
+                from ai_analysis import compute_feedback_penalty as _live_fb_penalty
+                _live_sig = database.get_feedback_signals(conn, user["id"])
+                _live_prof_row = conn.execute(
+                    "SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)
+                ).fetchone()
+                _live_prof = dict(_live_prof_row) if _live_prof_row else {}
+                _fb_dirty = False
+                for _j in jobs_list:
+                    if _j.get("status") not in ("new", "approved"):
+                        continue
+                    _pen, _rsn = _live_fb_penalty(_j, _live_sig, _live_prof)
+                    if _pen != (_j.get("feedback_penalty") or 0) or (_rsn or "") != (_j.get("feedback_reason") or ""):
+                        conn.execute(
+                            "UPDATE jobs SET feedback_penalty=?, feedback_reason=? WHERE id=?",
+                            (_pen, _rsn, _j["id"])
+                        )
+                        _j["feedback_penalty"] = _pen
+                        _j["feedback_reason"]  = _rsn
+                        _fb_dirty = True
+                if _fb_dirty:
+                    conn.commit()
+                if sort_by == "match":
+                    jobs_list.sort(
+                        key=lambda x: (x.get("match_score") or -1) - (x.get("feedback_penalty") or 0),
+                        reverse=True
+                    )
+            except Exception as _fbe:
+                print(f"[feedback-live] {_fbe}")
+
             # Auto-compute match/candidate scores for any unscored jobs (async)
             try:
                 from ai_analysis import compute_match_score, compute_candidate_score
@@ -5131,7 +5185,9 @@ class Handler(BaseHTTPRequestHandler):
                     if unscored_ids:
                         def _bg_score(job_ids, uid, pd):
                             try:
+                                from ai_analysis import compute_feedback_penalty as _bg_fb_penalty
                                 c2 = database.get_db()
+                                sig = database.get_feedback_signals(c2, uid)
                                 for jid in job_ids:
                                     row = c2.execute(
                                         "SELECT * FROM jobs WHERE id=? AND user_id=?",
@@ -5143,11 +5199,12 @@ class Handler(BaseHTTPRequestHandler):
                                     if jd.get("match_score") is not None:
                                         continue
                                     try:
-                                        ms = compute_match_score(jd, pd)
+                                        ms = compute_match_score(jd, pd, signals=sig)
                                         cs = compute_candidate_score(jd, pd)
+                                        pen, rsn = _bg_fb_penalty(jd, sig, pd)
                                         c2.execute(
-                                            "UPDATE jobs SET match_score=?, candidate_score=? WHERE id=?",
-                                            (ms, cs, jid)
+                                            "UPDATE jobs SET match_score=?, candidate_score=?, feedback_penalty=?, feedback_reason=? WHERE id=?",
+                                            (ms, cs, pen, rsn, jid)
                                         )
                                         c2.commit()
                                     except Exception as ie:
