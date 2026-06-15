@@ -4,7 +4,7 @@ import {
   Briefcase, X, MapPin, TrendingUp, Settings, BarChart3, Clock,
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
-  Zap, Target, Loader2, Plus, RotateCcw,
+  Zap, Target, Loader2, Plus, RotateCcw, Ban,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -402,7 +402,7 @@ function DashboardView(p: any) {
           {activeTab === "queue" && <ListTab jobs={approvedJobs} onSelectJob={setSelectedJob} emptyIcon={CheckCircle} emptyTitle="No jobs in queue" emptySub="Approved jobs appear here" heading={`${approvedJobs.length} ready to apply`} />}
           {activeTab === "applied" && <ListTab jobs={appliedJobs} onSelectJob={setSelectedJob} showStatus emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
           {activeTab === "deferred" && <DeferredTab jobs={deferredJobs} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} />}
-          {activeTab === "passed" && <EmptyTab icon={XCircle} title={`${rejectedCount} passed`} sub="Passed jobs are archived after 30 days" />}
+          {activeTab === "passed" && <PassedTab />}
           {activeTab === "activity" && <ActivityTab />}
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={appliedJobs.length} />}
         </div>
@@ -440,6 +440,69 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer }: any) {
 
 function EmptyTab({ icon: Icon, title, sub }: any) {
   return (<div className="text-center py-12"><Icon className="w-14 h-14 text-gray-600 mx-auto mb-3" /><p className="text-gray-400">{title}</p><p className="text-sm text-gray-500 mt-1">{sub}</p></div>);
+}
+
+function PassedTab() {
+  const [data, setData] = useState<any>(null);
+  const [block, setBlock] = useState("");
+  const load = () => api.learned().then(setData).catch(() => setData({ pass_reasons: [], blocklist: [], patterns: [] }));
+  useEffect(() => { load(); }, []);
+  if (data === null) return <div className="py-10 text-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto" /></div>;
+  const forget = async (id: number) => { await api.forgetPattern(id).catch(() => {}); load(); };
+  const unblock = async (c: string) => { await api.unblockCompany(c).catch(() => {}); load(); };
+  const addBlock = async () => { const c = block.trim(); if (!c) return; setBlock(""); await api.blockCompany(c).catch(() => {}); load(); };
+  const totalPass = data.pass_reasons.reduce((a: number, r: any) => a + r.count, 0);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-base font-semibold text-white mb-3">Why you pass{totalPass ? ` (${totalPass})` : ""}</h3>
+        {data.pass_reasons.length ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {data.pass_reasons.map((r: any) => (
+              <div key={r.reason} className="bg-gray-800 rounded-xl p-4 border border-gray-700 flex items-center justify-between">
+                <span className="text-sm text-gray-300">{r.reason}</span>
+                <span className="text-lg font-bold text-indigo-400">{r.count}</span>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-sm text-gray-500">No pass reasons recorded yet.</p>}
+      </div>
+
+      <div>
+        <h3 className="text-base font-semibold text-white mb-1 flex items-center gap-2"><Ban className="w-4 h-4 text-red-400" />Blocked companies</h3>
+        <p className="text-xs text-gray-500 mb-3">These are skipped automatically in future searches.</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {data.blocklist.length ? data.blocklist.map((c: string) => (
+            <span key={c} className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-red-600/15 border border-red-600/40 text-red-200 rounded-full text-sm">
+              {c}<button onClick={() => unblock(c)} className="w-4 h-4 flex items-center justify-center rounded-full bg-red-500/40 active:bg-red-500"><X className="w-3 h-3" /></button>
+            </span>
+          )) : <span className="text-xs text-gray-500">No blocked companies.</span>}
+        </div>
+        <div className="flex gap-2">
+          <input value={block} onChange={(e) => setBlock(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBlock(); } }} placeholder="Block a company…" className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
+          <button onClick={addBlock} className="px-3.5 bg-red-600/80 active:bg-red-600 text-white rounded-xl text-sm font-medium">Block</button>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-base font-semibold text-white mb-3">Learned passes{data.patterns.length ? ` (${data.patterns.length})` : ""}</h3>
+        {data.patterns.length ? (
+          <div className="space-y-2">
+            {data.patterns.map((pat: any) => (
+              <div key={pat.id} className="flex items-center gap-3 p-3 bg-gray-800 rounded-xl border border-gray-700">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white truncate">{pat.title || "(any role)"}</p>
+                  <p className="text-xs text-gray-400 truncate">{pat.company}{pat.notes ? ` \u2014 ${pat.notes}` : ""}</p>
+                </div>
+                <button onClick={() => forget(pat.id)} className="px-3 py-1.5 bg-gray-700 active:bg-gray-600 text-indigo-200 rounded-lg text-xs font-medium shrink-0">Forget</button>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-sm text-gray-500">Nothing learned yet. Jobs you pass will train your future matches.</p>}
+      </div>
+    </div>
+  );
 }
 
 function ActivityTab() {

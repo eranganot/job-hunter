@@ -542,6 +542,15 @@ def get_blocklist(conn: sqlite3.Connection, user_id: int) -> list:
     return [row[0] for row in rows]
 
 
+def remove_from_blocklist(conn: sqlite3.Connection, user_id: int, company_name: str) -> None:
+    """Remove a company from the user's blocklist."""
+    conn.execute(
+        "DELETE FROM user_blocklist WHERE user_id=? AND company_name=?",
+        (user_id, company_name)
+    )
+    conn.commit()
+
+
 def record_pass_reason_stat(conn: sqlite3.Connection, user_id: int, reason: str) -> None:
     """Increment (or insert) the pass-reason count for a user.
 

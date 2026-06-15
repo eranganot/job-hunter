@@ -1589,6 +1589,7 @@ def run_job_search(user_id: int):
         ).fetchall()
         _rej_set = {(r["c"], r["t"]) for r in _rej_patterns}
         _rej_companies = {r["c"] for r in _rej_patterns if r["c"]}
+        _block_set = {(c or "").strip().lower() for c in database.get_blocklist(conn, user_id)}
         # ── Feedback learning signals (for pre-scoring new jobs) ─────────
         _fb_signals = database.get_feedback_signals(conn, user_id)
         _fb_prof_row = conn.execute(
@@ -1604,6 +1605,9 @@ def run_job_search(user_id: int):
             _jc = j.get("company","").strip().lower()
             _jt = j.get("job_title","").strip().lower()
             if (_jc, _jt) in _rej_set:
+                skipped_rej += 1
+                continue
+            if _jc in _block_set:
                 skipped_rej += 1
                 continue
             if j.get("match_score", 0) <= 0:
@@ -5447,6 +5451,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json([dict(r) for r in rows])
             return
 
+        if path == "/api/learned":
+            user = self.require_auth()
+            if not user:
+                return
+            conn = database.get_db()
+            pr = database.get_pass_reason_stats(conn, user["id"])
+            bl = database.get_blocklist(conn, user["id"])
+            rows2 = conn.execute(
+                "SELECT id, company, title, notes, created_date FROM rejected_patterns WHERE user_id=? ORDER BY created_date DESC LIMIT 100",
+                (user["id"],)
+            ).fetchall()
+            conn.close()
+            self.send_json({
+                "pass_reasons": [{"reason": k, "count": v} for k, v in pr.items()],
+                "blocklist": bl,
+                "patterns": [dict(r) for r in rows2],
+            })
+            return
+
         # ── Sync: export approved jobs for relay/scheduled tasks ──
         if path == "/api/sync/approved":
             qs = parse_qs(parsed.query)
@@ -5550,6 +5573,36 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Unauthorized"}, 401)
             return
         user_id = user["id"]
+
+        if path == "/api/blocklist":
+            data = self.read_json()
+            company = (data.get("company") or "").strip()
+            if company:
+                conn = database.get_db()
+                database.add_to_blocklist(conn, user_id, company, data.get("reason", ""))
+                conn.close()
+            self.send_json({"success": True})
+            return
+
+        if path == "/api/blocklist/remove":
+            data = self.read_json()
+            company = (data.get("company") or "").strip()
+            if company:
+                conn = database.get_db()
+                database.remove_from_blocklist(conn, user_id, company)
+                conn.close()
+            self.send_json({"success": True})
+            return
+
+        if path == "/api/patterns/forget":
+            data = self.read_json()
+            pid = data.get("id")
+            conn = database.get_db()
+            if pid is not None:
+                conn.execute("DELETE FROM rejected_patterns WHERE id=? AND user_id=?", (pid, user_id))
+            conn.commit(); conn.close()
+            self.send_json({"success": True})
+            return
 
         if path == "/api/push/subscribe":
             data = self.read_json()
