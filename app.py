@@ -1739,6 +1739,22 @@ def _submit_application_guarded(job_url, job_title, company, applicant, cv_path,
             }
 
 
+def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
+    """Pick (apply_status, apply_next_attempt_at) for a failed apply using the
+    retry policy: route manual failures to manual_required, cap attempts, and
+    schedule exponential backoff for transient failures."""
+    import apply_engine as _ae
+    if engine_status == "manual_required":
+        return ("manual_required", None)
+    action, backoff = _ae.retry_decision(failure_type, attempts_after)
+    if action == "manual":
+        return ("manual_required", None)
+    if action == "giveup":
+        return ("failed", None)
+    from datetime import timedelta as _td
+    return ("failed", (datetime.now() + _td(seconds=backoff)).isoformat())
+
+
 def run_job_apply(user_id: int) -> int:
     """Submit applications to all approved jobs using browser automation + Claude."""
     # ── Rate-limit + auto_apply gate ──────────────────────────────────────────
@@ -1778,8 +1794,12 @@ def run_job_apply(user_id: int) -> int:
         import apply_engine
         conn = database.get_db()
         jobs = conn.execute(
-            "SELECT id, title, company, url FROM jobs WHERE user_id=? AND status='approved'",
-            (user_id,)
+            "SELECT id, title, company, url, COALESCE(apply_attempts,0) AS attempts "
+            "FROM jobs WHERE user_id=? AND status='approved' "
+            "AND COALESCE(apply_status,'') != 'manual_required' "
+            "AND COALESCE(apply_attempts,0) < ? "
+            "AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?)",
+            (user_id, apply_engine.MAX_APPLY_ATTEMPTS, datetime.now().isoformat())
         ).fetchall()
 
         # Cap jobs to daily remaining quota (non-admin only)
@@ -1841,13 +1861,15 @@ def run_job_apply(user_id: int) -> int:
                 )
             else:
                 # Failed — keep status='approved' so user can retry
+                _attempts_after = (j["attempts"] or 0) + 1
+                _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
                 c2.execute(
                     "UPDATE jobs SET notes=?, "
                     "apply_status=?, apply_error=?, "
                     "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
                     "WHERE id=? AND user_id=?",
-                    (notes, apply_status, apply_error, apply_failure_type, apply_failure_detail, j["id"], user_id)
+                    (notes, _fstatus, apply_error, apply_failure_type, apply_failure_detail, _next_at, j["id"], user_id)
                 )
             c2.commit()
             c2.close()
@@ -1931,7 +1953,7 @@ def _trigger_apply_bg(user_id: int, job_id: int):
             import apply_engine
             conn = database.get_db()
             job  = conn.execute(
-                "SELECT id, title, company, url, apply_status FROM jobs "
+                "SELECT id, title, company, url, apply_status, COALESCE(apply_attempts,0) AS apply_attempts FROM jobs "
                 "WHERE id=? AND user_id=?", (job_id, user_id)
             ).fetchone()
             if not job:
@@ -1987,13 +2009,15 @@ def _trigger_apply_bg(user_id: int, job_id: int):
                 )
             else:
                 # Failed / manual_required — keep status='approved' so user can retry
+                _attempts_after = (job["apply_attempts"] or 0) + 1
+                _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
                 c2.execute(
                     "UPDATE jobs SET apply_status=?, apply_error=?, "
                     "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                    "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
                     "WHERE id=? AND user_id=?",
-                    (apply_status, apply_error, apply_failure_type,
-                     apply_failure_detail, job_id, user_id)
+                    (_fstatus, apply_error, apply_failure_type,
+                     apply_failure_detail, _next_at, job_id, user_id)
                 )
             c2.commit()
             c2.close()
@@ -5900,7 +5924,7 @@ class Handler(BaseHTTPRequestHandler):
                     "UPDATE jobs SET status='new', apply_status=NULL, "
                     "apply_error=NULL, apply_confirmation=NULL, "
                     "apply_failure_type=NULL, apply_failure_detail=NULL, "
-                    "apply_attempts=0, applied_date=NULL, notes='', url_verified=NULL "
+                    "apply_attempts=0, apply_next_attempt_at=NULL, applied_date=NULL, notes='', url_verified=NULL "
                     "WHERE id=? AND user_id=?",
                     (job_id, user_id)
                 )
@@ -5921,7 +5945,7 @@ class Handler(BaseHTTPRequestHandler):
                     "UPDATE jobs SET status='approved', apply_status=NULL, "
                     "apply_error=NULL, apply_confirmation=NULL, "
                     "apply_failure_type=NULL, apply_failure_detail=NULL, "
-                    "apply_attempts=0, applied_date=NULL, notes='' "
+                    "apply_attempts=0, apply_next_attempt_at=NULL, applied_date=NULL, notes='' "
                     "WHERE id=? AND user_id=?",
                     (job_id, user_id)
                 )

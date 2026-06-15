@@ -425,6 +425,28 @@ def _add_failure_type(res: dict) -> dict:
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+# -- Apply retry policy --
+MAX_APPLY_ATTEMPTS = 3
+RETRYABLE_FAILURES = {"timeout", "network_error", "other"}
+MANUAL_FAILURES = {"captcha", "login_wall", "form_validation"}
+
+def retry_decision(failure_type, attempts, max_attempts=MAX_APPLY_ATTEMPTS):
+    """Decide what to do after a failed apply attempt.
+
+    `attempts` is the attempt count including the one that just failed.
+    Returns (action, backoff_seconds):
+      'manual' -> needs a human (captcha / login wall / form validation); never auto-retry
+      'giveup' -> attempts exhausted; stop retrying
+      'retry'  -> transient failure; auto-retry after backoff_seconds
+    """
+    if failure_type in MANUAL_FAILURES:
+        return ("manual", 0)
+    if attempts >= max_attempts:
+        return ("giveup", 0)
+    backoff = min(300 * (4 ** max(0, attempts - 1)), 6 * 3600)
+    return ("retry", backoff)
+
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
 
 _UA = (
