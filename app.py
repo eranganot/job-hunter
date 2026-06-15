@@ -5260,15 +5260,14 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user:
                 return
+            # A logged-in user is never trapped on onboarding. Mark them onboarded
+            # so the flag reflects reality; brand-new users still see the wizard
+            # right after /register. The onboarding page stays reachable at /onboarding.
             if not user.get("onboarding_complete"):
-                if _effectively_onboarded(user):
-                    try:
-                        auth.update_profile(user["id"], onboarding_complete=1)  # self-heal
-                    except Exception as _oe:
-                        print(f"[onboarding] self-heal failed: {_oe}")
-                else:
-                    self.redirect("/onboarding")
-                    return
+                try:
+                    auth.update_profile(user["id"], onboarding_complete=1)
+                except Exception as _oe:
+                    print(f"[onboarding] self-heal failed: {_oe}")
             self.send_html(DASHBOARD_HTML)
             return
 
@@ -5604,7 +5603,7 @@ class Handler(BaseHTTPRequestHandler):
             token = auth.create_session(user["id"])
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
-            dest = "/dashboard" if _effectively_onboarded(user) else "/onboarding"
+            dest = "/dashboard"
             self.send_header("Location", dest)
             self.end_headers()
             return
