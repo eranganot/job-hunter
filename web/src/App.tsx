@@ -7,6 +7,7 @@ import {
   MoreVertical, Zap, Target, Loader2,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity } from "./api/client";
+import { enablePush, pushState } from "./lib/push";
 
 type View = "swipe" | "dashboard";
 type DashboardTab = "queue" | "applied" | "deferred" | "passed" | "activity" | "analytics";
@@ -590,6 +591,19 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [saved, setSaved] = useState(false);
   const [cvName, setCvName] = useState<string>(me.cv_path ? String(me.cv_path).split("/").pop() || "" : "");
   const [cvMsg, setCvMsg] = useState("");
+  const [perm, setPerm] = useState(pushState());
+  const [pushMsg, setPushMsg] = useState("");
+  const enableNotifs = async () => {
+    setPushMsg("Enabling\u2026");
+    const r = await enablePush();
+    setPerm(pushState());
+    setPushMsg(r.ok ? "\u2713 Notifications enabled" : (r.reason || "Couldn't enable"));
+  };
+  const sendTest = async () => {
+    setPushMsg("Sending\u2026");
+    try { await api.pushTest(); setPushMsg("\u2713 Test sent \u2014 check your notifications"); }
+    catch { setPushMsg("Test failed"); }
+  };
 
   const save = async () => {
     setSaving(true); setSaved(false);
@@ -657,6 +671,24 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
             </div>
           </div>
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>
+            {perm === "unsupported" ? (
+              <p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>
+            ) : (
+              <div className="space-y-2">
+                <button onClick={enableNotifs} disabled={perm === "granted"}
+                  className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">
+                  {perm === "granted" ? "\u2713 Notifications enabled" : "Enable push notifications"}
+                </button>
+                {perm === "granted" && (
+                  <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>
+                )}
+                {pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}
+              </div>
+            )}
+          </div>
+
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
             {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}
           </button>

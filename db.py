@@ -229,6 +229,18 @@ def init_db():
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            endpoint     TEXT NOT NULL,
+            subscription TEXT NOT NULL,
+            created_date TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, endpoint),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
     conn.commit()
     _migrate(conn)
     count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]

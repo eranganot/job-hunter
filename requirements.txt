@@ -9,3 +9,6 @@ resend==2.10.0
 
 # Anti-bot stealth patches for Playwright
 playwright-stealth==1.0.6
+
+# Web Push (VAPID) notifications for the mobile PWA
+pywebpush==2.3.0

@@ -54,6 +54,9 @@ GEMINI_KEY    = _cfg("GEMINI_API_KEY",     "gemini_api_key")
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
 SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
+VAPID_PUBLIC_KEY      = _cfg("VAPID_PUBLIC_KEY", "vapid_public_key")
+VAPID_PRIVATE_PEM_B64 = _cfg("VAPID_PRIVATE_PEM_B64", "vapid_private_pem_b64")
+VAPID_SUBJECT         = _cfg("VAPID_SUBJECT", "vapid_subject", "mailto:eran.ganot@gmail.com")
 
 # Persistent paths — override with env vars on Railway (point to a mounted volume)
 DB_FILE     = _cfg("DATABASE_PATH", "_db_path", os.path.join(BASE_DIR, "jobs.db"))
@@ -217,6 +220,57 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
         except Exception as _notif_err:
             _log_notification(user_id, channel, "FAILED", str(_notif_err))
             print(f"[notify] Error on {channel}: {_notif_err}")
+    # Web push (independent of the channel list): notify any registered devices.
+    try:
+        send_web_push_to_user(user_id, message, url_suffix)
+    except Exception as _pe:
+        print(f"[push] deliver error: {_pe}")
+
+
+def _push_payload_url():
+    return MOBILE_URL.rstrip("/") + "/app"
+
+
+def send_web_push_to_user(user_id, message, url_suffix=""):
+    """Best-effort Web Push to a user's registered devices. No-op if VAPID keys
+    or pywebpush are unavailable, so the email/telegram path is never affected."""
+    if not (VAPID_PUBLIC_KEY and VAPID_PRIVATE_PEM_B64):
+        return
+    try:
+        from pywebpush import webpush  # noqa
+    except Exception as _imp:
+        print(f"[push] pywebpush unavailable: {_imp}")
+        return
+    import base64 as _b64
+    try:
+        pem = _b64.b64decode(VAPID_PRIVATE_PEM_B64).decode("utf-8")
+    except Exception as _pe:
+        print(f"[push] bad VAPID private key: {_pe}")
+        return
+    conn = database.get_db()
+    rows = conn.execute(
+        "SELECT id, subscription FROM push_subscriptions WHERE user_id=?", (user_id,)
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return
+    body = (message or "").strip().split("\n")[0][:160]
+    payload = json.dumps({"title": "Job Hunter", "body": body, "url": _push_payload_url()})
+    for r in rows:
+        try:
+            sub = json.loads(r["subscription"])
+            webpush(subscription_info=sub, data=payload,
+                    vapid_private_key=pem, vapid_claims={"sub": VAPID_SUBJECT})
+        except Exception as _se:
+            emsg = str(_se)
+            if "410" in emsg or "404" in emsg:
+                try:
+                    c2 = database.get_db()
+                    c2.execute("DELETE FROM push_subscriptions WHERE id=?", (r["id"],))
+                    c2.commit(); c2.close()
+                except Exception:
+                    pass
+            print(f"[push] send failed: {emsg}")
 
 
 def notify_admin_new_user(new_user_email: str, new_user_name: str):
@@ -5158,6 +5212,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(user)
             return
 
+        if path == "/api/push/public-key":
+            user = self.require_auth()
+            if not user:
+                return
+            self.send_json({"publicKey": VAPID_PUBLIC_KEY})
+            return
+
         if path == "/api/stats":
             user = self.require_auth()
             if not user:
@@ -5435,6 +5496,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Unauthorized"}, 401)
             return
         user_id = user["id"]
+
+        if path == "/api/push/subscribe":
+            data = self.read_json()
+            sub = data.get("subscription") or data
+            endpoint = (sub or {}).get("endpoint")
+            if not endpoint:
+                self.send_json({"error": "no endpoint"}, 400)
+                return
+            conn = database.get_db()
+            conn.execute(
+                "INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, subscription, created_date) "
+                "VALUES (?,?,?,?)",
+                (user_id, endpoint, json.dumps(sub), datetime.now().isoformat())
+            )
+            conn.commit(); conn.close()
+            self.send_json({"success": True})
+            return
+
+        if path == "/api/push/unsubscribe":
+            data = self.read_json()
+            endpoint = data.get("endpoint")
+            if endpoint:
+                conn = database.get_db()
+                conn.execute("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?", (user_id, endpoint))
+                conn.commit(); conn.close()
+            self.send_json({"success": True})
+            return
+
+        if path == "/api/push/test":
+            send_web_push_to_user(user_id, "Test notification from Job Hunter \u2014 push is working!", "/app")
+            self.send_json({"success": True})
+            return
 
         # ── CV Upload ──
         if path == "/api/upload-cv":

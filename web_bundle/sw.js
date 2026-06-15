@@ -1,7 +1,7 @@
 // Job Hunter service worker — scope is /app/ (served at /app/sw.js).
 // It only ever sees /app/* requests; /api/* is out of scope and always hits
 // the network live. Bump VERSION on each deploy to invalidate the old cache.
-const VERSION = "jh-v2";
+const VERSION = "jh-v3";
 const CACHE = `jobhunter-${VERSION}`;
 const SHELL = [
   "/app/",
@@ -49,5 +49,32 @@ self.addEventListener("fetch", (e) => {
         return res;
       })
       .catch(() => caches.match(req))
+  );
+});
+
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (_) { data = {}; }
+  const title = data.title || "Job Hunter";
+  const body = data.body || "You have a new update.";
+  const url = data.url || "/app";
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/app/icon-192.png",
+      badge: "/app/icon-192.png",
+      data: { url },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/app";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cls) => {
+      for (const c of cls) { if (c.url.includes("/app") && "focus" in c) return c.focus(); }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+    })
   );
 });

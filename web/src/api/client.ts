@@ -101,6 +101,9 @@ export const api = {
   reject: (id: number, reason: string) =>
     request(`/api/jobs/${id}/reject`, "POST", { reason }),
   applyNow: (id: number) => request(`/api/jobs/${id}/apply-now`, "POST", {}),
+  pushPublicKey: () => request<{ publicKey: string }>("/api/push/public-key"),
+  pushSubscribe: (sub: any) => request("/api/push/subscribe", "POST", { subscription: sub }),
+  pushTest: () => request("/api/push/test", "POST", {}),
   saveProfile: (body: Record<string, unknown>) =>
     request("/api/save-profile", "POST", body),
   saveSchedule: (body: Record<string, unknown>) =>
