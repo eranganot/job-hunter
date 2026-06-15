@@ -38,3 +38,7 @@ env/
 .idea/
 *.swp
 *.swo
+
+# SPA build deps (source in web/, committed bundle in web_bundle/)
+web/node_modules/
+web/dist/

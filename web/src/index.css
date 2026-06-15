@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  background: #0f172a;
+}
+/* Respect device safe areas (notch / home indicator) when installed as PWA */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

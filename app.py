@@ -5003,6 +5003,59 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(_TW_CSS)
             return
 
+        # -- Mobile PWA SPA (served under /app). Strictly additive: legacy
+        #    routes (/dashboard, /login, /api/*) are untouched. The built
+        #    bundle lives in web_bundle/ and is committed to the repo. --
+        if path == "/app" or path.startswith("/app/"):
+            import mimetypes as _mt
+            bundle = os.path.join(BASE_DIR, "web_bundle")
+            rel = path[len("/app"):].lstrip("/")
+            if rel:
+                fpath = os.path.normpath(os.path.join(bundle, rel))
+                if fpath.startswith(bundle) and os.path.isfile(fpath):
+                    ctype, _ = _mt.guess_type(fpath)
+                    if fpath.endswith(".js"):
+                        ctype = "text/javascript"
+                    elif fpath.endswith(".webmanifest"):
+                        ctype = "application/manifest+json"
+                    elif fpath.endswith(".css"):
+                        ctype = "text/css"
+                    ctype = ctype or "application/octet-stream"
+                    if ctype.startswith("text/") or "json" in ctype or "javascript" in ctype:
+                        ctype += "; charset=utf-8"
+                    with open(fpath, "rb") as fh:
+                        data = fh.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    if "/assets/" in path:
+                        self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                    else:
+                        self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+            user = self.require_auth()
+            if not user:
+                return
+            index_path = os.path.join(bundle, "index.html")
+            try:
+                with open(index_path, "rb") as fh:
+                    body = fh.read()
+            except FileNotFoundError:
+                self.send_response(404)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"App bundle not found")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # Public routes
         if path in ("/login", "/login/"):
             user = self.get_user()
