@@ -39,6 +39,7 @@ export function SwipeFlow() {
   const [undo, setUndo] = useState<{ type: "approve" | "defer"; job: UiJob } | null>(null);
   const [rejectedDelta, setRejectedDelta] = useState(0);
   const undoTimer = useRef<any>(null);
+  const [searchMsg, setSearchMsg] = useState("");
 
   // pull-to-refresh
   const [pull, setPull] = useState(0);
@@ -114,6 +115,12 @@ export function SwipeFlow() {
     setPendingReject(null);
     setRejectedDelta((c) => Math.max(0, c - 1));
     setCurrentIndex((i) => Math.max(0, i - 1)); // server never told — just go back
+  };
+
+  const runSearchNow = async () => {
+    setSearchMsg("Starting search\u2026");
+    try { await api.runSearch(); setSearchMsg("Search started \u2014 new matches appear in a few minutes. Pull down to refresh."); }
+    catch { setSearchMsg("Couldn't start a search right now."); }
   };
 
   const handleDefer = () => {
@@ -229,6 +236,11 @@ export function SwipeFlow() {
           </div>
           <div className="h-2 bg-gray-700 rounded-full overflow-hidden"><motion.div className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700" initial={{ width: 0 }} animate={{ width: `${((currentIndex + 1) / reviewJobs.length) * 100}%` }} transition={{ duration: 0.3 }} /></div>
         </div>
+      </div>
+
+      <div className="relative z-10 max-w-2xl mx-auto px-5 pt-3">
+        <button onClick={runSearchNow} className="w-full py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium flex items-center justify-center gap-2"><SearchIcon className="w-4 h-4" />Run a new search</button>
+        {searchMsg && <p className="text-xs text-indigo-300 mt-1.5 text-center">{searchMsg}</p>}
       </div>
 
       <NotifyNudge />
@@ -515,6 +527,8 @@ function TagInput({ value, onChange }: { value: string[]; onChange: (v: string[]
 function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const parseTitles = (v: any): string[] => { if (!v) return []; if (Array.isArray(v)) return v; try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); } catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); } };
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
+  const [keywords, setKeywords] = useState<string[]>(parseTitles(me.keywords));
+  const [locations, setLocations] = useState<string[]>(parseTitles(me.locations));
   const [phone, setPhone] = useState(me.phone || "");
   const [email, setEmail] = useState(me.email_address || me.email || "");
   const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
@@ -526,7 +540,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
 
   const enableNotifs = async () => { setPushMsg("Enabling…"); const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "✓ Notifications enabled" : (r.reason || "Couldn't enable")); };
   const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch { setPushMsg("Test failed"); } };
-  const save = async () => { setSaving(true); setSaved(false); try { await api.saveProfile({ phone, job_titles: titles }); await api.saveSchedule({ search_hour: parseInt(searchHour, 10), apply_hour: parseInt(applyHour, 10) }); if (email && email !== me.email) await api.saveNotifications({ email_address: email }); setSaved(true); } catch {} finally { setSaving(false); } };
+  const save = async () => { setSaving(true); setSaved(false); try { await api.saveProfile({ phone, job_titles: titles, keywords, locations }); await api.saveSchedule({ search_hour: parseInt(searchHour, 10), apply_hour: parseInt(applyHour, 10) }); if (email && email !== me.email) await api.saveNotifications({ email_address: email }); setSaved(true); } catch {} finally { setSaving(false); } };
   const onCvPick = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setCvMsg("Uploading…"); try { const buf = await file.arrayBuffer(); let bin = ""; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); const res = await fetch("/api/upload-cv", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, data: btoa(bin) }) }); if (res.ok) { setCvName(file.name); setCvMsg("✓ Uploaded"); } else setCvMsg("Upload failed"); } catch { setCvMsg("Upload failed"); } };
   const hours = Array.from({ length: 24 }, (_, h) => h);
   const fmtHour = (h: number) => { const ampm = h < 12 ? "AM" : "PM"; const hr = h % 12 === 0 ? 12 : h % 12; return `${String(hr).padStart(2, "0")}:00 ${ampm}`; };
@@ -538,6 +552,8 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
         <div className="p-5 space-y-6">
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic Schedule</h3><div className="space-y-3"><Field label="Daily Job Search" sub="Run search automatically"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field><Field label="Daily Auto-Apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field></div></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} /></div>
+          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-400" />Key Skills & Keywords</h3><TagInput value={keywords} onChange={setKeywords} /></div>
+          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><MapPin className="w-5 h-5 text-indigo-400" />Preferred Locations</h3><TagInput value={locations} onChange={setLocations} /></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-400" />Resume / CV</h3><label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">Tap to upload</p><p className="text-xs text-gray-500">PDF or DOCX, max 5MB</p>{cvName && <p className="text-xs text-green-400 mt-2">✓ {cvName}</p>}{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
           <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
