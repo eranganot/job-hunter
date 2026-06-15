@@ -241,9 +241,12 @@ def send_web_push_to_user(user_id, message, url_suffix=""):
     except Exception as _imp:
         print(f"[push] pywebpush unavailable: {_imp}")
         return
-    import base64 as _b64
+    import base64 as _b64, os as _os, tempfile as _tf
     try:
         pem = _b64.b64decode(VAPID_PRIVATE_PEM_B64).decode("utf-8")
+        key_path = _os.path.join(_tf.gettempdir(), "jh_vapid.pem")
+        with open(key_path, "w") as _kf:
+            _kf.write(pem)
     except Exception as _pe:
         print(f"[push] bad VAPID private key: {_pe}")
         return
@@ -260,7 +263,7 @@ def send_web_push_to_user(user_id, message, url_suffix=""):
         try:
             sub = json.loads(r["subscription"])
             webpush(subscription_info=sub, data=payload,
-                    vapid_private_key=pem, vapid_claims={"sub": VAPID_SUBJECT})
+                    vapid_private_key=key_path, vapid_claims={"sub": VAPID_SUBJECT})
         except Exception as _se:
             emsg = str(_se)
             if "410" in emsg or "404" in emsg:
