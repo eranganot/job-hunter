@@ -35,6 +35,26 @@ _TW_CSS = _gz.decompress(_b64.b64decode("H4sIAH8xyGkC/+08aa/kNnJ/RdmBgdcTSaOzDz1
 # ── Config ────────────────────────────────────────────────────────────────────
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+
+# -- Structured logging: route module print() calls through the logging module
+#    so production logs get timestamps + levels without editing ~124 call sites. --
+import logging as _logging
+_logging.basicConfig(level=_logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+_LOG = _logging.getLogger("jobhunter")
+_builtin_print = print
+def print(*args, **kwargs):  # noqa: A001 - intentional module-level logging shim
+    try:
+        sep = kwargs.get("sep", " ")
+        msg = sep.join(str(a) for a in args)
+    except Exception:
+        msg = " ".join(str(a) for a in args)
+    low = msg.lower()
+    if ("error" in low) or ("fail" in low) or ("traceback" in low) or ("exception" in low):
+        _LOG.error(msg)
+    elif "warn" in low:
+        _LOG.warning(msg)
+    else:
+        _LOG.info(msg)
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
 def load_config():
@@ -436,10 +456,19 @@ def _check_scheduled_jobs() -> None:
 
 
 def file_watcher():
+    _tick = 0
     while True:
         database.import_pending_jobs(BASE_DIR)
         database.import_applied_updates(BASE_DIR)
         _check_scheduled_jobs()
+        _tick += 1
+        if _tick % 60 == 0:  # ~hourly
+            try:
+                _purged = auth.cleanup_expired_sessions()
+                if _purged:
+                    print(f"[sessions] purged {_purged} expired session(s)")
+            except Exception as _se:
+                print(f"[sessions] cleanup error: {_se}")
         time.sleep(60)
 
 
@@ -1213,7 +1242,7 @@ def run_job_search(user_id: int):
                         _ae_body = ""
                         if isinstance(_ae, _ue.HTTPError):
                             try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:200]
-                            except: pass
+                            except Exception: pass
                         print(f"[search] Anthropic scoring error: {_ae}{_ae_body} — falling back to heuristic")
                         database.log_activity(user_id, "scoring_warning",
                             f"Anthropic scoring failed: {_ae}. Falling back to keyword heuristic.")
@@ -1578,7 +1607,7 @@ def run_job_search(user_id: int):
             _futs = {_ex.submit(_ae.check_url_alive, u): u for u in _new_urls}
             for _f, _u in _futs.items():
                 try:    _url_ok[_u] = 1 if _f.result(timeout=12) else 0
-                except: _url_ok[_u] = 0
+                except Exception: _url_ok[_u] = 0
         _chk_date = datetime.now().isoformat()
 
         # ── Load rejected patterns to filter out ────────────────────────
@@ -1661,7 +1690,7 @@ def run_job_search(user_id: int):
                 hist_results = {}
                 for _f2, _r2 in _futs2.items():
                     try:    hist_results[_r2["id"]] = 1 if _f2.result(timeout=12) else 0
-                    except: hist_results[_r2["id"]] = 0
+                    except Exception: hist_results[_r2["id"]] = 0
             conn = database.get_db()
             for job_id, ok in hist_results.items():
                 conn.execute("UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",(ok,_chk_date,job_id))
@@ -4987,7 +5016,7 @@ def _call_gemini_cv_optimizer(cv_text: str = "", cv_path: str = ""):
     except Exception as _he:
         _eb = b''
         try: _eb = _he.read()
-        except: pass
+        except Exception: pass
         raise Exception('Gemini API error: ' + str(_he) + (' - ' + _eb.decode('utf-8', errors='replace')[:300] if _eb else ''))
     _t = _d['candidates'][0]['content']['parts'][0]['text'].strip()
     if _t.startswith('```'):
@@ -5969,9 +5998,11 @@ class Handler(BaseHTTPRequestHandler):
 
             if action == "reject":
                 conn.execute(
-                    "INSERT INTO rejected_patterns (user_id,company,title,notes,created_date) VALUES (?,?,?,?,?)",
+                    "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
                     (user_id, job["company"], job["title"],
-                     reason or "No reason given", datetime.now().isoformat())
+                     reason or "No reason given",
+                     (job["location"] if "location" in job.keys() else None),
+                     datetime.now().isoformat())
                 )
                 detail = f"Passed on {job['title']} at {job['company']}"
                 if reason:
@@ -6119,8 +6150,10 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("UPDATE jobs SET status=? WHERE id=?", (new_status, job_id))
                 if action == "reject":
                     conn.execute(
-                        "INSERT INTO rejected_patterns (user_id,company,title,notes,created_date) VALUES (?,?,?,?,?)",
-                        (user_id, job["company"], job["title"], "Bulk pass", datetime.now().isoformat())
+                        "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
+                        (user_id, job["company"], job["title"], "Bulk pass",
+                         (job["location"] if "location" in job.keys() else None),
+                         datetime.now().isoformat())
                     )
                 done += 1
             conn.commit()
@@ -6409,6 +6442,12 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     print(f"\n🎯  Job Hunter (Multi-User) starting…")
     database.init_db()
+    try:
+        _exp = auth.cleanup_expired_sessions()
+        if _exp:
+            print(f"[startup] purged {_exp} expired session(s)")
+    except Exception as _se:
+        print(f"[startup] session cleanup error: {_se}")
 
     # Migrate expired jobs to rejected (expired tab removed)
     try:

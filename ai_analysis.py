@@ -195,11 +195,11 @@ def compute_feedback_penalty(
         penalty += 45
         reason = "Company you flagged as bad"
     elif company:
-        n = passed.get(company, 0)
-        if n >= 2:
+        w = passed.get(company, 0)
+        if w >= 1.5:
             penalty += 20
             reason = "You've passed on this company before"
-        elif n == 1:
+        elif w >= 0.5:
             penalty += 8
 
     # Similar-title penalty - exclude the user's own target-title tokens so we
@@ -219,6 +219,15 @@ def compute_feedback_penalty(
             penalty += min(12, 6 * hits)
             if not reason:
                 reason = "Similar to roles you've passed"
+
+    # Location the user has repeatedly passed on (only set when they passed for
+    # a location reason, so this never fights their own preferred city).
+    disliked_loc = signals.get("disliked_locations") or set()
+    job_loc = (job.get("location") or "").strip().lower()
+    if job_loc and disliked_loc and any(dl and dl in job_loc for dl in disliked_loc):
+        penalty += 10
+        if not reason:
+            reason = "Location you've passed on"
 
     penalty = min(60, penalty)
     return penalty, (reason if penalty > 0 else "")

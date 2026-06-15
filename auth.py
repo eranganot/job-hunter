@@ -151,6 +151,17 @@ def delete_session(token: str):
     conn.close()
 
 
+def cleanup_expired_sessions() -> int:
+    """Delete sessions past their expiry. Returns the number removed."""
+    conn = _get_db()
+    try:
+        cur = conn.execute("DELETE FROM sessions WHERE expires_date <= datetime('now')")
+        conn.commit()
+        return cur.rowcount or 0
+    finally:
+        conn.close()
+
+
 def update_profile(user_id: int, **kwargs):
     if not kwargs:
         return

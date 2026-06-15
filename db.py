@@ -259,15 +259,26 @@ def _migrate(conn: sqlite3.Connection):
         ("jobs",          "candidate_score INTEGER DEFAULT NULL"),
         ("jobs",          "status_check TEXT DEFAULT NULL"),
         ("jobs",          "status_checked_date TEXT DEFAULT NULL"),
+        ("rejected_patterns", "location TEXT DEFAULT NULL"),
     ]
+    applied = 0
     for table, col_def in additions:
         col_name = col_def.split()[0]
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
             conn.commit()
+            applied += 1
             print(f"[db] Migration: added {col_name} to {table}")
-        except Exception:
-            pass  # Column already exists — that's fine
+        except Exception as _me:
+            # "duplicate column" is the normal idempotent case; surface anything else.
+            if "duplicate column" not in str(_me).lower():
+                print(f"[db] Migration WARNING ({table}.{col_name}): {_me}")
+    # Stamp a simple schema version for visibility and future versioned migrations.
+    try:
+        conn.execute(f"PRAGMA user_version = {len(additions)}")
+        conn.commit()
+    except Exception as _ve:
+        print(f"[db] schema-version stamp failed: {_ve}")
 
     # Backfill: approved jobs with no apply_status get 'queued' so the scheduler picks them up
     try:
@@ -594,31 +605,54 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
       examples               list[dict]    - up to 12 recent {company,title,reason} for AI context
     """
     import re as _re
-    from collections import Counter as _Counter
+    from datetime import datetime as _dt
 
     rows = conn.execute(
-        "SELECT company, title, notes FROM rejected_patterns "
+        "SELECT company, title, notes, location, created_date FROM rejected_patterns "
         "WHERE user_id=? ORDER BY created_date DESC",
         (user_id,)
     ).fetchall()
 
+    # Recency decay: a pass loses half its weight every ~90 days so stale
+    # signals fade instead of penalizing forever (#18).
+    _now = _dt.now()
+    def _weight(created):
+        try:
+            age = max(0.0, (_now - _dt.fromisoformat((created or "").replace(" ", "T"))).total_seconds() / 86400.0)
+        except Exception:
+            age = 0.0
+        return 0.5 ** (age / 90.0)
+
     bad_companies: set = set()
     passed_companies: dict = {}
-    title_token_docs: list = []
+    tok_weight: dict = {}
+    loc_weight: dict = {}
     examples: list = []
 
     for r in rows:
         comp = (r["company"] or "").strip().lower()
         ttl  = (r["title"] or "").strip().lower()
         note = (r["notes"] or "").strip()
+        try:
+            loc = (r["location"] or "").strip().lower()
+        except Exception:
+            loc = ""
+        try:
+            created = r["created_date"]
+        except Exception:
+            created = None
+        w = _weight(created)
         if comp:
-            passed_companies[comp] = passed_companies.get(comp, 0) + 1
+            passed_companies[comp] = passed_companies.get(comp, 0.0) + w
             if "bad company" in note.lower():
                 bad_companies.add(comp)
         if ttl:
-            toks = {w for w in _re.split(r"[^a-z0-9]+", ttl) if len(w) > 3}
-            if toks:
-                title_token_docs.append(toks)
+            for tk in {x for x in _re.split(r"[^a-z0-9]+", ttl) if len(x) > 3}:
+                tok_weight[tk] = tok_weight.get(tk, 0.0) + w
+        # Location becomes a dislike signal only when the user passed *for a
+        # location reason* -- never penalize a city just because it appeared (#17).
+        if loc and "location" in note.lower():
+            loc_weight[loc] = loc_weight.get(loc, 0.0) + w
         if len(examples) < 12:
             examples.append({
                 "company": r["company"] or "",
@@ -626,16 +660,14 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
                 "reason":  note,
             })
 
-    tok_counter: "_Counter" = _Counter()
-    for toks in title_token_docs:
-        for t in toks:
-            tok_counter[t] += 1
-    disliked_title_tokens = {t for t, c in tok_counter.items() if c >= 2}
+    disliked_title_tokens = {t for t, wv in tok_weight.items() if wv >= 1.5}
+    disliked_locations = {l for l, wv in loc_weight.items() if wv >= 1.0}
 
     return {
         "bad_companies":         bad_companies,
         "passed_companies":      passed_companies,
         "disliked_title_tokens": disliked_title_tokens,
+        "disliked_locations":    disliked_locations,
         "reason_counts":         get_pass_reason_stats(conn, user_id),
         "examples":              examples,
     }
