@@ -2,6 +2,7 @@
 auth.py — Authentication helpers for Job Hunter
 """
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
@@ -32,7 +33,7 @@ def hash_password(password: str, salt: str = None):
 
 def verify_password(password: str, stored_hash: str, salt: str) -> bool:
     computed, _ = hash_password(password, salt)
-    return computed == stored_hash
+    return hmac.compare_digest(computed, stored_hash)
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────
@@ -183,8 +184,8 @@ def get_token_from_request(headers) -> str:
 
 def make_session_cookie(token: str) -> str:
     max_age = 30 * 24 * 3600
-    return f"session={token}; Path=/; HttpOnly; Max-Age={max_age}; SameSite=Lax"
+    return f"session={token}; Path=/; HttpOnly; Secure; Max-Age={max_age}; SameSite=Lax"
 
 
 def clear_session_cookie() -> str:
-    return "session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax"
+    return "session=; Path=/; HttpOnly; Secure; Max-Age=0; SameSite=Lax"

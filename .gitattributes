@@ -1,0 +1,15 @@
+# Normalize line endings to LF in the repo; check out as-is.
+# Prevents CRLF/LF diff churn and the file-corruption class of problem.
+* text=auto eol=lf
+
+# Treat these as binary (never normalize / never diff as text)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary
+*.zip  binary
+*.db   binary
