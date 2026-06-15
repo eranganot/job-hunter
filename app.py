@@ -5219,6 +5219,72 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"publicKey": VAPID_PUBLIC_KEY})
             return
 
+        # -- Dev helper: seed demo NEW jobs so the swipe UI can be tested --
+        if path == "/api/dev/seed-demo":
+            user = self.require_auth()
+            if not user:
+                return
+            from datetime import timedelta as _td
+            uid = user["id"]
+            now = datetime.now()
+            demo = [
+                ("Head of Product", "Wize Financial", "Tel Aviv, Israel",
+                 "https://example.com/demo/wize-head-product",
+                 "Own product vision for a fast-scaling fintech serving 2M+ users; lead a team of 6 PMs across payments and growth.",
+                 "Your fintech background and team-leadership experience map directly to the scope of this role.",
+                 "LinkedIn", 92, 88, 1, 30),
+                ("VP Product", "Healthify", "Remote (Israel)",
+                 "https://example.com/demo/healthify-vp-product",
+                 "Define the roadmap for a digital-health platform; partner with clinical and data teams to ship outcome-driven features.",
+                 "Strong match on B2C product depth and your record scaling 0->1 products.",
+                 "Company Site", 87, 90, 1, 95),
+                ("Director of Product", "DataForge", "Tel Aviv / Hybrid",
+                 "https://example.com/demo/dataforge-director",
+                 "Lead the platform product group for a data-infrastructure company; own developer experience and API strategy.",
+                 "Your platform and API experience is a close fit; seniority lines up with Director level.",
+                 "LinkedIn", 81, 79, 0, 180),
+                ("Chief Product Officer", "GreenGrid", "Herzliya, Israel",
+                 "https://example.com/demo/greengrid-cpo",
+                 "Build and lead the product org for a climate-tech scale-up; report to the CEO and own the full product lifecycle.",
+                 "Executive scope matches your CPO ambitions; climate-tech is an adjacent domain to your past work.",
+                 "Referral", 76, 83, 1, 320),
+                ("Senior Product Manager, AI", "NeuralLeap", "Remote",
+                 "https://example.com/demo/neuralleap-spm-ai",
+                 "Drive AI-powered product features end to end; work closely with ML engineers on LLM-based workflows.",
+                 "Top match: your AI product focus and shipping cadence align tightly with this team's needs.",
+                 "LinkedIn", 95, 85, 0, 12),
+                ("VP Product", "PayPilot", "Tel Aviv, Israel",
+                 "https://example.com/demo/paypilot-vp-product",
+                 "Lead product for a payments platform expanding across EMEA; own pricing, partnerships and the core checkout.",
+                 "Payments depth and your leadership track record make this a strong, senior-level fit.",
+                 "Company Site", 84, 80, 1, 50),
+            ]
+            conn = database.get_db()
+            ins = 0
+            for (title, company, loc, url, desc, why, src, ms, cs, ver, mins) in demo:
+                fd = (now - _td(minutes=mins)).isoformat()
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO jobs (user_id,title,company,location,url,description,"
+                    "why_relevant,source,found_date,status,match_score,candidate_score,url_verified) "
+                    "VALUES (?,?,?,?,?,?,?,?,?, 'new', ?,?,?)",
+                    (uid, title, company, loc, url, desc, why, src, fd, ms, cs, ver))
+                ins += 1 if cur.rowcount else 0
+            conn.commit(); conn.close()
+            self.send_json({"inserted": ins, "message": "Seeded demo jobs. Open /app to swipe."})
+            return
+
+        if path == "/api/dev/clear-demo":
+            user = self.require_auth()
+            if not user:
+                return
+            conn = database.get_db()
+            cur = conn.execute(
+                "DELETE FROM jobs WHERE user_id=? AND url LIKE 'https://example.com/demo/%'",
+                (user["id"],))
+            conn.commit(); n = cur.rowcount; conn.close()
+            self.send_json({"deleted": n})
+            return
+
         if path == "/api/stats":
             user = self.require_auth()
             if not user:
