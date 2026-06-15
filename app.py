@@ -6472,6 +6472,19 @@ if __name__ == "__main__":
             print(f"[startup] purged {_exp} expired session(s)")
     except Exception as _se:
         print(f"[startup] session cleanup error: {_se}")
+    # Ensure the configured admin email always holds the 'admin' role.
+    try:
+        if ADMIN_EMAIL:
+            _ac = database.get_db()
+            _promoted = _ac.execute(
+                "UPDATE users SET role='admin' WHERE lower(email)=lower(?) AND COALESCE(role,'') != 'admin'",
+                (ADMIN_EMAIL,)
+            ).rowcount
+            _ac.commit(); _ac.close()
+            if _promoted:
+                print(f"[startup] promoted {ADMIN_EMAIL} to admin role")
+    except Exception as _ae:
+        print(f"[startup] admin-role ensure failed: {_ae}")
 
     # Migrate expired jobs to rejected (expired tab removed)
     try:
