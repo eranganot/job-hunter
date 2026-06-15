@@ -366,6 +366,7 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         "new":      conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='new'",      (user_id,)).fetchone()[0],
         "approved": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='approved'", (user_id,)).fetchone()[0],
         "applied":  conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='applied'",  (user_id,)).fetchone()[0],
+        "deferred": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='deferred'", (user_id,)).fetchone()[0],
         "rejected": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='rejected'", (user_id,)).fetchone()[0] + archived_count,
         "total":    conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=?",                       (user_id,)).fetchone()[0] + archived_count,
     }

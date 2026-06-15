@@ -231,6 +231,13 @@ def _push_payload_url():
     return MOBILE_URL.rstrip("/") + "/app"
 
 
+def _push_link(url_suffix=""):
+    base = MOBILE_URL.rstrip("/") + "/app"
+    if "applied" in (url_suffix or ""):
+        return base + "?view=applied"
+    return base
+
+
 def send_web_push_to_user(user_id, message, url_suffix=""):
     """Best-effort Web Push to a user's registered devices. No-op if VAPID keys
     or pywebpush are unavailable, so the email/telegram path is never affected."""
@@ -258,7 +265,7 @@ def send_web_push_to_user(user_id, message, url_suffix=""):
     if not rows:
         return
     body = (message or "").strip().split("\n")[0][:160]
-    payload = json.dumps({"title": "Job Hunter", "body": body, "url": _push_payload_url()})
+    payload = json.dumps({"title": "Job Hunter", "body": body, "url": _push_link(url_suffix)})
     for r in rows:
         try:
             sub = json.loads(r["subscription"])
@@ -5856,7 +5863,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not found"}, 404)
                 return
 
-            status_map = {"approve":"approved","reject":"rejected","applied":"applied","failed":"approved","retry":"approved","restore":"new"}
+            status_map = {"approve":"approved","reject":"rejected","later":"deferred","applied":"applied","failed":"approved","retry":"approved","restore":"new"}
             if action == "restore":
                 conn.execute(
                     "UPDATE jobs SET status='new', apply_status=NULL, "

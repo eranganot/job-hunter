@@ -52,6 +52,7 @@ export type Stats = {
   approved: number;
   applied: number;
   rejected: number;
+  deferred?: number;
   total: number;
 };
 
@@ -101,6 +102,9 @@ export const api = {
   reject: (id: number, reason: string) =>
     request(`/api/jobs/${id}/reject`, "POST", { reason }),
   applyNow: (id: number) => request(`/api/jobs/${id}/apply-now`, "POST", {}),
+  later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
+  restore: (id: number) => request(`/api/jobs/${id}/restore`, "POST", {}),
+  runSearch: () => request("/api/run-search", "POST", {}),
   pushPublicKey: () => request<{ publicKey: string }>("/api/push/public-key"),
   pushSubscribe: (sub: any) => request("/api/push/subscribe", "POST", { subscription: sub }),
   pushTest: () => request("/api/push/test", "POST", {}),
