@@ -104,6 +104,25 @@ def _login_ok(key):
     with _LOGIN_LOCK:
         _LOGIN_FAILS.pop(key, None)
 
+
+def _effectively_onboarded(u):
+    """A registered user who already has a CV or target titles should not be
+    forced back through onboarding on every login/refresh."""
+    if not u:
+        return False
+    if u.get("onboarding_complete"):
+        return True
+    if u.get("cv_path"):
+        return True
+    jt = u.get("job_titles")
+    if not jt:
+        return False
+    try:
+        parsed = json.loads(jt) if isinstance(jt, str) else jt
+        return any(str(t).strip() for t in (parsed or []))
+    except Exception:
+        return bool(str(jt).strip() and str(jt).strip() not in ("[]", "{}"))
+
 # Persistent paths — override with env vars on Railway (point to a mounted volume)
 DB_FILE     = _cfg("DATABASE_PATH", "_db_path", os.path.join(BASE_DIR, "jobs.db"))
 UPLOADS_DIR = _cfg("UPLOADS_DIR",   "_uploads",  os.path.join(BASE_DIR, "uploads"))
@@ -5242,8 +5261,14 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             if not user.get("onboarding_complete"):
-                self.redirect("/onboarding")
-                return
+                if _effectively_onboarded(user):
+                    try:
+                        auth.update_profile(user["id"], onboarding_complete=1)  # self-heal
+                    except Exception as _oe:
+                        print(f"[onboarding] self-heal failed: {_oe}")
+                else:
+                    self.redirect("/onboarding")
+                    return
             self.send_html(DASHBOARD_HTML)
             return
 
@@ -5579,7 +5604,7 @@ class Handler(BaseHTTPRequestHandler):
             token = auth.create_session(user["id"])
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
-            dest = "/dashboard" if user.get("onboarding_complete") else "/onboarding"
+            dest = "/dashboard" if _effectively_onboarded(user) else "/onboarding"
             self.send_header("Location", dest)
             self.end_headers()
             return
