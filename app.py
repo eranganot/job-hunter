@@ -257,6 +257,13 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
     if not p:
         print(f"[notify] No profile found for user {user_id}")
         return
+    # Web push is the primary channel: it fires on EVERY notification, before
+    # (and independent of) the email/Telegram/WhatsApp channels, which remain as
+    # an optional fallback. So a user with no other channel still gets pushed.
+    try:
+        send_web_push_to_user(user_id, message, url_suffix)
+    except Exception as _pe:
+        print(f"[push] deliver error: {_pe}")
     channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",")]
     if not channels or channels == ["none"]:
         print(f"[notify] No notification channels configured for user {user_id}")
@@ -285,11 +292,6 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
         except Exception as _notif_err:
             _log_notification(user_id, channel, "FAILED", str(_notif_err))
             print(f"[notify] Error on {channel}: {_notif_err}")
-    # Web push (independent of the channel list): notify any registered devices.
-    try:
-        send_web_push_to_user(user_id, message, url_suffix)
-    except Exception as _pe:
-        print(f"[push] deliver error: {_pe}")
 
 
 def _push_payload_url():
