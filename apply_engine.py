@@ -49,7 +49,9 @@ _JOB_BOARD_DOMAINS = {
 def _is_job_board(url: str) -> bool:
     """Return True if the URL is from a job aggregator rather than a company's own site."""
     try:
-        host = urllib.parse.urlparse(url).netloc.lower().lstrip('www.')
+        host = urllib.parse.urlparse(url).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
         return any(host == d or host.endswith('.' + d) for d in _JOB_BOARD_DOMAINS)
     except Exception:
         return False
