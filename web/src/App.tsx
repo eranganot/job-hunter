@@ -120,7 +120,7 @@ export function SwipeFlow() {
   const runSearchNow = async () => {
     setSearchMsg("Starting search\u2026");
     try { await api.runSearch(); setSearchMsg("Search started \u2014 new matches appear in a few minutes. Pull down to refresh."); }
-    catch { setSearchMsg("Couldn't start a search right now."); }
+    catch (e: any) { setSearchMsg(e?.message || "Couldn't start a search right now."); }
   };
 
   const handleDefer = () => {
@@ -632,7 +632,7 @@ function Select({ value, onChange, options, fmt }: { value: string; onChange: (v
 
 function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty }: any) {
   const [searchMsg, setSearchMsg] = useState("");
-  const runSearch = async () => { setSearchMsg("Starting search…"); try { await api.runSearch(); setSearchMsg("Search started — new jobs will appear in a few minutes. Pull to refresh."); } catch { setSearchMsg("Couldn't start search."); } };
+  const runSearch = async () => { setSearchMsg("Starting search…"); try { await api.runSearch(); setSearchMsg("Search started — new jobs will appear in a few minutes. Pull to refresh."); } catch (e: any) { setSearchMsg(e?.message || "Couldn't start search."); } };
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex items-center justify-center p-6">
       <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center max-w-md w-full">

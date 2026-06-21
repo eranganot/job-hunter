@@ -85,7 +85,9 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
     throw new HttpError(401, "Not authenticated");
   }
   if (!res.ok) {
-    throw new HttpError(res.status, `Request failed: ${res.status}`);
+    let detail = `Request failed: ${res.status}`;
+    try { const j = await res.clone().json(); if (j && j.error) detail = j.error; } catch { /* non-json */ }
+    throw new HttpError(res.status, detail);
   }
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return (await res.json()) as T;

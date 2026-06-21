@@ -6209,8 +6209,8 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
-            if not ANTHROPIC_KEY:
-                self.send_json({"error": "Anthropic API key not configured"}, 400)
+            if not (ANTHROPIC_KEY or GEMINI_KEY):
+                self.send_json({"error": "No AI search key configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY in this service."}, 400)
                 return
             uid = user["id"]
             threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
