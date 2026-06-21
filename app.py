@@ -71,6 +71,9 @@ def _cfg(env_key: str, json_key: str, default="") -> str:
 
 ANTHROPIC_KEY = _cfg("ANTHROPIC_API_KEY", "anthropic_api_key")
 GEMINI_KEY    = _cfg("GEMINI_API_KEY",     "gemini_api_key")
+# Job search runs on Gemini only by default. Set SEARCH_USE_ANTHROPIC=1 to
+# re-enable the Anthropic Claude fallback for search discovery/scoring.
+SEARCH_USE_ANTHROPIC = _cfg("SEARCH_USE_ANTHROPIC", "search_use_anthropic", "0") == "1"
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
 SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
@@ -1242,8 +1245,8 @@ def run_job_search(user_id: int):
                         database.log_activity(user_id, "scoring_warning",
                             f"Gemini scoring failed: {_ge}. Falling back to Anthropic.")
 
-                # --- Try Anthropic Claude Haiku (secondary) ---
-                if ANTHROPIC_KEY:
+                # --- Try Anthropic Claude Haiku (secondary; off unless SEARCH_USE_ANTHROPIC) ---
+                if ANTHROPIC_KEY and SEARCH_USE_ANTHROPIC:
                     try:
                         _a_body = _js2.dumps({"model": "claude-haiku-4-5", "max_tokens": 4096,
                             "messages": [{"role": "user", "content": prompt_}]}).encode()
@@ -1420,7 +1423,7 @@ def run_job_search(user_id: int):
                 print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
                 import os as _os_tb
                 _TB_GEMINI = _os_tb.environ.get('GEMINI_API_KEY', '')
-                _TB_ANTH   = _os_tb.environ.get('ANTHROPIC_API_KEY', '')
+                _TB_ANTH   = (_os_tb.environ.get('ANTHROPIC_API_KEY', '') if SEARCH_USE_ANTHROPIC else '')
                 if _TB_GEMINI or _TB_ANTH:
                     # Collect jobs with meaningful descriptions that Track A didn't already return
                     _scored_urls = {j.get('url','') for j in scored_jobs}
@@ -1598,9 +1601,9 @@ def run_job_search(user_id: int):
         seen_urls     = set(existing_urls)
         seen_key      = set()
 
-        # Search real job sites via Claude web_search (LinkedIn, AllJobs, Drushim, etc.)
+        # Discover jobs via company APIs (Greenhouse/Lever) + Gemini search/scoring.
         jobs_data = _search_jobs_with_claude_websearch(titles, locations, keywords)
-        print(f"[run-search] Found {len(jobs_data)} jobs via Claude web_search")
+        print(f"[run-search] Found {len(jobs_data)} jobs via AI search (Gemini)")
 
         for j in jobs_data:
             jurl = (j.get("url") or "").strip()
