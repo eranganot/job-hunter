@@ -450,6 +450,7 @@ def retry_decision(failure_type, attempts, max_attempts=MAX_APPLY_ATTEMPTS):
 
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_KEY", "")
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -473,24 +474,26 @@ _CONFIRMATION_PHRASES = [
 # ── Claude helpers ────────────────────────────────────────────────────────────
 
 def _claude(prompt: str, max_tokens: int = 1024) -> str:
-    """Call Claude and return the text response."""
+    """Call Gemini Flash and return the text response.
+
+    Kept named _claude for backward-compat with every apply-engine caller; the
+    app is Gemini-only (no Anthropic key required)."""
+    key = GEMINI_KEY or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY not configured")
     payload = json.dumps({
-        "model": "claude-haiku-4-5",  # fixed: was claude-haiku-4-5-20251001
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens},
+    }).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key,
         data=payload,
-        headers={
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     with urllib.request.urlopen(req, timeout=90) as resp:
-        result = json.loads(resp.read())
-    text = result["content"][0]["text"].strip()
+        result = json.loads(resp.read().decode("utf-8"))
+    text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text.strip())
@@ -519,7 +522,7 @@ def extract_applicant_data(cv_text: str, email: str) -> dict:
         "phone": "", "linkedin_url": "", "location": "", "current_title": "",
         "current_company": "", "years_experience": 0, "summary": "",
     }
-    if not cv_text or not ANTHROPIC_KEY:
+    if not cv_text or not GEMINI_KEY:
         return empty
     try:
         result = _claude_json(
@@ -581,9 +584,9 @@ def submit_application(
             "resolved_url": str,  # actual URL used (may differ from job_url)
         }
     """
-    global ANTHROPIC_KEY
+    global GEMINI_KEY
     if api_key:
-        ANTHROPIC_KEY = api_key
+        GEMINI_KEY = api_key
 
     _base = {
         "success": False, "status": "failed", "confirmation_text": "", "error": "",

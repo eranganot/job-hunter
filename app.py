@@ -1887,7 +1887,7 @@ def run_job_apply(user_id: int) -> int:
             if job_url:
                 res = _submit_application_guarded(
                     job_url, j["title"], j["company"],
-                    applicant, cv_path, ANTHROPIC_KEY
+                    applicant, cv_path, GEMINI_KEY
                 )
                 apply_status       = res["status"]
                 apply_confirmation = res.get("confirmation_text", "")[:1000]
@@ -2037,7 +2037,7 @@ def _trigger_apply_bg(user_id: int, job_id: int):
 
             res = _submit_application_guarded(
                 job["url"], job["title"], job["company"],
-                applicant, cv_path, ANTHROPIC_KEY
+                applicant, cv_path, GEMINI_KEY
             )
 
             apply_status         = res["status"]
@@ -5776,7 +5776,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── CV Analyze ──
         if path == "/api/analyze-cv":
-            if not GEMINI_KEY and not ANTHROPIC_KEY:
+            if not GEMINI_KEY:
                 self.send_json({"error": "No AI API key configured. Set GEMINI_API_KEY in Railway environment variables."})
                 return
             # Get CV path from profile
@@ -5788,7 +5788,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "No CV uploaded yet. Please upload your PDF first."})
                 return
             try:
-                data = analyze_cv(cv_path, ANTHROPIC_KEY)
+                data = analyze_cv(cv_path, GEMINI_KEY)
                 # Save to profile
                 auth.update_profile(
                     user_id,
@@ -6127,7 +6127,7 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             try:
                 from ai_analysis import generate_cover_letter
-                letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, ANTHROPIC_KEY)
+                letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, GEMINI_KEY)
             except Exception as gen_err:
                 self.send_json({"error": str(gen_err)}, 500)
                 return
@@ -6212,8 +6212,8 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
-            if not (ANTHROPIC_KEY or GEMINI_KEY):
-                self.send_json({"error": "No AI search key configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY in this service."}, 400)
+            if not GEMINI_KEY:
+                self.send_json({"error": "No AI key configured. Set GEMINI_API_KEY in this service."}, 400)
                 return
             uid = user["id"]
             threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
@@ -6530,7 +6530,7 @@ if __name__ == "__main__":
     t = threading.Thread(target=file_watcher, daemon=True)
     t.start()
 
-    ai_status = "✅ Configured" if ANTHROPIC_KEY else "⚠️  Not set — add to config.json"
+    ai_status = "✅ Configured" if GEMINI_KEY else "⚠️  Not set — add to config.json"
 
     gemini_status = "✅ Configured" if GEMINI_KEY else "⚠️  Not set — add GEMINI_API_KEY"
     print(f"\n📂  Folder:        {BASE_DIR}")

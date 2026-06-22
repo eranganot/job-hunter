@@ -60,3 +60,27 @@ class TestExtractApplicantFallback:
         assert d["email"] == "x@e.com"
         assert d["full_name"] == ""
         assert d["years_experience"] == 0
+
+
+class TestClaudeHelperIsGemini:
+    def test_claude_calls_gemini_endpoint(self, monkeypatch):
+        import json as _json
+        import apply_engine as ae
+        monkeypatch.setattr(ae, "GEMINI_KEY", "test-key")
+        captured = {}
+
+        class _Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def read(self):
+                return _json.dumps({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}).encode()
+
+        def _fake_urlopen(req, timeout=90):
+            captured["url"] = req.full_url
+            return _Resp()
+
+        monkeypatch.setattr(ae.urllib.request, "urlopen", _fake_urlopen)
+        out = ae._claude("hi there")
+        assert out == "hello"
+        assert "generativelanguage.googleapis.com" in captured["url"]
+        assert "anthropic" not in captured["url"].lower()
