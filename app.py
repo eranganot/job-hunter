@@ -1902,7 +1902,7 @@ def run_job_apply(user_id: int) -> int:
                 notes = "Applied via Job Hunter (no URL)"
 
             c2 = database.get_db()
-            if apply_status in ("submitted", "confirmed"):
+            if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
                 c2.execute(
                     "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
@@ -2049,7 +2049,7 @@ def _trigger_apply_bg(user_id: int, job_id: int):
             today                = datetime.now().strftime("%Y-%m-%d")
 
             c2 = database.get_db()
-            if apply_status in ("submitted", "confirmed"):
+            if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
                 c2.execute(
                     "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
@@ -6490,6 +6490,20 @@ if __name__ == "__main__":
                 print(f"[startup] promoted {ADMIN_EMAIL} to admin role")
     except Exception as _ae:
         print(f"[startup] admin-role ensure failed: {_ae}")
+
+    # One-time cleanup: an 'applied' job that recorded an error never actually
+    # succeeded -> move it back to the queue as a retryable failure. Idempotent.
+    try:
+        _cc = database.get_db()
+        _moved = _cc.execute(
+            "UPDATE jobs SET status='approved', apply_status='failed' "
+            "WHERE status='applied' AND COALESCE(TRIM(apply_error), '') != ''"
+        ).rowcount
+        _cc.commit(); _cc.close()
+        if _moved:
+            print(f"[startup] moved {_moved} errored 'applied' job(s) back to the queue")
+    except Exception as _ce:
+        print(f"[startup] applied-cleanup error: {_ce}")
 
     # Migrate expired jobs to rejected (expired tab removed)
     try:

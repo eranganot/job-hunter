@@ -110,3 +110,39 @@ def test_success_marks_applied(env, monkeypatch):
     app.run_job_apply(uid)
     r = _row(jid)
     assert r["status"] == "applied" and r["apply_status"] == "submitted"
+
+
+def test_submitted_with_error_is_not_applied(env, monkeypatch):
+    """A 'submitted' result that carries an error never actually succeeded:
+    it must NOT land in Applied; it goes back to the queue as a failure."""
+    app, uid = env
+    jid = _seed(uid)
+    monkeypatch.setattr(app, "_submit_application_guarded", lambda *a, **k: {
+        "success": True, "status": "submitted", "confirmation_text": "",
+        "error": "Form analysis failed: HTTP Error 401: Unauthorized",
+        "resolved_url": "https://co/1",
+    })
+    app.run_job_apply(uid)
+    r = _row(jid)
+    assert r["status"] == "approved"          # stayed in the queue
+    assert r["apply_status"] != "submitted"   # not marked submitted/applied
+
+
+def test_cleanup_moves_errored_applied_back(env):
+    """The startup cleanup query moves error-tagged 'applied' jobs to the queue,
+    and leaves clean (no-error) applied jobs alone."""
+    app, uid = env
+    conn = database.get_db()
+    conn.execute("DELETE FROM jobs WHERE user_id=?", (uid,))
+    # one errored 'applied', one clean 'applied'
+    conn.execute("INSERT INTO jobs (user_id,title,company,status,apply_status,apply_error) VALUES (?,?,?, 'applied','submitted','Form analysis failed: 401')", (uid, "Bad", "X"))
+    conn.execute("INSERT INTO jobs (user_id,title,company,status,apply_status,apply_error) VALUES (?,?,?, 'applied','confirmed','')", (uid, "Good", "Y"))
+    conn.commit()
+    # run the exact cleanup query
+    conn.execute("UPDATE jobs SET status='approved', apply_status='failed' "
+                 "WHERE status='applied' AND COALESCE(TRIM(apply_error), '') != ''")
+    conn.commit()
+    rows = {r["title"]: dict(r) for r in conn.execute("SELECT title, status, apply_status FROM jobs WHERE user_id=?", (uid,)).fetchall()}
+    conn.close()
+    assert rows["Bad"]["status"] == "approved" and rows["Bad"]["apply_status"] == "failed"
+    assert rows["Good"]["status"] == "applied"   # clean one stays
