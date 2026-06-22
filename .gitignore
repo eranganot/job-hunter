@@ -42,3 +42,7 @@ env/
 # SPA build deps (source in web/, committed bundle in web_bundle/)
 web/node_modules/
 web/dist/
+
+jobs.db
+jobs.db-journal
+__pycache__/
