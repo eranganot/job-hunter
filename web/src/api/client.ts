@@ -20,6 +20,9 @@ export type ApiJob = {
   candidate_score?: number | null;
   url_verified?: number | null;
   apply_status?: string | null;
+  apply_confirmation?: string | null;
+  apply_error?: string | null;
+  apply_failure_type?: string | null;
   applied_date?: string | null;
 };
 
@@ -38,6 +41,9 @@ export type UiJob = {
   timeAgo: string;
   status: string;
   applyStatus: string | null;
+  applyConfirmation: string;
+  applyError: string;
+  applyFailureType: string;
 };
 
 export type Me = {
@@ -104,6 +110,7 @@ export const api = {
   reject: (id: number, reason: string) =>
     request(`/api/jobs/${id}/reject`, "POST", { reason }),
   applyNow: (id: number) => request(`/api/jobs/${id}/apply-now`, "POST", {}),
+  markApplied: (id: number) => request(`/api/jobs/${id}/applied`, "POST", { notes: "Marked applied manually" }),
   later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
   restore: (id: number) => request(`/api/jobs/${id}/restore`, "POST", {}),
   runSearch: () => request("/api/run-search", "POST", {}),
@@ -140,5 +147,8 @@ export function toUiJob(j: ApiJob): UiJob {
     timeAgo: timeAgo(j.found_date),
     status: j.status,
     applyStatus: j.apply_status ?? null,
+    applyConfirmation: j.apply_confirmation || "",
+    applyError: j.apply_error || "",
+    applyFailureType: j.apply_failure_type || "",
   };
 }

@@ -13,9 +13,12 @@ type View = "swipe" | "dashboard";
 type DashboardTab = "queue" | "applied" | "deferred" | "passed" | "activity" | "analytics";
 
 const REJECT_REASONS: Record<string, string> = {
+  fit: "Not a good fit",
   seniority: "Wrong seniority level",
-  company: "Not interested in this company",
-  industry: "Not interested in this industry",
+  salary: "Salary too low",
+  company: "Bad company",
+  location: "Wrong location",
+  applied: "Already applied elsewhere",
 };
 
 export function SwipeFlow() {
@@ -149,6 +152,21 @@ export function SwipeFlow() {
     api.restore(job.id).catch(() => {});
   };
 
+  const onMarkApplied = (job: UiJob) => {
+    setApprovedJobs((p) => p.filter((j) => j.id !== job.id));
+    setAppliedJobs((p) => [{ ...job, status: "applied", applyStatus: "submitted" }, ...p]);
+    api.markApplied(job.id).catch(() => {});
+  };
+  const onRemoveQueued = (job: UiJob, reason: string) => {
+    setApprovedJobs((p) => p.filter((j) => j.id !== job.id));
+    api.reject(job.id, reason).catch(() => {});
+  };
+  const onRetryApply = (job: UiJob) => {
+    setApprovedJobs((p) => p.map((j) => (j.id === job.id ? { ...j, applyStatus: "applying" } : j)));
+    setAppliedJobs((p) => p.map((j) => (j.id === job.id ? { ...j, applyStatus: "applying" } : j)));
+    api.applyNow(job.id).catch(() => {});
+  };
+
   // pull-to-refresh handlers (swipe screen only)
   const onTouchStart = (e: React.TouchEvent) => { if (window.scrollY <= 0 && !pendingReject) pullStart.current = e.touches[0].clientY; };
   const onTouchMove = (e: React.TouchEvent) => {
@@ -183,6 +201,7 @@ export function SwipeFlow() {
         me={me} activeTab={dashboardTab} setActiveTab={setDashboardTab}
         onBackToSwipe={() => setView("swipe")}
         approvedJobs={approvedJobs} appliedJobs={appliedJobs} deferredJobs={deferredJobs} onUnDefer={unDefer}
+        onMarkApplied={onMarkApplied} onRemoveQueued={onRemoveQueued} onRetry={onRetryApply}
         approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount}
         selectedJob={selectedJob} setSelectedJob={setSelectedJob}
         onOpenSettings={() => setShowSettings(true)} showSettings={showSettings} onCloseSettings={() => setShowSettings(false)}
@@ -379,7 +398,8 @@ const TABS: [DashboardTab, string, any][] = [
 ];
 
 function DashboardView(p: any) {
-  const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings } = p;
+  const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, onMarkApplied, onRemoveQueued, onRetry, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings } = p;
+  const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="bg-gray-800 border-b border-gray-700 safe-top">
@@ -399,7 +419,7 @@ function DashboardView(p: any) {
           {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
         </div>
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
-          {activeTab === "queue" && <ListTab jobs={approvedJobs} onSelectJob={setSelectedJob} emptyIcon={CheckCircle} emptyTitle="No jobs in queue" emptySub="Approved jobs appear here" heading={`${approvedJobs.length} ready to apply`} />}
+          {activeTab === "queue" && <QueueTab jobs={approvedJobs} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} />}
           {activeTab === "applied" && <ListTab jobs={appliedJobs} onSelectJob={setSelectedJob} showStatus emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
           {activeTab === "deferred" && <DeferredTab jobs={deferredJobs} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} />}
           {activeTab === "passed" && <PassedTab />}
@@ -407,7 +427,8 @@ function DashboardView(p: any) {
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={appliedJobs.length} />}
         </div>
       </div>
-      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} />}
+      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} />}
+      <AnimatePresence>{removeTarget && <RejectReasonSheet job={removeTarget} onPick={(k) => { onRemoveQueued(removeTarget, k ? (REJECT_REASONS[k] || k) : "Removed from queue"); setRemoveTarget(null); }} onUndo={() => setRemoveTarget(null)} />}</AnimatePresence>
       <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={onCloseSettings} />}</AnimatePresence>
     </div>
   );
@@ -415,6 +436,44 @@ function DashboardView(p: any) {
 
 function StatCard({ label, value, sub, icon }: any) {
   return (<div className="bg-gray-800 rounded-xl p-4 border border-gray-700"><div className="flex items-center justify-between mb-1.5"><span className="text-sm font-medium text-gray-400">{label}</span>{icon}</div><div className="text-2xl font-bold text-white">{value}</div><p className="text-xs text-gray-500 mt-0.5">{sub}</p></div>);
+}
+
+function ApplyBadge({ job }: { job: UiJob }) {
+  const s = job.applyStatus;
+  if (!s || s === "queued") return <span className="text-xs text-gray-500">Queued \u00b7 ready to apply</span>;
+  if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying\u2026</span>;
+  if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
+  if (s === "failed") return <span className="inline-flex items-center gap-1 text-xs text-red-300"><XCircle className="w-3 h-3" />Apply failed{job.applyFailureType ? ` (${job.applyFailureType})` : ""}</span>;
+  if (s === "confirmed") return <span className="inline-flex items-center gap-1 text-xs text-green-300"><CheckCircle className="w-3 h-3" />Confirmed</span>;
+  if (s === "submitted" || s === "applied") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><CheckCircle className="w-3 h-3" />Submitted</span>;
+  return <span className="text-xs text-gray-400">{s}</span>;
+}
+
+function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove }: any) {
+  if (!jobs.length) return <EmptyTab icon={CheckCircle} title="No jobs in queue" sub="Approved jobs appear here" />;
+  return (
+    <div className="space-y-3">
+      <h3 className="text-base font-semibold text-white mb-1">{jobs.length} in queue</h3>
+      {jobs.map((job: UiJob) => <QueueJobCard key={job.id} job={job} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}
+    </div>
+  );
+}
+
+function QueueJobCard({ job, onSelect, onMarkApplied, onRemove }: any) {
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      <div className="flex items-center gap-3 p-3.5 active:bg-gray-700/40 cursor-pointer" onClick={() => onSelect(job)}>
+        <div className="w-12 h-12 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-xl flex items-center justify-center shrink-0"><Building2 className="w-6 h-6 text-indigo-400" /></div>
+        <div className="flex-1 min-w-0"><h4 className="font-semibold text-white truncate">{job.title}</h4><p className="text-sm text-gray-400 truncate">{job.company}</p><div className="mt-1"><ApplyBadge job={job} /></div></div>
+        <div className="text-right shrink-0"><div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "\u2014" : `${job.matchScore}%`}</div><div className="text-[10px] text-gray-500">match</div></div>
+      </div>
+      <div className="flex border-t border-gray-700 divide-x divide-gray-700">
+        <button onClick={() => onMarkApplied(job)} className="flex-1 py-2.5 text-xs font-medium text-green-300 active:bg-gray-700 flex items-center justify-center gap-1"><CheckCircle className="w-4 h-4" />Mark applied</button>
+        {job.url && <a href={job.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex-1 py-2.5 text-xs font-medium text-indigo-300 active:bg-gray-700 flex items-center justify-center gap-1"><ExternalLink className="w-4 h-4" />Open</a>}
+        <button onClick={() => onRemove(job)} className="flex-1 py-2.5 text-xs font-medium text-red-300 active:bg-gray-700 flex items-center justify-center gap-1"><X className="w-4 h-4" />Remove</button>
+      </div>
+    </div>
+  );
 }
 
 function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emptySub, heading }: any) {
@@ -555,7 +614,7 @@ function StatusPill({ s }: { s: string }) {
   return <span className="px-2.5 py-1 bg-gray-700 text-gray-300 text-xs font-medium rounded-full">{s}</span>;
 }
 
-function JobDetailModal({ job, onClose }: { job: UiJob; onClose: () => void }) {
+function JobDetailModal({ job, onClose, onRetry }: { job: UiJob; onClose: () => void; onRetry?: (j: UiJob) => void }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
       <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
@@ -565,6 +624,17 @@ function JobDetailModal({ job, onClose }: { job: UiJob; onClose: () => void }) {
           <div className="grid grid-cols-2 gap-3"><div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-xl p-4 border border-blue-800/50"><div className="text-sm text-gray-400 mb-1">Match Score</div><div className="text-2xl font-bold text-blue-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div></div><div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-xl p-4 border border-green-800/50"><div className="text-sm text-gray-400 mb-1">Your Strength</div><div className="text-2xl font-bold text-green-400">{job.candidateScore === null ? "—" : `${job.candidateScore}%`}</div></div></div>
           {job.whyFits && <div className="bg-gradient-to-br from-amber-900/20 to-orange-900/20 rounded-xl p-4 border border-amber-800/50"><h4 className="font-bold text-amber-500 mb-1.5 flex items-center gap-2"><Sparkles className="w-5 h-5" />Why this is a strong fit</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
           {job.description && <div><h4 className="font-semibold text-white mb-1.5">About the role</h4><p className="text-gray-400 text-sm leading-relaxed whitespace-pre-line">{job.description}</p></div>}
+          {job.applyStatus && job.applyStatus !== "queued" && (
+            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+              <h4 className="font-semibold text-white mb-2">Application status</h4>
+              <ApplyBadge job={job} />
+              {job.applyConfirmation && <p className="text-sm text-gray-300 mt-2 whitespace-pre-line">{job.applyConfirmation}</p>}
+              {!job.applyConfirmation && job.applyError && <p className="text-sm text-red-300 mt-2 break-words">{job.applyError}</p>}
+              {(job.applyStatus === "failed" || job.applyStatus === "manual_required") && onRetry && (
+                <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />Retry application</button>
+              )}
+            </div>
+          )}
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-indigo-400 text-sm font-medium">Open job posting <ExternalLink className="w-3.5 h-3.5" /></a>}
         </div>
       </motion.div>
