@@ -46,3 +46,8 @@ web/dist/
 jobs.db
 jobs.db-journal
 __pycache__/
+
+# Local SQLite + cache artifacts
+jobs.db
+jobs.db-journal
+__pycache__/
