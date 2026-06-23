@@ -12,6 +12,25 @@ import { enablePush, pushState } from "./lib/push";
 type View = "swipe" | "dashboard";
 type DashboardTab = "queue" | "applied" | "deferred" | "passed" | "activity" | "analytics";
 
+const NAV_KEY = "jh.nav";
+
+// Decide the initial screen on (re)mount, synchronously, before first paint.
+// Priority: push deep-link  >  last screen this session (survives refresh)  >
+// fall back to the new-jobs rule once jobs load (resolved=false).
+function readInitialNav(): { view: View; tab: DashboardTab; resolved: boolean } {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const v = params.get("view") || window.location.hash.replace("#", "");
+    if (v === "applied") return { view: "dashboard", tab: "applied", resolved: true };
+    if (v === "dashboard") return { view: "dashboard", tab: "queue", resolved: true };
+    const saved = JSON.parse(sessionStorage.getItem(NAV_KEY) || "null");
+    if (saved && (saved.view === "swipe" || saved.view === "dashboard")) {
+      return { view: saved.view, tab: saved.tab || "queue", resolved: true };
+    }
+  } catch { /* ignore */ }
+  return { view: "swipe", tab: "queue", resolved: false };
+}
+
 const REJECT_REASONS: Record<string, string> = {
   fit: "Not a good fit",
   seniority: "Wrong seniority level",
@@ -22,8 +41,9 @@ const REJECT_REASONS: Record<string, string> = {
 };
 
 export function SwipeFlow() {
-  const [view, setView] = useState<View>("swipe");
-  const [dashboardTab, setDashboardTab] = useState<DashboardTab>("queue");
+  const initialNav = useRef(readInitialNav());
+  const [view, setView] = useState<View>(initialNav.current.view);
+  const [dashboardTab, setDashboardTab] = useState<DashboardTab>(initialNav.current.tab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,15 +69,16 @@ export function SwipeFlow() {
   const [refreshing, setRefreshing] = useState(false);
   const pullStart = useRef<number | null>(null);
 
-  // Deep-link: open Applied tab / dashboard when launched from a push.
-  const initialRouteDone = useRef(false);
+  // If a deep-link or a saved session screen already decided the view, don't
+  // re-route on the new-jobs rule. Otherwise the rule applies once jobs load.
+  const initialRouteDone = useRef(initialNav.current.resolved);
+
+  // Remember the current screen so a page refresh keeps the user in place.
+  // sessionStorage = survives refresh, clears on app relaunch (fresh launch
+  // re-applies the new-jobs landing rule).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const v = params.get("view") || window.location.hash.replace("#", "");
-    if (v) initialRouteDone.current = true; // a deep-link wins over auto-routing
-    if (v === "applied") { setView("dashboard"); setDashboardTab("applied"); }
-    else if (v === "dashboard") setView("dashboard");
-  }, []);
+    try { sessionStorage.setItem(NAV_KEY, JSON.stringify({ view, tab: dashboardTab })); } catch { /* ignore */ }
+  }, [view, dashboardTab]);
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
