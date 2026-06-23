@@ -51,6 +51,30 @@ export type Me = {
   name: string;
   email: string;
   role?: string;
+  cv_path?: string | null;
+  cv_filename?: string | null;
+  cv_uploaded_date?: string | null;
+  cv_optimizer_date?: string | null;
+};
+
+export type CvOptimizerResult = {
+  score?: number;
+  score_label?: string;
+  summary?: string;
+  strengths?: string[];
+  improvements?: { title: string; detail: string }[];
+  ats_notes?: string[];
+  analyzed_date?: string;
+  cached?: boolean;
+  error?: string;
+};
+
+export type ValidateLinksResult = {
+  checked: number;
+  removed: number;
+  alive: number;
+  unknown: number;
+  removed_items: { title: string; company: string }[];
 };
 
 export type Stats = {
@@ -114,6 +138,9 @@ export const api = {
   later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
   restore: (id: number) => request(`/api/jobs/${id}/restore`, "POST", {}),
   runSearch: () => request("/api/run-search", "POST", {}),
+  cvOptimizerCached: () => request<CvOptimizerResult>("/api/cv-optimizer-analyze"),
+  cvOptimizer: () => request<CvOptimizerResult>("/api/cv-optimizer-analyze", "POST", {}),
+  validateLinks: () => request<ValidateLinksResult>("/api/validate-links", "POST", {}),
   learned: () => request<{ pass_reasons: { reason: string; count: number }[]; blocklist: string[]; patterns: { id: number; company: string; title: string; notes: string; created_date: string }[] }>("/api/learned"),
   blockCompany: (company: string) => request("/api/blocklist", "POST", { company }),
   unblockCompany: (company: string) => request("/api/blocklist/remove", "POST", { company }),

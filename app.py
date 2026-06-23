@@ -5049,6 +5049,48 @@ def _call_gemini_cv_optimizer(cv_text: str = "", cv_path: str = ""):
     return json.loads(_t)
 
 
+_LINK_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _link_status(url: str, timeout: int = 8) -> str:
+    """Classify a job URL: 'alive' | 'dead' | 'unknown'.
+
+    Conservative on purpose - we only call a link 'dead' when it is
+    *definitively* gone (HTTP 404/410, or DNS that no longer resolves).
+    Bot-blocks and rate-limits (401/403/429), timeouts, and transient
+    network errors return 'unknown' so a live posting is never removed
+    just because the server refused our automated request.
+    """
+    import urllib.request as _ur, urllib.error as _ue, socket as _sock
+    if not url or not str(url).strip():
+        return "dead"  # no URL = unusable
+    url = str(url).strip()
+    for method in ("HEAD", "GET"):
+        try:
+            req = _ur.Request(url, method=method, headers={"User-Agent": _LINK_UA})
+            with _ur.urlopen(req, timeout=timeout) as r:
+                return "alive" if r.status < 400 else (
+                    "dead" if r.status in (404, 410) else "unknown")
+        except _ue.HTTPError as e:
+            if e.code in (404, 410):
+                return "dead"
+            if e.code < 400:
+                return "alive"
+            return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
+        except _ue.URLError as e:
+            if isinstance(getattr(e, "reason", None), _sock.gaierror):
+                return "dead"  # hostname no longer resolves
+            if method == "GET":
+                return "unknown"
+            continue  # retry once with GET
+        except Exception:
+            if method == "GET":
+                return "unknown"
+            continue
+    return "unknown"
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
@@ -5760,10 +5802,14 @@ class Handler(BaseHTTPRequestHandler):
                 cv_path = os.path.join(user_upload_dir, "cv.pdf")
                 with open(cv_path, "wb") as f:
                     f.write(file_data)
-                auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0)
-                database.log_activity(user_id, "cv_uploaded", "Uploaded new CV PDF")
-                print(f"[cv] ✅ Saved CV for user {user_id}: {cv_path}")
-                self.send_json({"success": True, "path": cv_path})
+                _orig_name = os.path.basename(filename) or "cv.pdf"
+                _uploaded_at = datetime.now().isoformat(timespec="seconds")
+                auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0,
+                                    cv_filename=_orig_name, cv_uploaded_date=_uploaded_at)
+                database.log_activity(user_id, "cv_uploaded", f"Uploaded new CV: {_orig_name}")
+                print(f"[cv] ✅ Saved CV for user {user_id}: {cv_path} (orig={_orig_name})")
+                self.send_json({"success": True, "path": cv_path,
+                                "filename": _orig_name, "uploaded_date": _uploaded_at})
                 bump_onboarding(user_id, "cv_uploaded")
             except Exception as exc:
                 import traceback
@@ -5949,6 +5995,59 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(_result)
                 except Exception as _e:
                     self.send_json({'error': str(_e)}, 500)
+        # ── Validate queue/new links: drop dead postings ──
+        if path == "/api/validate-links":
+            conn = database.get_db()
+            rows = conn.execute(
+                "SELECT id, url, title, company, status FROM jobs "
+                "WHERE user_id=? AND status IN ('new','approved')",
+                (user_id,)
+            ).fetchall()
+            jobs_to_check = [dict(r) for r in rows]
+            conn.close()
+
+            import concurrent.futures as _cf
+            results = []
+            if jobs_to_check:
+                with _cf.ThreadPoolExecutor(max_workers=8) as _ex:
+                    _futs = {_ex.submit(_link_status, j["url"]): j for j in jobs_to_check}
+                    for _fut in _cf.as_completed(_futs):
+                        results.append((_futs[_fut], _fut.result()))
+
+            checked = len(results)
+            removed = alive = unknown = 0
+            removed_items = []
+            _now_iso = datetime.now().isoformat(timespec="seconds")
+            conn = database.get_db()
+            for j, st in results:
+                if st == "dead":
+                    conn.execute(
+                        "UPDATE jobs SET status='rejected', "
+                        "notes=TRIM(COALESCE(notes,'') || ' [auto-removed: dead link]'), "
+                        "url_verified=0, url_check_date=? WHERE id=? AND user_id=?",
+                        (_now_iso, j["id"], user_id))
+                    removed += 1
+                    removed_items.append({"title": j.get("title") or "Untitled",
+                                          "company": j.get("company") or ""})
+                elif st == "alive":
+                    conn.execute(
+                        "UPDATE jobs SET url_verified=1, url_check_date=? WHERE id=? AND user_id=?",
+                        (_now_iso, j["id"], user_id))
+                    alive += 1
+                else:  # unknown - keep, just timestamp the check
+                    conn.execute(
+                        "UPDATE jobs SET url_check_date=? WHERE id=? AND user_id=?",
+                        (_now_iso, j["id"], user_id))
+                    unknown += 1
+            conn.commit()
+            conn.close()
+            if checked:
+                database.log_activity(user_id, "links_validated",
+                    f"Checked {checked} link(s): removed {removed} dead, {alive} alive, {unknown} unverified")
+            self.send_json({"checked": checked, "removed": removed, "alive": alive,
+                            "unknown": unknown, "removed_items": removed_items})
+            return
+
         # ── Change password ──
         if path == "/api/change-password":
             data = self.read_json()

@@ -146,6 +146,8 @@ def init_db():
         "ALTER TABLE jobs ADD COLUMN cover_letter TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_result TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_date TEXT DEFAULT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN cv_filename TEXT DEFAULT NULL",
+        "ALTER TABLE user_profiles ADD COLUMN cv_uploaded_date TEXT DEFAULT NULL",
         # ── Phase-1 robustness migrations ─────────────────────────────────────
         "ALTER TABLE jobs ADD COLUMN apply_strategy TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_next_attempt_at TEXT DEFAULT NULL",

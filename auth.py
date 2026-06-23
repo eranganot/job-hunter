@@ -124,6 +124,7 @@ def get_session_user(token: str):
     row = conn.execute("""
         SELECT u.id, u.name, u.email, u.created_date, u.role,
                p.cv_path, p.cv_analyzed, p.cv_summary,
+               p.cv_filename, p.cv_uploaded_date, p.cv_optimizer_date,
                p.job_titles, p.keywords, p.locations,
                p.salary_min, p.salary_max, p.experience_years, p.seniority,
                p.linkedin_url, p.phone,

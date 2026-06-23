@@ -4,9 +4,9 @@ import {
   Briefcase, X, MapPin, TrendingUp, Settings, BarChart3, Clock,
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
-  Zap, Target, Loader2, Plus, RotateCcw, Ban,
+  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText,
 } from "lucide-react";
-import { api, toUiJob, type UiJob, type Me, type Stats, type Activity } from "./api/client";
+import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
 
 type View = "swipe" | "dashboard";
@@ -234,6 +234,7 @@ export function SwipeFlow() {
         approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount}
         selectedJob={selectedJob} setSelectedJob={setSelectedJob}
         onOpenSettings={() => setShowSettings(true)} showSettings={showSettings} onCloseSettings={() => setShowSettings(false)}
+        onReload={loadAll}
       />
     );
   }
@@ -427,7 +428,7 @@ const TABS: [DashboardTab, string, any][] = [
 ];
 
 function DashboardView(p: any) {
-  const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, onMarkApplied, onRemoveQueued, onRetry, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings } = p;
+  const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, onMarkApplied, onRemoveQueued, onRetry, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings, onReload } = p;
   const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -448,7 +449,7 @@ function DashboardView(p: any) {
           {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
         </div>
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
-          {activeTab === "queue" && <QueueTab jobs={approvedJobs} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} />}
+          {activeTab === "queue" && <QueueTab jobs={approvedJobs} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} onReload={onReload} />}
           {activeTab === "applied" && <ListTab jobs={appliedJobs} onSelectJob={setSelectedJob} showStatus emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
           {activeTab === "deferred" && <DeferredTab jobs={deferredJobs} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} />}
           {activeTab === "passed" && <PassedTab />}
@@ -478,12 +479,32 @@ function ApplyBadge({ job }: { job: UiJob }) {
   return <span className="text-xs text-gray-400">{s}</span>;
 }
 
-function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove }: any) {
-  if (!jobs.length) return <EmptyTab icon={CheckCircle} title="No jobs in queue" sub="Approved jobs appear here" />;
+function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any) {
+  const [checking, setChecking] = useState(false);
+  const [checkMsg, setCheckMsg] = useState("");
+  const checkLinks = async () => {
+    setChecking(true); setCheckMsg("Checking every link…");
+    try {
+      const r = await api.validateLinks();
+      const parts = [`Checked ${r.checked}`];
+      if (r.removed) parts.push(`removed ${r.removed} dead`);
+      if (r.unknown) parts.push(`${r.unknown} unverified`);
+      setCheckMsg(parts.join(" · ") + (r.removed ? "" : " — all good"));
+      if (r.removed && onReload) await onReload();
+    } catch (e: any) {
+      setCheckMsg(e?.message || "Couldn't check links right now.");
+    } finally { setChecking(false); }
+  };
   return (
     <div className="space-y-3">
-      <h3 className="text-base font-semibold text-white mb-1">{jobs.length} in queue</h3>
-      {jobs.map((job: UiJob) => <QueueJobCard key={job.id} job={job} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base font-semibold text-white">{jobs.length} in queue</h3>
+        <button onClick={checkLinks} disabled={checking} className="px-3 py-2 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">{checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}{checking ? "Checking…" : "Check links"}</button>
+      </div>
+      {checkMsg && <p className="text-xs text-gray-400 -mt-1">{checkMsg}</p>}
+      {!jobs.length
+        ? <EmptyTab icon={CheckCircle} title="No jobs in queue" sub="Approved jobs appear here" />
+        : jobs.map((job: UiJob) => <QueueJobCard key={job.id} job={job} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}
     </div>
   );
 }
@@ -696,14 +717,22 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
   const [applyHour, setApplyHour] = useState(String(me.apply_hour ?? 17));
   const [saving, setSaving] = useState(false); const [saved, setSaved] = useState(false);
-  const [cvName, setCvName] = useState<string>(me.cv_path ? String(me.cv_path).split("/").pop() || "" : "");
+  const [cvName, setCvName] = useState<string>(me.cv_filename || (me.cv_path ? String(me.cv_path).split("/").pop() || "" : ""));
+  const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
   const [cvMsg, setCvMsg] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [cvAnalysis, setCvAnalysis] = useState<CvOptimizerResult | null>(null);
+  const [analyzeMsg, setAnalyzeMsg] = useState("");
   const [perm, setPerm] = useState(pushState()); const [pushMsg, setPushMsg] = useState("");
+
+  useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
+  const fmtDate = (iso: string) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); };
+  const analyzeCv = async () => { setAnalyzing(true); setAnalyzeMsg(""); try { const r = await api.cvOptimizer(); if (r?.error) setAnalyzeMsg(r.error); else { setCvAnalysis(r); setAnalyzeMsg(r?.cached ? "Showing your most recent analysis" : ""); } } catch (e: any) { setAnalyzeMsg(e?.message || "Analysis failed"); } finally { setAnalyzing(false); } };
 
   const enableNotifs = async () => { setPushMsg("Enabling…"); const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "✓ Notifications enabled" : (r.reason || "Couldn't enable")); };
   const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch { setPushMsg("Test failed"); } };
   const save = async () => { setSaving(true); setSaved(false); try { await api.saveProfile({ phone, job_titles: titles, keywords, locations }); await api.saveSchedule({ search_hour: parseInt(searchHour, 10), apply_hour: parseInt(applyHour, 10) }); if (email && email !== me.email) await api.saveNotifications({ email_address: email }); setSaved(true); } catch {} finally { setSaving(false); } };
-  const onCvPick = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setCvMsg("Uploading…"); try { const buf = await file.arrayBuffer(); let bin = ""; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); const res = await fetch("/api/upload-cv", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, data: btoa(bin) }) }); if (res.ok) { setCvName(file.name); setCvMsg("✓ Uploaded"); } else setCvMsg("Upload failed"); } catch { setCvMsg("Upload failed"); } };
+  const onCvPick = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setCvMsg("Uploading…"); try { const buf = await file.arrayBuffer(); let bin = ""; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); const res = await fetch("/api/upload-cv", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, data: btoa(bin) }) }); if (res.ok) { let info: any = {}; try { info = await res.json(); } catch { /* ignore */ } setCvName(info.filename || file.name); setCvDate(info.uploaded_date || new Date().toISOString()); setCvAnalysis(null); setAnalyzeMsg(""); setCvMsg("✓ Uploaded"); } else setCvMsg("Upload failed"); } catch { setCvMsg("Upload failed"); } };
   const hours = Array.from({ length: 24 }, (_, h) => h);
   const fmtHour = (h: number) => { const ampm = h < 12 ? "AM" : "PM"; const hr = h % 12 === 0 ? 12 : h % 12; return `${String(hr).padStart(2, "0")}:00 ${ampm}`; };
 
@@ -716,13 +745,51 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} /></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-400" />Key Skills & Keywords</h3><TagInput value={keywords} onChange={setKeywords} /></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><MapPin className="w-5 h-5 text-indigo-400" />Preferred Locations</h3><TagInput value={locations} onChange={setLocations} /></div>
-          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-400" />Resume / CV</h3><label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">Tap to upload</p><p className="text-xs text-gray-500">PDF or DOCX, max 5MB</p>{cvName && <p className="text-xs text-green-400 mt-2">✓ {cvName}</p>}{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label></div>
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-400" />Resume / CV</h3>
+            {cvName && (
+              <div className="flex items-center gap-3 p-3 mb-3 bg-gray-800 rounded-xl border border-gray-700">
+                <div className="w-9 h-9 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-indigo-300" /></div>
+                <div className="min-w-0 flex-1"><p className="text-sm font-medium text-white truncate">{cvName}</p><p className="text-xs text-gray-400">{cvDate ? `Uploaded ${fmtDate(cvDate)}` : "Current CV on file"}</p></div>
+              </div>
+            )}
+            <label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">{cvName ? "Tap to replace" : "Tap to upload"}</p><p className="text-xs text-gray-500">PDF, max 5MB</p>{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label>
+            {cvName && (
+              <button onClick={analyzeCv} disabled={analyzing} className="w-full mt-3 py-3 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-60">{analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{analyzing ? "Analyzing…" : "✨ Analyze my CV with AI"}</button>
+            )}
+            {analyzeMsg && <p className="text-xs text-gray-400 mt-2">{analyzeMsg}</p>}
+            {cvAnalysis && <CvAnalysisPanel data={cvAnalysis} fmtDate={fmtDate} />}
+          </div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
           <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+function CvAnalysisPanel({ data, fmtDate }: { data: CvOptimizerResult; fmtDate: (s: string) => string }) {
+  const score = typeof data.score === "number" ? data.score : null;
+  const scoreColor = score == null ? "text-gray-300" : score >= 80 ? "text-green-400" : score >= 60 ? "text-amber-400" : "text-red-400";
+  return (
+    <div className="mt-3 bg-gray-800 rounded-xl border border-gray-700 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-300" /><span className="text-sm font-semibold text-white">AI CV Review</span></div>
+        {score != null && <div className="text-right"><span className={`text-2xl font-bold ${scoreColor}`}>{score}</span><span className="text-xs text-gray-500">/100</span>{data.score_label && <p className="text-xs text-gray-400">{data.score_label}</p>}</div>}
+      </div>
+      {data.summary && <p className="text-sm text-gray-300">{data.summary}</p>}
+      {data.strengths && data.strengths.length > 0 && (
+        <div><p className="text-xs font-semibold text-green-400 mb-1">Strengths</p><ul className="space-y-1">{data.strengths.map((s, i) => <li key={i} className="text-xs text-gray-300 flex gap-2"><Check className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" />{s}</li>)}</ul></div>
+      )}
+      {data.improvements && data.improvements.length > 0 && (
+        <div><p className="text-xs font-semibold text-amber-400 mb-1">Improvements</p><ul className="space-y-1.5">{data.improvements.map((im, i) => <li key={i} className="text-xs text-gray-300"><span className="font-medium text-white">{im.title}</span>{im.detail ? ` — ${im.detail}` : ""}</li>)}</ul></div>
+      )}
+      {data.ats_notes && data.ats_notes.length > 0 && (
+        <div><p className="text-xs font-semibold text-indigo-300 mb-1">ATS notes</p><ul className="space-y-1">{data.ats_notes.map((n, i) => <li key={i} className="text-xs text-gray-400 flex gap-2"><AlertCircle className="w-3.5 h-3.5 text-indigo-300 shrink-0 mt-0.5" />{n}</li>)}</ul></div>
+      )}
+      {data.analyzed_date && <p className="text-[11px] text-gray-500 pt-1">Last analyzed {fmtDate(data.analyzed_date)}</p>}
+    </div>
   );
 }
 
