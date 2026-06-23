@@ -23,5 +23,6 @@ The OneDrive copy (`…\Eran's dev\Job Hunter`, branch `master`, commit `870c4eb
 Two-folder drift (being retired); sandbox can't push; Playwright browser binaries must be present in the Railway image for real submits.
 
 ## Changelog (newest first)
+- 2026-06-23 — Landing page auto-routes on first load: swipe if there are new jobs, dashboard (queue tab) if none. Deep-links (`?view=`) still win. Initial load only — the "All Done" screen after a swipe session is unchanged. (`web/src/App.tsx`)
 - 2026-06-22 — STATUS.md + CLAUDE.md seeded.
 - (prior) — Gemini-only migration, apply mislabel fix, amber manual badge + honest summary, direct-ATS sourcing, apply-freeze fix.

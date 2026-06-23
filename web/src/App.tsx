@@ -50,9 +50,11 @@ export function SwipeFlow() {
   const pullStart = useRef<number | null>(null);
 
   // Deep-link: open Applied tab / dashboard when launched from a push.
+  const initialRouteDone = useRef(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const v = params.get("view") || window.location.hash.replace("#", "");
+    if (v) initialRouteDone.current = true; // a deep-link wins over auto-routing
     if (v === "applied") { setView("dashboard"); setDashboardTab("applied"); }
     else if (v === "dashboard") setView("dashboard");
   }, []);
@@ -67,6 +69,12 @@ export function SwipeFlow() {
       setMe(meRes); setStats(statsRes);
       setNewJobs(nw.map(toUiJob)); setApprovedJobs(ap.map(toUiJob)); setAppliedJobs(ad.map(toUiJob)); setDeferredJobs(df.map(toUiJob));
       setCurrentIndex(0); setRejectedDelta(0); setUndo(null);
+      // First load only: land on swipe if there are new jobs, else the dashboard.
+      if (!initialRouteDone.current) {
+        initialRouteDone.current = true;
+        if (nw.length > 0) { setView("swipe"); }
+        else { setView("dashboard"); setDashboardTab("queue"); }
+      }
     } catch (e: any) {
       if (e?.status !== 401) setError("Couldn't load your jobs.");
     } finally { setLoading(false); }
