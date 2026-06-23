@@ -5376,6 +5376,39 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(user)
             return
 
+        if path == "/api/cv":
+            user = self.require_auth()
+            if not user:
+                return
+            _cvp = os.path.join(UPLOADS_DIR, str(user["id"]), "cv.pdf")
+            if not os.path.exists(_cvp):
+                self.send_json({"error": "No CV uploaded yet."}, 404)
+                return
+            try:
+                with open(_cvp, "rb") as _f:
+                    _data = _f.read()
+            except Exception:
+                self.send_json({"error": "Could not read CV."}, 500)
+                return
+            _fname = "cv.pdf"
+            try:
+                _conn = database.get_db()
+                _r = _conn.execute("SELECT cv_filename FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
+                _conn.close()
+                if _r and _r["cv_filename"]:
+                    _fname = _r["cv_filename"]
+            except Exception:
+                pass
+            _disp = "attachment" if qs.get("download", ["0"])[0] == "1" else "inline"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f'{_disp}; filename="{_fname}"')
+            self.send_header("Content-Length", str(len(_data)))
+            self.send_header("Cache-Control", "private, no-cache")
+            self.end_headers()
+            self.wfile.write(_data)
+            return
+
         if path == "/api/push/public-key":
             user = self.require_auth()
             if not user:

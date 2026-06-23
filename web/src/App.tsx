@@ -4,7 +4,7 @@ import {
   Briefcase, X, MapPin, TrendingUp, Settings, BarChart3, Clock,
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
-  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText,
+  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -221,6 +221,14 @@ export function SwipeFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentJob, showSettings, view, pendingReject]);
 
+  // After swiping through a non-empty stack, go straight to the dashboard
+  // instead of dwelling on the "All done" screen. Empty stacks keep it.
+  useEffect(() => {
+    if (view === "swipe" && !loading && reviewJobs.length > 0 && currentIndex >= reviewJobs.length) {
+      setView("dashboard"); setDashboardTab("queue");
+    }
+  }, [view, loading, currentIndex, reviewJobs.length]);
+
   if (loading) return <CenterState icon={<Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />} title="Loading your jobs…" />;
   if (error) return <CenterState icon={<AlertCircle className="w-10 h-10 text-red-400" />} title={error} action={{ label: "Retry", onClick: loadAll }} />;
 
@@ -240,6 +248,11 @@ export function SwipeFlow() {
   }
 
   if (currentIndex >= reviewJobs.length) {
+    // Finished a non-empty stack -> the effect above redirects to the
+    // dashboard; show a brief spinner rather than the "All done" screen.
+    if (reviewJobs.length > 0) {
+      return <CenterState icon={<Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />} title="Opening dashboard…" />;
+    }
     return (
       <>
         <AllDoneScreen approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount}
@@ -343,6 +356,7 @@ function NotifyNudge() {
 
 function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
   const onDragEnd = (_: any, info: PanInfo) => { if (info.offset.x > 110) onApprove(); else if (info.offset.x < -110) onPass(); };
+  const [showScoreInfo, setShowScoreInfo] = useState(false);
   return (
     <motion.div initial={{ scale: 0.85, opacity: 0 }}
       animate={{ scale: 1, opacity: 1, rotateZ: direction === "left" ? -22 : direction === "right" ? 22 : 0, x: direction === "left" ? -900 : direction === "right" ? 900 : 0 }}
@@ -364,9 +378,21 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
               {job.timeAgo && <div className="flex items-center gap-1.5 text-sm text-gray-400"><Clock className="w-4 h-4" /><span>{job.timeAgo}</span></div>}
             </div>
           </div>
-          <div className="flex gap-3">
-            <ScoreBox label="Match Score" value={job.matchScore} icon={<TrendingUp className="w-4 h-4 text-blue-400" />} tone="blue" />
-            <ScoreBox label="Your Strength" value={job.candidateScore} icon={<Sparkles className="w-4 h-4 text-green-400" />} tone="green" />
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-gray-400">Scores</span>
+              <button type="button" onClick={() => setShowScoreInfo((v: boolean) => !v)} className="text-xs text-indigo-300 active:text-indigo-200 flex items-center gap-1"><Info className="w-3.5 h-3.5" />What’s this?</button>
+            </div>
+            <div className="flex gap-3">
+              <ScoreBox label="Match Score" value={job.matchScore} icon={<TrendingUp className="w-4 h-4 text-blue-400" />} tone="blue" />
+              <ScoreBox label="Your Strength" value={job.candidateScore} icon={<Sparkles className="w-4 h-4 text-green-400" />} tone="green" />
+            </div>
+            {showScoreInfo && (
+              <div className="mt-2 text-xs text-gray-400 bg-gray-900/60 border border-gray-700 rounded-xl p-3 space-y-1.5">
+                <p><span className="text-blue-300 font-medium">Match Score</span> — how well this job fits your profile (titles, skills, seniority).</p>
+                <p><span className="text-green-300 font-medium">Your Strength</span> — your fit as a candidate: the match score adjusted for your CV and experience. They’re equal when no adjustments apply.</p>
+              </div>
+            )}
           </div>
           {job.whyFits && (<div className="bg-gradient-to-br from-amber-950/50 to-orange-950/50 rounded-2xl p-4 border-2 border-amber-700"><div className="flex items-center gap-2 mb-2"><div className="w-7 h-7 bg-amber-500 rounded-full flex items-center justify-center"><Sparkles className="w-4 h-4 text-white" /></div><h4 className="font-bold text-amber-400 text-sm">Why this is a strong fit</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
           {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
@@ -430,6 +456,14 @@ const TABS: [DashboardTab, string, any][] = [
 function DashboardView(p: any) {
   const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, onMarkApplied, onRemoveQueued, onRetry, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings, onReload } = p;
   const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
+  const [sortBy, setSortBy] = useState<"match" | "date" | "company">("match");
+  const sortJobs = (arr: UiJob[]) => {
+    const a = [...(arr || [])];
+    if (sortBy === "company") a.sort((x, y) => (x.company || "").localeCompare(y.company || ""));
+    else if (sortBy === "date") a.sort((x, y) => (y.foundDate || "").localeCompare(x.foundDate || ""));
+    else a.sort((x, y) => (y.matchScore ?? -1) - (x.matchScore ?? -1));
+    return a;
+  };
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       <header className="bg-gray-800 border-b border-gray-700 safe-top">
@@ -448,10 +482,20 @@ function DashboardView(p: any) {
         <div className="grid grid-cols-3 gap-2 mb-4">
           {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
         </div>
+        {["queue", "applied", "deferred"].includes(activeTab) && (
+          <div className="flex items-center justify-end gap-2 mb-3">
+            <span className="text-xs text-gray-500">Sort by</span>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="px-3 py-1.5 border border-gray-700 rounded-lg bg-gray-800 text-gray-200 text-xs">
+              <option value="match">Match</option>
+              <option value="date">Date</option>
+              <option value="company">Company</option>
+            </select>
+          </div>
+        )}
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
-          {activeTab === "queue" && <QueueTab jobs={approvedJobs} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} onReload={onReload} />}
-          {activeTab === "applied" && <ListTab jobs={appliedJobs} onSelectJob={setSelectedJob} showStatus emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
-          {activeTab === "deferred" && <DeferredTab jobs={deferredJobs} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} />}
+          {activeTab === "queue" && <QueueTab jobs={sortJobs(approvedJobs)} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} onReload={onReload} />}
+          {activeTab === "applied" && <ListTab jobs={sortJobs(appliedJobs)} onSelectJob={setSelectedJob} showStatus emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
+          {activeTab === "deferred" && <DeferredTab jobs={sortJobs(deferredJobs)} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} />}
           {activeTab === "passed" && <PassedTab />}
           {activeTab === "activity" && <ActivityTab />}
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={appliedJobs.length} />}
@@ -751,6 +795,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
               <div className="flex items-center gap-3 p-3 mb-3 bg-gray-800 rounded-xl border border-gray-700">
                 <div className="w-9 h-9 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-indigo-300" /></div>
                 <div className="min-w-0 flex-1"><p className="text-sm font-medium text-white truncate">{cvName}</p><p className="text-xs text-gray-400">{cvDate ? `Uploaded ${fmtDate(cvDate)}` : "Current CV on file"}</p></div>
+                <a href="/api/cv" target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1.5"><ExternalLink className="w-3.5 h-3.5" />View</a>
               </div>
             )}
             <label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">{cvName ? "Tap to replace" : "Tap to upload"}</p><p className="text-xs text-gray-500">PDF, max 5MB</p>{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label>

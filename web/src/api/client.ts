@@ -44,6 +44,7 @@ export type UiJob = {
   applyConfirmation: string;
   applyError: string;
   applyFailureType: string;
+  foundDate: string | null;
 };
 
 export type Me = {
@@ -177,5 +178,6 @@ export function toUiJob(j: ApiJob): UiJob {
     applyConfirmation: j.apply_confirmation || "",
     applyError: j.apply_error || "",
     applyFailureType: j.apply_failure_type || "",
+    foundDate: j.found_date ?? null,
   };
 }
