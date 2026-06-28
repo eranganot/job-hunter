@@ -6754,6 +6754,85 @@ if __name__ == "__main__":
     except Exception as _ae:
         print(f"[startup] admin-role ensure failed: {_ae}")
 
+    # ── One-time queue cleanup (set QUEUE_CLEANUP=1 to run once, then remove it) ──
+    # Marks every queued job (new/approved/deferred) for the admin user as
+    # 'applied (manual)' EXCEPT a keep-list, so jobs handled outside the app leave
+    # the queue and are remembered. Guarded by a DB marker so it runs EXACTLY once
+    # — a future search can never be wiped even if the env var is left set.
+    # Override keepers with QUEUE_CLEANUP_KEEP="limy:senior product manager;riskified:product strategy director".
+    try:
+        _qc_flag = (os.environ.get("QUEUE_CLEANUP", "") or "").strip().lower()
+        if _qc_flag in ("1", "true", "yes", "on"):
+            _qc = database.get_db()
+            _qc.execute("CREATE TABLE IF NOT EXISTS app_flags "
+                        "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
+            _done = _qc.execute("SELECT 1 FROM app_flags WHERE key='queue_cleanup_done'").fetchone()
+            if _done:
+                _qc.close()
+                print("[cleanup] QUEUE_CLEANUP set but already ran once — skipping. Remove the env var.")
+            else:
+                _arow = _qc.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
+                                    (ADMIN_EMAIL,)).fetchone()
+                _cuid = _arow["id"] if _arow else 1
+                import re as _re_qc2
+                _keep_env = (os.environ.get("QUEUE_CLEANUP_KEEP", "") or "").strip()
+                if _keep_env:
+                    _keepers = []
+                    for _pair in _keep_env.split(";"):
+                        if ":" in _pair:
+                            _c, _t = _pair.split(":", 1)
+                            _keepers.append((_c.strip().lower(), _t.strip().lower()))
+                else:
+                    _keepers = [("limy", "senior product manager"),
+                                ("riskified", "product strategy director")]
+                def _qnorm(_s):
+                    return _re_qc2.sub(r"[^a-z0-9 ]", " ", (_s or "").lower()).strip()
+                def _qkeep(_co, _ti):
+                    _con, _tin = _qnorm(_co), _qnorm(_ti)
+                    for _kc, _kt in _keepers:
+                        if _kc and _kc not in _con:
+                            continue
+                        if _kt and not all(_w in _tin for _w in _kt.split() if len(_w) >= 3):
+                            continue
+                        return True
+                    return False
+                _rows = _qc.execute(
+                    "SELECT id, title, company FROM jobs WHERE user_id=? "
+                    "AND status IN ('new','approved','deferred')", (_cuid,)
+                ).fetchall()
+                _today = datetime.now().strftime("%Y-%m-%d")
+                _kept = 0
+                _cleared = 0
+                _kept_names = []
+                for _r in _rows:
+                    if _qkeep(_r["company"], _r["title"]):
+                        _kept += 1
+                        _kept_names.append(f"{_r['title']} @ {_r['company']}")
+                        continue
+                    _qc.execute(
+                        "UPDATE jobs SET status='applied', applied_date=?, "
+                        "notes=?, apply_status='manual' WHERE id=? AND user_id=?",
+                        (_today, "Marked applied manually (one-time queue cleanup)",
+                         _r["id"], _cuid)
+                    )
+                    _cleared += 1
+                _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
+                            "('queue_cleanup_done', ?)",
+                            (f"kept={_kept} cleared={_cleared} {_today}",))
+                _qc.commit()
+                _qc.close()
+                try:
+                    database.log_activity(_cuid, "job_applied",
+                        f"One-time cleanup: marked {_cleared} queued job(s) applied (manual); kept {_kept}")
+                except Exception:
+                    pass
+                print(f"[cleanup] ONE-TIME DONE: user {_cuid} kept {_kept} ({_kept_names}), "
+                      f"marked {_cleared} applied(manual). >>> Remove the QUEUE_CLEANUP env var now. <<<")
+    except Exception as _qce:
+        import traceback as _tb_qc
+        print(f"[cleanup] one-time queue cleanup error: {_qce}")
+        _tb_qc.print_exc()
+
     # One-time cleanup: an 'applied' job that recorded an error never actually
     # succeeded -> move it back to the queue as a retryable failure. Idempotent.
     try:
