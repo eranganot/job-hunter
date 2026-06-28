@@ -652,6 +652,14 @@ def run_job_search(user_id: int):
             _tm_categories = _pick_techmap_categories(titles_, kws_)
             print(f"[search] TechMap categories for this user: {_tm_categories}")
 
+            # -- Israeli company slugs (Lever) --
+            _LV_COMPANIES = {
+                'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
+                # Global tech with Israeli offices (Lever)
+                'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
+                'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
+            }
+
             # ── Dynamic Greenhouse discovery from TechMap CSV(s) ──────────────
             # Fetch TechMap now (before ATS threads launch) to discover additional
             # Greenhouse board slugs from job URLs. This keeps coverage self-updating.
@@ -693,13 +701,6 @@ def run_job_search(user_id: int):
             except Exception as _tm_disc_err:
                 print(f"[search] TechMap discovery error (non-fatal): {_tm_disc_err}")
                 _tm_prefetched_rows = None
-            # -- Israeli company slugs (Lever) --
-            _LV_COMPANIES = {
-                'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
-                # Global tech with Israeli offices (Lever)
-                'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
-                'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
-            }
             # -- SmartRecruiters public boards --
             _SR_COMPANIES = {
                 'servicenow': 'ServiceNow',
@@ -1263,7 +1264,7 @@ def run_job_search(user_id: int):
                         _parts.append({'text': prompt_})
                         _g_body = _js2.dumps({
                             'contents': [{'parts': _parts}],
-                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 8192}
+                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 12288, 'thinkingConfig': {'thinkingBudget': 0}}
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
@@ -1390,7 +1391,7 @@ def run_job_search(user_id: int):
                         _ws_body = _js2.dumps({
                             'contents': [{'parts': [{'text': _ws_prompt}]}],
                             'tools': [{'google_search': {}}],
-                            'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048}
+                            'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048, 'thinkingConfig': {'thinkingBudget': 0}}
                         }).encode('utf-8')
                         _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                    'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY_WS)
@@ -1569,7 +1570,7 @@ def run_job_search(user_id: int):
                                             pass
                                     _body_d = _js2.dumps({
                                         "contents": [{"parts": _parts_d}],
-                                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096}
+                                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}}
                                     }).encode()
                                     _url_d = ("https://generativelanguage.googleapis.com/v1beta/models/"
                                               "gemini-2.5-flash:generateContent?key=" + _TB_GEMINI)

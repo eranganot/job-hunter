@@ -18,6 +18,11 @@ from .proxies import ProxyManager
 try:
     import httpx
     _HTTPX = True
+    # httpx logs every request at INFO to stderr, which Railway flags as
+    # red "error" lines — silence it (we already log our own summaries).
+    import logging as _logging
+    _logging.getLogger("httpx").setLevel(_logging.WARNING)
+    _logging.getLogger("httpcore").setLevel(_logging.WARNING)
 except Exception:
     _HTTPX = False
 
