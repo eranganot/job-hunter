@@ -111,7 +111,11 @@ export function SwipeFlow() {
   const deferredCount = deferredJobs.length;
   const rejectedCount = (stats?.rejected ?? 0) + rejectedDelta;
 
-  const advance = () => setTimeout(() => { setCurrentIndex((i) => i + 1); setDirection(null); }, 240);
+  const finishedSwiping = useRef(false);
+  const advance = () => {
+    if (currentIndex >= reviewJobs.length - 1) finishedSwiping.current = true; // last card
+    setTimeout(() => { setCurrentIndex((i) => i + 1); setDirection(null); }, 240);
+  };
 
   const armUndo = (u: { type: "approve" | "defer"; job: UiJob }) => {
     setUndo(u);
@@ -221,13 +225,15 @@ export function SwipeFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentJob, showSettings, view, pendingReject]);
 
-  // After swiping through a non-empty stack, go straight to the dashboard
-  // instead of dwelling on the "All done" screen. Empty stacks keep it.
+  // Right after the user swipes the LAST card, jump to the dashboard.
+  // Gated by finishedSwiping so opening Swipe later (with an already-empty
+  // stack) shows the "All done / Run a new search" screen instead of bouncing.
   useEffect(() => {
-    if (view === "swipe" && !loading && reviewJobs.length > 0 && currentIndex >= reviewJobs.length) {
+    if (view === "swipe" && !loading && !pendingReject && finishedSwiping.current && currentIndex >= reviewJobs.length) {
+      finishedSwiping.current = false;
       setView("dashboard"); setDashboardTab("queue");
     }
-  }, [view, loading, currentIndex, reviewJobs.length]);
+  }, [view, loading, pendingReject, currentIndex, reviewJobs.length]);
 
   if (loading) return <CenterState icon={<Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />} title="Loading your jobs…" />;
   if (error) return <CenterState icon={<AlertCircle className="w-10 h-10 text-red-400" />} title={error} action={{ label: "Retry", onClick: loadAll }} />;
@@ -248,11 +254,6 @@ export function SwipeFlow() {
   }
 
   if (currentIndex >= reviewJobs.length) {
-    // Finished a non-empty stack -> the effect above redirects to the
-    // dashboard; show a brief spinner rather than the "All done" screen.
-    if (reviewJobs.length > 0) {
-      return <CenterState icon={<Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />} title="Opening dashboard…" />;
-    }
     return (
       <>
         <AllDoneScreen approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount}
