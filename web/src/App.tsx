@@ -63,6 +63,7 @@ export function SwipeFlow() {
   const [rejectedDelta, setRejectedDelta] = useState(0);
   const undoTimer = useRef<any>(null);
   const [searchMsg, setSearchMsg] = useState("");
+  const [actionError, setActionError] = useState("");
 
   // pull-to-refresh
   const [pull, setPull] = useState(0);
@@ -123,11 +124,19 @@ export function SwipeFlow() {
     undoTimer.current = setTimeout(() => setUndo(null), 5000);
   };
 
+  // Persist a swipe action; if the server write fails, stop swallowing it —
+  // surface a clear message so the user knows the change didn't save.
+  const persistAction = (p: Promise<any>, label: string) => {
+    p.then(() => setActionError("")).catch((e: any) => {
+      setActionError(`Couldn't save your ${label} \u2014 ${e?.message || "the change wasn\u2019t saved"}. Pull down to refresh.`);
+    });
+  };
+
   const handleApprove = () => {
     const job = currentJob; if (!job || pendingReject) return;
     setDirection("right");
     setApprovedJobs((p) => [{ ...job, status: "approved" }, ...p]);
-    api.approve(job.id).catch(() => {});
+    persistAction(api.approve(job.id), "approve");
     armUndo({ type: "approve", job });
     advance();
   };
@@ -144,7 +153,7 @@ export function SwipeFlow() {
     const job = pendingReject; setPendingReject(null);
     if (!job) return;
     const reason = reasonKey ? (REJECT_REASONS[reasonKey] || reasonKey) : "Not a fit";
-    api.reject(job.id, reason).catch(() => {});
+    persistAction(api.reject(job.id, reason), "pass");
   };
 
   const undoPass = () => {
@@ -163,7 +172,7 @@ export function SwipeFlow() {
     const job = currentJob; if (!job || pendingReject) return;
     setDirection(null);
     setDeferredJobs((p) => [{ ...job, status: "deferred" }, ...p]);
-    api.later(job.id).catch(() => {});
+    persistAction(api.later(job.id), "defer");
     armUndo({ type: "defer", job });
     advance();
   };
@@ -304,6 +313,7 @@ export function SwipeFlow() {
       <div className="relative z-10 max-w-2xl mx-auto px-5 pt-3">
         <button onClick={runSearchNow} className="w-full py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium flex items-center justify-center gap-2"><SearchIcon className="w-4 h-4" />Run a new search</button>
         {searchMsg && <p className="text-xs text-indigo-300 mt-1.5 text-center">{searchMsg}</p>}
+        {actionError && <p className="text-xs text-red-300 mt-1.5 text-center">{actionError}</p>}
       </div>
 
       <NotifyNudge />

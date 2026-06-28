@@ -532,9 +532,12 @@ def run_job_search(user_id: int):
 
         # ── Load all existing URLs to dedup against full history ─────────
         conn = database.get_db()
+        # Dedup against EVERY job URL we've ever stored for this user (any status,
+        # any age). This guarantees a job the user already swiped — approved,
+        # passed/rejected, deferred, applied, or expired — is never re-added as
+        # "new" by a later search.
         existing_urls = {r[0] for r in conn.execute(
-            "SELECT url FROM jobs WHERE user_id=? AND url!='' "
-            "AND found_date >= date('now', '-30 days') AND status NOT IN ('applied','rejected')", (user_id,)
+            "SELECT url FROM jobs WHERE user_id=? AND url!=''", (user_id,)
         ).fetchall()}
         conn.close()
 
