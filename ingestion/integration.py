@@ -79,7 +79,7 @@ def collect_external_sources(
                 # the user's locations/titles before they reach the scorer.
                 if _gate and not _passes_relevance(
                         nj.title, nj.location or "", titles or [],
-                        locations or [], keywords or [], query.remote_ok):
+                        locations or [], keywords or []):
                     dropped += 1
                     continue
                 out.append(CanonicalJob.from_normalized(nj).to_legacy_dict())

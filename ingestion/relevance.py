@@ -42,7 +42,13 @@ _IL_TOKENS = {
     "hod hasharon", "givatayim", "modiin", "modi'in", "ness ziona",
 }
 
-_REMOTE_TOKENS = ("remote", "anywhere", "work from home", "wfh", "hybrid", "מרחוק")
+# Remote-ANYWHERE indicators (NOT "hybrid" — hybrid implies a physical office).
+_REMOTE_ANYWHERE = ("remote", "anywhere", "work from home", "work-from-home", "wfh", "מרחוק")
+
+# Work-mode words that must NOT be read as geography. Without this, a user who
+# put "Hybrid" in their preferences would match a "Hybrid - London" posting.
+_WORKMODE_WORDS = {"hybrid", "remote", "onsite", "on-site", "office", "wfh",
+                   "anywhere", "flexible", "relocation", "fulltime", "parttime"}
 
 # generic title words that should NOT count as a meaningful role-noun overlap
 _GENERIC = {
@@ -68,24 +74,40 @@ def _user_is_israel(user_locations: list[str]) -> bool:
     return False
 
 
+def _accepts_remote(user_locations: list[str]) -> bool:
+    """True only if the user explicitly wants remote-anywhere (NOT 'hybrid')."""
+    for ul in user_locations:
+        u = (ul or "").lower()
+        if any(t in u for t in _REMOTE_ANYWHERE):
+            return True
+    return False
+
+
 def passes_location(location: str, user_locations: list[str],
-                    remote_ok: bool = True) -> bool:
+                    accept_remote: "bool | None" = None) -> bool:
     if not user_locations:
         return True
     loc = (location or "").strip().lower()
     if not loc:
         return True                      # unknown location → let the AI decide
-    if remote_ok and any(t in loc for t in _REMOTE_TOKENS):
-        return True
+    if accept_remote is None:
+        accept_remote = _accepts_remote(user_locations)
+    # Israel-aware geographic match (covers Tel Aviv / Herzliya / "..., Israel" / Hybrid-in-Israel)
     if _user_is_israel(user_locations) and any(t in loc for t in _IL_TOKENS):
         return True
-    # token overlap with the user's stated locations
+    # user-listed PLACE tokens — work-mode words excluded so "hybrid" never
+    # counts as a location (a "Hybrid - London" job must NOT match an IL user).
     toks: set[str] = set()
     for ul in user_locations:
-        for w in (ul or "").lower().replace(",", " ").split():
-            if len(w) >= 3:
+        for w in (ul or "").lower().replace(",", " ").replace("-", " ").split():
+            if len(w) >= 3 and w not in _WORKMODE_WORDS:
                 toks.add(w)
-    return any(w in loc for w in toks)
+    if any(w in loc for w in toks):
+        return True
+    # remote-anywhere only if the user actually opted into remote (not hybrid)
+    if accept_remote and any(t in loc for t in _REMOTE_ANYWHERE):
+        return True
+    return False
 
 
 def passes_title(title: str, user_titles: list[str],
@@ -121,7 +143,9 @@ def passes_title(title: str, user_titles: list[str],
 
 def passes(job_title: str, job_location: str,
            user_titles: list[str], user_locations: list[str],
-           user_keywords: list[str], remote_ok: bool = True) -> bool:
-    """Both gates must pass for an external job to be kept."""
-    return (passes_location(job_location, user_locations, remote_ok)
+           user_keywords: list[str], accept_remote: "bool | None" = None) -> bool:
+    """Both gates must pass for an external job to be kept. ``accept_remote`` is
+    derived from the user's own preferences when left as None (so a user who
+    listed 'hybrid' but not 'remote' does NOT get remote-anywhere jobs)."""
+    return (passes_location(job_location, user_locations, accept_remote)
             and passes_title(job_title, user_titles, user_keywords))

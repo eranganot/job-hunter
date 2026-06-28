@@ -33,7 +33,12 @@ def _q(query) -> str:
 
 
 def _loc(query) -> str:
-    return (query.locations[0] if query.locations else "Israel")
+    """First GEOGRAPHIC location (skip work-mode words like 'hybrid'); default Israel."""
+    _workmode = {"hybrid", "remote", "onsite", "on-site", "office", "flexible", "anywhere"}
+    for l in (query.locations or []):
+        if l and l.strip().lower() not in _workmode:
+            return l
+    return "Israel"
 
 
 class _BigTechBase(SourceAdapter):
@@ -59,8 +64,8 @@ class MicrosoftAdapter(_BigTechBase):
     def _fetch_bigtech(self, query) -> list:
         out = []
         data = self.http.get_json(self.BASE, params={
-            "q": _q(query), "l": "en_us", "pg": 1, "pgSz": query.limit_per_source,
-            "o": "Relevance", "flt": "true",
+            "q": _q(query), "lc": _loc(query), "l": "en_us", "pg": 1,
+            "pgSz": query.limit_per_source, "o": "Relevance", "flt": "true",
         })
         if not data:
             return out
