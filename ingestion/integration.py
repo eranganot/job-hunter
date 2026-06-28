@@ -26,6 +26,7 @@ from .dedup import Deduplicator
 from .registry import build_adapters
 from .proxies import ProxyManager
 from .credits import CreditManager
+from .relevance import gate_enabled, passes as _passes_relevance
 
 # Process-wide singletons so the credit ledger / circuit-breaker state persists
 # across searches within a running app process.
@@ -60,6 +61,8 @@ def collect_external_sources(
     adapters = build_adapters(role, proxies, credits)
     out: list[dict[str, Any]] = []
     reports: list[str] = []
+    _gate = gate_enabled()
+    dropped = 0
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {ex.submit(a.fetch, query): a for a in adapters}
         for fut in as_completed(futs):
@@ -71,9 +74,18 @@ def collect_external_sources(
                 continue
             reports.append(f"{a.name.value}:{res.status.value}({res.count})")
             for nj in res.jobs:
+                # Geography + title gate: external sources are global and ignore
+                # the user's preferences server-side, so keep only jobs that match
+                # the user's locations/titles before they reach the scorer.
+                if _gate and not _passes_relevance(
+                        nj.title, nj.location or "", titles or [],
+                        locations or [], keywords or [], query.remote_ok):
+                    dropped += 1
+                    continue
                 out.append(CanonicalJob.from_normalized(nj).to_legacy_dict())
     print(f"[ingest] external sources (role={role}): " + ", ".join(sorted(reports)))
-    print(f"[ingest] external sources contributed {len(out)} raw jobs")
+    print(f"[ingest] external sources contributed {len(out)} jobs "
+          f"(gated out {dropped} off-preference; gate={'on' if _gate else 'off'})")
     return out
 
 
