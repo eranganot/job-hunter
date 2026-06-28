@@ -1701,6 +1701,17 @@ def run_job_search(user_id: int):
                 continue
             if j.get("match_score", 0) <= 0:
                 continue
+            # ── Relevance gate: only insert/notify jobs aligned with the user's
+            #    titles + locations, so off-target roles never reach the queue. ──
+            try:
+                from ingestion.relevance import passes as _rel_passes, gate_enabled as _rel_gate
+                if _rel_gate() and not _rel_passes(
+                        j.get("job_title") or j.get("title") or "",
+                        j.get("location") or "", titles, locations, keywords):
+                    skipped_rej += 1
+                    continue
+            except Exception:
+                pass
             try:
                 _jurl = (j.get("url") or "").strip()
                 if _jurl and _url_ok.get(_jurl) == 0:
@@ -6794,14 +6805,14 @@ if __name__ == "__main__":
     try:
         _qc_flag = (os.environ.get("QUEUE_CLEANUP", "") or "").strip().lower()
         if _qc_flag in ("1", "true", "yes", "on", "force"):
-            _force = (_qc_flag == "force")
             _qc = database.get_db()
             _qc.execute("CREATE TABLE IF NOT EXISTS app_flags "
                         "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
-            _done = _qc.execute("SELECT 1 FROM app_flags WHERE key='queue_cleanup_done'").fetchone()
-            if _done and not _force:
+            _tok_row = _qc.execute("SELECT value FROM app_flags WHERE key='queue_cleanup_token'").fetchone()
+            _last_tok = _tok_row[0] if _tok_row else ""
+            if _qc_flag == _last_tok:
                 _qc.close()
-                print("[cleanup] QUEUE_CLEANUP already ran once — skipping. Use QUEUE_CLEANUP=force to re-run, then remove the var.")
+                print(f"[cleanup] QUEUE_CLEANUP='{_qc_flag}' already ran for this value — skipping (it will NOT touch new search results). Change the value to re-run (e.g. =force2), or remove the var.")
             else:
                 _arow = _qc.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
                                     (ADMIN_EMAIL,)).fetchone()
@@ -6854,6 +6865,8 @@ if __name__ == "__main__":
                 _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
                             "('queue_cleanup_done', ?)",
                             (f"kept={_kept} cleared={_cleared} {_today}",))
+                _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
+                            "('queue_cleanup_token', ?)", (_qc_flag,))
                 _qc.commit()
                 _qc.close()
                 try:

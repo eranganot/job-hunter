@@ -112,33 +112,28 @@ def passes_location(location: str, user_locations: list[str],
 
 def passes_title(title: str, user_titles: list[str],
                  user_keywords: list[str], threshold: float = 80.0) -> bool:
-    if not user_titles and not user_keywords:
+    # No titles to match against → don't filter on title (let the AI scorer decide).
+    if not user_titles:
         return True
     nt = normalize_title(title)
     if not nt:
         return True
-    nt_tokens = set(nt.split())
-
     for t in user_titles:
         tg = normalize_title(t)
         if not tg:
             continue
         if tg in nt or nt in tg:         # substring (e.g. "product manager" ⊂ "senior product manager")
             return True
-        if _ratio(nt, tg) >= threshold:  # fuzzy whole-title
+        if _ratio(nt, tg) >= threshold:  # fuzzy whole-title (token-set ratio)
             return True
 
-    # meaningful role-noun overlap (drops generic words like "senior"/"manager")
-    key_tokens: set[str] = set()
-    for t in user_titles:
-        for w in normalize_title(t).split():
-            if len(w) >= 4 and w not in _GENERIC:
-                key_tokens.add(w)
-    for k in user_keywords:
-        for w in (k or "").lower().split():
-            if len(w) >= 3:
-                key_tokens.add(w)
-    return bool(key_tokens & nt_tokens)
+    # No single-shared-word fallback: with a title like "Forward Deployment
+    # Engineer" present, a lone shared word ("engineer", "lead") would let through
+    # unrelated roles (e.g. "Partner Solutions Engineer" / "CX Solution Engineer").
+    # Require a real WHOLE-title match. user_keywords is intentionally not used as
+    # a title qualifier (broad terms like "AI" over-match); keywords still drive
+    # the search queries and the AI scorer elsewhere.
+    return False
 
 
 def passes(job_title: str, job_location: str,
