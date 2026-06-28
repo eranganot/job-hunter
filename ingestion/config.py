@@ -67,7 +67,9 @@ class Config:
     JOBSPY_ENABLED = _env_bool("JOBSPY_ENABLED", True)     # still needs python-jobspy installed
 
     # ── big-tech (FREE — public internal endpoints) ───────────────────────
-    BIGTECH_ENABLED = _env_bool("BIGTECH_ENABLED", True)
+    # Big-Tech endpoints are OPT-IN: unvalidated/fragile + global, so default OFF.
+    # Turn on with BIGTECH_ENABLED=1 (still filtered by the relevance gate).
+    BIGTECH_ENABLED = _env_bool("BIGTECH_ENABLED", False)
     # Meta's GraphQL doc_id rotates; expose it as config so it can be refreshed
     # without a code change.
     META_GRAPHQL_DOC_ID = _env("META_GRAPHQL_DOC_ID")
