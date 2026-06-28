@@ -1066,27 +1066,59 @@ def run_job_search(user_id: int):
                     pass
             print(f"[search] Indeed: {_indeed_count} jobs matched")
 
-            # -- Second-level dedup: normalized company+title fingerprint --
-            def _norm_fp(_r):
-                import re as _re_fp
-                _tt = (_r.get("title") or "").lower()
-                _cc = (_r.get("company") or "").lower()
-                _tt = _re_fp.sub(r'[\(\[].*?[\)\]]', '', _tt)
-                _tt = _re_fp.sub(r'[^a-z0-9 ]', ' ', _tt)
-                _tt = _re_fp.sub(r'\s+', ' ', _tt).strip()
-                _cc = _re_fp.sub(r'[^a-z0-9 ]', ' ', _cc)
-                _cc = _re_fp.sub(r'\s+', ' ', _cc).strip()
-                return f"{_cc}|{_tt}"
-            _seen_fps = set()
-            _deduped = []
-            for _r in all_raw:
-                _fp = _norm_fp(_r)
-                if _fp and _fp != "|" and _fp not in _seen_fps:
-                    _seen_fps.add(_fp)
-                    _deduped.append(_r)
-            print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
-            all_raw = _deduped
-            print(f"[search] Pre-filter: {len(all_raw)} title-matched jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} companies")
+            # ── Multi-source ingestion + cross-platform fuzzy dedup ──────────
+            # New pipeline (ingestion/): pulls Big-Tech internal endpoints (free,
+            # everyone) + paid aggregators/scrapers (admin only), then fuzzy-merges
+            # the WHOLE union so a role mirrored across a career page + LinkedIn +
+            # an aggregator reaches the AI scorer ONCE. Falls back to the legacy
+            # exact-fingerprint dedup if the package is unavailable (never fatal).
+            _ingest_ok = False
+            try:
+                import ingestion as _ingestion
+                # role gates the paid sources (admin-only)
+                _role = "user"
+                try:
+                    _conn_r = database.get_db()
+                    _rr = _conn_r.execute(
+                        "SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+                    _conn_r.close()
+                    _role = (_rr["role"] if _rr and _rr["role"] else "user")
+                except Exception:
+                    _role = "user"
+                _ext = _ingestion.collect_external_sources(
+                    role=_role, titles=titles_, locations=locs_,
+                    keywords=kws_, existing_urls=existing_urls)
+                all_raw.extend(_ext)
+                _before = len(all_raw)
+                all_raw = _ingestion.deduplicate_raw(all_raw)
+                print(f"[search] Multi-source fuzzy dedup: {_before} -> {len(all_raw)} "
+                      f"canonical jobs (role={_role})")
+                _ingest_ok = True
+            except Exception as _ing_err:
+                print(f"[search] ingestion module unavailable ({_ing_err}); legacy dedup")
+
+            if not _ingest_ok:
+                # -- legacy exact company+title fingerprint dedup (fallback) --
+                def _norm_fp(_r):
+                    import re as _re_fp
+                    _tt = (_r.get("title") or "").lower()
+                    _cc = (_r.get("company") or "").lower()
+                    _tt = _re_fp.sub(r'[\(\[].*?[\)\]]', '', _tt)
+                    _tt = _re_fp.sub(r'[^a-z0-9 ]', ' ', _tt)
+                    _tt = _re_fp.sub(r'\s+', ' ', _tt).strip()
+                    _cc = _re_fp.sub(r'[^a-z0-9 ]', ' ', _cc)
+                    _cc = _re_fp.sub(r'\s+', ' ', _cc).strip()
+                    return f"{_cc}|{_tt}"
+                _seen_fps = set()
+                _deduped = []
+                for _r in all_raw:
+                    _fp = _norm_fp(_r)
+                    if _fp and _fp != "|" and _fp not in _seen_fps:
+                        _seen_fps.add(_fp)
+                        _deduped.append(_r)
+                print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
+                all_raw = _deduped
+            print(f"[search] Pre-filter: {len(all_raw)} jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} ATS boards + external sources")
 
             if not all_raw:
                 return []
