@@ -1161,18 +1161,36 @@ def run_job_search(user_id: int):
                 if "```" in t:
                     t = t.split("```")[1]
                     if t.startswith("json"): t = t[4:]
-                si = t.find("[");  ei = t.rfind("]")
-                if si < 0 or ei <= si:
+                si = t.find("[")
+                if si < 0:
                     print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
                     return []
-                try:
-                    parsed = _js2.loads(t[si:ei+1])
-                except Exception as _parse_err:
-                    print(f"[search] ⚠️  JSON parse failed: {_parse_err} | raw snippet: {t[si:si+120]!r}")
-                    return []
+                ei = t.rfind("]")
+                parsed = None
+                if ei > si:
+                    try:
+                        parsed = _js2.loads(t[si:ei+1])
+                    except Exception:
+                        parsed = None
+                if parsed is None:
+                    # Salvage a TRUNCATED array (Gemini hit its output token limit):
+                    # keep every COMPLETE object up to the last closing brace instead
+                    # of throwing away the whole 50-job batch.
+                    _frag = t[si:]
+                    _last = _frag.rfind("}")
+                    if _last > 0:
+                        try:
+                            parsed = _js2.loads(_frag[:_last + 1] + "]")
+                            print(f"[search] ⚠️  Recovered {len(parsed)} job(s) from a truncated AI response")
+                        except Exception as _pe:
+                            print(f"[search] ⚠️  JSON parse failed (unrecoverable): {_pe}")
+                            return []
+                    else:
+                        print(f"[search] ⚠️  AI response had no parseable JSON — skipping batch")
+                        return []
                 out = []
                 for j in parsed:
-                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 40:
+                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 30:
                         j.setdefault("match_score", j.get("candidate_score", 0))
                         j.setdefault("found_date", today)
                         j.setdefault("source", "greenhouse/lever")
@@ -1239,7 +1257,7 @@ def run_job_search(user_id: int):
                     "  target roles. Determine the candidate's actual field FROM THE CV — do NOT assume "
                     "  product management or any other specific field.\n\n"
                     "Total score = Title + Seniority + Location + CV-Requirements. "
-                    "Include jobs scoring >= 40. "
+                    "Include jobs scoring >= 30. "
                     "For fit_reason: one sentence citing which dimensions scored highest and why. "
                     "Return ONLY a valid JSON array with fields: "
                     "job_title, company, location, url, publish_date (null if unknown), "
@@ -1333,7 +1351,7 @@ def run_job_search(user_id: int):
                         if _lp.lower() in _loc or "remote" in _loc or "israel" in _loc:
                             _score += 10
                             break
-                    if _score >= 40:
+                    if _score >= 30:
                         _jc = dict(j)
                         _jc["candidate_score"] = min(_score, 95)
                         _jc["match_score"] = _jc["candidate_score"]
@@ -1358,8 +1376,8 @@ def run_job_search(user_id: int):
             _jobs_to_score = _ats_jobs + _other_jobs
             print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other)")
             scored_jobs = []
-            for batch_i in range(0, len(_jobs_to_score), 50):
-                batch = _jobs_to_score[batch_i:batch_i+50]
+            for batch_i in range(0, len(_jobs_to_score), 20):
+                batch = _jobs_to_score[batch_i:batch_i+20]
                 scored_jobs.extend(_score_batch(batch, profile_text))
 
             # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
@@ -1772,15 +1790,25 @@ def run_job_search(user_id: int):
         database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")
 
         # ── Consolidated search notification ─────────────────────────────
-        notif_lines = [f"🔍 Search Complete — {today}"]
+        # The FIRST line is what the phone push banner shows, so summarize the
+        # result there (count + top companies) instead of just "Search Complete".
         if inserted > 0:
-            notif_lines.append(f"\n📋 {inserted} new job(s) added for review:")
+            _uniq_co = []
+            for _ci in new_jobs_info:
+                _cco = (_ci.get("company") or "").strip()
+                if _cco and _cco not in _uniq_co:
+                    _uniq_co.append(_cco)
+            _co_str = ", ".join(_uniq_co[:4]) + ("…" if len(_uniq_co) > 4 else "")
+            _headline = f"🎯 {inserted} new role(s) for review"
+            if _co_str:
+                _headline += f" — {_co_str}"
+            notif_lines = [_headline, ""]
             for info in new_jobs_info[:10]:
                 icon = "🔗" if info["url_ok"]==1 else ("⚠️" if info["url_ok"]==0 else "")
                 notif_lines.append(f"  • {info['title']} @ {info['company']} {icon}".rstrip())
             if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
         else:
-            notif_lines.append("\nNo new jobs inserted (all already in history).")
+            notif_lines = [f"🔍 Search done — no new matches today ({today})"]
         if (hist_alive+hist_dead)>0:
             notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
             notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
@@ -6526,7 +6554,7 @@ class Handler(BaseHTTPRequestHandler):
                         conn2 = database.get_db()
                         for orig in batch:
                             scored_j = url_to_score.get(orig['url'])
-                            if scored_j and scored_j.get('candidate_score', 0) >= 40:
+                            if scored_j and scored_j.get('candidate_score', 0) >= 30:
                                 conn2.execute(
                                     "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
                                     (scored_j['candidate_score'], scored_j['candidate_score'],
