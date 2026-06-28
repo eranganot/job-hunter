@@ -6642,6 +6642,88 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        # ── One-time queue cleanup (admin/maintenance) ─────────────────────────
+        # Marks every job currently in the review queue as "applied (manual)" —
+        # EXCEPT a keep-list — so jobs the user already handled outside the app
+        # leave the queue and are remembered. Auth: SYNC_API_KEY. Defaults to a
+        # DRY RUN (preview only); pass {"dry_run": false} to actually commit.
+        if path == "/api/sync/queue-cleanup":
+            data = self.read_json()
+            if not self._check_sync_key(data.get("api_key", "")):
+                self.send_json({"error": "Unauthorized"}, 401)
+                return
+            _uid = data.get("user_id")
+            if not _uid:
+                _c0 = database.get_db()
+                _arow = _c0.execute(
+                    "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
+                ).fetchone()
+                _c0.close()
+                _uid = _arow["id"] if _arow else 1
+            _uid = int(_uid)
+            dry_run = data.get("dry_run", True)
+            if isinstance(dry_run, str):
+                dry_run = dry_run.strip().lower() not in ("0", "false", "no", "off")
+            mark_status = data.get("mark_status", "applied")
+            keepers = data.get("keep") or [
+                {"company": "limy", "title": "senior product manager"},
+                {"company": "riskified", "title": "product strategy director"},
+            ]
+            statuses = data.get("statuses") or ["new", "approved", "deferred"]
+            import re as _re_qc
+            def _qc_norm(s):
+                return _re_qc.sub(r"[^a-z0-9 ]", " ", (s or "").lower()).strip()
+            def _is_keeper(_co, _ti):
+                _con, _tin = _qc_norm(_co), _qc_norm(_ti)
+                for k in keepers:
+                    kc, kt = _qc_norm(k.get("company", "")), _qc_norm(k.get("title", ""))
+                    if kc and kc not in _con:
+                        continue
+                    if kt and not all(w in _tin for w in kt.split() if len(w) >= 3):
+                        continue
+                    return True
+                return False
+            conn = database.get_db()
+            _ph = ",".join("?" for _ in statuses)
+            rows = conn.execute(
+                "SELECT id, title, company, status FROM jobs "
+                "WHERE user_id=? AND status IN (" + _ph + ")",
+                (_uid, *statuses)
+            ).fetchall()
+            keep_list, clear_list = [], []
+            for r in rows:
+                rec = {"id": r["id"], "title": r["title"],
+                       "company": r["company"], "status": r["status"]}
+                (keep_list if _is_keeper(r["company"], r["title"]) else clear_list).append(rec)
+            if dry_run:
+                conn.close()
+                self.send_json({
+                    "dry_run": True, "user_id": _uid,
+                    "would_keep": keep_list, "would_keep_count": len(keep_list),
+                    "would_clear_count": len(clear_list), "would_clear": clear_list,
+                })
+                return
+            today = datetime.now().strftime("%Y-%m-%d")
+            cleared = 0
+            for c in clear_list:
+                conn.execute(
+                    "UPDATE jobs SET status=?, applied_date=?, notes=?, "
+                    "apply_status='manual' WHERE id=? AND user_id=?",
+                    (mark_status, today, "Marked applied manually (bulk queue cleanup)",
+                     c["id"], _uid)
+                )
+                cleared += 1
+            conn.commit()
+            conn.close()
+            database.log_activity(
+                _uid, "job_applied",
+                f"Bulk cleanup: marked {cleared} queued job(s) applied (manual); kept {len(keep_list)}"
+            )
+            print(f"[cleanup] user {_uid}: kept {len(keep_list)}, marked {cleared} applied(manual)")
+            self.send_json({"success": True, "kept": len(keep_list),
+                            "cleared": cleared, "kept_jobs": keep_list})
+            return
+
         self.send_response(404)
         self.end_headers()
 

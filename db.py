@@ -26,7 +26,7 @@ def get_db() -> sqlite3.Connection:
     # immediately. busy_timeout makes writers wait up to N ms for the lock to
     # clear instead — eliminates the spurious lock errors seen in prod logs
     # (2026-05-27) without changing semantics.
-    conn.execute("PRAGMA busy_timeout = 10000")    # 10 seconds
+    conn.execute("PRAGMA busy_timeout = 30000")    # 30s — writers wait instead of failing (fixes removes dropped under heavy search)
     # NORMAL is safe under WAL and noticeably faster than the default FULL;
     # the only thing it relaxes is fsync on every commit (durability across a
     # power cut, which Railway's host already protects against).
