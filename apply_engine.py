@@ -483,7 +483,11 @@ def _claude(prompt: str, max_tokens: int = 1024) -> str:
         raise RuntimeError("GEMINI_API_KEY not configured")
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens},
+        # gemini-2.5-flash "thinking" otherwise eats the output budget and the
+        # call returns prose with no JSON (e.g. extract_applicant_data: "No JSON
+        # found"). Disable thinking so the structured output comes back.
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens,
+                             "thinkingConfig": {"thinkingBudget": 0}},
     }).encode("utf-8")
     req = urllib.request.Request(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key,
