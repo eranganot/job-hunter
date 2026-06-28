@@ -6216,9 +6216,22 @@ class Handler(BaseHTTPRequestHandler):
             database.write_approved_jobs(BASE_DIR)
             bump_onboarding(user_id, "first_job_reviewed")
 
-            # On approval: immediately kick off background application
+            # On approval: kick off a background application ONLY if the user has
+            # auto-apply enabled. Otherwise approving just shortlists the job (moves
+            # it to the Approved queue); the user applies explicitly via "Apply Now"
+            # or the scheduled apply run. This keeps the apply engine OUT of the
+            # search/review flow unless auto-apply was deliberately turned on.
             if action == "approve":
-                _trigger_apply_bg(user_id, job_id)
+                _aa_conn = database.get_db()
+                _aa_row = _aa_conn.execute(
+                    "SELECT auto_apply_enabled FROM user_profiles WHERE user_id=?",
+                    (user_id,)
+                ).fetchone()
+                _aa_conn.close()
+                if _aa_row and _aa_row["auto_apply_enabled"]:
+                    _trigger_apply_bg(user_id, job_id)
+                else:
+                    print(f"[approve] job {job_id} shortlisted (auto-apply off — not applying)")
 
             self.send_json({"success": True})
             return
