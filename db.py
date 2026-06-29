@@ -18,6 +18,12 @@ def get_db() -> sqlite3.Connection:
     # timeout=30 — Python-level lock wait (some platforms ignore busy_timeout
     # otherwise). Pair it with PRAGMA busy_timeout for belt-and-suspenders.
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    # Autocommit (isolation_level=None): every write commits immediately and
+    # releases the SQLite writer lock, so a leaked/abandoned connection can
+    # never hold the lock open and starve other writers (the root cause of
+    # persistent "database is locked"). Explicit conn.commit() calls become
+    # harmless no-ops; readers are unaffected (WAL).
+    conn.isolation_level = None
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode=WAL")

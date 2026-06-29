@@ -6073,8 +6073,11 @@ class Handler(BaseHTTPRequestHandler):
 
         elif self.path == '/api/cv-optimizer-analyze':
             if self.command == 'GET':
-                with database.get_db() as _conn:
+                _conn = database.get_db()
+                try:
                     _prof = _conn.execute('SELECT cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
+                finally:
+                    _conn.close()
                 if _prof and _prof['cv_optimizer_result']:
                     _res = json.loads(_prof['cv_optimizer_result'])
                     _res['cached'] = True; _res['analyzed_date'] = _prof['cv_optimizer_date']
@@ -6083,8 +6086,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == 'POST':
                 try:
                     from datetime import datetime as _dt, timedelta as _td
-                    with database.get_db() as _conn:
+                    _conn = database.get_db()
+                    try:
                         _prof = _conn.execute('SELECT cv_path, cv_summary, cv_optimizer_result, cv_optimizer_date FROM user_profiles WHERE user_id=?', (user_id,)).fetchone()
+                    finally:
+                        _conn.close()
                     if not _prof:
                         self.send_json({'error': 'Profile not found'}, 404); return
                     if _prof['cv_optimizer_result'] and _prof['cv_optimizer_date']:
@@ -6103,10 +6109,13 @@ class Handler(BaseHTTPRequestHandler):
                     _result['cached'] = False
                     _now = _dt.now().isoformat()
                     _result['analyzed_date'] = _now
-                    with database.get_db() as _conn:
+                    _conn = database.get_db()
+                    try:
                         _conn.execute('UPDATE user_profiles SET cv_optimizer_result=?, cv_optimizer_date=? WHERE user_id=?',
                                       (json.dumps(_result), _now, user_id))
                         _conn.commit()
+                    finally:
+                        _conn.close()
                     self.send_json(_result)
                 except Exception as _e:
                     self.send_json({'error': str(_e)}, 500)
@@ -6915,6 +6924,10 @@ if __name__ == "__main__":
         import traceback as _tb_qc
         print(f"[cleanup] one-time queue cleanup error: {_qce}")
         _tb_qc.print_exc()
+        try:
+            _qc.close()
+        except Exception:
+            pass
 
     # Process any waiting files
     database.import_pending_jobs(BASE_DIR)
