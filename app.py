@@ -1173,18 +1173,25 @@ def run_job_search(user_id: int):
                     except Exception:
                         parsed = None
                 if parsed is None:
-                    # Salvage a TRUNCATED array (Gemini hit its output token limit):
-                    # keep every COMPLETE object up to the last closing brace instead
-                    # of throwing away the whole 50-job batch.
+                    # Robust salvage: read complete objects one-by-one with
+                    # raw_decode. Handles truncation (output cut off), a missing
+                    # comma between objects, and trailing junk — we keep every
+                    # object that parses and stop at the first broken one, instead
+                    # of throwing away the whole batch.
                     _frag = t[si:]
-                    _last = _frag.rfind("}")
-                    if _last > 0:
+                    _dec = _js2.JSONDecoder()
+                    parsed = []
+                    _k = _frag.find("{")
+                    while _k != -1:
                         try:
-                            parsed = _js2.loads(_frag[:_last + 1] + "]")
-                            print(f"[search] ⚠️  Recovered {len(parsed)} job(s) from a truncated AI response")
-                        except Exception as _pe:
-                            print(f"[search] ⚠️  JSON parse failed (unrecoverable): {_pe}")
-                            return []
+                            _obj, _end = _dec.raw_decode(_frag, _k)
+                        except Exception:
+                            break
+                        if isinstance(_obj, dict):
+                            parsed.append(_obj)
+                        _k = _frag.find("{", _end)
+                    if parsed:
+                        print(f"[search] ⚠️  Recovered {len(parsed)} job(s) from a malformed/truncated AI response")
                     else:
                         print(f"[search] ⚠️  AI response had no parseable JSON — skipping batch")
                         return []
