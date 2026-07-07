@@ -160,3 +160,31 @@ future failures are diagnosable without a live rerun.
   stub pages; a conservative re-check demotes already-"Verified" parked rows and
   surfaces them in the search notification. Regression tests added.
 - **Two queue-removal reasons:** "Link is broken" and "Job no longer exists".
+
+---
+
+## Progress log
+
+**2026-07-07 (round 2) — shipped:**
+- **Timeout hardening** (was: frequent "Apply exceeded 120s deadline"). Apply-path
+  Gemini calls now use a 25s timeout (`APPLY_LLM_TIMEOUT`); `networkidle` waits
+  trimmed to 4–5s; overall deadline default 120→150s (`APPLY_DEADLINE_S`).
+- **Truthful verification (B1)** — `_verify_submission`: confirmed/submitted only
+  on real evidence; blocked submits reported as failed with the on-page error.
+  Greenhouse/Lever/generic no longer report false "submitted".
+- **Phase 3 — auto-answer required questions** — on a validation-blocked submit,
+  collect the still-required/invalid fields, have Gemini answer them (work-auth =
+  authorized/no-sponsorship by default; EEO/demographic = decline), fill, and
+  resubmit once (bounded single recovery pass). Wired into Greenhouse + Lever.
+- **Phase 5-lite — failure diagnostics** — on non-confirmed outcomes, capture the
+  on-page validation text into the failure detail, plus an optional full-page
+  screenshot when `APPLY_DEBUG_DIR` is set.
+- **Push self-heal** — re-subscribes on load/focus when permission is granted
+  (heals rotated endpoints + subscriptions lost on redeploy).
+
+**Still open (needs the Railway volume + a live run):**
+- Attach the persistent volume so the queue, CV, and push subscriptions survive
+  redeploys (Phase 1). This is the likely reason the queue looked empty.
+- Extend the required-question recovery to the generic career-page path and the
+  Workday wizard.
+- Optional `apply-selftest` admin endpoint for one-tap live diagnosis.

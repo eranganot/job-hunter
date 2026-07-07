@@ -123,3 +123,65 @@ def test_check_url_alive_flags_parked(monkeypatch):
 
     monkeypatch.setattr(ae.urllib.request, "urlopen", lambda req, timeout=8: _Resp())
     assert ae.check_url_alive("https://saasjobs.io") is False
+
+
+# ── Required-question auto-answer (Phase 3) ────────────────────────────────────
+class _FakePage:
+    def __init__(self, fields=None):
+        self._fields = fields or []
+        self.filled = {}
+        self.selected = {}
+        self.checked = []
+    def evaluate(self, js):
+        return self._fields
+    def fill(self, sel, val):
+        self.filled[sel] = val
+    def select_option(self, sel, value=None, label=None):
+        self.selected[sel] = value if value is not None else label
+    def check(self, sel):
+        self.checked.append(sel)
+
+
+def test_collect_unfilled_required_dedups_and_caps():
+    fields = [{"selector": "#a", "label": "A", "type": "text", "options": []},
+              {"selector": "#a", "label": "A dup", "type": "text", "options": []},
+              {"selector": "#b", "label": "B", "type": "select", "options": ["x", "y"]}]
+    out = ae._collect_unfilled_required(_FakePage(fields))
+    sels = [f["selector"] for f in out]
+    assert sels == ["#a", "#b"]
+
+
+def test_answer_and_fill_required_executes_actions(monkeypatch):
+    page = _FakePage()
+    monkeypatch.setattr(ae, "_claude_json", lambda *a, **k: [
+        {"selector": "#work_auth", "action": "select", "value": "Yes"},
+        {"selector": "#name", "action": "fill", "value": "Eran"},
+        {"selector": "#eeo", "action": "check", "value": ""},
+    ])
+    n = ae._answer_and_fill_required(page, [{"selector": "#work_auth"}], {"full_name": "Eran"})
+    assert n == 3
+    assert page.filled.get("#name") == "Eran"
+    assert page.selected.get("#work_auth") == "Yes"
+    assert "#eeo" in page.checked
+
+
+def test_answer_and_fill_required_bad_llm_output(monkeypatch):
+    monkeypatch.setattr(ae, "_claude_json", lambda *a, **k: {"error": "nope"})
+    assert ae._answer_and_fill_required(_FakePage(), [{"selector": "#x"}], {}) == 0
+
+
+def test_finalize_recovers_from_validation_block(monkeypatch):
+    # first verify = failed (blocked), second verify = confirmed after answering
+    seq = iter([
+        {"success": False, "status": "failed", "confirmation_text": "", "error": "blocked"},
+        {"success": True, "status": "confirmed", "confirmation_text": "Thank you", "error": ""},
+    ])
+    monkeypatch.setattr(ae, "_verify_submission", lambda page: next(seq))
+    monkeypatch.setattr(ae, "_collect_unfilled_required", lambda page: [{"selector": "#q"}])
+    monkeypatch.setattr(ae, "_answer_and_fill_required", lambda page, f, a: 1)
+
+    class _P:
+        def click(self, sel, timeout=0): pass
+    res = ae._finalize_after_submit(_P(), {}, ['button[type="submit"]'])
+    assert res["status"] == "confirmed"
+    assert "auto-answered 1" in res["confirmation_text"]

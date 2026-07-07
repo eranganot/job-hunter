@@ -147,6 +147,23 @@ def _gh_fill(page, selector: str, value: str):
     except Exception:
         pass
 
+_DEBUG_DIR = os.environ.get("APPLY_DEBUG_DIR", "")
+
+
+def _save_debug_shot(page, tag: str = "apply_fail") -> str:
+    """Best-effort full-page screenshot on failure. No-op unless APPLY_DEBUG_DIR
+    is set (screenshots don't persist without a mounted volume). Returns path."""
+    if not _DEBUG_DIR:
+        return ""
+    try:
+        os.makedirs(_DEBUG_DIR, exist_ok=True)
+        p = os.path.join(_DEBUG_DIR, f"{tag}_{int(time.time())}.png")
+        page.screenshot(path=p, full_page=True)
+        return p
+    except Exception:
+        return ""
+
+
 def _verify_submission(page) -> dict:
     """Determine the TRUE outcome after clicking a submit button.
 
@@ -179,8 +196,10 @@ def _verify_submission(page) -> dict:
             continue
     errs = [x for i, x in enumerate(dict.fromkeys(errs)) if i < 6]
     if errs:
+        _shot = _save_debug_shot(page, "apply_validation")
         return {"success": False, "status": "failed", "confirmation_text": "",
-                "error": "Submit blocked by required/invalid fields: " + "; ".join(errs)}
+                "error": ("Submit blocked by required/invalid fields: " + "; ".join(errs)
+                          + (f" [shot: {_shot}]" if _shot else ""))}
     still_form = True
     try:
         still_form = bool(page.query_selector("form"))
@@ -189,8 +208,115 @@ def _verify_submission(page) -> dict:
     if not still_form:
         return {"success": True, "status": "submitted",
                 "confirmation_text": text[:500], "error": ""}
+    _shot = _save_debug_shot(page, "apply_noconfirm")
     return {"success": False, "status": "failed", "confirmation_text": text[:300],
-            "error": "No confirmation after submit (form still present) — needs manual review"}
+            "error": ("No confirmation after submit (form still present) — needs manual review"
+                      + (f" [shot: {_shot}]" if _shot else ""))}
+
+
+COLLECT_REQUIRED_JS = '() => {\n  const out = [];\n  const seen = new Set();\n  const els = document.querySelectorAll(\'input, select, textarea\');\n  for (const el of els) {\n    const type = (el.type || el.tagName).toLowerCase();\n    if (type === \'hidden\' || el.disabled || el.readOnly) continue;\n    const required = el.required || el.getAttribute(\'aria-required\') === \'true\';\n    const invalid = el.getAttribute(\'aria-invalid\') === \'true\';\n    const empty = !el.value || String(el.value).trim() === \'\';\n    const isChoice = (type === \'radio\' || type === \'checkbox\');\n    if (!invalid && !(required && (empty || isChoice))) continue;\n    let label = \'\';\n    if (el.id) { const l = document.querySelector(\'label[for="\' + CSS.escape(el.id) + \'"]\'); if (l) label = l.innerText; }\n    if (!label && el.closest(\'label\')) label = el.closest(\'label\').innerText;\n    if (!label) label = el.getAttribute(\'aria-label\') || el.name || el.placeholder || \'\';\n    label = (label || \'\').replace(/\\s+/g, \' \').trim().slice(0, 140);\n    let sel = \'\';\n    if (el.id) sel = \'#\' + CSS.escape(el.id);\n    else if (el.name) sel = el.tagName.toLowerCase() + \'[name="\' + el.name + \'"]\';\n    else continue;\n    const key = sel + \'|\' + (el.value || \'\');\n    if (seen.has(key)) continue; seen.add(key);\n    let options = [];\n    if (el.tagName === \'SELECT\') options = [...el.options].map(o => o.value || o.text).filter(Boolean).slice(0, 25);\n    if (type === \'radio\') { const g = document.getElementsByName(el.name); options = [...g].map(r => r.value).filter(Boolean).slice(0, 25); }\n    out.push({ selector: sel, label: label, type: type, options: options });\n    if (out.length >= 15) break;\n  }\n  return out;\n}'
+
+
+def _collect_unfilled_required(page):
+    """Return a compact list of still-required / invalid form fields the standard
+    handlers did not fill (custom screening questions, EEO, work-auth, etc.)."""
+    try:
+        fields = page.evaluate(COLLECT_REQUIRED_JS) or []
+    except Exception:
+        return []
+    # de-dup by selector, keep order
+    seen, out = set(), []
+    for fdef in fields:
+        sel = (fdef or {}).get("selector")
+        if not sel or sel in seen:
+            continue
+        seen.add(sel)
+        out.append(fdef)
+    return out[:15]
+
+
+def _answer_and_fill_required(page, fields, applicant) -> int:
+    """Ask Gemini to answer the collected required fields, then fill them.
+    Conservative: truthful from applicant data; assumes work authorization + no
+    sponsorship unless stated; declines demographic/EEO questions when possible."""
+    if not fields:
+        return 0
+    prompt = (
+        "You are completing REQUIRED fields on a job application that were left blank.\n"
+        "Applicant data (JSON):\n" + json.dumps(applicant) + "\n\n"
+        "Fields (JSON array):\n" + json.dumps(fields) + "\n\n"
+        "Return ONLY a JSON array of actions: "
+        '{"selector": "...", "action": "fill|select|check", "value": "..."}.\n'
+        "Rules:\n"
+        "- Answer truthfully from the applicant data.\n"
+        "- Work authorization: assume the applicant IS authorized to work in the "
+        "posting's country and does NOT require visa sponsorship, unless the "
+        "applicant data clearly says otherwise.\n"
+        "- Demographic / EEO / gender / race / veteran / disability questions: pick a "
+        '"decline to self-identify" / "prefer not to say" option when one exists.\n'
+        "- Yes/No eligibility questions: choose the answer that keeps the application valid.\n"
+        "- For select/radio, value MUST exactly match one of the provided options.\n"
+        "- Only include fields you can answer confidently. No prose, JSON only."
+    )
+    try:
+        actions = _claude_json(prompt, max_tokens=1024, timeout=_APPLY_LLM_TIMEOUT)
+    except Exception as e:
+        print(f"[apply-engine] required-field answer failed: {e}")
+        return 0
+    if not isinstance(actions, list):
+        return 0
+    n = 0
+    for a in actions:
+        if not isinstance(a, dict):
+            continue
+        sel = a.get("selector", ""); act = a.get("action", "fill"); val = str(a.get("value", ""))
+        if not sel:
+            continue
+        try:
+            if act == "select":
+                try:
+                    page.select_option(sel, value=val)
+                except Exception:
+                    page.select_option(sel, label=val)
+            elif act == "check":
+                try:
+                    page.check(sel)
+                except Exception:
+                    page.check(sel + '[value="' + val + '"]')
+            else:
+                page.fill(sel, val)
+            n += 1
+        except Exception as e:
+            print(f"[apply-engine] required-field fill {sel}: {e}")
+            continue
+    return n
+
+
+def _finalize_after_submit(page, applicant, submit_selectors) -> dict:
+    """Verify the outcome; if the submit was blocked by required/invalid fields,
+    auto-answer them once and resubmit. Bounded to a single recovery pass."""
+    res = _verify_submission(page)
+    if res.get("status") != "failed":
+        return res
+    try:
+        fields = _collect_unfilled_required(page)
+        if fields:
+            n = _answer_and_fill_required(page, fields, applicant)
+            if n:
+                for sel in submit_selectors:
+                    try:
+                        page.click(sel, timeout=5_000)
+                        break
+                    except Exception:
+                        continue
+                res2 = _verify_submission(page)
+                res2["confirmation_text"] = (
+                    (res2.get("confirmation_text", "") or "")
+                    + f" [auto-answered {n} required field(s)]")[:600]
+                return res2
+    except Exception as e:
+        res["error"] = ((res.get("error", "") or "") + f" | required-retry error: {e}")[:480]
+    return res
 
 
 def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
@@ -241,7 +367,9 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
             result["error"] = "Greenhouse: could not find submit button"
             return result
 
-        return _verify_submission(page)
+        return _finalize_after_submit(page, applicant,
+            ['button[type="submit"]', 'input[type="submit"]',
+             'button:has-text("Submit")', 'button:has-text("Apply")'])
     except Exception as e:
         result["error"] = f"Greenhouse handler error: {e}"
         return result
@@ -294,7 +422,9 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
             result["error"] = "Lever: could not find submit button"
             return result
 
-        return _verify_submission(page)
+        return _finalize_after_submit(page, applicant,
+            ['button[type="submit"]', 'button:has-text("Submit")',
+             'a:has-text("Submit")', '.postings-btn'])
     except Exception as e:
         result["error"] = f"Lever handler error: {e}"
         return result
