@@ -3449,6 +3449,11 @@ SETTINGS_HTML = """<!DOCTYPE html>
 
   <!-- Account panel -->
   <div class="panel bg-white rounded-2xl p-6 shadow-sm border border-slate-100" id="panel-account">
+    <div id="settings-admin-section" class="hidden mb-6 pb-6 border-b border-slate-200">
+      <h3 class="font-bold text-slate-900 mb-1">\U0001F451 Admin</h3>
+      <p class="text-sm text-slate-500 mb-3">Queue overview, maintenance actions, and all users.</p>
+      <a href="/admin" class="btn btn-primary inline-block">Open Admin Panel \u2192</a>
+    </div>
     <h3 class="font-bold text-slate-900 mb-4">Change Password</h3>
     <div class="space-y-4">
       <div><label class="label">Current password</label><input class="input" type="password" id="s-cur-pw" placeholder="••••••••"/></div>
@@ -3516,6 +3521,8 @@ async function loadUser() {
 
   // Schedule — role-aware
   const isAdmin = userData.role === 'admin';
+  const _adminSec = document.getElementById('settings-admin-section');
+  if (_adminSec) _adminSec.classList.toggle('hidden', !isAdmin);
   const freq    = userData.schedule_frequency || (isAdmin ? 'daily' : 'weekly');
 
   document.getElementById('schedule-role-note').textContent = isAdmin
@@ -3943,7 +3950,39 @@ ADMIN_HTML = """<!DOCTYPE html>
 
 <div class="max-w-4xl mx-auto px-5 py-8">
   <h1 class="text-2xl font-bold text-slate-900 mb-1">Admin Panel</h1>
-  <p class="text-slate-500 text-sm mb-6">All users and their pipeline status.</p>
+  <p class="text-slate-500 text-sm mb-6">Queue tools, maintenance, and all users.</p>
+
+  <!-- Queue overview -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-5">
+    <h2 class="font-bold text-slate-900 mb-3">\U0001F4CA Your Queue</h2>
+    <div id="queue-stats" class="grid grid-cols-3 gap-3 text-center">
+      <div class="col-span-3 text-sm text-slate-400 py-4 animate-pulse">Loading\u2026</div>
+    </div>
+  </div>
+
+  <!-- Maintenance -->
+  <div class="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 mb-6">
+    <h2 class="font-bold text-slate-900 mb-3">\U0001F6E0\uFE0F Maintenance</h2>
+    <div class="space-y-2">
+      <button onclick="adminAction('clear-attempted')"
+        class="w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-all">
+        \U0001F9F9 Clear attempted jobs from queue
+        <span class="block text-xs text-slate-400 font-normal">Removes already-tried (manual / failed) jobs</span></button>
+      <button onclick="adminAction('rescore')"
+        class="w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-all">
+        \U0001F3AF Re-score new jobs</button>
+      <button onclick="adminAction('dedup')"
+        class="w-full text-left px-4 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-all">
+        \U0001F501 Remove duplicate jobs</button>
+      <button onclick="adminAction('clear-applied')"
+        class="w-full text-left px-4 py-3 rounded-xl border border-red-200 text-sm font-medium text-red-600 hover:bg-red-50 transition-all">
+        \U0001F5D1\uFE0F Delete all applied jobs
+        <span class="block text-xs text-red-400 font-normal">Permanent \u2014 asks for confirmation</span></button>
+    </div>
+    <p id="admin-msg" class="text-sm text-center mt-3 hidden"></p>
+  </div>
+
+  <h2 class="font-bold text-slate-900 mb-3">\U0001F465 Users</h2>
   <div id="users-grid" class="space-y-4">
     <div class="text-center py-10 text-slate-400 animate-pulse text-sm">Loading users…</div>
   </div>
@@ -4001,6 +4040,52 @@ async function toggleUser(id, currentActive) {
   loadUsers();
 }
 
+async function loadQueueStats() {
+  try {
+    const r = await fetch('/api/admin/queue-stats');
+    if (!r.ok) { document.getElementById('queue-stats').innerHTML = '<p class="col-span-3 text-red-600 py-3 text-sm">Access denied.</p>'; return; }
+    const s = await r.json();
+    const cell = (n,label,color) => `<div><div class="text-xl font-bold ${color}">${n||0}</div><div class="text-xs text-slate-400">${label}</div></div>`;
+    document.getElementById('queue-stats').innerHTML =
+      cell(s.new,'New','text-slate-800') + cell(s.approved,'Approved','text-green-600') +
+      cell(s.applied,'Applied','text-purple-600') + cell(s.rejected,'Rejected','text-slate-500') +
+      cell(s.manual_required,'Manual','text-amber-600') + cell(s.dead_links,'Dead links','text-red-500');
+  } catch(e) {}
+}
+
+function _adminMsg(t, ok) {
+  const el = document.getElementById('admin-msg');
+  el.textContent = t;
+  el.className = 'text-sm text-center mt-3 ' + (ok ? 'text-green-600' : 'text-red-600');
+}
+
+async function adminAction(kind) {
+  if (kind === 'clear-applied' && !confirm('Permanently DELETE all applied jobs? This cannot be undone.')) return;
+  if (kind === 'clear-attempted' && !confirm('Remove already-attempted (manual / failed) jobs from the queue? They move to Rejected (reversible).')) return;
+  _adminMsg('Working\u2026', true);
+  try {
+    let r;
+    if (kind === 'dedup') {
+      r = await fetch('/api/admin/dedup');                 // GET
+    } else {
+      const url = kind === 'clear-applied' ? '/api/admin/clear-applied'
+                : kind === 'clear-attempted' ? '/api/admin/clear-attempted'
+                : '/api/admin/rescore';
+      r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+    }
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok) { _adminMsg(j.error || 'Failed', false); return; }
+    let msg = 'Done.';
+    if (kind === 'clear-attempted') msg = `Cleared ${j.cleared||0} attempted job(s) from the queue.`;
+    else if (kind === 'clear-applied') msg = `Deleted ${j.deleted||0} applied job(s).`;
+    else if (kind === 'rescore') msg = j.message || `Re-scored ${j.rescored||0} job(s).`;
+    else if (kind === 'dedup') msg = `Removed ${j.removed||0} duplicate(s).`;
+    _adminMsg(msg, true);
+    loadQueueStats();
+  } catch(e) { _adminMsg('Error: ' + e, false); }
+}
+
+loadQueueStats();
 loadUsers();
 </script>
 </body>
@@ -5669,6 +5754,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(items)
             return
 
+        if path == "/api/admin/queue-stats":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, status=403)
+                return
+            _uid = user["id"]
+            conn = database.get_db()
+            def _qs(where):
+                return conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? " + where, (_uid,)).fetchone()[0]
+            stats = {
+                "new": _qs("AND status='new'"),
+                "approved": _qs("AND status='approved'"),
+                "applied": _qs("AND status='applied'"),
+                "rejected": _qs("AND status='rejected'"),
+                "manual_required": _qs("AND status='approved' AND COALESCE(apply_status,'')='manual_required'"),
+                "dead_links": _qs("AND status IN ('new','approved') AND url_verified=0"),
+            }
+            conn.close()
+            self.send_json(stats)
+            return
+
         if path == "/api/admin/dedup":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
@@ -6504,6 +6610,28 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
         # ── Admin: clear applied jobs ─────────────────────────────────────────────
+        if path == "/api/admin/clear-attempted":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload = self.read_json()
+            target_uid = payload.get("user_id") or user["id"]
+            conn = database.get_db()
+            cur = conn.execute(
+                "UPDATE jobs SET status='rejected', "
+                "notes=COALESCE(notes,'') || ' [admin: cleared attempted]' "
+                "WHERE user_id=? AND status='approved' AND COALESCE(apply_attempts,0) >= 1 "
+                "AND COALESCE(apply_status,'') IN ('manual_required','failed')",
+                (int(target_uid),)
+            )
+            cleared = cur.rowcount
+            conn.commit(); conn.close()
+            database.log_activity(user["id"], "admin_clear_attempted",
+                                  f"Cleared {cleared} attempted job(s) from queue")
+            print(f"[admin] clear-attempted: {cleared} rows")
+            self.send_json({"cleared": cleared})
+            return
+
         if path == "/api/admin/clear-applied":
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)
