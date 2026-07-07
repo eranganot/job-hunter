@@ -5761,13 +5761,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _uid = user["id"]
             conn = database.get_db()
+            # Reuse the SAME source the dashboard/Analytics use so numbers match
+            # exactly (get_stats folds in passed_archived_count for the lifetime
+            # 'rejected'/'total', so Passed here == Passed on the dashboard).
+            base = database.get_stats(conn, _uid)
             def _qs(where):
                 return conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? " + where, (_uid,)).fetchone()[0]
             stats = {
-                "new": _qs("AND status='new'"),
-                "approved": _qs("AND status='approved'"),
-                "applied": _qs("AND status='applied'"),
-                "rejected": _qs("AND status='rejected'"),
+                "new": base.get("new", 0),
+                "approved": base.get("approved", 0),
+                "applied": base.get("applied", 0),
+                "rejected": base.get("rejected", 0),
+                "deferred": base.get("deferred", 0),
+                "total": base.get("total", 0),
                 "manual_required": _qs("AND status='approved' AND COALESCE(apply_status,'')='manual_required'"),
                 "dead_links": _qs("AND status IN ('new','approved') AND url_verified=0"),
             }
