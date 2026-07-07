@@ -17,5 +17,49 @@
   </head>
   <body class="bg-gray-900">
     <div id="root"></div>
+    <!-- Push self-heal: re-registers a rotated/wiped push subscription on every
+         load + focus when permission is already granted. Keeps notifications
+         alive after a redeploy loses the subscription row or Chrome rotates the
+         endpoint. Vanilla JS so it works without a bundle rebuild. -->
+    <script>
+    (function () {
+      function b64ToUint8(base64) {
+        var pad = "=".repeat((4 - (base64.length % 4)) % 4);
+        var b = (base64 + pad).replace(/-/g, "+").replace(/_/g, "/");
+        var raw = atob(b), out = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+      }
+      async function syncPush() {
+        try {
+          if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return;
+          if (Notification.permission !== "granted") return;
+          var reg = await navigator.serviceWorker.ready;
+          var res = await fetch("/api/push/public-key", { credentials: "same-origin" });
+          if (!res.ok) return;
+          var pk = (await res.json()).publicKey;
+          if (!pk) return;
+          var sub = await reg.pushManager.getSubscription();
+          var lastKey = null; try { lastKey = localStorage.getItem("jh_vapid_key"); } catch (e) {}
+          if (sub && lastKey && lastKey !== pk) { try { await sub.unsubscribe(); } catch (e) {} sub = null; }
+          if (!sub) {
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: b64ToUint8(pk),
+            });
+          }
+          await fetch("/api/push/subscribe", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subscription: sub.toJSON() }),
+          });
+          try { localStorage.setItem("jh_vapid_key", pk); } catch (e) {}
+        } catch (e) { /* silent — never block the app */ }
+      }
+      if (document.readyState === "complete") syncPush();
+      else window.addEventListener("load", syncPush);
+      window.addEventListener("focus", function () { setTimeout(syncPush, 500); });
+    })();
+    </script>
   </body>
 </html>

@@ -1794,6 +1794,32 @@ def run_job_search(user_id: int):
                 else:  hist_dead  += 1
             conn.commit(); conn.close()
 
+        # ── Re-validate already-"Verified" rows (catch parked/expired domains) ──
+        # Conservative: only DEMOTE a verified row to dead when _link_status proves
+        # it is definitively gone (404/410/dead-DNS/parked). Alive/unknown stay 1,
+        # so a transient bot-block never nukes a good posting.
+        conn = database.get_db()
+        prev_ok = conn.execute(
+            "SELECT id, url FROM jobs WHERE user_id=? AND url_verified=1 AND url!=''", (user_id,)
+        ).fetchall()
+        conn.close()
+        reval_dead = 0
+        if prev_ok:
+            with _TPE(max_workers=8) as _ex3:
+                _futs3 = {_ex3.submit(_link_status, r["url"]): r for r in prev_ok}
+                _demote = []
+                for _f3, _r3 in _futs3.items():
+                    try:    _st = _f3.result(timeout=12)
+                    except Exception: _st = "unknown"
+                    if _st == "dead":
+                        _demote.append(_r3["id"])
+            if _demote:
+                conn = database.get_db()
+                for _jid in _demote:
+                    conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, _jid))
+                conn.commit(); conn.close()
+                reval_dead = len(_demote)
+
         database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")
 
         # ── Consolidated search notification ─────────────────────────────
@@ -1819,6 +1845,8 @@ def run_job_search(user_id: int):
         if (hist_alive+hist_dead)>0:
             notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
             notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
+        if reval_dead>0:
+            notif_lines.append(f"⚠️ {reval_dead} previously-'Verified' link(s) now flagged dead (parked/expired)")
         try:
             deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#new")
         except Exception as _dn_err:
@@ -1849,7 +1877,7 @@ _APPLY_SEM = threading.Semaphore(int(os.environ.get("APPLY_MAX_CONCURRENT", "2")
 # apply. Orphaned timed-out tasks keep running but are bounded by Playwright's
 # own per-step + launch timeouts, so they die on their own.
 _APPLY_POOL = _cf.ThreadPoolExecutor(max_workers=4)
-_APPLY_DEADLINE_S = int(os.environ.get("APPLY_DEADLINE_S", "120"))
+_APPLY_DEADLINE_S = int(os.environ.get("APPLY_DEADLINE_S", "150"))
 
 
 def _submit_application_guarded(job_url, job_title, company, applicant, cv_path, api_key=""):
@@ -5148,29 +5176,33 @@ def _link_status(url: str, timeout: int = 8) -> str:
     if not url or not str(url).strip():
         return "dead"  # no URL = unusable
     url = str(url).strip()
-    for method in ("HEAD", "GET"):
-        try:
-            req = _ur.Request(url, method=method, headers={"User-Agent": _LINK_UA})
-            with _ur.urlopen(req, timeout=timeout) as r:
-                return "alive" if r.status < 400 else (
-                    "dead" if r.status in (404, 410) else "unknown")
-        except _ue.HTTPError as e:
-            if e.code in (404, 410):
+    try:
+        req = _ur.Request(url, method="GET", headers={"User-Agent": _LINK_UA})
+        with _ur.urlopen(req, timeout=timeout) as r:
+            if r.status in (404, 410):
                 return "dead"
-            if e.code < 400:
-                return "alive"
-            return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
-        except _ue.URLError as e:
-            if isinstance(getattr(e, "reason", None), _sock.gaierror):
-                return "dead"  # hostname no longer resolves
-            if method == "GET":
-                return "unknown"
-            continue  # retry once with GET
-        except Exception:
-            if method == "GET":
-                return "unknown"
-            continue
-    return "unknown"
+            if r.status >= 400:
+                return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
+            body = r.read(20000).decode("utf-8", "ignore")
+            try:
+                import apply_engine as _ae
+                if _ae._looks_parked(r.geturl(), body):
+                    return "dead"  # parked / for-sale domain = posting is gone
+            except Exception:
+                pass
+            return "alive"
+    except _ue.HTTPError as e:
+        if e.code in (404, 410):
+            return "dead"
+        if e.code < 400:
+            return "alive"
+        return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
+    except _ue.URLError as e:
+        if isinstance(getattr(e, "reason", None), _sock.gaierror):
+            return "dead"  # hostname no longer resolves
+        return "unknown"
+    except Exception:
+        return "unknown"
 
 
 class Handler(BaseHTTPRequestHandler):

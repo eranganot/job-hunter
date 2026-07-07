@@ -84,3 +84,42 @@ class TestClaudeHelperIsGemini:
         assert out == "hello"
         assert "generativelanguage.googleapis.com" in captured["url"]
         assert "anthropic" not in captured["url"].lower()
+
+
+# ── Parked / expired-domain detection (regression for false "Verified" badge) ──
+def test_looks_parked_godaddy_lander_stub():
+    # GoDaddy/Sedo-style JS-redirect stub (what saasjobs.io actually serves)
+    stub = ('<!DOCTYPE html><html><head><script>window.onload=function(){'
+            'window.location.href="/lander"}</script></head></html>')
+    assert ae._looks_parked("https://saasjobs.io", stub) is True
+
+
+def test_looks_parked_host_match():
+    assert ae._looks_parked("https://forsale.godaddy.com/forsale/x.io", "") is True
+
+
+def test_looks_parked_for_sale_phrases():
+    body = "The domain name example.com is for sale. Make an offer."
+    assert ae._looks_parked("https://example.com", body) is True
+
+
+def test_looks_parked_real_job_not_flagged():
+    # A real posting that merely runs a script or mentions "for sale" once must NOT be flagged
+    body = ('<html><body><h1>Senior PM</h1><p>Great role, apply now in Tel Aviv.</p>'
+            '<script>var h=window.location.host</script></body></html>')
+    assert ae._looks_parked("https://boards.greenhouse.io/acme/jobs/1", body) is False
+
+
+def test_check_url_alive_flags_parked(monkeypatch):
+    stub = ('<html><head><script>window.location.href="/lander"</script></head>'
+            '<body></body></html>')
+
+    class _Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self, n=-1): return stub.encode()
+        def geturl(self): return "https://saasjobs.io"
+
+    monkeypatch.setattr(ae.urllib.request, "urlopen", lambda req, timeout=8: _Resp())
+    assert ae.check_url_alive("https://saasjobs.io") is False

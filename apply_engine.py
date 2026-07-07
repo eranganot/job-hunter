@@ -147,6 +147,52 @@ def _gh_fill(page, selector: str, value: str):
     except Exception:
         pass
 
+def _verify_submission(page) -> dict:
+    """Determine the TRUE outcome after clicking a submit button.
+
+    Only declares success on real evidence, and detects validation errors so a
+    blocked submit is reported as `failed` (not a false `submitted`). Order:
+      1. confirmation phrase -> confirmed
+      2. visible required/invalid-field errors -> failed (submit was blocked)
+      3. the form disappeared -> submitted (accepted, no explicit thank-you)
+      4. same page, form still present, no error -> failed (needs manual review)
+    """
+    try:
+        page.wait_for_load_state("networkidle", timeout=5_000)
+    except Exception:
+        pass
+    text = (page.evaluate("document.body.innerText") or "")
+    low = text.lower()
+    if any(p in low for p in _CONFIRMATION_PHRASES):
+        return {"success": True, "status": "confirmed",
+                "confirmation_text": text[:500], "error": ""}
+    # Validation errors => submit did NOT go through
+    errs = []
+    for sel in ('[aria-invalid="true"]', '.field_with_errors', '.error',
+                '[class*="error"]', '[role="alert"]'):
+        try:
+            for e in (page.query_selector_all(sel) or [])[:6]:
+                t = (e.inner_text() or "").strip()
+                if t and len(t) < 140:
+                    errs.append(t)
+        except Exception:
+            continue
+    errs = [x for i, x in enumerate(dict.fromkeys(errs)) if i < 6]
+    if errs:
+        return {"success": False, "status": "failed", "confirmation_text": "",
+                "error": "Submit blocked by required/invalid fields: " + "; ".join(errs)}
+    still_form = True
+    try:
+        still_form = bool(page.query_selector("form"))
+    except Exception:
+        pass
+    if not still_form:
+        return {"success": True, "status": "submitted",
+                "confirmation_text": text[:500], "error": ""}
+    return {"success": False, "status": "failed", "confirmation_text": text[:300],
+            "error": "No confirmation after submit (form still present) — needs manual review"}
+
+
 def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
     """Handle Greenhouse application forms with known structure."""
     result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
@@ -157,7 +203,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
                 el = page.query_selector(sel)
                 if el and el.is_visible():
                     el.click()
-                    page.wait_for_load_state("networkidle", timeout=8_000)
+                    page.wait_for_load_state("networkidle", timeout=4_000)
                     break
             except Exception:
                 continue
@@ -195,13 +241,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
             result["error"] = "Greenhouse: could not find submit button"
             return result
 
-        page.wait_for_load_state("networkidle", timeout=10_000)
-        confirm_text = page.evaluate("document.body.innerText") or ""
-        if any(w in confirm_text.lower() for w in ["thank", "received", "submitted", "confirmation"]):
-            result.update(success=True, status="confirmed", confirmation_text=confirm_text[:500])
-        else:
-            result.update(success=True, status="submitted", confirmation_text=confirm_text[:500])
-        return result
+        return _verify_submission(page)
     except Exception as e:
         result["error"] = f"Greenhouse handler error: {e}"
         return result
@@ -216,7 +256,7 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
                 el = page.query_selector(sel)
                 if el and el.is_visible():
                     el.click()
-                    page.wait_for_load_state("networkidle", timeout=8_000)
+                    page.wait_for_load_state("networkidle", timeout=4_000)
                     break
             except Exception:
                 continue
@@ -254,13 +294,7 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
             result["error"] = "Lever: could not find submit button"
             return result
 
-        page.wait_for_load_state("networkidle", timeout=10_000)
-        confirm_text = page.evaluate("document.body.innerText") or ""
-        if any(w in confirm_text.lower() for w in ["thank", "received", "submitted", "application"]):
-            result.update(success=True, status="confirmed", confirmation_text=confirm_text[:500])
-        else:
-            result.update(success=True, status="submitted", confirmation_text=confirm_text[:500])
-        return result
+        return _verify_submission(page)
     except Exception as e:
         result["error"] = f"Lever handler error: {e}"
         return result
@@ -292,7 +326,7 @@ def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
         filled_cv = False
         for page_num in range(12):  # hard cap: prevent infinite loops
             try:
-                page.wait_for_load_state("networkidle", timeout=8_000)
+                page.wait_for_load_state("networkidle", timeout=4_000)
             except Exception:
                 pass
 
@@ -352,7 +386,7 @@ def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
                     if el and el.is_visible() and el.is_enabled():
                         el.click()
                         try:
-                            page.wait_for_load_state("networkidle", timeout=12_000)
+                            page.wait_for_load_state("networkidle", timeout=5_000)
                         except Exception:
                             pass
                         confirm = page.evaluate("document.body.innerText") or ""
@@ -429,6 +463,12 @@ def _add_failure_type(res: dict) -> dict:
 
 # -- Apply retry policy --
 MAX_APPLY_ATTEMPTS = 3
+
+# Per-call Gemini timeout used INSIDE the browser apply flow. Kept short so the
+# nav-check + form-fill + confirmation calls plus page navigation can never blow
+# the overall apply deadline (APPLY_DEADLINE_S, default 120s). Non-apply Gemini
+# callers (search/scoring) keep the generous 90s default.
+_APPLY_LLM_TIMEOUT = int(os.environ.get('APPLY_LLM_TIMEOUT', '25'))
 RETRYABLE_FAILURES = {"timeout", "network_error", "other"}
 MANUAL_FAILURES = {"captcha", "login_wall", "form_validation"}
 
@@ -473,7 +513,7 @@ _CONFIRMATION_PHRASES = [
 
 # ── Claude helpers ────────────────────────────────────────────────────────────
 
-def _claude(prompt: str, max_tokens: int = 1024) -> str:
+def _claude(prompt: str, max_tokens: int = 1024, timeout: int = 90) -> str:
     """Call Gemini Flash and return the text response.
 
     Kept named _claude for backward-compat with every apply-engine caller; the
@@ -495,7 +535,7 @@ def _claude(prompt: str, max_tokens: int = 1024) -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=90) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         result = json.loads(resp.read().decode("utf-8"))
     text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
     if text.startswith("```"):
@@ -503,9 +543,9 @@ def _claude(prompt: str, max_tokens: int = 1024) -> str:
         text = re.sub(r"\n?```$", "", text.strip())
     return text.strip()
 
-def _claude_json(prompt: str, max_tokens: int = 1024):
-    """Call Claude and parse the JSON response."""
-    text = _claude(prompt, max_tokens)
+def _claude_json(prompt: str, max_tokens: int = 1024, timeout: int = 90):
+    """Call Gemini and parse the JSON response."""
+    text = _claude(prompt, max_tokens, timeout=timeout)
     try:
         return json.loads(text)
     except Exception:
@@ -546,22 +586,82 @@ def extract_applicant_data(cv_text: str, email: str) -> dict:
 
 # ── URL alive check ───────────────────────────────────────────────────────────
 
+# ── Parked / expired-domain detection ─────────────────────────────────────────
+# An expired or unregistered domain often gets caught by a registrar/parking
+# service that returns HTTP 200 with a "this domain is for sale" landing page
+# (GoDaddy, Sedo, Afternic, Dan, HugeDomains, …). Those must count as DEAD even
+# though the status code is < 400, otherwise a dead posting looks "Verified".
+_PARKED_HOSTS = (
+    "sedoparking.com", "sedo.com", "forsale.godaddy.com", "godaddy.com/forsale",
+    "afternic.com", "dan.com", "hugedomains.com", "bodis.com", "parkingcrew.net",
+    "above.com", "uniregistry.com", "buydomains.com", "domainmarket.com",
+    "cashparking.com", "parklogic.com", "smartname.com", "domize.com",
+    "undeveloped.com", "namebright.com/parking", "sav.com/parking",
+)
+_PARKED_PHRASES = (
+    "the domain name", "is for sale", "buy this domain", "this domain is for sale",
+    "domain may be for sale", "checkout the full domain", "make an offer",
+    "domain parking", "get this domain", "interested in this domain",
+    "the domain you are looking for", "this webpage was generated by the domain owner",
+    "verified domain", "own it today",
+)
+
+
+_LANDER_SIGNS = ("/lander", "_lander", "/park", "/caf/", "sedoparking",
+                 "parkingcrew", "bodis", "afternic", "cashparking", "/_ds/")
+
+
+def _looks_parked(final_url: str, body: str) -> bool:
+    """Heuristic: does this look like a parked / for-sale domain page?
+
+    Catches three shapes:
+      1. Final URL on a known parking/for-sale host (definitive).
+      2. Body carrying 2+ for-sale phrases (GoDaddy/Sedo landers).
+      3. A tiny client-side-redirect stub (`window.location=... "/lander"`) —
+         modern parking services cloak behind a JS/meta redirect, so a 3-line
+         page that only redirects (esp. to a parking lander) is treated as dead.
+    A real job posting is never any of these."""
+    fu = (final_url or "").lower()
+    if any(h in fu for h in _PARKED_HOSTS):
+        return True
+    b = body or ""
+    bl = b.lower()
+    if sum(1 for p in _PARKED_PHRASES if p in bl) >= 2:
+        return True
+    # Client-side redirect stub detection
+    targets = re.findall(r"""location\.(?:href|replace)\s*(?:=|\()\s*['"]([^'"]+)['"]""", bl)
+    targets += re.findall(r"""http-equiv=["']refresh["'][^>]*url=['"]?([^'"\s>]+)""", bl)
+    redirect_target = " ".join(targets)
+    has_redirect = bool(targets) or ("window.location" in bl) or ('http-equiv="refresh"' in bl)
+    if has_redirect and any(sig in (redirect_target + " " + fu) for sig in _LANDER_SIGNS):
+        return True
+    # A stub whose only purpose is to redirect, with essentially no visible text.
+    # Strip <script>/<style> blocks first so JS redirect code isn't counted as text.
+    _stripped = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", b)
+    visible = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", _stripped)).strip()
+    if has_redirect and len(visible) < 40 and len(b) < 1200:
+        return True
+    return False
+
+
 def check_url_alive(url: str, timeout: int = 8) -> bool:
-    """Return True if the URL responds with a non-error HTTP status."""
+    """Return True if the URL responds with a non-error status AND is not a
+    parked / for-sale domain page (which return 200 but the job is gone)."""
     if not url:
         return False
-    for method in ("HEAD", "GET"):
-        try:
-            req = urllib.request.Request(url, method=method, headers={"User-Agent": _UA})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.status < 400
-        except urllib.error.HTTPError as e:
-            return e.code < 400
-        except Exception:
-            if method == "HEAD":
-                continue
-            return False
-    return False
+    try:
+        req = urllib.request.Request(url, method="GET", headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            if r.status >= 400:
+                return False
+            body = r.read(20000).decode("utf-8", "ignore")
+            if _looks_parked(r.geturl(), body):
+                return False
+            return True
+    except urllib.error.HTTPError as e:
+        return e.code < 400
+    except Exception:
+        return False
 
 # ── Core application submission ───────────────────────────────────────────────
 
@@ -645,7 +745,7 @@ def submit_application(
             try:
                 page.goto(actual_url, wait_until="domcontentloaded", timeout=30_000)
                 try:
-                    page.wait_for_load_state("networkidle", timeout=8_000)
+                    page.wait_for_load_state("networkidle", timeout=4_000)
                 except PWTimeout:
                     pass
             except PWTimeout:
@@ -695,13 +795,14 @@ def submit_application(
                         f'Is there an Apply button? Return JSON: '
                         f'{{"has_apply_button":true/false,"button_text":"exact text or empty"}}',
                         max_tokens=150,
+                        timeout=_APPLY_LLM_TIMEOUT,
                     )
                     if nav.get("has_apply_button") and nav.get("button_text"):
                         btn = page.get_by_text(nav["button_text"], exact=False).first
                         if btn:
                             btn.click()
                             try:
-                                page.wait_for_load_state("networkidle", timeout=8_000)
+                                page.wait_for_load_state("networkidle", timeout=4_000)
                             except PWTimeout:
                                 pass
                             page_text = page.evaluate("document.body.innerText") or ""
@@ -732,6 +833,7 @@ def submit_application(
                     f'Rules: only include visible/required fields; end with submit.\n'
                     f'If impossible (login/captcha/no form), return {{"error":"reason"}}',
                     max_tokens=2048,
+                        timeout=_APPLY_LLM_TIMEOUT,
                 )
             except Exception as e:
                 browser.close()
@@ -793,7 +895,7 @@ def submit_application(
 
             # 6. Wait for result page ──────────────────────────────────────────
             try:
-                page.wait_for_load_state("networkidle", timeout=12_000)
+                page.wait_for_load_state("networkidle", timeout=5_000)
             except PWTimeout:
                 pass
 
@@ -809,6 +911,7 @@ def submit_application(
                     f'Was the application successfully received by the company?\n'
                     f'Return JSON: {{"confirmed":true/false,"message":"confirmation or reason"}}',
                     max_tokens=200,
+                        timeout=_APPLY_LLM_TIMEOUT,
                 )
                 confirmed = bool(v.get("confirmed", False)) or phrase_ok
                 msg = v.get("message", result_text[:400])
@@ -817,13 +920,17 @@ def submit_application(
                 msg = result_text[:400]
 
             browser.close()
-            return {
-                "success": confirmed,
-                "status": "confirmed" if confirmed else "submitted",
-                "confirmation_text": msg,
-                "error": "",
-                "resolved_url": actual_url,
-            }
+            if confirmed:
+                return {"success": True, "status": "confirmed",
+                        "confirmation_text": msg, "error": "",
+                        "resolved_url": actual_url}
+            # Not confirmed: report honestly as a retryable failure rather than a
+            # false 'submitted' (which app.py would mark as 'applied'). Keeps the
+            # "Submitted N" summary truthful.
+            return {**_base, "status": "failed",
+                    "confirmation_text": msg,
+                    "error": "No submission confirmation detected — needs manual review",
+                    "resolved_url": actual_url}
 
     except Exception as e:
         err = str(e)

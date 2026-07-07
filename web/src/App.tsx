@@ -38,6 +38,8 @@ const REJECT_REASONS: Record<string, string> = {
   company: "Bad company",
   location: "Wrong location",
   applied: "Already applied elsewhere",
+  broken_link: "Link is broken",
+  gone: "Job no longer exists",
 };
 
 export function SwipeFlow() {

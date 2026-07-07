@@ -32,5 +32,31 @@ export async function enablePush(): Promise<{ ok: boolean; reason?: string }> {
     });
   }
   await api.pushSubscribe(sub.toJSON());
+  try { localStorage.setItem("jh_vapid_key", publicKey); } catch {}
   return { ok: true };
+}
+
+// Self-heal: re-register a rotated/wiped push subscription on every app load
+// when permission is already granted. Fixes "notifications silently stopped"
+// after a redeploy loses the subscription row or Chrome rotates the endpoint.
+// Silent — never throws into app startup.
+export async function syncPush(): Promise<void> {
+  try {
+    if (pushState() !== "granted") return;
+    const reg = await navigator.serviceWorker.ready;
+    const { publicKey } = await api.pushPublicKey();
+    if (!publicKey) return;
+    let sub = await reg.pushManager.getSubscription();
+    let lastKey: string | null = null;
+    try { lastKey = localStorage.getItem("jh_vapid_key"); } catch {}
+    if (sub && lastKey && lastKey !== publicKey) { try { await sub.unsubscribe(); } catch {} sub = null; }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlB64ToUint8Array(publicKey) as unknown as BufferSource,
+      });
+    }
+    await api.pushSubscribe(sub.toJSON());
+    try { localStorage.setItem("jh_vapid_key", publicKey); } catch {}
+  } catch { /* silent */ }
 }
