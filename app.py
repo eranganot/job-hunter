@@ -4154,6 +4154,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <button onclick="selectReason('Wrong location')"        class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">📍 Wrong location</button>
       <button onclick="selectReason('Already applied elsewhere')"       class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">✓ Already applied elsewhere</button>
       <button onclick="selectReason('Not relevant to my search')" class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🔍 Not relevant to my search</button>
+      <button onclick="selectReason('Link is broken')" class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🔗 Link is broken</button>
+      <button onclick="selectReason('Job no longer exists')" class="reason-btn w-full text-left px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 transition-all">🚫 Job no longer exists</button>
     </div>
     <button onclick="skipReason()" class="w-full text-sm text-slate-400 hover:text-slate-600 py-2 transition-all">Skip — no reason</button>
   </div>
@@ -6847,7 +6849,9 @@ if __name__ == "__main__":
         _cc = database.get_db()
         _moved = _cc.execute(
             "UPDATE jobs SET status='approved', apply_status='failed' "
-            "WHERE status='applied' AND COALESCE(TRIM(apply_error), '') != ''"
+            "WHERE status='applied' AND COALESCE(TRIM(apply_error), '') != '' "
+            "AND COALESCE(apply_status,'') NOT IN ('manual_required','confirmed','submitted') "
+            "AND COALESCE(apply_attempts,0) < 3"
         ).rowcount
         _cc.commit(); _cc.close()
         if _moved:
@@ -6859,7 +6863,7 @@ if __name__ == "__main__":
     try:
         _mconn = database.get_db()
         _mconn.execute("UPDATE jobs SET status='rejected', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
-        _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status IN ('failed','manual_required')")
+        _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status='failed' AND COALESCE(apply_attempts,0) < 3")
         # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
         _stuck = _mconn.execute(
             "UPDATE jobs SET apply_status=NULL WHERE apply_status='applying'"
@@ -6870,6 +6874,31 @@ if __name__ == "__main__":
         _mconn.close()
     except Exception:
         pass
+
+    # ── One-time prune: retire jobs already ATTEMPTED (manual_required/failed with
+    #    >=1 attempt) out of the Approved queue. These were being resurfaced on every
+    #    redeploy by the migrations above, so already-handled jobs kept reappearing.
+    #    Runs exactly once (guarded by an app_flags token). Reversible: moved to
+    #    'rejected' with a note, not deleted. Bump the token (v2) to re-run. ──
+    try:
+        _pc = database.get_db()
+        _pc.execute("CREATE TABLE IF NOT EXISTS app_flags "
+                    "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
+        _pdone = _pc.execute("SELECT value FROM app_flags WHERE key='prune_attempted_v1'").fetchone()
+        if not _pdone:
+            _pn = _pc.execute(
+                "UPDATE jobs SET status='rejected', "
+                "notes=COALESCE(notes,'') || ' [auto-removed: already attempted]' "
+                "WHERE status='approved' AND COALESCE(apply_attempts,0) >= 1 "
+                "AND COALESCE(apply_status,'') IN ('manual_required','failed')"
+            ).rowcount
+            _pc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES ('prune_attempted_v1', ?)",
+                        (str(_pn),))
+            _pc.commit()
+            print(f"[startup] one-time prune: retired {_pn} already-attempted job(s) from the queue")
+        _pc.close()
+    except Exception as _pe:
+        print(f"[startup] prune-attempted error: {_pe}")
 
     # ── One-time queue cleanup (set QUEUE_CLEANUP=1, or =force to re-run) ──
     # Runs LAST (after the migrations above) and clears apply_error on the jobs it
