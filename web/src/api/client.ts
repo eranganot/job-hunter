@@ -52,6 +52,7 @@ export type Me = {
   name: string;
   email: string;
   role?: string;
+  is_admin?: boolean;
   cv_path?: string | null;
   cv_filename?: string | null;
   cv_uploaded_date?: string | null;
@@ -155,6 +156,12 @@ export const api = {
     request("/api/save-schedule", "POST", body),
   saveNotifications: (body: Record<string, unknown>) =>
     request("/api/save-notifications", "POST", body),
+  adminQueueStats: () => request<{ new: number; approved: number; applied: number; rejected: number; manual_required: number; dead_links: number }>("/api/admin/queue-stats"),
+  adminClearAttempted: () => request<{ cleared: number }>("/api/admin/clear-attempted", "POST", {}),
+  adminClearApplied: () => request<{ deleted: number }>("/api/admin/clear-applied", "POST", {}),
+  adminRescore: () => request<{ rescored?: number; message?: string }>("/api/admin/rescore", "POST", {}),
+  adminDedup: () => request<{ removed: number }>("/api/admin/dedup"),
+  adminUsers: () => request<any[]>("/api/admin/users"),
 };
 
 import { timeAgo } from "../lib/format";

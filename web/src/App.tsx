@@ -5,6 +5,7 @@ import {
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
+  ShieldCheck, Trash2, Users,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -768,6 +769,104 @@ function TagInput({ value, onChange }: { value: string[]; onChange: (v: string[]
   );
 }
 
+function AdminModal({ onClose }: { onClose: () => void }) {
+  const [stats, setStats] = useState<any>(null);
+  const [users, setUsers] = useState<any[]>([]);
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const load = () => {
+    api.adminQueueStats().then(setStats).catch(() => {});
+    api.adminUsers().then((u) => setUsers(Array.isArray(u) ? u : [])).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+  const run = async (kind: string) => {
+    if (kind === "clear-applied" && !confirm("Permanently delete ALL applied jobs? This cannot be undone.")) return;
+    if (kind === "clear-attempted" && !confirm("Move already-attempted (manual / failed) jobs out of the queue? They go to Passed and can be restored.")) return;
+    setBusy(kind); setMsg("");
+    try {
+      let m = "Done.";
+      if (kind === "clear-attempted") { const r = await api.adminClearAttempted(); m = `Cleared ${r.cleared || 0} attempted job(s) from the queue.`; }
+      else if (kind === "clear-applied") { const r = await api.adminClearApplied(); m = `Deleted ${r.deleted || 0} applied job(s).`; }
+      else if (kind === "rescore") { const r = await api.adminRescore(); m = r.message || `Re-scored ${r.rescored || 0} job(s).`; }
+      else if (kind === "dedup") { const r = await api.adminDedup(); m = `Removed ${r.removed || 0} duplicate(s).`; }
+      setMsg(m); load();
+    } catch (e: any) { setMsg(e?.message || "Action failed"); }
+    finally { setBusy(""); }
+  };
+  const Stat = ({ n, label, color }: { n: number; label: string; color: string }) => (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center">
+      <div className={`text-xl font-bold ${color}`}>{n ?? 0}</div>
+      <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+    </div>
+  );
+  const ActBtn = ({ kind, icon, label, sub, danger }: any) => (
+    <button onClick={() => run(kind)} disabled={!!busy}
+      className={`w-full flex items-center gap-3 p-3.5 rounded-xl border text-left disabled:opacity-60 ${danger ? "bg-red-500/10 border-red-500/30" : "bg-gray-800 border-gray-700"}`}>
+      {busy === kind ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : icon}
+      <span className="min-w-0">
+        <span className={`block text-sm font-medium ${danger ? "text-red-300" : "text-gray-200"}`}>{label}</span>
+        {sub && <span className="block text-xs text-gray-400">{sub}</span>}
+      </span>
+    </button>
+  );
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
+      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
+        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-5 flex items-center justify-between z-10">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-400" />Admin</h2>
+          <button onClick={onClose} className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        <div className="p-5 space-y-6">
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-indigo-400" />Queue overview</h3>
+            <div className="grid grid-cols-3 gap-2.5">
+              <Stat n={stats?.new} label="New" color="text-white" />
+              <Stat n={stats?.approved} label="Queue" color="text-green-400" />
+              <Stat n={stats?.applied} label="Applied" color="text-indigo-300" />
+              <Stat n={stats?.rejected} label="Passed" color="text-gray-300" />
+              <Stat n={stats?.manual_required} label="Manual" color="text-amber-400" />
+              <Stat n={stats?.dead_links} label="Dead links" color="text-red-400" />
+            </div>
+          </div>
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
+            <div className="space-y-2">
+              <ActBtn kind="clear-attempted" icon={<Ban className="w-5 h-5 text-gray-300 shrink-0" />} label="Clear attempted jobs from queue" sub="Removes already-tried (manual / failed) jobs" />
+              <ActBtn kind="rescore" icon={<Target className="w-5 h-5 text-gray-300 shrink-0" />} label="Re-score new jobs" />
+              <ActBtn kind="dedup" icon={<RefreshCw className="w-5 h-5 text-gray-300 shrink-0" />} label="Remove duplicate jobs" />
+              <ActBtn kind="clear-applied" icon={<Trash2 className="w-5 h-5 text-red-300 shrink-0" />} label="Delete all applied jobs" sub="Permanent — asks for confirmation" danger />
+            </div>
+            {msg && <p className="text-sm text-indigo-300 mt-3">{msg}</p>}
+          </div>
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-500 font-normal">({users.length})</span></h3>
+            <div className="space-y-2">
+              {users.map((u) => (
+                <div key={u.id} className="bg-gray-800 rounded-xl border border-gray-700 p-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{u.name || "?"}{u.role === "admin" && <span className="ml-2 text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full align-middle">admin</span>}</p>
+                      <p className="text-xs text-gray-400 truncate">{u.email}</p>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${u.is_active ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}>{u.is_active ? "Active" : "Inactive"}</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 mt-2.5 pt-2.5 border-t border-gray-700 text-center">
+                    <div><div className="text-sm font-bold text-white">{u.stats_new || 0}</div><div className="text-[10px] text-gray-500">New</div></div>
+                    <div><div className="text-sm font-bold text-green-400">{u.stats_approved || 0}</div><div className="text-[10px] text-gray-500">Queue</div></div>
+                    <div><div className="text-sm font-bold text-indigo-300">{u.stats_applied || 0}</div><div className="text-[10px] text-gray-500">Applied</div></div>
+                    <div><div className="text-sm font-bold text-gray-300">{u.stats_total || 0}</div><div className="text-[10px] text-gray-500">Total</div></div>
+                  </div>
+                </div>
+              ))}
+              {users.length === 0 && <p className="text-sm text-gray-500 text-center py-3">No users.</p>}
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const parseTitles = (v: any): string[] => { if (!v) return []; if (Array.isArray(v)) return v; try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); } catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); } };
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
@@ -785,6 +884,8 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [cvAnalysis, setCvAnalysis] = useState<CvOptimizerResult | null>(null);
   const [analyzeMsg, setAnalyzeMsg] = useState("");
   const [perm, setPerm] = useState(pushState()); const [pushMsg, setPushMsg] = useState("");
+  const [showAdmin, setShowAdmin] = useState(false);
+  const isAdmin = me.role === "admin" || (me as any).is_admin;
 
   useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
   const fmtDate = (iso: string) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); };
@@ -798,10 +899,17 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const fmtHour = (h: number) => { const ampm = h < 12 ? "AM" : "PM"; const hr = h % 12 === 0 ? 12 : h % 12; return `${String(hr).padStart(2, "0")}:00 ${ampm}`; };
 
   return (
+    <>
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
       <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
         <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-5 flex items-center justify-between z-10"><h2 className="text-lg font-bold text-white">Settings</h2><button onClick={onClose} className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button></div>
         <div className="p-5 space-y-6">
+          {isAdmin && (
+            <button onClick={() => setShowAdmin(true)} className="w-full flex items-center justify-between gap-2 p-4 bg-indigo-600/15 border border-indigo-600/40 rounded-xl active:bg-indigo-600/25">
+              <span className="flex items-center gap-2 text-indigo-200 font-semibold"><ShieldCheck className="w-5 h-5" />Admin Panel</span>
+              <span className="text-indigo-300 text-sm">Queue tools & users →</span>
+            </button>
+          )}
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic Schedule</h3><div className="space-y-3"><Field label="Daily Job Search" sub="Run search automatically"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field><Field label="Daily Auto-Apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field></div></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} /></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-400" />Key Skills & Keywords</h3><TagInput value={keywords} onChange={setKeywords} /></div>
@@ -828,6 +936,8 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
         </div>
       </motion.div>
     </motion.div>
+    <AnimatePresence>{showAdmin && <AdminModal onClose={() => setShowAdmin(false)} />}</AnimatePresence>
+    </>
   );
 }
 

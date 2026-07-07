@@ -1,7 +1,7 @@
 // Job Hunter service worker — scope is /app/ (served at /app/sw.js).
 // It only ever sees /app/* requests; /api/* is out of scope and always hits
 // the network live. Bump VERSION on each deploy to invalidate the old cache.
-const VERSION = "jh-v4";
+const VERSION = "jh-v7";
 const CACHE = `jobhunter-${VERSION}`;
 const SHELL = [
   "/app/",
