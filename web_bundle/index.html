@@ -18,9 +18,8 @@
   <body class="bg-gray-900">
     <div id="root"></div>
     <!-- Push self-heal: re-registers a rotated/wiped push subscription on every
-         load + focus when permission is already granted. Keeps notifications
-         alive after a redeploy loses the subscription row or Chrome rotates the
-         endpoint. Vanilla JS so it works without a bundle rebuild. -->
+         load + focus when permission is already granted. Vanilla JS so it works
+         without a bundle rebuild. -->
     <script>
     (function () {
       function b64ToUint8(base64) {
@@ -59,6 +58,35 @@
       if (document.readyState === "complete") syncPush();
       else window.addEventListener("load", syncPush);
       window.addEventListener("focus", function () { setTimeout(syncPush, 500); });
+    })();
+    </script>
+    <!-- Admin entry point for the PWA (admin-only). The full admin panel lives at
+         /admin (server-rendered). Injected here so it works without rebuilding the
+         React bundle. Hidden entirely for non-admin users. -->
+    <script>
+    (function () {
+      function addAdminButton() {
+        fetch("/api/me", { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (u) {
+            if (!u || !(u.role === "admin" || u.is_admin)) return;
+            if (document.getElementById("jh-admin-fab")) return;
+            var a = document.createElement("a");
+            a.id = "jh-admin-fab";
+            a.href = "/admin";
+            a.textContent = "👑 Admin";
+            a.setAttribute("aria-label", "Open Admin Panel");
+            a.style.cssText =
+              "position:fixed;right:12px;bottom:80px;z-index:9999;" +
+              "background:#4f46e5;color:#fff;font:600 13px/1 system-ui,-apple-system,sans-serif;" +
+              "padding:10px 14px;border-radius:9999px;text-decoration:none;" +
+              "box-shadow:0 4px 14px rgba(0,0,0,.4);";
+            document.body.appendChild(a);
+          })
+          .catch(function () {});
+      }
+      if (document.readyState === "complete") addAdminButton();
+      else window.addEventListener("load", addAdminButton);
     })();
     </script>
   </body>
