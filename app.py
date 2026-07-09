@@ -81,6 +81,13 @@ VAPID_PUBLIC_KEY      = _cfg("VAPID_PUBLIC_KEY", "vapid_public_key")
 VAPID_PRIVATE_PEM_B64 = _cfg("VAPID_PRIVATE_PEM_B64", "vapid_private_pem_b64")
 VAPID_SUBJECT         = _cfg("VAPID_SUBJECT", "vapid_subject", "mailto:eran.ganot@gmail.com")
 
+# ── Google Sign-In (OAuth 2.0) ──
+GOOGLE_CLIENT_ID     = _cfg("GOOGLE_CLIENT_ID",     "google_client_id")
+GOOGLE_CLIENT_SECRET = _cfg("GOOGLE_CLIENT_SECRET", "google_client_secret")
+GOOGLE_AUTH_URI      = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URI     = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URI  = "https://openidconnect.googleapis.com/v1/userinfo"
+
 # -- Login brute-force rate limiting (in-memory; single-process threaded server) --
 import time as _time_rl
 import threading as _threading_rl
@@ -2300,6 +2307,17 @@ LOGIN_HTML = """<!DOCTYPE html>
 
     {error_block}
 
+    <a href="/auth/google/start" class="flex items-center justify-center gap-3 w-full border border-slate-300 rounded-lg py-2.5 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z"/></svg>
+      Continue with Google
+    </a>
+
+    <div class="flex items-center gap-3 my-5">
+      <div class="h-px bg-slate-200 flex-1"></div>
+      <span class="text-xs text-slate-400 font-medium">or</span>
+      <div class="h-px bg-slate-200 flex-1"></div>
+    </div>
+
     <form method="POST" action="/login" class="space-y-4">
       <div>
         <label class="label" for="email">Email</label>
@@ -2340,6 +2358,17 @@ REGISTER_HTML = """<!DOCTYPE html>
     <h2 class="text-xl font-bold text-slate-900 mb-6">Create your account</h2>
 
     {error_block}
+
+    <a href="/auth/google/start" class="flex items-center justify-center gap-3 w-full border border-slate-300 rounded-lg py-2.5 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z"/></svg>
+      Continue with Google
+    </a>
+
+    <div class="flex items-center gap-3 my-5">
+      <div class="h-px bg-slate-200 flex-1"></div>
+      <span class="text-xs text-slate-400 font-medium">or</span>
+      <div class="h-px bg-slate-200 flex-1"></div>
+    </div>
 
     <form method="POST" action="/register" class="space-y-4">
       <div>
@@ -5494,6 +5523,94 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Set-Cookie", auth.clear_session_cookie())
             self.send_header("Location", "/login")
+            self.end_headers()
+            return
+
+        # ── Google Sign-In: start (full-page redirect to Google; PWA-safe) ──
+        if path in ("/auth/google/start", "/auth/google/start/"):
+            if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+                self.send_html(LOGIN_HTML.replace("{error_block}", error_block(
+                    "Google sign-in isn't configured on this server yet.")))
+                return
+            import secrets as _secrets_g, hashlib as _hashlib_g, base64 as _b64_g
+            _state    = _secrets_g.token_urlsafe(32)
+            _verifier = _secrets_g.token_urlsafe(64)
+            _challenge = _b64_g.urlsafe_b64encode(
+                _hashlib_g.sha256(_verifier.encode()).digest()).rstrip(b"=").decode()
+            _redirect_uri = MOBILE_URL.rstrip("/") + "/auth/google/callback"
+            _params = urllib.parse.urlencode({
+                "client_id": GOOGLE_CLIENT_ID,
+                "redirect_uri": _redirect_uri,
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": _state,
+                "code_challenge": _challenge,
+                "code_challenge_method": "S256",
+                "access_type": "online",
+                "prompt": "select_account",
+            })
+            _sec = "; Secure" if MOBILE_URL.startswith("https") else ""
+            self.send_response(302)
+            self.send_header("Set-Cookie", f"g_state={_state}; Path=/; HttpOnly{_sec}; Max-Age=600; SameSite=Lax")
+            self.send_header("Set-Cookie", f"g_verifier={_verifier}; Path=/; HttpOnly{_sec}; Max-Age=600; SameSite=Lax")
+            self.send_header("Location", GOOGLE_AUTH_URI + "?" + _params)
+            self.end_headers()
+            return
+
+        # ── Google Sign-In: callback (verify state, exchange code, sign in) ──
+        if path in ("/auth/google/callback", "/auth/google/callback/"):
+            def _google_fail(msg):
+                self.send_html(LOGIN_HTML.replace("{error_block}", error_block(msg)))
+            _code  = (qs.get("code")  or [""])[0]
+            _state = (qs.get("state") or [""])[0]
+            if qs.get("error"):
+                _google_fail("Google sign-in was cancelled."); return
+            from http.cookies import SimpleCookie as _SC_g
+            _ck = _SC_g(); _ck.load(self.headers.get("Cookie", ""))
+            _cookie_state    = _ck["g_state"].value    if "g_state"    in _ck else ""
+            _cookie_verifier = _ck["g_verifier"].value  if "g_verifier" in _ck else ""
+            if not _code or not _state or not _cookie_state or _state != _cookie_state:
+                _google_fail("Google sign-in failed a security check. Please try again."); return
+            _redirect_uri = MOBILE_URL.rstrip("/") + "/auth/google/callback"
+            try:
+                _tok_body = urllib.parse.urlencode({
+                    "code": _code,
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": _redirect_uri,
+                    "grant_type": "authorization_code",
+                    "code_verifier": _cookie_verifier,
+                }).encode()
+                _tok_req = urllib.request.Request(GOOGLE_TOKEN_URI, data=_tok_body,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"})
+                with urllib.request.urlopen(_tok_req, timeout=15) as _r:
+                    _tok = json.loads(_r.read().decode())
+                _access = _tok.get("access_token")
+                if not _access:
+                    _google_fail("Google sign-in failed (no token). Please try again."); return
+                _ui_req = urllib.request.Request(GOOGLE_USERINFO_URI,
+                    headers={"Authorization": "Bearer " + _access})
+                with urllib.request.urlopen(_ui_req, timeout=15) as _r:
+                    _info = json.loads(_r.read().decode())
+            except Exception as _ge:
+                print(f"[google-oauth] token/userinfo error: {_ge}")
+                _google_fail("Couldn't reach Google to complete sign-in. Please try again."); return
+            _sub      = _info.get("sub")
+            _email    = _info.get("email", "")
+            _verified = _info.get("email_verified", False)
+            _name     = _info.get("name", "")
+            _pic      = _info.get("picture", "")
+            if not _sub or not _email or not _verified:
+                _google_fail("Your Google account email isn't verified, so we can't sign you in."); return
+            _user, _is_new, _err = auth.find_or_create_google_user(_sub, _email, _name, _pic)
+            if _err or not _user:
+                _google_fail(_err or "Sign-in failed. Please try again."); return
+            _token = auth.create_session(_user["id"])
+            self.send_response(302)
+            self.send_header("Set-Cookie", auth.make_session_cookie(_token))
+            self.send_header("Set-Cookie", "g_state=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
+            self.send_header("Set-Cookie", "g_verifier=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
+            self.send_header("Location", "/onboarding" if _is_new else "/dashboard")
             self.end_headers()
             return
 

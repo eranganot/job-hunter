@@ -154,6 +154,11 @@ def init_db():
         "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_date TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_filename TEXT DEFAULT NULL",
         "ALTER TABLE user_profiles ADD COLUMN cv_uploaded_date TEXT DEFAULT NULL",
+        # ── Google Sign-In (OAuth) ──
+        "ALTER TABLE users ADD COLUMN google_sub TEXT DEFAULT NULL",
+        "ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'password'",
+        "ALTER TABLE users ADD COLUMN avatar_url TEXT DEFAULT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL",
         # ── Phase-1 robustness migrations ─────────────────────────────────────
         "ALTER TABLE jobs ADD COLUMN apply_strategy TEXT DEFAULT NULL",
         "ALTER TABLE jobs ADD COLUMN apply_next_attempt_at TEXT DEFAULT NULL",

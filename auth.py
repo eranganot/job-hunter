@@ -201,3 +201,75 @@ def make_session_cookie(token: str) -> str:
 
 def clear_session_cookie() -> str:
     return "session=; Path=/; HttpOnly; Secure; Max-Age=0; SameSite=Lax"
+
+
+# ── Google Sign-In (OAuth) ────────────────────────────────────
+
+def find_or_create_google_user(google_sub: str, email: str, name: str = "", avatar_url: str = ""):
+    """Resolve a Google identity to a local user.
+
+    Returns (user_dict, is_new, error_message).
+      1. Match by google_sub  -> existing linked account.
+      2. Match by email       -> link Google onto the existing (password) account.
+      3. Otherwise            -> create a new Google-backed user + profile row.
+    Only Google-verified emails should reach this function (caller enforces).
+    """
+    normalized_email = (email or "").strip().lower()
+    if not google_sub or not normalized_email:
+        return None, False, "Missing Google account details."
+
+    conn = _get_db()
+    try:
+        # 1. Already linked by Google subject id
+        row = conn.execute(
+            "SELECT * FROM users WHERE google_sub=? AND is_active=1", (google_sub,)
+        ).fetchone()
+        if row:
+            return dict(row), False, None
+
+        # 2. Existing account with the same verified email -> link it
+        row = conn.execute(
+            "SELECT * FROM users WHERE email=? AND is_active=1", (normalized_email,)
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE users SET google_sub=?, avatar_url=COALESCE(NULLIF(?,''), avatar_url) WHERE id=?",
+                (google_sub, avatar_url or "", row["id"])
+            )
+            conn.commit()
+            updated = conn.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
+            return dict(updated), False, None
+
+        # 3. Brand-new user. Admin email (from config) gets the admin role.
+        role              = "admin" if (_admin_email and normalized_email == _admin_email) else "user"
+        default_frequency = "daily" if role == "admin" else "weekly"
+        # Google users have no password; store a random unusable hash so the
+        # NOT NULL columns are satisfied and password login can never succeed.
+        pw_hash, salt = hash_password(secrets.token_urlsafe(32))
+        display_name = (name or normalized_email.split("@")[0]).strip()
+        conn.execute(
+            "INSERT INTO users (name, email, password_hash, salt, created_date, role, "
+            "google_sub, auth_provider, avatar_url) VALUES (?,?,?,?,?,?,?,?,?)",
+            (display_name, normalized_email, pw_hash, salt, datetime.now().isoformat(),
+             role, google_sub, "google", avatar_url or "")
+        )
+        user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO user_profiles (user_id, schedule_frequency) VALUES (?,?)",
+            (user_id, default_frequency)
+        )
+        conn.commit()
+        created = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return dict(created), True, None
+    except Exception as e:
+        if "UNIQUE" in str(e):
+            # Race: concurrent link/create. Re-fetch by sub or email.
+            row = conn.execute(
+                "SELECT * FROM users WHERE google_sub=? OR email=?",
+                (google_sub, normalized_email)
+            ).fetchone()
+            if row:
+                return dict(row), False, None
+        return None, False, str(e)
+    finally:
+        conn.close()
