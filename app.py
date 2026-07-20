@@ -5957,9 +5957,30 @@ class Handler(BaseHTTPRequestHandler):
             _rc_title = (qs.get("title", [""])[0] or "").strip()
             if _rc_company and _rc_title:
                 try:
+                    _name_slugs = _ae._company_slugs(_rc_company)
+                    try:
+                        _gem_slugs = _ae._gemini_board_candidates(_rc_company, _rc_title)
+                    except Exception as _ge:
+                        _gem_slugs = [f"ERR:{type(_ge).__name__}:{_ge}"[:120]]
+                    # Reachability: can THIS host reach the ATS APIs at all?
+                    _reach = _ae._ats_get("https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=false", timeout=6)
+                    _reach_n = len(_reach.get("jobs", [])) if isinstance(_reach, dict) else -1
+                    _slug_counts = {}
+                    _cand = _name_slugs + [g for g in _gem_slugs if isinstance(g, str) and g not in _name_slugs]
+                    for _sl in _cand[:8]:
+                        try:
+                            _slug_counts[_sl] = len(_ae._ats_postings_for_slug(_sl))
+                        except Exception:
+                            _slug_counts[_sl] = -1
                     _rr = _ae.resolve_ats_application(_rc_company, _rc_title)
-                    diag["resolver_probe"] = {"company": _rc_company, "title": _rc_title,
-                                              "resolved": _rr or None}
+                    diag["resolver_probe"] = {
+                        "company": _rc_company, "title": _rc_title,
+                        "name_slugs": _name_slugs,
+                        "gemini_slugs": _gem_slugs,
+                        "greenhouse_reachable_stripe_jobs": _reach_n,
+                        "slug_posting_counts": _slug_counts,
+                        "resolved": _rr or None,
+                    }
                 except Exception as _e:
                     diag["resolver_probe"] = {"error": str(_e)[:300]}
             probe = {"launched": False}
