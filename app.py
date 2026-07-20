@@ -1903,14 +1903,14 @@ _APPLY_POOL = _cf.ThreadPoolExecutor(max_workers=4)
 _APPLY_DEADLINE_S = int(os.environ.get("APPLY_DEADLINE_S", "150"))
 
 
-def _submit_application_guarded(job_url, job_title, company, applicant, cv_path, api_key=""):
+def _submit_application_guarded(job_url, job_title, company, applicant, cv_path, api_key="", job_location=""):
     """Run apply_engine.submit_application with a concurrency cap and an overall
     wall-clock deadline so a single apply can never hang the job forever."""
     import apply_engine  # imported lazily (module is imported locally elsewhere)
     with _APPLY_SEM:
         fut = _APPLY_POOL.submit(
             apply_engine.submit_application,
-            job_url, job_title, company, applicant, cv_path, api_key,
+            job_url, job_title, company, applicant, cv_path, api_key, job_location,
         )
         try:
             return fut.result(timeout=_APPLY_DEADLINE_S)
@@ -2023,7 +2023,8 @@ def run_job_apply(user_id: int) -> int:
             if job_url:
                 res = _submit_application_guarded(
                     job_url, j["title"], j["company"],
-                    applicant, cv_path, GEMINI_KEY
+                    applicant, cv_path, GEMINI_KEY,
+                    (j["location"] if "location" in j.keys() else ""),
                 )
                 apply_status       = res["status"]
                 apply_confirmation = res.get("confirmation_text", "")[:1000]
@@ -2175,7 +2176,8 @@ def _trigger_apply_bg(user_id: int, job_id: int):
 
             res = _submit_application_guarded(
                 job["url"], job["title"], job["company"],
-                applicant, cv_path, GEMINI_KEY
+                applicant, cv_path, GEMINI_KEY,
+                (job["location"] if "location" in job.keys() else ""),
             )
 
             apply_status         = res["status"]
@@ -5979,7 +5981,8 @@ class Handler(BaseHTTPRequestHandler):
                             max_tokens=128, timeout=20)
                     except Exception as _ge2:
                         _graw = f"ERR {type(_ge2).__name__}: {_ge2}"
-                    _rr = _ae.resolve_ats_application(_rc_company, _rc_title)
+                    _rc_loc = (qs.get("location", [""])[0] or "").strip()
+                    _rr = _ae.resolve_ats_application(_rc_company, _rc_title, location=_rc_loc)
                     diag["resolver_probe"] = {
                         "company": _rc_company, "title": _rc_title,
                         "name_slugs": _name_slugs,

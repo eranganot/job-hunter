@@ -343,3 +343,38 @@ def test_norm_company():
     assert ae._norm_company("Cato Networks") == "catonetworks"
     assert ae._norm_company("monday.com") == "mondaycom"
     assert ae._ATS_BOARD_MAP.get(ae._norm_company("Cato Networks")) == "catonetworks"
+
+
+def test_norm_title_strips_seniority_not_specialization():
+    assert ae._norm_title("Senior Product Manager") == ae._norm_title("Product Manager")
+    assert ae._norm_title("Group Product Manager") == ae._norm_title("Product Manager")
+    assert ae._norm_title("Product Marketing Manager") != ae._norm_title("Product Manager")
+
+
+def test_resolve_rejects_superset_title(monkeypatch):
+    # "Product Manager" must NOT match "Product Marketing Manager"
+    def fake_get(url, timeout=6):
+        if "/wizinc/" in url and "greenhouse" in url:
+            return {"jobs": [{"title": "Product Marketing Manager", "id": 1,
+                              "absolute_url": "https://boards.greenhouse.io/wizinc/jobs/1",
+                              "location": {"name": "Remote - USA"}}]}
+        return None
+    monkeypatch.setattr(ae, "_ats_get", fake_get)
+    monkeypatch.setattr(ae, "_gemini_board_candidates", lambda *a, **k: [])
+    assert ae.resolve_ats_application("Wiz", "Product Manager") is None
+
+
+def test_resolve_prefers_target_location(monkeypatch):
+    def fake_get(url, timeout=6):
+        if "/wizinc/" in url and "greenhouse" in url:
+            return {"jobs": [
+                {"title": "Product Manager", "id": 1, "location": {"name": "Remote - USA"},
+                 "absolute_url": "https://boards.greenhouse.io/wizinc/jobs/1"},
+                {"title": "Product Manager", "id": 2, "location": {"name": "Tel Aviv, Israel"},
+                 "absolute_url": "https://boards.greenhouse.io/wizinc/jobs/2"},
+            ]}
+        return None
+    monkeypatch.setattr(ae, "_ats_get", fake_get)
+    monkeypatch.setattr(ae, "_gemini_board_candidates", lambda *a, **k: [])
+    r = ae.resolve_ats_application("Wiz", "Product Manager", location="Tel Aviv")
+    assert r and r["url"].endswith("/jobs/2") and "Tel Aviv" in r["location"]

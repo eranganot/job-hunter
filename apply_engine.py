@@ -846,16 +846,58 @@ def check_url_alive(url: str, timeout: int = 8) -> bool:
 # / Ashby / Comeet) and matching the posting by title. No Google scraping — this
 # is deterministic and fast, and reuses the same endpoints the search uses.
 
+_TITLE_GENERIC = {"senior", "junior", "jr", "sr", "lead", "staff", "principal",
+                  "the", "of", "and", "a", "an", "ii", "iii", "iv", "i", "group",
+                  "global", "corporate"}
+
+
+def _norm_title(t: str) -> str:
+    """Drop seniority/generic words so 'Senior Product Manager' == 'Product
+    Manager' but 'Product Marketing Manager' stays distinct."""
+    return " ".join(w for w in re.findall(r"[a-z0-9]+", (t or "").lower())
+                    if w not in _TITLE_GENERIC)
+
+
 try:
     from rapidfuzz import fuzz as _rf
 
     def _title_ratio(a: str, b: str) -> float:
-        return float(_rf.token_set_ratio(a, b))
+        na, nb = _norm_title(a), _norm_title(b)
+        if not na or not nb:
+            return 0.0
+        # token_SORT (order+length sensitive) so a shorter title does NOT score
+        # 100 against a longer superset ("Product Manager" vs "Product Marketing
+        # Manager"); token_set_ratio wrongly gave those a perfect match.
+        return float(_rf.token_sort_ratio(na, nb))
 except Exception:  # pragma: no cover
     from difflib import SequenceMatcher as _SM
 
     def _title_ratio(a: str, b: str) -> float:
-        return _SM(None, a, b).ratio() * 100.0
+        na, nb = _norm_title(a), _norm_title(b)
+        if not na or not nb:
+            return 0.0
+        return _SM(None, na, nb).ratio() * 100.0
+
+
+_IL_LOC_TOKENS = ("israel", "tel aviv", "tel-aviv", "telaviv", "tlv", "herzliya",
+                  "ramat gan", "petah tikva", "haifa", "jerusalem", "netanya",
+                  "raanana", "ra'anana", "rehovot", "yokneam", "hod hasharon",
+                  "givatayim", "modiin", "caesarea", "or yehuda", "ness ziona")
+
+
+def _loc_match(posting_loc: str, target: str) -> int:
+    """2 = strong location match, 0 = none/unknown. Lets the resolver pick the
+    RIGHT posting when a board lists the same title in several locations."""
+    p = (posting_loc or "").lower()
+    t = (target or "").lower()
+    if not t or not p:
+        return 0
+    twords = {w for w in re.findall(r"[a-z]+", t) if len(w) >= 3}
+    if any(w in p for w in twords):
+        return 2
+    if any(x in t for x in _IL_LOC_TOKENS) and any(x in p for x in _IL_LOC_TOKENS):
+        return 2
+    return 0
 
 
 _ATS_DIRECT_HOSTS = (
@@ -1025,18 +1067,28 @@ def resolve_ats_application(company: str, job_title: str, location: str = "",
     Best-effort; no Google scraping."""
     if not company or not job_title:
         return None
-    best = {"v": None}
+    best = {"v": None, "key": (-1, -1.0)}   # rank by (location_match, title_score)
+
+    def _consider(p) -> bool:
+        score = _title_ratio(job_title, p["title"])
+        if score < threshold:
+            return False
+        loc = _loc_match(p.get("location", ""), location)
+        key = (loc, score)
+        if key > best["key"]:
+            best["key"] = key
+            best["v"] = {"url": p["url"], "ats": p["ats"],
+                         "matched_title": p["title"], "score": round(score, 1),
+                         "location": p.get("location", "")}
+        # Stop early on an exact title match, provided the location is satisfied
+        # (or no target location was requested).
+        return score >= 97 and (loc >= 2 or not location)
 
     def _scan(slugs) -> bool:
         for slug in slugs:
             for p in _ats_postings_for_slug(slug):
-                score = _title_ratio(job_title, p["title"])
-                if best["v"] is None or score > best["v"]["score"]:
-                    best["v"] = {"url": p["url"], "ats": p["ats"],
-                                 "matched_title": p["title"], "score": round(score, 1),
-                                 "location": p.get("location", "")}
-            if best["v"] and best["v"]["score"] >= 92:   # confident → stop early
-                return True
+                if _consider(p):
+                    return True
         return False
 
     tried = []
@@ -1047,14 +1099,17 @@ def resolve_ats_application(company: str, job_title: str, location: str = "",
         if _s not in tried:
             tried.append(_s)
     strong = _scan(tried)
-    # Widen with Gemini-suggested slugs only if name-munging didn't nail it.
+    # Widen with Gemini-suggested slugs only if the curated map + name-munging
+    # didn't already nail a perfect match.
     if not strong and use_llm:
-        extra = [s for s in _gemini_board_candidates(company, job_title) if s not in tried]
+        try:
+            extra = [s for s in _gemini_board_candidates(company, job_title) if s not in tried]
+        except Exception:
+            extra = []
         if extra:
             _scan(extra)
 
-    b = best["v"]
-    return b if (b and b["score"] >= threshold) else None
+    return best["v"]
 
 
 # ── Core application submission ───────────────────────────────────────────────
@@ -1066,6 +1121,7 @@ def submit_application(
     applicant: dict,
     cv_path: str | None,
     api_key: str = "",
+    job_location: str = "",
 ) -> dict:
     """
     Submit a job application using headless Chromium + Claude.
@@ -1119,7 +1175,7 @@ def submit_application(
     # disables it.
     if not _is_direct_ats(job_url) and os.environ.get("APPLY_RESOLVE_ATS", "1").strip().lower() in ("1", "true", "yes", "on"):
         try:
-            _r = resolve_ats_application(company, job_title)
+            _r = resolve_ats_application(company, job_title, location=job_location)
         except Exception as _re:
             _r = None
             print(f"[apply-engine] ATS resolve error: {_re}")
