@@ -422,6 +422,37 @@ def check_notifications():
         print(f"[notify] Error: {e}")
 
 
+def _gemini_generate(url: str, body_bytes: bytes, timeout: int = 90, retries: int = 4) -> str:
+    """POST to the Gemini REST API with exponential backoff on 429/503 (honours
+    Retry-After). A single un-retried 429 was collapsing job SCORING to the weak
+    keyword heuristic, which starves the queue — this smooths per-minute rate
+    limits so sourced jobs actually get scored + inserted."""
+    import urllib.request as _u, urllib.error as _ue, time as _t, random as _r
+    last = None
+    for attempt in range(retries + 1):
+        try:
+            req = _u.Request(url, data=body_bytes,
+                             headers={"Content-Type": "application/json"}, method="POST")
+            with _u.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8")
+        except _ue.HTTPError as e:
+            last = e
+            if e.code in (429, 500, 503) and attempt < retries:
+                _ra = e.headers.get("Retry-After") if e.headers else None
+                delay = float(_ra) if (_ra and str(_ra).isdigit()) else min(2 ** attempt + _r.random(), 30)
+                print(f"[gemini] HTTP {e.code} — backoff retry {attempt + 1}/{retries} in {delay:.1f}s")
+                _t.sleep(delay)
+                continue
+            raise
+        except Exception as e:
+            last = e
+            if attempt < retries:
+                _t.sleep(min(2 ** attempt, 8))
+                continue
+            raise
+    raise last  # pragma: no cover
+
+
 def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
     """Check activity_log to see if this scheduled job already fired today.
     DB-backed so it survives server restarts (unlike an in-memory dict).
@@ -1300,10 +1331,7 @@ def run_job_search(user_id: int):
                         }).encode('utf-8')
                         _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
-                        _g_req = _ur2.Request(_g_url, data=_g_body,
-                                              headers={'Content-Type': 'application/json'}, method='POST')
-                        with _ur2.urlopen(_g_req, timeout=90) as _g_resp:
-                            _g_data = _js2.loads(_g_resp.read().decode('utf-8'))
+                        _g_data = _js2.loads(_gemini_generate(_g_url, _g_body, timeout=90))
                         _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
                         result_ = _parse_scored_response(_g_text)
                         print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
@@ -1427,10 +1455,7 @@ def run_job_search(user_id: int):
                         }).encode('utf-8')
                         _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
                                    'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY_WS)
-                        _ws_req = _ur2.Request(_ws_url, data=_ws_body,
-                                               headers={'Content-Type': 'application/json'}, method='POST')
-                        with _ur2.urlopen(_ws_req, timeout=60) as _ws_resp:
-                            _ws_data = _js2.loads(_ws_resp.read().decode('utf-8'))
+                        _ws_data = _js2.loads(_gemini_generate(_ws_url, _ws_body, timeout=60))
                         _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
                         _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
                         if _ws_si >= 0 and _ws_ei > _ws_si:
@@ -1606,10 +1631,7 @@ def run_job_search(user_id: int):
                                     }).encode()
                                     _url_d = ("https://generativelanguage.googleapis.com/v1beta/models/"
                                               "gemini-2.5-flash:generateContent?key=" + _TB_GEMINI)
-                                    _req_d = _ur2.Request(_url_d, data=_body_d,
-                                                          headers={"Content-Type": "application/json"}, method="POST")
-                                    with _ur2.urlopen(_req_d, timeout=90) as _rd:
-                                        _resp_d = _js2.loads(_rd.read().decode())
+                                    _resp_d = _js2.loads(_gemini_generate(_url_d, _body_d, timeout=90))
                                     _text_d = _resp_d["candidates"][0]["content"]["parts"][0]["text"]
                                     _scored_d = _parse_desc_resp(_text_d)
                                     _out_d = _apply_desc_scores(_scored_d, batch_d_)
@@ -5930,26 +5952,31 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 _c2 = database.get_db()
                 _rows = _c2.execute(
-                    "SELECT url, COALESCE(apply_status,'') AS aps, COALESCE(url_verified,-1) AS uv, "
-                    "COALESCE(apply_attempts,0) AS att FROM jobs WHERE user_id=? AND status='approved'",
+                    "SELECT status, url, COALESCE(apply_status,'') AS aps, COALESCE(url_verified,-1) AS uv, "
+                    "COALESCE(apply_attempts,0) AS att FROM jobs WHERE user_id=? AND status IN ('new','approved')",
                     (user["id"],)).fetchall()
+                _allcounts = {r[0]: r[1] for r in _c2.execute(
+                    "SELECT status, COUNT(*) FROM jobs WHERE user_id=? GROUP BY status",
+                    (user["id"],)).fetchall()}
                 _c2.close()
-                _tot=_dead=_board=_manual=_exhausted=_submittable=0
-                for _r in _rows:
-                    _tot += 1
-                    _u = _r["url"] or ""
-                    if _r["uv"] == 0: _dead += 1; continue
-                    if _r["aps"] == "manual_required": _manual += 1; continue
-                    if _ae._is_job_board(_u): _board += 1; continue
-                    if _r["att"] >= _ae.MAX_APPLY_ATTEMPTS: _exhausted += 1; continue
-                    _submittable += 1
+                def _bucket(rows):
+                    tot = dead = board = manual = exh = sub = 0
+                    for _r in rows:
+                        tot += 1
+                        _u = _r["url"] or ""
+                        if _r["uv"] == 0: dead += 1; continue
+                        if _r["aps"] == "manual_required": manual += 1; continue
+                        if _ae._is_job_board(_u): board += 1; continue
+                        if _r["att"] >= _ae.MAX_APPLY_ATTEMPTS: exh += 1; continue
+                        sub += 1
+                    return {"total": tot, "auto_submittable": sub,
+                            "job_board_manual_by_design": board,
+                            "flagged_manual_required": manual,
+                            "dead_link": dead, "attempts_exhausted": exh}
                 diag["queue_audit"] = {
-                    "approved_total": _tot,
-                    "auto_submittable": _submittable,
-                    "job_board_manual_by_design": _board,
-                    "flagged_manual_required": _manual,
-                    "dead_link": _dead,
-                    "attempts_exhausted": _exhausted,
+                    "status_counts": _allcounts,
+                    "approved": _bucket([r for r in _rows if r["status"] == "approved"]),
+                    "new_unreviewed": _bucket([r for r in _rows if r["status"] == "new"]),
                 }
             except Exception as _e:
                 diag["queue_audit_error"] = str(_e)[:300]
