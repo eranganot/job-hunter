@@ -5972,11 +5972,19 @@ class Handler(BaseHTTPRequestHandler):
                             _slug_counts[_sl] = len(_ae._ats_postings_for_slug(_sl))
                         except Exception:
                             _slug_counts[_sl] = -1
+                    try:
+                        _graw = _ae._claude(
+                            f'Return ONLY a JSON array of up to 5 likely lowercase ATS board '
+                            f'slugs for the company "{_rc_company}" (e.g. Wiz -> ["wizinc","wiz"]).',
+                            max_tokens=128, timeout=20)
+                    except Exception as _ge2:
+                        _graw = f"ERR {type(_ge2).__name__}: {_ge2}"
                     _rr = _ae.resolve_ats_application(_rc_company, _rc_title)
                     diag["resolver_probe"] = {
                         "company": _rc_company, "title": _rc_title,
                         "name_slugs": _name_slugs,
                         "gemini_slugs": _gem_slugs,
+                        "gemini_raw": (_graw or "")[:300],
                         "greenhouse_reachable_stripe_jobs": _reach_n,
                         "slug_posting_counts": _slug_counts,
                         "resolved": _rr or None,

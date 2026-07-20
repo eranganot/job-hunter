@@ -301,3 +301,23 @@ def test_gemini_board_candidates_no_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_KEY", raising=False)
     assert ae._gemini_board_candidates("Wiz") == []
+
+
+def test_gemini_board_candidates_parses_json_array(monkeypatch):
+    monkeypatch.setattr(ae, "GEMINI_KEY", "x")
+    monkeypatch.setattr(ae, "_claude", lambda *a, **k: '```json\n["wizinc","wiz"]\n```')
+    assert ae._gemini_board_candidates("Wiz")[:2] == ["wizinc", "wiz"]
+
+
+def test_gemini_board_candidates_parses_prose(monkeypatch):
+    monkeypatch.setattr(ae, "GEMINI_KEY", "x")
+    monkeypatch.setattr(ae, "_claude", lambda *a, **k: 'The likely board slug is "gongio".')
+    assert "gongio" in ae._gemini_board_candidates("Gong")
+
+
+def test_gemini_board_candidates_swallows_errors(monkeypatch):
+    monkeypatch.setattr(ae, "GEMINI_KEY", "x")
+    def boom(*a, **k):
+        raise RuntimeError("api down")
+    monkeypatch.setattr(ae, "_claude", boom)
+    assert ae._gemini_board_candidates("Wiz") == []

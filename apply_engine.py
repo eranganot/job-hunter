@@ -970,17 +970,25 @@ def _gemini_board_candidates(company: str, job_title: str = "") -> list[str]:
         f'best guess first. Example: ["wizinc","wiz"].'
     )
     try:
-        data = _claude_json(prompt, max_tokens=128, timeout=20)
+        raw = _claude(prompt, max_tokens=128, timeout=20)
     except Exception as e:
         print(f"[apply-engine] gemini board hint error: {e}")
         return []
+    # Shape-tolerant: prefer quoted tokens (JSON array / quoted list); fall back
+    # to bare words. Every slug is verified against the live ATS API downstream,
+    # so junk candidates are harmless.
+    low = (raw or "").lower()
+    toks = re.findall(r'"([a-z0-9][a-z0-9\-]{1,40})"', low)
+    if not toks:
+        toks = re.findall(r'[a-z0-9][a-z0-9\-]{1,40}', low)
+    _stop = {"json", "slug", "slugs", "array", "the", "com", "io", "ai", "ats",
+             "board", "boards", "greenhouse", "lever", "ashby", "smartrecruiters",
+             "comeet", "company", "example", "likely", "https", "http", "www", "careers"}
     out = []
-    if isinstance(data, list):
-        for x in data:
-            if isinstance(x, str):
-                sl = re.sub(r"[^a-z0-9-]", "", x.lower().strip())
-                if sl and len(sl) >= 2 and sl not in out:
-                    out.append(sl)
+    for t in toks:
+        t = re.sub(r"[^a-z0-9-]", "", t).strip("-")
+        if t and len(t) >= 2 and t not in out and t not in _stop:
+            out.append(t)
     return out[:5]
 
 
