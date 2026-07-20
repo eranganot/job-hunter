@@ -693,15 +693,15 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
   const suggested = totalSuggested || 0;
   // approved (all-time) = jobs that passed the approval gate = still-approved + applied
   const approvedAllTime = approvedCount + appliedCount;
-  // Both rates are over TOTAL SUGGESTED (every job ever), per product definition.
+  // Approval rate = approved-of-all-time / total suggested. Apply rate = applied / approved (of the jobs that cleared the gate, how many were applied to).
   const approvalRate = suggested > 0 ? Math.round((approvedAllTime / suggested) * 100) : 0;
-  const applyRate = suggested > 0 ? Math.round((appliedCount / suggested) * 100) : 0;
+  const applyRate = approvedAllTime > 0 ? Math.round((appliedCount / approvedAllTime) * 100) : 0;
   const bar = (label: string, n: number, color: string) => (<div><div className="flex items-center justify-between mb-1"><span className="text-sm text-gray-400">{label}</span><span className="text-sm font-medium text-white">{n}</span></div><div className="h-2 bg-gray-700 rounded-full overflow-hidden"><div className={`h-full ${color}`} style={{ width: `${totalReviewed ? (n / totalReviewed) * 100 : 0}%` }} /></div></div>);
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-2xl p-5 border border-blue-800/50"><h4 className="text-sm font-medium text-gray-400 mb-1">Approval Rate</h4><div className="text-3xl font-bold text-blue-400 mb-1">{approvalRate}%</div><p className="text-sm text-gray-500">{approvedAllTime} approved of {suggested} suggested</p></div>
-        <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50"><h4 className="text-sm font-medium text-gray-400 mb-1">Applied</h4><div className="text-3xl font-bold text-green-400 mb-1">{applyRate}%</div><p className="text-sm text-gray-500">{appliedCount} applied of {suggested} suggested</p></div>
+        <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50"><h4 className="text-sm font-medium text-gray-400 mb-1">Applied</h4><div className="text-3xl font-bold text-green-400 mb-1">{applyRate}%</div><p className="text-sm text-gray-500">{appliedCount} applied of {approvedAllTime} approved</p></div>
       </div>
       <div className="bg-gray-800 rounded-xl p-5 border border-gray-700"><h4 className="font-semibold text-white mb-4">Decision Distribution</h4><div className="space-y-3">{bar("Approved", approvedCount, "bg-green-500")}{bar("Passed", rejectedCount, "bg-red-500")}{bar("Deferred", deferredCount, "bg-amber-500")}</div></div>
       <div className="bg-gradient-to-br from-indigo-900/20 to-slate-800/40 rounded-2xl p-5 border border-indigo-800/40"><h4 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Insights</h4><ul className="space-y-2 text-sm text-gray-300"><li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>You've reviewed {totalReviewed} job{totalReviewed !== 1 ? "s" : ""} so far.</span></li><li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{approvalRate}% approval rate — {approvalRate > 50 ? "you're casting a wide net" : "you're being selective"}.</span></li></ul></div>

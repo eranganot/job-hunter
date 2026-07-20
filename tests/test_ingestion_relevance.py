@@ -45,8 +45,25 @@ def test_remote_passes_only_if_user_lists_remote():
     assert passes("Head of Product", "Remote - Europe", TITLES, locs_remote, KW)
 
 
-def test_unknown_location_defers_to_ai():
-    assert passes_location("", LOCS)          # empty → keep, let the scorer decide
+def test_unknown_location_strict_drops_by_default(monkeypatch):
+    monkeypatch.delenv("INGEST_STRICT_LOCATION", raising=False)
+    # blank location + concrete non-remote target → dropped (strict default on).
+    # Blank-location postings are the main wrong-geo leak.
+    assert not passes_location("", LOCS)
+
+
+def test_unknown_location_kept_when_strict_off(monkeypatch):
+    monkeypatch.setenv("INGEST_STRICT_LOCATION", "0")
+    assert passes_location("", LOCS)          # permissive mode → let the scorer decide
+
+
+def test_unknown_location_kept_for_remote_user():
+    # a user who opted into remote-anywhere still receives unknown-location roles
+    assert passes_location("", ["Remote"])
+
+
+def test_unknown_location_kept_when_no_prefs():
+    assert passes_location("", [])
 
 
 # ---- title --------------------------------------------------------------

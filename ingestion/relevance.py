@@ -64,6 +64,15 @@ def gate_enabled() -> bool:
             not in ("0", "false", "no", "off"))
 
 
+def _strict_location() -> bool:
+    """When ON (default), a blank/unknown job location is DROPPED for users who
+    target a concrete place and did not opt into remote — blank-location postings
+    (Indeed/SparkHire/Workday fallbacks) are the main source of wrong-geo leakage.
+    Set INGEST_STRICT_LOCATION=0 to restore the old 'let the AI decide' behavior."""
+    return (os.environ.get("INGEST_STRICT_LOCATION", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
 def _user_is_israel(user_locations: list[str]) -> bool:
     for ul in user_locations:
         u = (ul or "").strip().lower()
@@ -88,10 +97,15 @@ def passes_location(location: str, user_locations: list[str],
     if not user_locations:
         return True
     loc = (location or "").strip().lower()
-    if not loc:
-        return True                      # unknown location → let the AI decide
     if accept_remote is None:
         accept_remote = _accepts_remote(user_locations)
+    if not loc:
+        # Unknown location. Blank-location postings are the main wrong-geo leak,
+        # so when the user targets a concrete place and did NOT opt into remote,
+        # drop them. INGEST_STRICT_LOCATION=0 restores the permissive behavior.
+        if _strict_location() and not accept_remote:
+            return False
+        return True
     # Israel-aware geographic match (covers Tel Aviv / Herzliya / "..., Israel" / Hybrid-in-Israel)
     if _user_is_israel(user_locations) and any(t in loc for t in _IL_TOKENS):
         return True

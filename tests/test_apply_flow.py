@@ -27,6 +27,7 @@ def env(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(apply_engine, "extract_applicant_data", lambda cv, em: {"email": em})
+    monkeypatch.setenv("APPLY_ENGINE_ENABLED", "1")  # exercise the apply path; kill-switch tested separately
     return app, uid
 
 
@@ -101,6 +102,24 @@ def test_exhausted_not_repicked(env, monkeypatch):
     monkeypatch.setattr(app, "_submit_application_guarded", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), _ok())[1])
     app.run_job_apply(uid)
     assert calls["n"] == 0
+
+
+def test_apply_engine_disabled_by_default(env, monkeypatch):
+    """With APPLY_ENGINE_ENABLED unset/off, run_job_apply must no-op and never
+    touch the queue (job stays 'approved', not 'manual_required')."""
+    app, uid = env
+    monkeypatch.delenv("APPLY_ENGINE_ENABLED", raising=False)
+    _seed(uid)
+    called = {"n": 0}
+    monkeypatch.setattr(app, "_submit_application_guarded",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    res = app.run_job_apply(uid)
+    assert res.get("skipped") == "apply_engine_disabled"
+    assert called["n"] == 0
+    conn = database.get_db()
+    st = conn.execute("SELECT status FROM jobs WHERE user_id=?", (uid,)).fetchone()["status"]
+    conn.close()
+    assert st == "approved"
 
 
 def test_success_marks_applied(env, monkeypatch):

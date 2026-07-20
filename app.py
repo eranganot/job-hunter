@@ -1807,11 +1807,13 @@ def run_job_search(user_id: int):
         # so a transient bot-block never nukes a good posting.
         conn = database.get_db()
         prev_ok = conn.execute(
-            "SELECT id, url FROM jobs WHERE user_id=? AND url_verified=1 AND url!=''", (user_id,)
+            "SELECT id, url, status FROM jobs WHERE user_id=? AND url_verified=1 AND url!=''", (user_id,)
         ).fetchall()
         conn.close()
         reval_dead = 0
+        reval_removed = 0
         if prev_ok:
+            _autoreject = os.environ.get("LINK_AUTOREJECT_DEAD", "1").strip().lower() not in ("0", "false", "no", "off")
             with _TPE(max_workers=8) as _ex3:
                 _futs3 = {_ex3.submit(_link_status, r["url"]): r for r in prev_ok}
                 _demote = []
@@ -1819,11 +1821,22 @@ def run_job_search(user_id: int):
                     try:    _st = _f3.result(timeout=12)
                     except Exception: _st = "unknown"
                     if _st == "dead":
-                        _demote.append(_r3["id"])
+                        _demote.append(_r3)
             if _demote:
                 conn = database.get_db()
-                for _jid in _demote:
-                    conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, _jid))
+                for _r in _demote:
+                    _jid = _r["id"]; _rst = (_r["status"] or "")
+                    # A definitively-dead link in the REVIEW queue is useless — move it
+                    # out so Eran stops seeing expired postings. Applied/rejected rows
+                    # are only re-flagged (url_verified=0), never re-statused.
+                    if _autoreject and _rst in ("new", "approved"):
+                        conn.execute(
+                            "UPDATE jobs SET status='rejected', url_verified=0, url_check_date=?, "
+                            "notes=COALESCE(notes,'') || ' [auto-removed: link dead/closed]' WHERE id=?",
+                            (_chk_date, _jid))
+                        reval_removed += 1
+                    else:
+                        conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, _jid))
                 conn.commit(); conn.close()
                 reval_dead = len(_demote)
 
@@ -1853,7 +1866,10 @@ def run_job_search(user_id: int):
             notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
             notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
         if reval_dead>0:
-            notif_lines.append(f"⚠️ {reval_dead} previously-'Verified' link(s) now flagged dead (parked/expired)")
+            _rmsg = f"⚠️ {reval_dead} previously-'Verified' link(s) now dead (parked/closed/expired)"
+            if reval_removed>0:
+                _rmsg += f" — {reval_removed} auto-removed from review"
+            notif_lines.append(_rmsg)
         try:
             deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#new")
         except Exception as _dn_err:
@@ -1927,6 +1943,9 @@ def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
 
 def run_job_apply(user_id: int) -> int:
     """Submit applications to all approved jobs using browser automation + Claude."""
+    # Global kill-switch: apply engine disabled by default (2026-07-20).
+    if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"applied": 0, "error": "", "skipped": "apply_engine_disabled"}
     # ── Rate-limit + auto_apply gate ──────────────────────────────────────────
     from datetime import timezone as _tz
     today_utc = datetime.now(_tz.utc).strftime("%Y-%m-%d")
@@ -2121,6 +2140,8 @@ def _trigger_apply_bg(user_id: int, job_id: int):
     def _run():
         try:
             import apply_engine
+            if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
+                return  # apply engine disabled (2026-07-20)
             conn = database.get_db()
             job  = conn.execute(
                 "SELECT id, title, company, url, apply_status, COALESCE(apply_attempts,0) AS apply_attempts FROM jobs "
@@ -5299,11 +5320,13 @@ def _link_status(url: str, timeout: int = 8) -> str:
                 return "dead"
             if r.status >= 400:
                 return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
-            body = r.read(20000).decode("utf-8", "ignore")
+            body = r.read(40000).decode("utf-8", "ignore")
             try:
                 import apply_engine as _ae
                 if _ae._looks_parked(r.geturl(), body):
                     return "dead"  # parked / for-sale domain = posting is gone
+                if _ae._looks_closed(body):
+                    return "dead"  # 200-OK but posting closed/filled/expired
             except Exception:
                 pass
             return "alive"
@@ -5869,6 +5892,56 @@ class Handler(BaseHTTPRequestHandler):
                 if "details" in _it and _it["details"]:
                     _it["details"] = repair_mojibake(_it["details"])
             self.send_json(items)
+            return
+
+        if path == "/api/admin/apply-selftest":
+            # Read-only production diagnosis of the apply engine. Does NOT submit
+            # anything — it launches a browser and hits example.com to prove the
+            # runtime can actually drive Chromium. This is the ground-truth probe
+            # for "the engine applies to nothing regardless of code fixes".
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, status=403)
+                return
+            import apply_engine as _ae
+            import time as _t
+            diag = {
+                "playwright_importable": bool(getattr(_ae, "PLAYWRIGHT_AVAILABLE", False)),
+                "apply_engine_enabled_env": os.environ.get("APPLY_ENGINE_ENABLED", "(unset)"),
+                "gemini_key_present": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
+                "db_file": DB_FILE,
+                "db_exists": os.path.exists(DB_FILE),
+                "uploads_dir": UPLOADS_DIR,
+                "uploads_exists": os.path.isdir(UPLOADS_DIR),
+            }
+            try:
+                _c = database.get_db()
+                _pr = _c.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
+                _c.close()
+                _cvp = (_pr["cv_path"] if _pr else "") or ""
+                diag["cv_path"] = _cvp
+                diag["cv_exists"] = bool(_cvp and os.path.exists(_cvp))
+            except Exception as _e:
+                diag["cv_error"] = str(_e)[:300]
+            probe = {"launched": False}
+            if diag["playwright_importable"]:
+                _t0 = _t.time()
+                try:
+                    with _ae.sync_playwright() as _pw:
+                        _b = _pw.chromium.launch(headless=True)
+                        probe["chromium_version"] = _b.version
+                        _pg = _b.new_page()
+                        _pg.goto("https://example.com", timeout=20000)
+                        probe["nav_title"] = _pg.title()
+                        _b.close()
+                        probe["launched"] = True
+                except Exception as _e:
+                    probe["error"] = f"{type(_e).__name__}: {str(_e)[:400]}"
+                probe["elapsed_s"] = round(_t.time() - _t0, 1)
+            else:
+                probe["error"] = "playwright import failed (PLAYWRIGHT_AVAILABLE=False)"
+            diag["browser_probe"] = probe
+            self.send_json(diag)
             return
 
         if path == "/api/admin/queue-stats":

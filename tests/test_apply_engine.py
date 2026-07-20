@@ -110,6 +110,42 @@ def test_looks_parked_real_job_not_flagged():
     assert ae._looks_parked("https://boards.greenhouse.io/acme/jobs/1", body) is False
 
 
+def test_looks_closed_position_filled():
+    body = "<html><body><h1>Senior PM</h1><p>This position has been filled.</p></body></html>"
+    assert ae._looks_closed(body) is True
+
+
+def test_looks_closed_no_longer_accepting():
+    body = "<html><body>We are no longer accepting applications for this role.</body></html>"
+    assert ae._looks_closed(body) is True
+
+
+def test_looks_closed_real_job_not_flagged():
+    body = "<html><body><h1>Senior PM</h1><p>Apply now in Tel Aviv. Great role.</p></body></html>"
+    assert ae._looks_closed(body) is False
+
+
+def test_looks_closed_ignores_script_text():
+    # the phrase ONLY inside a <script> must not trigger (visible text only)
+    body = ('<html><head><script>var x="no longer accepting applications"</script></head>'
+            '<body><h1>Open role</h1><p>Apply now.</p></body></html>')
+    assert ae._looks_closed(body) is False
+
+
+def test_check_url_alive_flags_closed(monkeypatch):
+    closed = "<html><body>This job has been filled.</body></html>"
+
+    class _Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self, n=-1): return closed.encode()
+        def geturl(self): return "https://boards.greenhouse.io/acme/jobs/1"
+
+    monkeypatch.setattr(ae.urllib.request, "urlopen", lambda req, timeout=8: _Resp())
+    assert ae.check_url_alive("https://boards.greenhouse.io/acme/jobs/1") is False
+
+
 def test_check_url_alive_flags_parked(monkeypatch):
     stub = ('<html><head><script>window.location.href="/lander"</script></head>'
             '<body></body></html>')

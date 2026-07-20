@@ -741,6 +741,51 @@ _LANDER_SIGNS = ("/lander", "_lander", "/park", "/caf/", "sedoparking",
                  "parkingcrew", "bodis", "afternic", "cashparking", "/_ds/")
 
 
+# Phrases that appear on a job page whose posting is CLOSED / FILLED even though
+# the URL still returns HTTP 200 (Greenhouse/Lever/Comeet/Ashby/Workday all do
+# this). A LIVE posting essentially never contains these, so a single strong
+# match is treated as "the job is gone". Kept tight to avoid false positives.
+_CLOSED_PHRASES = (
+    "no longer accepting applications",
+    "no longer accepting application",
+    "this position has been filled",
+    "this job has been filled",
+    "position has been closed",
+    "this posting is closed",
+    "posting is no longer available",
+    "job posting is no longer available",
+    "this job is no longer available",
+    "this position is no longer available",
+    "the job you are looking for is no longer",
+    "this role is no longer open",
+    "we are no longer accepting applications",
+    "applications are no longer being accepted",
+    "job is not available anymore",
+    "this opening has been filled",
+    "position is no longer open",
+    "this listing has expired",
+    "job listing has expired",
+    "the page you were looking for doesn't exist",
+    "job not found",
+    "position not found",
+    "oops! that job",
+)
+
+
+def _looks_closed(body: str) -> bool:
+    """True if a 200-OK page reads as a closed/filled/expired posting.
+
+    Matches on the VISIBLE text only (scripts/styles stripped) so JS strings
+    can't trigger it, and requires an exact known-closed phrase."""
+    if not body:
+        return False
+    _stripped = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", body)
+    visible = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", _stripped)).strip().lower()
+    if not visible:
+        return False
+    return any(ph in visible for ph in _CLOSED_PHRASES)
+
+
 def _looks_parked(final_url: str, body: str) -> bool:
     """Heuristic: does this look like a parked / for-sale domain page?
 
@@ -784,8 +829,10 @@ def check_url_alive(url: str, timeout: int = 8) -> bool:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             if r.status >= 400:
                 return False
-            body = r.read(20000).decode("utf-8", "ignore")
+            body = r.read(40000).decode("utf-8", "ignore")
             if _looks_parked(r.geturl(), body):
+                return False
+            if _looks_closed(body):
                 return False
             return True
     except urllib.error.HTTPError as e:
@@ -826,6 +873,13 @@ def submit_application(
         "success": False, "status": "failed", "confirmation_text": "", "error": "",
         "apply_failure_type": None, "apply_failure_detail": None, "resolved_url": job_url,
     }
+
+    # ── Global kill-switch (2026-07-20) ──────────────────────────────────────
+    # Auto-submit apply engine is DISABLED by default. Set Railway env
+    # APPLY_ENGINE_ENABLED=1 to re-enable. Reversible with no code change.
+    if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
+        return {**_base, "status": "manual_required",
+                "error": "Apply engine disabled (set APPLY_ENGINE_ENABLED=1 to re-enable)"}
 
     if not PLAYWRIGHT_AVAILABLE:
         return {**_base, "status": "manual_required",
