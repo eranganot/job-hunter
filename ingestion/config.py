@@ -66,6 +66,14 @@ class Config:
     JOBSPY_SITES = _env("JOBSPY_SITES", "linkedin,indeed,glassdoor")
     JOBSPY_ENABLED = _env_bool("JOBSPY_ENABLED", True)     # still needs python-jobspy installed
 
+    # ── SecretJobs (secretjobs.ai) — PAID, admin only, authenticated ──────
+    # No public feed: reads the account holder's OWN logged-in session. Capture
+    # the job-feed endpoint from your Network tab and set these in Railway env.
+    SECRETJOBS_JOBS_URL = _env("SECRETJOBS_JOBS_URL")        # the frontend job-feed JSON endpoint
+    SECRETJOBS_AUTH_HEADER = _env("SECRETJOBS_AUTH_HEADER", "Cookie")  # or "Authorization"
+    SECRETJOBS_AUTH_VALUE = _env("SECRETJOBS_AUTH_VALUE")    # your cookie string, or "Bearer <token>"
+    SECRETJOBS_MONTHLY_CAP = _env_int("SECRETJOBS_MONTHLY_CAP", 3000)
+
     # ── big-tech (FREE — public internal endpoints) ───────────────────────
     # Big-Tech ON by default. Results are constrained to the user's geography
     # by the relevance gate (Israel-office jobs), so no global flood. Turn off

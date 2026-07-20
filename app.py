@@ -5923,6 +5923,34 @@ class Handler(BaseHTTPRequestHandler):
                 diag["cv_exists"] = bool(_cvp and os.path.exists(_cvp))
             except Exception as _e:
                 diag["cv_error"] = str(_e)[:300]
+            # Queue composition — is there anything AUTO-SUBMITTABLE to apply to?
+            # (job-board URLs are manual_required by design; dead links are unusable.)
+            try:
+                _c2 = database.get_db()
+                _rows = _c2.execute(
+                    "SELECT url, COALESCE(apply_status,'') AS aps, COALESCE(url_verified,-1) AS uv, "
+                    "COALESCE(apply_attempts,0) AS att FROM jobs WHERE user_id=? AND status='approved'",
+                    (user["id"],)).fetchall()
+                _c2.close()
+                _tot=_dead=_board=_manual=_exhausted=_submittable=0
+                for _r in _rows:
+                    _tot += 1
+                    _u = _r["url"] or ""
+                    if _r["uv"] == 0: _dead += 1; continue
+                    if _r["aps"] == "manual_required": _manual += 1; continue
+                    if _ae._is_job_board(_u): _board += 1; continue
+                    if _r["att"] >= _ae.MAX_APPLY_ATTEMPTS: _exhausted += 1; continue
+                    _submittable += 1
+                diag["queue_audit"] = {
+                    "approved_total": _tot,
+                    "auto_submittable": _submittable,
+                    "job_board_manual_by_design": _board,
+                    "flagged_manual_required": _manual,
+                    "dead_link": _dead,
+                    "attempts_exhausted": _exhausted,
+                }
+            except Exception as _e:
+                diag["queue_audit_error"] = str(_e)[:300]
             probe = {"launched": False}
             if diag["playwright_importable"]:
                 _t0 = _t.time()

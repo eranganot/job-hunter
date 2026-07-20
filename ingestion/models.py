@@ -80,6 +80,8 @@ class JobSource(str, Enum):
     # PAID — managed scraping
     APIFY = "apify"
     JOBSPY = "jobspy"
+
+    SECRETJOBS = "secretjobs"
     # fallback
     UNKNOWN = "unknown"
 

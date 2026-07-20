@@ -5,10 +5,12 @@ from .bigtech import (
 )
 from .aggregators import TheirStackAdapter, AdzunaAdapter, CoresignalAdapter
 from .managed import ApifyAdapter, JobSpyAdapter
+from .secretjobs import SecretJobsAdapter
 
 __all__ = [
     "SourceAdapter", "AdapterResult", "AdapterStatus",
     "MicrosoftAdapter", "GoogleAdapter", "MetaAdapter", "AmazonAdapter", "AppleAdapter",
     "TheirStackAdapter", "AdzunaAdapter", "CoresignalAdapter",
     "ApifyAdapter", "JobSpyAdapter",
+    "SecretJobsAdapter",
 ]

@@ -31,6 +31,7 @@ class CreditManager:
             "theirstack": config.THEIRSTACK_MONTHLY_CAP,
             "coresignal": config.CORESIGNAL_MONTHLY_CAP,
             "apify": config.APIFY_MONTHLY_CAP,
+            "secretjobs": config.SECRETJOBS_MONTHLY_CAP,
         }
         self._spend: dict[str, int] = {}          # "provider:YYYY-MM" -> credits
         self._failures: dict[str, int] = {}       # provider -> consecutive fails

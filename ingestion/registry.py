@@ -22,6 +22,7 @@ from .adapters import (
     MicrosoftAdapter, GoogleAdapter, MetaAdapter, AmazonAdapter, AppleAdapter,
     TheirStackAdapter, AdzunaAdapter, CoresignalAdapter,
     ApifyAdapter, JobSpyAdapter,
+    SecretJobsAdapter,
 )
 
 # Every adapter class the pipeline knows about.
@@ -32,6 +33,8 @@ ALL_ADAPTERS: list[type[SourceAdapter]] = [
     TheirStackAdapter, AdzunaAdapter, CoresignalAdapter,
     # PAID — managed scraping
     ApifyAdapter, JobSpyAdapter,
+    # PAID — authenticated (account holder's own session)
+    SecretJobsAdapter,
 ]
 
 
