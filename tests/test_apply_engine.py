@@ -269,3 +269,35 @@ def test_resolve_ats_application_no_title_match(monkeypatch):
 def test_resolve_ats_application_needs_company_and_title():
     assert ae.resolve_ats_application("", "PM") is None
     assert ae.resolve_ats_application("Acme", "") is None
+
+
+def test_resolve_uses_gemini_suggested_slug(monkeypatch):
+    # name-munging gives "wiz" (no board); Gemini supplies the real slug "wizinc"
+    def fake_get(url, timeout=6):
+        if "greenhouse" in url and "/wizinc/" in url:
+            return {"jobs": [{"title": "Senior Product Manager", "id": 7,
+                              "absolute_url": "https://boards.greenhouse.io/wizinc/jobs/7",
+                              "location": {"name": "Tel Aviv"}}]}
+        return None
+    monkeypatch.setattr(ae, "_ats_get", fake_get)
+    monkeypatch.setattr(ae, "_gemini_board_candidates", lambda company, job_title="": ["wizinc"])
+    r = ae.resolve_ats_application("Wiz", "Senior Product Manager")
+    assert r and r["ats"] == "greenhouse" and r["url"].endswith("/wizinc/jobs/7")
+
+
+def test_resolve_skips_gemini_when_use_llm_false(monkeypatch):
+    calls = {"n": 0}
+    def spy(*a, **k):
+        calls["n"] += 1
+        return ["wizinc"]
+    monkeypatch.setattr(ae, "_gemini_board_candidates", spy)
+    monkeypatch.setattr(ae, "_ats_get", lambda url, timeout=6: None)
+    assert ae.resolve_ats_application("Wiz", "PM", use_llm=False) is None
+    assert calls["n"] == 0
+
+
+def test_gemini_board_candidates_no_key(monkeypatch):
+    monkeypatch.setattr(ae, "GEMINI_KEY", "")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_KEY", raising=False)
+    assert ae._gemini_board_candidates("Wiz") == []

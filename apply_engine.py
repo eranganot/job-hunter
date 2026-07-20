@@ -949,27 +949,73 @@ def _ats_postings_for_slug(slug: str) -> list[dict]:
     return [p for p in out if p.get("title") and p.get("url")]
 
 
+def _gemini_board_candidates(company: str, job_title: str = "") -> list[str]:
+    """Ask Gemini for likely ATS board SLUGS for a company. Companies routinely
+    use a slug that differs from their name (Wiz→"wizinc", Gong→"gongio"), which
+    plain name-munging can't produce. Every returned slug is VERIFIED by probing
+    the live ATS API, so a wrong/hallucinated guess is harmless (it just yields
+    no postings). Off with APPLY_RESOLVE_LLM_SLUGS=0."""
+    if not company:
+        return []
+    if os.environ.get("APPLY_RESOLVE_LLM_SLUGS", "1").strip().lower() in ("0", "false", "no", "off"):
+        return []
+    if not (GEMINI_KEY or os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI_KEY")):
+        return []
+    prompt = (
+        f'The company "{company}" posts jobs on an ATS (Greenhouse, Lever, Ashby, '
+        f'or SmartRecruiters). The board "slug" is the identifier in the URL — e.g. '
+        f'boards.greenhouse.io/<slug> or jobs.lever.co/<slug>. Slugs often differ '
+        f'from the company name (e.g. Wiz -> "wizinc", Gong -> "gongio"). Return ONLY '
+        f'a JSON array of up to 5 most-likely lowercase board slugs for "{company}", '
+        f'best guess first. Example: ["wizinc","wiz"].'
+    )
+    try:
+        data = _claude_json(prompt, max_tokens=128, timeout=20)
+    except Exception as e:
+        print(f"[apply-engine] gemini board hint error: {e}")
+        return []
+    out = []
+    if isinstance(data, list):
+        for x in data:
+            if isinstance(x, str):
+                sl = re.sub(r"[^a-z0-9-]", "", x.lower().strip())
+                if sl and len(sl) >= 2 and sl not in out:
+                    out.append(sl)
+    return out[:5]
+
+
 def resolve_ats_application(company: str, job_title: str, location: str = "",
-                            threshold: float = 82.0) -> "dict | None":
+                            threshold: float = 82.0, use_llm: bool = True) -> "dict | None":
     """Resolve company + title to a direct-ATS application URL. Returns
-    {url, ats, matched_title, score, location} or None. Deterministic; best-effort."""
+    {url, ats, matched_title, score, location} or None. Tries name-derived slugs
+    first (free), then Gemini-suggested slugs (verified against the live ATS API).
+    Best-effort; no Google scraping."""
     if not company or not job_title:
         return None
-    best = None
-    for slug in _company_slugs(company):
-        postings = _ats_postings_for_slug(slug)
-        for p in postings:
-            score = _title_ratio(job_title, p["title"])
-            if best is None or score > best["score"]:
-                best = {"url": p["url"], "ats": p["ats"],
-                        "matched_title": p["title"], "score": round(score, 1),
-                        "location": p.get("location", "")}
-        # Early exit: a confident match on this slug is enough.
-        if best and best["score"] >= 92:
-            break
-    if best and best["score"] >= threshold:
-        return best
-    return None
+    best = {"v": None}
+
+    def _scan(slugs) -> bool:
+        for slug in slugs:
+            for p in _ats_postings_for_slug(slug):
+                score = _title_ratio(job_title, p["title"])
+                if best["v"] is None or score > best["v"]["score"]:
+                    best["v"] = {"url": p["url"], "ats": p["ats"],
+                                 "matched_title": p["title"], "score": round(score, 1),
+                                 "location": p.get("location", "")}
+            if best["v"] and best["v"]["score"] >= 92:   # confident → stop early
+                return True
+        return False
+
+    tried = list(_company_slugs(company))
+    strong = _scan(tried)
+    # Widen with Gemini-suggested slugs only if name-munging didn't nail it.
+    if not strong and use_llm:
+        extra = [s for s in _gemini_board_candidates(company, job_title) if s not in tried]
+        if extra:
+            _scan(extra)
+
+    b = best["v"]
+    return b if (b and b["score"] >= threshold) else None
 
 
 # ── Core application submission ───────────────────────────────────────────────
