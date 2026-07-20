@@ -992,6 +992,31 @@ def _gemini_board_candidates(company: str, job_title: str = "") -> list[str]:
     return out[:5]
 
 
+def _norm_company(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (name or "").lower())
+
+
+# Curated, VERIFIED company → ATS board slug map (probed live, 2026-07-20). This
+# is the deterministic primary source so the resolver does NOT depend on Gemini
+# (whose prod key is rate-limited / 429). Extend freely: {normalized company: slug}.
+# The slug is probed across all ATSes by _ats_postings_for_slug, so only the slug
+# is needed. Add new entries after verifying the board returns postings.
+_ATS_BOARD_MAP = {
+    "wiz": "wizinc",
+    "gong": "gongio",
+    "melio": "melio",
+    "taboola": "taboola",
+    "yotpo": "yotpo",
+    "similarweb": "similarweb",
+    "lemonade": "lemonade",
+    "jfrog": "jfrog",
+    "fireblocks": "fireblocks",
+    "appsflyer": "appsflyer",
+    "payoneer": "payoneer",
+    "catonetworks": "catonetworks",
+}
+
+
 def resolve_ats_application(company: str, job_title: str, location: str = "",
                             threshold: float = 82.0, use_llm: bool = True) -> "dict | None":
     """Resolve company + title to a direct-ATS application URL. Returns
@@ -1014,7 +1039,13 @@ def resolve_ats_application(company: str, job_title: str, location: str = "",
                 return True
         return False
 
-    tried = list(_company_slugs(company))
+    tried = []
+    _mapped = _ATS_BOARD_MAP.get(_norm_company(company))
+    if _mapped:
+        tried.append(_mapped)
+    for _s in _company_slugs(company):
+        if _s not in tried:
+            tried.append(_s)
     strong = _scan(tried)
     # Widen with Gemini-suggested slugs only if name-munging didn't nail it.
     if not strong and use_llm:

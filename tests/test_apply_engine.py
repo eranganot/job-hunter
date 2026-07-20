@@ -321,3 +321,25 @@ def test_gemini_board_candidates_swallows_errors(monkeypatch):
         raise RuntimeError("api down")
     monkeypatch.setattr(ae, "_claude", boom)
     assert ae._gemini_board_candidates("Wiz") == []
+
+
+def test_resolve_uses_curated_map_without_gemini(monkeypatch):
+    # Gemini would 429; curated map must resolve Wiz -> wizinc anyway.
+    def boom(*a, **k):
+        raise RuntimeError("429 Too Many Requests")
+    monkeypatch.setattr(ae, "_gemini_board_candidates", boom)
+    def fake_get(url, timeout=6):
+        if "greenhouse" in url and "/wizinc/" in url:
+            return {"jobs": [{"title": "Senior Product Manager", "id": 5,
+                              "absolute_url": "https://boards.greenhouse.io/wizinc/jobs/5",
+                              "location": {"name": "Tel Aviv"}}]}
+        return None
+    monkeypatch.setattr(ae, "_ats_get", fake_get)
+    r = ae.resolve_ats_application("Wiz", "Senior Product Manager")
+    assert r and r["url"].endswith("/wizinc/jobs/5")
+
+
+def test_norm_company():
+    assert ae._norm_company("Cato Networks") == "catonetworks"
+    assert ae._norm_company("monday.com") == "mondaycom"
+    assert ae._ATS_BOARD_MAP.get(ae._norm_company("Cato Networks")) == "catonetworks"
