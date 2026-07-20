@@ -5951,6 +5951,17 @@ class Handler(BaseHTTPRequestHandler):
                 }
             except Exception as _e:
                 diag["queue_audit_error"] = str(_e)[:300]
+            # Optional live resolver probe (read-only, no submit):
+            #   /api/admin/apply-selftest?company=monday.com&title=Product+Manager
+            _rc_company = (qs.get("company", [""])[0] or "").strip()
+            _rc_title = (qs.get("title", [""])[0] or "").strip()
+            if _rc_company and _rc_title:
+                try:
+                    _rr = _ae.resolve_ats_application(_rc_company, _rc_title)
+                    diag["resolver_probe"] = {"company": _rc_company, "title": _rc_title,
+                                              "resolved": _rr or None}
+                except Exception as _e:
+                    diag["resolver_probe"] = {"error": str(_e)[:300]}
             probe = {"launched": False}
             if diag["playwright_importable"]:
                 _t0 = _t.time()

@@ -840,6 +840,138 @@ def check_url_alive(url: str, timeout: int = 8) -> bool:
     except Exception:
         return False
 
+# ── Deterministic ATS resolver (steps 2–4: company → career board → posting) ──
+# Given a company + job title, resolve to the company's OWN ATS application URL
+# by probing the known ATS JSON APIs directly (Greenhouse / Lever / SmartRecruiters
+# / Ashby / Comeet) and matching the posting by title. No Google scraping — this
+# is deterministic and fast, and reuses the same endpoints the search uses.
+
+try:
+    from rapidfuzz import fuzz as _rf
+
+    def _title_ratio(a: str, b: str) -> float:
+        return float(_rf.token_set_ratio(a, b))
+except Exception:  # pragma: no cover
+    from difflib import SequenceMatcher as _SM
+
+    def _title_ratio(a: str, b: str) -> float:
+        return _SM(None, a, b).ratio() * 100.0
+
+
+_ATS_DIRECT_HOSTS = (
+    "boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co",
+    "jobs.ashbyhq.com", "jobs.smartrecruiters.com", "comeet.co",
+    "myworkdayjobs.com", "eu.greenhouse.io",
+)
+
+
+def _is_direct_ats(url: str) -> bool:
+    u = (url or "").lower()
+    return any(h in u for h in _ATS_DIRECT_HOSTS)
+
+
+def _company_slugs(company: str) -> list[str]:
+    """Best-effort slug candidates for a company name (deterministic)."""
+    base = (company or "").lower().strip()
+    if not base:
+        return []
+    base = re.sub(r"\b(inc|ltd|llc|corp|gmbh|co|the)\b", " ", base)
+    base = base.replace("&", "and")
+    nodots = re.sub(r"\.(com|io|ai|co|net|org)$", "", base).strip()
+    cands = [
+        re.sub(r"[^a-z0-9]+", "", nodots),    # "monday.com" -> "monday"
+        re.sub(r"[^a-z0-9]+", "", base),      # "mondaycom"
+        re.sub(r"[^a-z0-9]+", "-", nodots).strip("-"),  # "palo-alto-networks"
+    ]
+    out = []
+    for c in cands:
+        if c and len(c) >= 2 and c not in out:
+            out.append(c)
+    return out[:3]
+
+
+def _ats_get(url: str, timeout: int = 6):
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            if r.status >= 400:
+                return None
+            return json.loads(r.read().decode("utf-8", "ignore"))
+    except Exception:
+        return None
+
+
+def _ats_postings_for_slug(slug: str) -> list[dict]:
+    """Return [{title, url, location}] across ATSes for one company slug."""
+    out = []
+    # Greenhouse
+    gh = _ats_get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=false")
+    if isinstance(gh, dict):
+        for j in gh.get("jobs", []) or []:
+            loc = j.get("location", {}) or {}
+            out.append({"title": j.get("title", ""),
+                        "url": j.get("absolute_url") or f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id','')}",
+                        "location": loc.get("name", "") if isinstance(loc, dict) else "",
+                        "ats": "greenhouse"})
+    # Lever
+    lv = _ats_get(f"https://api.lever.co/v0/postings/{slug}?mode=json")
+    if isinstance(lv, list):
+        for j in lv:
+            cats = j.get("categories") or {}
+            out.append({"title": j.get("text", ""),
+                        "url": j.get("hostedUrl") or f"https://jobs.lever.co/{slug}/{j.get('id','')}",
+                        "location": cats.get("location", "") or "",
+                        "ats": "lever"})
+    # SmartRecruiters
+    sr = _ats_get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+    if isinstance(sr, dict):
+        for j in sr.get("content", []) or []:
+            loc = j.get("location") or {}
+            city = loc.get("city", "") if isinstance(loc, dict) else ""
+            out.append({"title": j.get("name", ""),
+                        "url": f"https://jobs.smartrecruiters.com/{slug}/{j.get('id','')}",
+                        "location": city, "ats": "smartrecruiters"})
+    # Ashby
+    ab = _ats_get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=false")
+    if isinstance(ab, dict):
+        for j in ab.get("jobs", []) or []:
+            out.append({"title": j.get("title", ""),
+                        "url": j.get("jobUrl") or j.get("applyUrl") or "",
+                        "location": j.get("location", "") or "", "ats": "ashby"})
+    # Comeet
+    cm = _ats_get(f"https://www.comeet.co/careers/api/{slug}/positions")
+    if isinstance(cm, list):
+        for j in cm:
+            loc = j.get("location")
+            loc = (loc.get("name", "") if isinstance(loc, dict) else str(loc or ""))
+            out.append({"title": j.get("name", ""), "url": j.get("url", ""),
+                        "location": loc, "ats": "comeet"})
+    return [p for p in out if p.get("title") and p.get("url")]
+
+
+def resolve_ats_application(company: str, job_title: str, location: str = "",
+                            threshold: float = 82.0) -> "dict | None":
+    """Resolve company + title to a direct-ATS application URL. Returns
+    {url, ats, matched_title, score, location} or None. Deterministic; best-effort."""
+    if not company or not job_title:
+        return None
+    best = None
+    for slug in _company_slugs(company):
+        postings = _ats_postings_for_slug(slug)
+        for p in postings:
+            score = _title_ratio(job_title, p["title"])
+            if best is None or score > best["score"]:
+                best = {"url": p["url"], "ats": p["ats"],
+                        "matched_title": p["title"], "score": round(score, 1),
+                        "location": p.get("location", "")}
+        # Early exit: a confident match on this slug is enough.
+        if best and best["score"] >= 92:
+            break
+    if best and best["score"] >= threshold:
+        return best
+    return None
+
+
 # ── Core application submission ───────────────────────────────────────────────
 
 def submit_application(
@@ -895,20 +1027,34 @@ def submit_application(
     # login to apply anyway, so we return manual_required quickly instead of
     # burning a browser. Set APPLY_RESOLVE_CAREER_PAGE=1 to re-enable.
     actual_url = job_url
-    if _is_job_board(job_url):
+
+    # ── Deterministic ATS resolution (steps 2–4) ─────────────────────────────
+    # If not already a clean direct-ATS posting, resolve company → known ATS
+    # board → the exact posting by title (no Google scrape). APPLY_RESOLVE_ATS=0
+    # disables it.
+    if not _is_direct_ats(job_url) and os.environ.get("APPLY_RESOLVE_ATS", "1").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            _r = resolve_ats_application(company, job_title)
+        except Exception as _re:
+            _r = None
+            print(f"[apply-engine] ATS resolve error: {_re}")
+        if _r and _r.get("url"):
+            print(f"[apply-engine] Resolved {company!r}/{job_title!r} -> {_r['ats']} {_r['url']} (score {_r['score']})")
+            actual_url = _r["url"]
+
+    # Still a job-board URL and unresolved → manual (login wall), unless the
+    # legacy Google career-page resolver is explicitly enabled.
+    if _is_job_board(actual_url):
         if os.environ.get("APPLY_RESOLVE_CAREER_PAGE", "") == "1":
-            print(f"[apply-engine] Job board URL detected ({job_url}), searching for company career page…")
             direct = _find_company_apply_url(company, job_title)
             if direct:
-                print(f"[apply-engine] Resolved to: {direct}")
+                print(f"[apply-engine] Career-page resolver -> {direct}")
                 actual_url = direct
-            else:
-                print(f"[apply-engine] Could not find direct URL — keeping original: {job_url}")
-        else:
-            print(f"[apply-engine] Job board URL ({job_url}) — auto-apply not supported, flagging for manual apply")
+        if _is_job_board(actual_url):
+            print(f"[apply-engine] Job board URL ({actual_url}) — no direct ATS match, flagging for manual apply")
             return {**_base, "status": "manual_required",
                     "apply_failure_type": "login_wall",
-                    "apply_failure_detail": "Job-board listing requires manual application (login wall)",
+                    "apply_failure_detail": "No direct ATS match found; job-board listing requires manual application",
                     "error": "Job-board listing — apply manually on the source site"}
     _base["resolved_url"] = actual_url
 

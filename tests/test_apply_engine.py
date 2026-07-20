@@ -221,3 +221,51 @@ def test_finalize_recovers_from_validation_block(monkeypatch):
     res = ae._finalize_after_submit(_P(), {}, ['button[type="submit"]'])
     assert res["status"] == "confirmed"
     assert "auto-answered 1" in res["confirmation_text"]
+
+
+# ── Deterministic ATS resolver (steps 2–4: company → board → posting) ──────────
+def test_company_slugs_derives_real_slug():
+    s = ae._company_slugs("monday.com")
+    assert "monday" in s
+    assert "paloaltonetworks" in ae._company_slugs("Palo Alto Networks Inc")
+
+
+def test_is_direct_ats_classifies():
+    assert ae._is_direct_ats("https://boards.greenhouse.io/acme/jobs/1")
+    assert ae._is_direct_ats("https://jobs.lever.co/acme/abc")
+    assert not ae._is_direct_ats("https://www.linkedin.com/jobs/view/123")
+
+
+def test_resolve_ats_application_matches(monkeypatch):
+    def fake_get(url, timeout=6):
+        if "greenhouse" in url and "/monday/" in url:
+            return {"jobs": [
+                {"title": "Senior Product Manager", "id": 99,
+                 "absolute_url": "https://boards.greenhouse.io/monday/jobs/99",
+                 "location": {"name": "Tel Aviv"}},
+                {"title": "Data Engineer", "id": 98,
+                 "absolute_url": "https://boards.greenhouse.io/monday/jobs/98",
+                 "location": {"name": "Tel Aviv"}},
+            ]}
+        return None
+    monkeypatch.setattr(ae, "_ats_get", fake_get)
+    r = ae.resolve_ats_application("monday.com", "Senior Product Manager")
+    assert r and r["ats"] == "greenhouse"
+    assert r["url"].endswith("/monday/jobs/99")
+    assert r["score"] >= 82
+
+
+def test_resolve_ats_application_no_title_match(monkeypatch):
+    def fake_get(url, timeout=6):
+        if "greenhouse" in url and "/monday/" in url:
+            return {"jobs": [{"title": "Warehouse Associate", "id": 1,
+                              "absolute_url": "https://boards.greenhouse.io/monday/jobs/1",
+                              "location": {}}]}
+        return None
+    monkeypatch.setattr(ae, "_ats_get", fake_get)
+    assert ae.resolve_ats_application("monday.com", "Senior Product Manager") is None
+
+
+def test_resolve_ats_application_needs_company_and_title():
+    assert ae.resolve_ats_application("", "PM") is None
+    assert ae.resolve_ats_application("Acme", "") is None
