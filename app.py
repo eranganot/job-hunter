@@ -2017,6 +2017,16 @@ def run_job_apply(user_id: int) -> int:
         if _remaining is not None:
             jobs = jobs[:_remaining]
 
+        # First-live-run safety valve: bound applies per RUN even for admin, so a
+        # freshly re-enabled engine can't fire dozens of real submits at once.
+        # Raise/disable with Railway env APPLY_MAX_PER_RUN (0 = unlimited).
+        try:
+            _per_run = int(os.environ.get("APPLY_MAX_PER_RUN", "5") or "5")
+        except ValueError:
+            _per_run = 5
+        if _per_run > 0:
+            jobs = jobs[:_per_run]
+
         if not jobs:
             conn.close()
             return {"applied": 0, "error": ""}
@@ -5916,6 +5926,95 @@ class Handler(BaseHTTPRequestHandler):
                 if "details" in _it and _it["details"]:
                     _it["details"] = repair_mojibake(_it["details"])
             self.send_json(items)
+            return
+
+        if path == "/api/admin/apply-test":
+            # Guarded LIVE single-job apply. Default is a DRY RUN (resolve + input
+            # check, no submit). Add &mode=live to actually submit ONE job. Admin
+            # only; bypasses the global kill-switch for this one explicit call.
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, status=403)
+                return
+            import apply_engine as _ae
+            _jid = (qs.get("job_id", [""])[0] or "").strip()
+            _mode = (qs.get("mode", ["dry"])[0] or "dry").strip().lower()
+            if not _jid.isdigit():
+                self.send_json({"error": "pass ?job_id=<id> (&mode=dry|live)"}, status=400)
+                return
+            conn = database.get_db()
+            job = conn.execute(
+                "SELECT id, title, company, url, location, COALESCE(apply_status,'') AS aps "
+                "FROM jobs WHERE id=? AND user_id=?", (int(_jid), user["id"])).fetchone()
+            prof = conn.execute("SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?",
+                                (user["id"],)).fetchone() if job else None
+            conn.close()
+            if not job:
+                self.send_json({"error": f"job {_jid} not found for this user"}, status=404)
+                return
+            _cv_text = (prof["cv_summary"] or "") if prof else ""
+            _cv_path = (prof["cv_path"] or None) if prof else None
+            applicant = _ae.extract_applicant_data(_cv_text, user.get("email", ""))
+            _jloc = (job["location"] if "location" in job.keys() else "") or ""
+
+            resolved = None
+            if not _ae._is_direct_ats(job["url"] or ""):
+                try:
+                    resolved = _ae.resolve_ats_application(job["company"], job["title"], location=_jloc)
+                except Exception as _e:
+                    resolved = {"error": str(_e)[:200]}
+            _target = (resolved or {}).get("url") if isinstance(resolved, dict) else None
+            _target = _target or (job["url"] or "")
+
+            out = {
+                "mode": _mode,
+                "job": {"id": job["id"], "title": job["title"], "company": job["company"],
+                        "url": job["url"], "location": _jloc, "apply_status": job["aps"]},
+                "resolved": resolved,
+                "target_url": _target,
+                "is_direct_ats": _ae._is_direct_ats(_target),
+                "applicant_ready": bool(applicant.get("full_name") or applicant.get("first_name")),
+                "applicant_name": applicant.get("full_name", ""),
+                "cv_present": bool(_cv_path and os.path.exists(_cv_path)),
+            }
+            if _mode != "live":
+                out["note"] = "DRY RUN — nothing submitted. Add &mode=live to actually submit this ONE job."
+                self.send_json(out)
+                return
+
+            # LIVE: submit exactly this one job, forcing past the kill-switch.
+            res = _ae.submit_application(
+                job["url"] or "", job["title"], job["company"], applicant, _cv_path,
+                GEMINI_KEY, _jloc, True,   # api_key, job_location, force=True
+            )
+            out["result"] = {
+                "status": res.get("status"), "success": res.get("success"),
+                "resolved_url": res.get("resolved_url"),
+                "confirmation_text": (res.get("confirmation_text") or "")[:500],
+                "error": (res.get("error") or "")[:500],
+                "apply_failure_type": res.get("apply_failure_type"),
+                "apply_failure_detail": (res.get("apply_failure_detail") or "")[:500],
+            }
+            try:
+                _st = res.get("status")
+                c3 = database.get_db()
+                if _st in ("submitted", "confirmed") and not (res.get("error") or "").strip():
+                    c3.execute(
+                        "UPDATE jobs SET status='applied', applied_date=?, apply_status=?, "
+                        "apply_confirmation=?, apply_error='', "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
+                        (datetime.now().strftime('%Y-%m-%d'), _st,
+                         (res.get('confirmation_text') or '')[:1000], job["id"], user["id"]))
+                else:
+                    c3.execute(
+                        "UPDATE jobs SET apply_status=?, apply_error=?, "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
+                        (_st, (res.get('error') or '')[:500], job["id"], user["id"]))
+                c3.commit(); c3.close()
+                out["persisted"] = True
+            except Exception as _e:
+                out["persist_error"] = str(_e)[:200]
+            self.send_json(out)
             return
 
         if path == "/api/admin/apply-selftest":

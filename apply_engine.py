@@ -1122,6 +1122,7 @@ def submit_application(
     cv_path: str | None,
     api_key: str = "",
     job_location: str = "",
+    force: bool = False,
 ) -> dict:
     """
     Submit a job application using headless Chromium + Claude.
@@ -1150,7 +1151,7 @@ def submit_application(
     # ── Global kill-switch (2026-07-20) ──────────────────────────────────────
     # Auto-submit apply engine is DISABLED by default. Set Railway env
     # APPLY_ENGINE_ENABLED=1 to re-enable. Reversible with no code change.
-    if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
+    if not force and os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
         return {**_base, "status": "manual_required",
                 "error": "Apply engine disabled (set APPLY_ENGINE_ENABLED=1 to re-enable)"}
 

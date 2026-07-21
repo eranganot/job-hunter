@@ -378,3 +378,19 @@ def test_resolve_prefers_target_location(monkeypatch):
     monkeypatch.setattr(ae, "_gemini_board_candidates", lambda *a, **k: [])
     r = ae.resolve_ats_application("Wiz", "Product Manager", location="Tel Aviv")
     assert r and r["url"].endswith("/jobs/2") and "Tel Aviv" in r["location"]
+
+
+def test_killswitch_blocks_without_force(monkeypatch):
+    monkeypatch.delenv("APPLY_ENGINE_ENABLED", raising=False)
+    r = ae.submit_application("https://x/y", "T", "C", {}, None)
+    assert r["status"] == "manual_required"
+    assert "disabled" in (r.get("error") or "").lower()
+
+
+def test_force_bypasses_killswitch(monkeypatch):
+    # force=True must get PAST the kill-switch (then it hits the next gate).
+    monkeypatch.delenv("APPLY_ENGINE_ENABLED", raising=False)
+    monkeypatch.setattr(ae, "PLAYWRIGHT_AVAILABLE", False)
+    r = ae.submit_application("https://x/y", "T", "C", {}, None, force=True)
+    assert "disabled" not in (r.get("error") or "").lower()
+    assert "playwright" in (r.get("error") or "").lower()
