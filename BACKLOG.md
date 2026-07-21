@@ -57,3 +57,11 @@ Items **1, 2, 5, 6, 11, 12** are all **S** and mostly independent — a good fir
 ### Notes
 - All 8 non-`main` branches are already merged (0 commits ahead) and can be deleted to declutter.
 - Uncommitted working-tree changes exist in config/test files (`relay.py`, `requirements.txt`, `Dockerfile`, `tests/*`, etc.) — review and commit or discard.
+
+---
+
+## Parked (2026-07-20)
+
+| # | Item | Status / next step | Effort |
+|---|------|--------------------|--------|
+| P | **SecretJobs (secretjobs.ai) authenticated source** | Adapter is **built, tested, deployed** (`ingestion/adapters/secretjobs.py`, PAID/admin, shape-tolerant parser). Parked pending Eran: capture the logged-in job-feed request and set Railway env `SECRETJOBS_JOBS_URL`, `SECRETJOBS_AUTH_HEADER`, `SECRETJOBS_AUTH_VALUE`. No public feed (subscription-gated), so it can't self-activate. Optionally tighten the field mapper once a redacted sample response is shared. | S |
