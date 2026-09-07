@@ -22,3 +22,7 @@ httpx>=0.27
 rapidfuzz>=3.6
 # OPTIONAL (admin/JobSpy adapter; pulls pandas — install only if you want it):
 #   pip install python-jobspy
+
+# Postgres driver (Phase 2b). Only used when DB_BACKEND=postgres;
+# SQLite deployments never import it.
+psycopg[binary]==3.3.5

@@ -16,6 +16,7 @@ db.init_db() has always created - moved here verbatim, not rewritten.
 Phase 2b adds the Postgres dialect; the two introspection helpers below are the
 only place that needs to know which engine it is talking to.
 """
+import dbdriver
 
 SCHEMA_MIGRATIONS_DDL = """
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -82,9 +83,19 @@ _BASELINE_EXTRA_DDL = [
 ]
 
 
+def _dialect(conn):
+    return dbdriver.dialect_of(conn)
+
+
 def _has_column(conn, table, column):
-    """True if table.column exists. SQLite path; Phase 2b adds information_schema."""
+    """True if table.column exists, on either engine."""
     try:
+        if _dialect(conn) == dbdriver.POSTGRES:
+            row = conn.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema=current_schema() AND table_name=? AND column_name=?",
+                (table, column)).fetchone()
+            return row is not None
         return any(r[1] == column for r in conn.execute("PRAGMA table_info(" + table + ")"))
     except Exception:
         return False
@@ -92,18 +103,42 @@ def _has_column(conn, table, column):
 
 def _table_exists(conn, table):
     try:
+        if _dialect(conn) == dbdriver.POSTGRES:
+            row = conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema=current_schema() AND table_name=?", (table,)).fetchone()
+            return row is not None
         row = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-        ).fetchone()
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
         return row is not None
     except Exception:
         return False
 
 
+def ddl_for(sql, conn):
+    """
+    Render SQLite DDL for the connection's engine.
+
+    Only two constructs in this schema are not portable:
+      * INTEGER PRIMARY KEY AUTOINCREMENT -> BIGSERIAL PRIMARY KEY
+      * TEXT DEFAULT (datetime('now'))    -> the same TEXT format via to_char
+
+    Everything else - TEXT, INTEGER, UNIQUE(...), FOREIGN KEY ... ON DELETE
+    CASCADE, partial unique indexes - is valid on both. A test builds the schema
+    on both engines and diffs the tables and columns, so drift shows up as a
+    failure rather than a surprise during a migration.
+    """
+    if _dialect(conn) == dbdriver.SQLITE:
+        return sql
+    out = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    out = dbdriver._DATETIME_NOW.sub(dbdriver.PG_NOW, out)
+    return out
+
+
 def m0001_baseline(conn):
     """The full schema. Every statement is CREATE TABLE IF NOT EXISTS."""
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS users (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             name          TEXT NOT NULL,
@@ -114,9 +149,9 @@ def m0001_baseline(conn):
             is_active     INTEGER DEFAULT 1,
             role          TEXT DEFAULT 'user'
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS sessions (
             token        TEXT PRIMARY KEY,
             user_id      INTEGER NOT NULL,
@@ -124,9 +159,9 @@ def m0001_baseline(conn):
             expires_date TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS user_profiles (
             user_id              INTEGER PRIMARY KEY,
             cv_path              TEXT,
@@ -160,9 +195,9 @@ def m0001_baseline(conn):
             onboarding_complete  INTEGER DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS jobs (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL,
@@ -181,7 +216,7 @@ def m0001_baseline(conn):
             UNIQUE(user_id, url),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
-    """)
+    """, conn))
 
     # Migrations — safe to re-run on every start
     # Columns and tables added after the original schema shipped.
@@ -198,9 +233,9 @@ def m0001_baseline(conn):
         conn.execute("ALTER TABLE " + _table + " ADD COLUMN " + _coldef)
         print("[db] baseline: added " + _coldef.split()[0] + " to " + _table)
     for _stmt in _BASELINE_EXTRA_DDL:
-        conn.execute(_stmt)
+        conn.execute(ddl_for(_stmt, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS rejected_patterns (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL,
@@ -210,9 +245,9 @@ def m0001_baseline(conn):
             created_date TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS user_blocklist (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL,
@@ -221,9 +256,9 @@ def m0001_baseline(conn):
             date_added   TEXT DEFAULT (datetime('now')),
             UNIQUE(user_id, company_name)
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS pass_reason_stats (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id       INTEGER NOT NULL,
@@ -232,9 +267,9 @@ def m0001_baseline(conn):
             last_hit_date TEXT DEFAULT (datetime('now')),
             UNIQUE(user_id, reason)
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS activity_log (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL,
@@ -243,9 +278,9 @@ def m0001_baseline(conn):
             created_date TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
-    """)
+    """, conn))
 
-    conn.execute("""
+    conn.execute(ddl_for("""
         CREATE TABLE IF NOT EXISTS push_subscriptions (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL,
@@ -255,7 +290,7 @@ def m0001_baseline(conn):
             UNIQUE(user_id, endpoint),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
-    """)
+    """, conn))
     conn.commit()
 
 
@@ -304,7 +339,7 @@ MIGRATIONS = [
 
 
 def applied_versions(conn):
-    conn.execute(SCHEMA_MIGRATIONS_DDL)
+    conn.execute(ddl_for(SCHEMA_MIGRATIONS_DDL, conn))
     conn.commit()
     return set(r[0] for r in conn.execute("SELECT version FROM schema_migrations"))
 

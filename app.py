@@ -158,6 +158,9 @@ MOBILE_URL = (f"https://{_railway_domain}" if _railway_domain
 # ── DB + Auth init ────────────────────────────────────────────────────────────
 
 database.set_db_path(DB_FILE)
+# Phase 2b: Postgres is opt-in via DB_BACKEND=postgres; DATABASE_URL alone
+# never switches engines (Railway injects reference vars freely).
+database.set_database_url(os.environ.get("DATABASE_URL", ""))
 auth.set_db_getter(database.get_db)
 auth.set_admin_email(ADMIN_EMAIL)
 

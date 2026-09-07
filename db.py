@@ -4,11 +4,32 @@ db.py — Multi-user database layer for Job Hunter
 import sqlite3
 import json
 import os
+import dbdriver
 from datetime import datetime, timedelta
 
 import migrations
 
 DB_PATH = None  # Injected by app.py at startup
+DATABASE_URL = None  # Injected by app.py when DB_BACKEND=postgres
+
+
+def set_database_url(url: str):
+    global DATABASE_URL
+    DATABASE_URL = url
+
+
+def backend() -> str:
+    """
+    Which engine get_db() will open.
+
+    Opt-in is explicit: DB_BACKEND=postgres. The presence of DATABASE_URL is
+    NOT enough - Railway hands reference variables out freely, and a variable
+    appearing by accident must never silently repoint a live app at a different
+    database.
+    """
+    if os.environ.get("DB_BACKEND", "sqlite").strip().lower() == "postgres":
+        return dbdriver.POSTGRES
+    return dbdriver.SQLITE
 
 
 def set_db_path(path: str):
@@ -16,7 +37,20 @@ def set_db_path(path: str):
     DB_PATH = path
 
 
-def get_db() -> sqlite3.Connection:
+def get_db():
+    """Open a connection to whichever engine this deployment is configured for."""
+    if backend() == dbdriver.POSTGRES:
+        url = DATABASE_URL or os.environ.get("DATABASE_URL", "")
+        if not url:
+            raise RuntimeError(
+                "DB_BACKEND=postgres but no DATABASE_URL was provided. "
+                "Set DATABASE_URL, or unset DB_BACKEND to stay on SQLite."
+            )
+        return dbdriver.connect_postgres(url)
+    return _sqlite_connect()
+
+
+def _sqlite_connect() -> sqlite3.Connection:
     # timeout=30 — Python-level lock wait (some platforms ignore busy_timeout
     # otherwise). Pair it with PRAGMA busy_timeout for belt-and-suspenders.
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
