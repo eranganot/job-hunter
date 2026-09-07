@@ -65,7 +65,7 @@ def lite(tmp_path):
 
 def test_migrations_build_the_schema_on_postgres(pg):
     applied = migrations.run(pg)
-    assert applied == [1, 2, 3]
+    assert applied == [v for v, _n, _f in migrations.MIGRATIONS]
     assert migrations._table_exists(pg, "users")
     assert migrations._table_exists(pg, "jobs")
     assert migrations._has_column(pg, "jobs", "apply_status")

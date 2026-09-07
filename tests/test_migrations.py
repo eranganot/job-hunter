@@ -30,7 +30,7 @@ def test_fresh_database_gets_the_whole_schema(tmp_path):
     conn = fresh(tmp_path)
     applied = migrations.run(conn)
 
-    assert applied == [1, 2, 3]
+    assert applied == [v for v, _n, _f in migrations.MIGRATIONS]
     tables = {r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     for expected in ("users", "sessions", "user_profiles", "jobs",

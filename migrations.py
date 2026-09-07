@@ -331,10 +331,28 @@ def m0003_backfill_queued_apply_status(conn):
     conn.commit()
 
 
+def m0004_app_flags(conn):
+    """
+    app_flags: created ad-hoc by app.py's one-time cleanup blocks (app.py:7429,
+    7458) and therefore absent from the managed schema. Production's SQLite has
+    it; a fresh Postgres would not - the Phase 2c dry run caught exactly that.
+    Bringing it under migrations makes the two engines agree.
+    """
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS app_flags (
+            key      TEXT PRIMARY KEY,
+            value    TEXT,
+            set_date TEXT DEFAULT (datetime('now'))
+        )
+    """, conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
     (3, "backfill_queued_apply_status", m0003_backfill_queued_apply_status),
+    (4, "app_flags",                    m0004_app_flags),
 ]
 
 
