@@ -5940,7 +5940,19 @@ class Handler(BaseHTTPRequestHandler):
             _jid = (qs.get("job_id", [""])[0] or "").strip()
             _mode = (qs.get("mode", ["dry"])[0] or "dry").strip().lower()
             if not _jid.isdigit():
-                self.send_json({"error": "pass ?job_id=<id> (&mode=dry|live)"}, status=400)
+                # No job_id → list candidate jobs (with their IDs) to pick from.
+                _lc = database.get_db()
+                _lrows = _lc.execute(
+                    "SELECT id, status, title, company, url FROM jobs "
+                    "WHERE user_id=? AND status IN ('new','approved') "
+                    "ORDER BY status, id DESC LIMIT 50", (user["id"],)).fetchall()
+                _lc.close()
+                self.send_json({
+                    "note": "Pick a job_id, then open ?job_id=<id> for a DRY RUN, "
+                            "and ?job_id=<id>&mode=live to actually submit that one job.",
+                    "jobs": [{"id": r["id"], "status": r["status"], "title": r["title"],
+                              "company": r["company"], "url": r["url"]} for r in _lrows],
+                })
                 return
             conn = database.get_db()
             job = conn.execute(

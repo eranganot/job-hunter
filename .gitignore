@@ -51,3 +51,13 @@ __pycache__/
 jobs.db
 jobs.db-journal
 __pycache__/
+
+# Local agent/session state -- noise on every git status, and noise is where a
+# real modified file hides. Portable copies live in the account skill library.
+.claude/
+
+# Staging for files the device bridge cannot delete; remove by hand.
+_to_delete/
+
+# Desktop-app scratch: superseded plan drafts saved into the repo by the Claude app.
+Claude outputs/
