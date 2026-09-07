@@ -5731,6 +5731,11 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT details, created_date FROM activity_log "
                 "WHERE event_type='job_applied' ORDER BY id DESC LIMIT 1"
             ).fetchone()
+            try:
+                _schema_version = conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
+            except Exception:
+                _schema_version = 0
             conn.close()
             self.send_json({
                 "status": "ok",
@@ -5740,6 +5745,9 @@ class Handler(BaseHTTPRequestHandler):
                 "last_search": {"detail": repair_mojibake(last_search[0]) if last_search else None, "date": last_search[1] if last_search else None},
                 "last_apply": {"detail": repair_mojibake(last_apply[0]) if last_apply else None, "date": last_apply[1] if last_apply else None},
                 "scheduler": "active (checks every 60s)",
+                # Phase 2a: lets a deploy be verified from outside - the smoke
+                # script asserts the migrations actually ran on the box.
+                "schema_version": _schema_version,
             })
             return
 

@@ -1,5 +1,6 @@
 <#
-    smoke_phase0.ps1 - prove a deploy is alive and still enforcing its auth gates.
+    smoke.ps1 - prove a deploy is alive, on the expected schema, and still
+    enforcing its auth gates. Supersedes smoke_phase0.ps1.
 
     Read-only. Sends no writes, creates no users, submits no applications.
     Safe to run against production.
@@ -8,13 +9,14 @@
     rather than Invoke-WebRequest -SkipHttpErrorCheck, which is 7-only).
 
     Usage:
-        .\scripts\smoke_phase0.ps1                          # production
-        .\scripts\smoke_phase0.ps1 -BaseUrl https://<staging-host>
-        .\scripts\smoke_phase0.ps1 -SkipLocal               # remote checks only
+        .\scripts\smoke.ps1                                 # production
+        .\scripts\smoke.ps1 -BaseUrl https://web-staging-8e79.up.railway.app -SkipLocal
+        .\scripts\smoke.ps1 -ExpectedSchema 3               # pin the schema version
 #>
 [CmdletBinding()]
 param(
     [string]$BaseUrl = "https://web-production-192b7.up.railway.app",
+    [int]$ExpectedSchema = 0,          # 0 = read it from local migrations.py
     [switch]$SkipLocal
 )
 
@@ -86,7 +88,7 @@ function Get-Status($url) {
 }
 
 Write-Host ""
-Write-Host "=== Phase 0 smoke: $BaseUrl ===" -ForegroundColor Cyan
+Write-Host "=== smoke: $BaseUrl ===" -ForegroundColor Cyan
 Write-Host ""
 
 # --- Local suite --------------------------------------------------------------
@@ -120,8 +122,22 @@ Check "GET /api/health is 200 and well-formed" {
     if ($r.Code -ne 200) { return "status $($r.Code)" }
     $script:health = $r.Body | ConvertFrom-Json
     if ($script:health.status -ne "ok") { return "status field = $($script:health.status)" }
-    Write-Host ("      users=" + $script:health.active_users + "  jobs=" + $script:health.total_jobs + "  scheduler=" + $script:health.scheduler) -ForegroundColor DarkGray
+    Write-Host ("      users=" + $script:health.active_users + "  jobs=" + $script:health.total_jobs + "  schema=" + $script:health.schema_version) -ForegroundColor DarkGray
     $true
+}
+Check "deployed schema is at the expected migration version" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $want = $ExpectedSchema
+    if ($want -le 0) {
+        # Read the highest version from the local migrations.py so this never
+        # needs editing when a migration is added.
+        $v = (& python -c "import migrations; print(max(v for v,_n,_f in migrations.MIGRATIONS))" 2>&1 | Out-String).Trim()
+        if ($v -match '^\d+$') { $want = [int]$v } else { return "could not read the expected version from migrations.py ($v)" }
+    }
+    $got = [int]$script:health.schema_version
+    if ($got -eq $want) { $true }
+    elseif ($got -eq 0) { "deployed box reports schema_version 0 - migrations did not run there" }
+    else { "deployed schema_version $got, expected $want - the deploy is behind" }
 }
 Check "GET /login renders" {
     $r = Get-Status "$BaseUrl/login"

@@ -188,8 +188,12 @@ def test_health_is_public_and_reports_shape(stack):
     status, _, body = Client(stack["port"]).get("/api/health")
     assert status == 200
     payload = json.loads(body)
-    for key in ("status", "active_users", "total_jobs", "scheduler"):
+    for key in ("status", "active_users", "total_jobs", "scheduler", "schema_version"):
         assert key in payload
+    # Phase 2a: health must report the applied schema version so a deploy can be
+    # verified from outside. 0 would mean the migrations never ran on that box.
+    import migrations as _m
+    assert payload["schema_version"] == max(v for v, _n, _f in _m.MIGRATIONS)
 
 
 # ── Authentication gates ──────────────────────────────────────────────────────
