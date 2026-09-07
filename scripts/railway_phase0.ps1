@@ -112,8 +112,12 @@ print(json.dumps(out))
             } catch { Warn "could not reach $HealthUrl to cross-check counts" }
 
             Write-Host ""
-            Ok "restore rehearsal: point a local run at this copy -"
-            Info "    `$env:DATABASE_PATH='$dbLocal'; python app.py    # then open http://localhost:5001/login"
+            Ok "restore verified at the data layer (opens, integrity_check ok, counts match)."
+            Warn "Do NOT boot app.py against this copy."
+            Info "app.py starts the scheduler and the file watcher on import: a scheduled hour"
+            Info "could fire a real search (Gemini spend) and deliver notifications to the real"
+            Info "users in this DB via their own Telegram/WhatsApp/email settings."
+            Info "The full boot-level restore rehearsal happens in Phase 2, against staging."
         }
     }
 }

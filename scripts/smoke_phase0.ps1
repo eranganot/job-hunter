@@ -127,20 +127,23 @@ Write-Host ""
 
 # --- Auth gates (the part that matters before public signup) ------------------
 Write-Host "-- auth gates (anonymous) --" -ForegroundColor Cyan
+# NOTE: no .GetNewClosure() here. A closure is bound to a NEW dynamic-module
+# scope with its own function table, so script-level helpers (Get-Status) are
+# invisible inside it - that is exactly how these checks failed on the first run.
+# Check runs the block immediately in the same iteration, so $p is already the
+# current value and no closure is needed.
 foreach ($p in @("/dashboard", "/settings", "/onboarding", "/admin")) {
-    $path = $p
-    Check "GET $path redirects to /login" {
-        $r = Get-Status "$BaseUrl$path"
+    Check "GET $p redirects to /login" {
+        $r = Get-Status "$BaseUrl$p"
         if ($r.Code -eq 302 -and "$($r.Location)" -match "/login") { $true }
         else { "status $($r.Code) location $($r.Location)" }
-    }.GetNewClosure()
+    }
 }
 foreach ($p in @("/api/me", "/api/jobs", "/api/stats", "/api/activity")) {
-    $path = $p
-    Check "GET $path is not served anonymously" {
-        $r = Get-Status "$BaseUrl$path"
+    Check "GET $p is not served anonymously" {
+        $r = Get-Status "$BaseUrl$p"
         if ($r.Code -eq 302) { $true } else { "status $($r.Code)" }
-    }.GetNewClosure()
+    }
 }
 Check "GET /api/admin/users leaks nothing anonymously" {
     $r = Get-Status "$BaseUrl/api/admin/users"
