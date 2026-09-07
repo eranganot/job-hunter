@@ -25,4 +25,4 @@ rapidfuzz>=3.6
 
 # Postgres driver (Phase 2b). Only used when DB_BACKEND=postgres;
 # SQLite deployments never import it.
-psycopg[binary]==3.3.5
+psycopg[binary,pool]==3.3.5

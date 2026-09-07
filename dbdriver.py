@@ -19,7 +19,9 @@ What it deliberately does NOT do is pretend to be a general SQLite emulator.
 It covers exactly the idioms this codebase uses; anything else should fail
 loudly rather than quietly do something different from SQLite.
 """
+import os
 import re
+import threading
 
 SQLITE = "sqlite"
 POSTGRES = "postgres"
@@ -213,8 +215,10 @@ class PgConnection:
 
     dialect = POSTGRES
 
-    def __init__(self, conn):
+    def __init__(self, conn, pool=None):
         self._conn = conn
+        self._pool = pool
+        self._returned = False
 
     def execute(self, sql, params=()):
         sql = translate(sql, POSTGRES, bool(params))
@@ -236,7 +240,14 @@ class PgConnection:
         self._conn.rollback()
 
     def close(self):
-        self._conn.close()
+        """Return to the pool when pooled; otherwise close for real."""
+        if self._returned:
+            return
+        self._returned = True
+        if self._pool is not None:
+            self._pool.putconn(self._conn)
+        else:
+            self._conn.close()
 
     @property
     def closed(self):
@@ -250,12 +261,77 @@ class PgConnection:
         return False
 
 
-def connect_postgres(url: str, connect_timeout: int = 15) -> PgConnection:
-    """Open a Postgres connection with the sqlite-compatible wrapper."""
+# get_db() is called at ~189 sites, often several times per request. A SQLite
+# connection is almost free; a Postgres one is a TCP handshake, TLS and an auth
+# round trip. Without pooling, moving to Postgres would look like "Postgres is
+# slow" for reasons that have nothing to do with Postgres.
+_POOLS = {}
+_POOL_LOCK = threading.Lock()
+
+POOL_MIN = int(os.environ.get("JH_PG_POOL_MIN", "1"))
+POOL_MAX = int(os.environ.get("JH_PG_POOL_MAX", "10"))
+
+
+def _get_pool(url: str):
+    """One pool per URL per process, created on first use."""
+    with _POOL_LOCK:
+        pool = _POOLS.get(url)
+        if pool is None:
+            from psycopg_pool import ConnectionPool
+
+            def _configure(conn):
+                # Mirrors db.get_db()'s SQLite setup (isolation_level=None), so
+                # .commit() at the call sites stays a harmless no-op.
+                conn.autocommit = True
+
+            pool = ConnectionPool(url, min_size=POOL_MIN, max_size=POOL_MAX,
+                                  configure=_configure, open=True, timeout=20)
+            _POOLS[url] = pool
+        return pool
+
+
+def close_pools():
+    """Shut every pool down. For tests and clean process exit."""
+    with _POOL_LOCK:
+        for pool in _POOLS.values():
+            try:
+                pool.close()
+            except Exception:
+                pass
+        _POOLS.clear()
+
+
+def pool_stats(url: str = None):
+    """Pool health, for /api/health and for diagnosing exhaustion."""
+    with _POOL_LOCK:
+        pools = _POOLS if url is None else {url: _POOLS.get(url)}
+        out = {}
+        for key, pool in pools.items():
+            if pool is None:
+                continue
+            st = pool.get_stats()
+            out[key.split("@")[-1]] = {
+                "size": st.get("pool_size"), "available": st.get("pool_available"),
+                "waiting": st.get("requests_waiting"),
+            }
+        return out
+
+
+def connect_postgres(url: str, connect_timeout: int = 15, pooled: bool = True) -> PgConnection:
+    """
+    Borrow a pooled Postgres connection wearing the sqlite-compatible interface.
+
+    PgConnection.close() returns it to the pool rather than closing the socket,
+    so the existing `conn = get_db() ... conn.close()` pattern keeps working
+    unchanged - it just stops being expensive.
+    """
     import psycopg  # imported lazily: SQLite-only deployments need not install it
 
-    conn = psycopg.connect(url, autocommit=True, connect_timeout=connect_timeout)
-    return PgConnection(conn)
+    if not pooled:
+        return PgConnection(psycopg.connect(url, autocommit=True,
+                                            connect_timeout=connect_timeout))
+    pool = _get_pool(url)
+    return PgConnection(pool.getconn(), pool=pool)
 
 
 def dialect_of(conn) -> str:

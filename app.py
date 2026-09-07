@@ -5735,6 +5735,11 @@ class Handler(BaseHTTPRequestHandler):
                 "WHERE event_type='job_applied' ORDER BY id DESC LIMIT 1"
             ).fetchone()
             try:
+                import dbdriver as _dbd
+                _pool_stats = _dbd.pool_stats()
+            except Exception:
+                _pool_stats = {}
+            try:
                 _schema_version = conn.execute(
                     "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
             except Exception:
@@ -5751,6 +5756,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Phase 2a: lets a deploy be verified from outside - the smoke
                 # script asserts the migrations actually ran on the box.
                 "schema_version": _schema_version,
+                "db_backend": database.backend(),
+                # Pool exhaustion looks like "the app hung" from outside; this
+                # makes it visible. Empty on SQLite.
+                "db_pool": _pool_stats,
             })
             return
 

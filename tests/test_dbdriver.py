@@ -190,3 +190,62 @@ def test_unmapped_upsert_table_raises_rather_than_guessing():
 def test_upserts_are_untouched_on_sqlite():
     sql = "INSERT OR IGNORE INTO jobs (user_id, url) VALUES (?, ?)"
     assert translate(sql, SQLITE, True) == sql
+
+
+# ── Connection pooling ────────────────────────────────────────────────────────
+
+def test_pool_settings_come_from_the_environment(monkeypatch):
+    import importlib
+    monkeypatch.setenv("JH_PG_POOL_MAX", "3")
+    reloaded = importlib.reload(dbdriver)
+    assert reloaded.POOL_MAX == 3
+    monkeypatch.delenv("JH_PG_POOL_MAX")
+    importlib.reload(dbdriver)
+
+
+def test_close_returns_a_pooled_connection_instead_of_closing_it():
+    """
+    get_db() is called ~189 times; the call sites all close afterwards. With a
+    pool, close() must mean 'give it back', or the pool drains to nothing.
+    """
+    returned = []
+
+    class FakePool:
+        def putconn(self, conn):
+            returned.append(conn)
+
+    class FakeConn:
+        closed = False
+
+        def close(self):
+            raise AssertionError("a pooled connection must not be closed directly")
+
+    conn = FakeConn()
+    wrapper = dbdriver.PgConnection(conn, pool=FakePool())
+    wrapper.close()
+    assert returned == [conn]
+
+
+def test_double_close_returns_the_connection_only_once():
+    """Returning the same connection twice corrupts the pool's accounting."""
+    returned = []
+
+    class FakePool:
+        def putconn(self, conn):
+            returned.append(conn)
+
+    wrapper = dbdriver.PgConnection(object(), pool=FakePool())
+    wrapper.close()
+    wrapper.close()
+    assert len(returned) == 1
+
+
+def test_unpooled_connection_still_closes_for_real():
+    closed = []
+
+    class FakeConn:
+        def close(self):
+            closed.append(True)
+
+    dbdriver.PgConnection(FakeConn()).close()
+    assert closed == [True]

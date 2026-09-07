@@ -58,7 +58,23 @@ if ($Service -ne "") { $svcArgs = @("--service", $Service) }
 if ($Backup) {
     Write-Host ""
     Write-Host "=== production backup ===" -ForegroundColor Cyan
-    $stamp = Get-Date -Format "yyyy-MM-dd_HHmm"
+    # Which environment is the CLI actually linked to? Production and a seeded
+    # staging can hold identical row counts, so counts cannot tell them apart -
+    # and mislabelling a staging copy as a production backup is how someone ends
+    # up believing they have a safety net they do not have.
+    $statusText = (& railway status 2>&1 | Out-String)
+    if ($statusText -match "(?im)^\s*Environment:\s*(.+?)\s*$") { $linkedEnv = $Matches[1] } else { $linkedEnv = "unknown" }
+    Write-Host ("      linked environment: " + $linkedEnv) -ForegroundColor Cyan
+    if ($linkedEnv -notmatch "(?i)^prod") {
+        Warn ("this is NOT production - the copy will be labelled '" + $linkedEnv + "'")
+        if (-not $PSBoundParameters.ContainsKey("HealthUrl")) {
+            Info "skipping the live /api/health cross-check (it points at production by default)."
+            Info "Pass -HealthUrl <this environment's url> to compare against the right app."
+            $HealthUrl = ""
+        }
+    }
+
+    $stamp = (Get-Date -Format "yyyy-MM-dd_HHmm") + "_" + ($linkedEnv -replace "[^A-Za-z0-9]", "")
     $dest  = Join-Path $OutDir $stamp
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
@@ -189,7 +205,9 @@ if ($Backup) {
 
         # What the live app reports, to compare every candidate against.
         $health = $null
-        try { $health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 30 } catch { Warn "could not reach $HealthUrl to cross-check counts" }
+        if ($HealthUrl -ne "") {
+            try { $health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 30 } catch { Warn "could not reach $HealthUrl to cross-check counts" }
+        }
         if ($health) { Info "live /api/health: active_users=$($health.active_users)  total_jobs=$($health.total_jobs)" }
 
         # Verify each download is a real, openable SQLite DB - a truncated file is
@@ -223,7 +241,7 @@ print(json.dumps(out))
             Info "users=$($counts.users) (active $($counts.active_users))  jobs=$($counts.jobs)  sessions=$($counts.sessions)  newest job=$($counts.last_job)"
 
             if ($health -and $health.active_users -eq $counts.active_users -and $health.total_jobs -eq $counts.jobs) {
-                Ok ("MATCHES live production -> " + $f.Volume + " is the volume production is using")
+                Ok ("MATCHES the live app at " + $HealthUrl + " -> " + $f.Volume + " is the volume it is using")
                 $live += $f.Volume
             } elseif ($health) {
                 Warn ("does NOT match live (" + $health.active_users + " users / " + $health.total_jobs + " jobs) - stale or a different service's data")
@@ -232,9 +250,9 @@ print(json.dumps(out))
 
         Write-Host ""
         if ($live.Count -eq 1) {
-            Ok ("production DB backed up from " + $live[0] + " -> " + $dest)
+            Ok ("[" + $linkedEnv + "] DB backed up from " + $live[0] + " -> " + $dest)
         } elseif ($live.Count -eq 0) {
-            Warn "no downloaded copy matches live counts. Either the app wrote during the download (re-run and see if it is stable) or production reads a volume this script did not try."
+            Warn "no downloaded copy matches the live counts. Either the app wrote during the download (re-run and see if it is stable) or production reads a volume this script did not try."
         } else {
             Warn ("more than one volume matches live counts: " + ($live -join ", ") + " - inspect before trusting either.")
         }
