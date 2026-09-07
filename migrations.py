@@ -26,6 +26,62 @@ SCHEMA_MIGRATIONS_DDL = """
 """
 
 
+
+# Column additions carried over from the original init_db() migration list.
+# (table, column definition) - applied only when the column is absent.
+_BASELINE_ADDITIONS = [
+    ('jobs', 'stage TEXT DEFAULT NULL'),
+    ('user_profiles', 'weekdays_only INTEGER DEFAULT 0'),
+    ('jobs', 'url_verified INTEGER DEFAULT NULL'),
+    ('jobs', 'url_check_date TEXT DEFAULT NULL'),
+    ('jobs', 'apply_status TEXT DEFAULT NULL'),
+    ('jobs', 'apply_confirmation TEXT DEFAULT NULL'),
+    ('jobs', 'apply_attempts INTEGER DEFAULT 0'),
+    ('jobs', 'apply_error TEXT DEFAULT NULL'),
+    ('user_profiles', "email_address TEXT DEFAULT ''"),
+    ('user_profiles', "email_smtp_host TEXT DEFAULT 'smtp.gmail.com'"),
+    ('user_profiles', 'email_smtp_port INTEGER DEFAULT 587'),
+    ('user_profiles', "email_smtp_user TEXT DEFAULT ''"),
+    ('user_profiles', "email_smtp_pass TEXT DEFAULT ''"),
+    ('jobs', 'publish_date TEXT DEFAULT NULL'),
+    ('jobs', 'full_description TEXT DEFAULT NULL'),
+    ('jobs', 'apply_failure_type TEXT DEFAULT NULL'),
+    ('jobs', 'apply_failure_detail TEXT DEFAULT NULL'),
+    ('user_profiles', 'auto_apply_enabled INTEGER DEFAULT 0'),
+    ('user_profiles', 'applications_sent_today INTEGER DEFAULT 0'),
+    ('user_profiles', 'applications_reset_date TEXT DEFAULT NULL'),
+    ('user_profiles', "onboarding_progress TEXT DEFAULT '{}'"),
+    ('user_profiles', 'onboarding_dismissed INTEGER DEFAULT 0'),
+    ('jobs', 'cover_letter TEXT DEFAULT NULL'),
+    ('user_profiles', 'cv_optimizer_result TEXT DEFAULT NULL'),
+    ('user_profiles', 'cv_optimizer_date TEXT DEFAULT NULL'),
+    ('user_profiles', 'cv_filename TEXT DEFAULT NULL'),
+    ('user_profiles', 'cv_uploaded_date TEXT DEFAULT NULL'),
+    ('users', 'google_sub TEXT DEFAULT NULL'),
+    ('users', "auth_provider TEXT DEFAULT 'password'"),
+    ('users', 'avatar_url TEXT DEFAULT NULL'),
+    ('jobs', 'apply_strategy TEXT DEFAULT NULL'),
+    ('jobs', 'apply_next_attempt_at TEXT DEFAULT NULL'),
+    ('jobs', 'apply_evidence_path TEXT DEFAULT NULL'),
+    ('jobs', 'apply_resolved_url TEXT DEFAULT NULL'),
+    ('jobs', 'apply_submitted_at TEXT DEFAULT NULL'),
+    ('user_profiles', 'applications_per_run INTEGER DEFAULT 10'),
+    ('user_profiles', 'passed_archived_count INTEGER DEFAULT 0'),
+    ('jobs', 'feedback_penalty INTEGER DEFAULT 0'),
+    ('jobs', "feedback_reason TEXT DEFAULT ''"),
+]
+
+# Non-ALTER statements from that same list. Every one is IF NOT EXISTS,
+# so they are safe to execute unconditionally on both engines.
+_BASELINE_EXTRA_DDL = [
+    "CREATE TABLE IF NOT EXISTS user_blocklist (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, company_name TEXT NOT NULL, reason TEXT DEFAULT '', date_added TEXT DEFAULT (datetime('now')), UNIQUE(user_id, company_name))",
+    "CREATE TABLE IF NOT EXISTS pass_reason_stats (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, reason TEXT NOT NULL, count INTEGER DEFAULT 1, last_hit_date TEXT DEFAULT (datetime('now')), UNIQUE(user_id, reason))",
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL',
+    "CREATE TABLE IF NOT EXISTS career_url_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, job_title TEXT NOT NULL, resolved_url TEXT NOT NULL, created_date TEXT DEFAULT (datetime('now')), UNIQUE(company, job_title))",
+    "CREATE TABLE IF NOT EXISTS application_answers (\n  user_id INTEGER PRIMARY KEY,\n  first_name TEXT, last_name TEXT, preferred_name TEXT,\n  phone_country_code TEXT, phone TEXT, email TEXT,\n  city TEXT, state_region TEXT, country TEXT, postal_code TEXT, address_line TEXT,\n  work_auth_il INTEGER, work_auth_us INTEGER, work_auth_eu INTEGER,\n  visa_required INTEGER, willing_to_relocate INTEGER,\n  current_title TEXT, current_company TEXT, years_experience INTEGER,\n  salary_expectation_min INTEGER, salary_expectation_currency TEXT,\n  notice_period_days INTEGER, available_start_date TEXT,\n  linkedin_url TEXT, github_url TEXT, portfolio_url TEXT, twitter_url TEXT,\n  eeo_race TEXT, eeo_gender TEXT, eeo_veteran TEXT, eeo_disability TEXT,\n  how_heard TEXT DEFAULT 'Company website',\n  cover_letter_default TEXT, why_company_default TEXT,\n  updated_date TEXT,\n  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE\n)",
+]
+
+
 def _has_column(conn, table, column):
     """True if table.column exists. SQLite path; Phase 2b adds information_schema."""
     try:
@@ -128,78 +184,21 @@ def m0001_baseline(conn):
     """)
 
     # Migrations — safe to re-run on every start
-    for _migration in [
-        "ALTER TABLE jobs ADD COLUMN stage TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN weekdays_only INTEGER DEFAULT 0",
-        "ALTER TABLE jobs ADD COLUMN url_verified INTEGER DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN url_check_date TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_status TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_confirmation TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_attempts INTEGER DEFAULT 0",
-        "ALTER TABLE jobs ADD COLUMN apply_error TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN email_address TEXT DEFAULT ''",
-        "ALTER TABLE user_profiles ADD COLUMN email_smtp_host TEXT DEFAULT 'smtp.gmail.com'",
-        "ALTER TABLE user_profiles ADD COLUMN email_smtp_port INTEGER DEFAULT 587",
-        "ALTER TABLE user_profiles ADD COLUMN email_smtp_user TEXT DEFAULT ''",
-        "ALTER TABLE user_profiles ADD COLUMN email_smtp_pass TEXT DEFAULT ''",
-        "ALTER TABLE jobs ADD COLUMN publish_date TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN full_description TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_failure_type TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_failure_detail TEXT DEFAULT NULL",
-        "CREATE TABLE IF NOT EXISTS user_blocklist (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, company_name TEXT NOT NULL, reason TEXT DEFAULT '', date_added TEXT DEFAULT (datetime('now')), UNIQUE(user_id, company_name))",
-        "CREATE TABLE IF NOT EXISTS pass_reason_stats (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, reason TEXT NOT NULL, count INTEGER DEFAULT 1, last_hit_date TEXT DEFAULT (datetime('now')), UNIQUE(user_id, reason))",
-        "ALTER TABLE user_profiles ADD COLUMN auto_apply_enabled INTEGER DEFAULT 0",
-        "ALTER TABLE user_profiles ADD COLUMN applications_sent_today INTEGER DEFAULT 0",
-        "ALTER TABLE user_profiles ADD COLUMN applications_reset_date TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN onboarding_progress TEXT DEFAULT '{}'",
-        "ALTER TABLE user_profiles ADD COLUMN onboarding_dismissed INTEGER DEFAULT 0",
-        "ALTER TABLE jobs ADD COLUMN cover_letter TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_result TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN cv_optimizer_date TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN cv_filename TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN cv_uploaded_date TEXT DEFAULT NULL",
-        # ── Google Sign-In (OAuth) ──
-        "ALTER TABLE users ADD COLUMN google_sub TEXT DEFAULT NULL",
-        "ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'password'",
-        "ALTER TABLE users ADD COLUMN avatar_url TEXT DEFAULT NULL",
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL",
-        # ── Phase-1 robustness migrations ─────────────────────────────────────
-        "ALTER TABLE jobs ADD COLUMN apply_strategy TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_next_attempt_at TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_evidence_path TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_resolved_url TEXT DEFAULT NULL",
-        "ALTER TABLE jobs ADD COLUMN apply_submitted_at TEXT DEFAULT NULL",
-        "ALTER TABLE user_profiles ADD COLUMN applications_per_run INTEGER DEFAULT 10",
-        # ── Passed-history cleanup (preserves historical 'total' across deletions) ──
-        "ALTER TABLE user_profiles ADD COLUMN passed_archived_count INTEGER DEFAULT 0",
-        # ── Feedback learning loop: per-job penalty derived from pass history ──
-        "ALTER TABLE jobs ADD COLUMN feedback_penalty INTEGER DEFAULT 0",
-        "ALTER TABLE jobs ADD COLUMN feedback_reason TEXT DEFAULT ''",
-        # career_url_cache: created separately below (CREATE TABLE IF NOT EXISTS)
-        "CREATE TABLE IF NOT EXISTS career_url_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, company TEXT NOT NULL, job_title TEXT NOT NULL, resolved_url TEXT NOT NULL, created_date TEXT DEFAULT (datetime(\'now\')), UNIQUE(company, job_title))",
-        # application_answers: canonical applicant profile (§4.6)
-        """CREATE TABLE IF NOT EXISTS application_answers (
-  user_id INTEGER PRIMARY KEY,
-  first_name TEXT, last_name TEXT, preferred_name TEXT,
-  phone_country_code TEXT, phone TEXT, email TEXT,
-  city TEXT, state_region TEXT, country TEXT, postal_code TEXT, address_line TEXT,
-  work_auth_il INTEGER, work_auth_us INTEGER, work_auth_eu INTEGER,
-  visa_required INTEGER, willing_to_relocate INTEGER,
-  current_title TEXT, current_company TEXT, years_experience INTEGER,
-  salary_expectation_min INTEGER, salary_expectation_currency TEXT,
-  notice_period_days INTEGER, available_start_date TEXT,
-  linkedin_url TEXT, github_url TEXT, portfolio_url TEXT, twitter_url TEXT,
-  eeo_race TEXT, eeo_gender TEXT, eeo_veteran TEXT, eeo_disability TEXT,
-  how_heard TEXT DEFAULT \'Company website\',
-  cover_letter_default TEXT, why_company_default TEXT,
-  updated_date TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-)"""
-    ]:
-        try:
-            conn.execute(_migration)
-        except Exception:
-            pass  # column already exists
+    # Columns and tables added after the original schema shipped.
+    #
+    # This used to be `try: conn.execute(...) except: pass`, which hid every
+    # failure. That is survivable on SQLite; on Postgres a failed statement
+    # aborts the whole transaction, so the first already-applied ALTER would
+    # take every statement after it down with it. Check first, then act.
+    for _table, _coldef in _BASELINE_ADDITIONS:
+        if not _table_exists(conn, _table):
+            continue
+        if _has_column(conn, _table, _coldef.split()[0]):
+            continue
+        conn.execute("ALTER TABLE " + _table + " ADD COLUMN " + _coldef)
+        print("[db] baseline: added " + _coldef.split()[0] + " to " + _table)
+    for _stmt in _BASELINE_EXTRA_DDL:
+        conn.execute(_stmt)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS rejected_patterns (

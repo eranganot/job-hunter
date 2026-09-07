@@ -135,3 +135,39 @@ def test_helpers_are_honest_about_what_exists(tmp_path):
     assert not migrations._table_exists(conn, "no_such_table")
     assert migrations._has_column(conn, "jobs", "status")
     assert not migrations._has_column(conn, "jobs", "no_such_column")
+
+
+# ── Phase 2b-i: no swallowed failures ─────────────────────────────────────────
+
+def test_every_baseline_addition_exists_after_a_run(tmp_path):
+    """The 39 columns lifted out of the old try/except loop must all land."""
+    conn = fresh(tmp_path, "additions.db")
+    migrations.run(conn)
+
+    missing = [(t, c.split()[0]) for t, c in migrations._BASELINE_ADDITIONS
+               if not migrations._has_column(conn, t, c.split()[0])]
+    assert not missing, f"baseline additions never applied: {missing}"
+
+
+def test_baseline_is_a_no_op_the_second_time(tmp_path):
+    conn = fresh(tmp_path, "twice.db")
+    migrations.run(conn)
+    before = {t: sorted(cols(conn, t)) for t in ("users", "jobs", "user_profiles")}
+
+    migrations.m0001_baseline(conn)      # deliberately re-run
+    after = {t: sorted(cols(conn, t)) for t in ("users", "jobs", "user_profiles")}
+    assert after == before
+
+
+def test_migrations_never_swallow_a_failure():
+    """
+    Guard against the pattern coming back. `try: execute(...) except: pass` is
+    survivable on SQLite but fatal on Postgres, where one failed statement
+    aborts the transaction and every later statement in it fails too.
+    """
+    import inspect
+    src = inspect.getsource(migrations)
+    for offender in ("except Exception:\n            pass",
+                     "except Exception:\n        pass",
+                     "except:\n"):
+        assert offender not in src, f"migrations.py swallows failures again: {offender!r}"
