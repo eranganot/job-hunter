@@ -15,6 +15,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import urllib.parse
 from http.server import HTTPServer
 from socketserver import ThreadingMixIn
@@ -29,12 +30,30 @@ class _Server(ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
 
 
+# Transport-level errors that mean "the socket died", not "the app answered
+# something wrong". One full-suite run on Windows/py3.12 showed a single
+# unexplained failure in this file that never reproduced (7/7 in isolation,
+# 220/220 on Linux). Rather than invent a cause, the client retries ONCE on a
+# dead socket and never on an HTTP status - so a real behavioural regression
+# still fails, while a dropped connection does not masquerade as one.
+_TRANSPORT_ERRORS = (ConnectionResetError, ConnectionAbortedError,
+                     BrokenPipeError, http.client.RemoteDisconnected,
+                     http.client.BadStatusLine)
+
+
 class Client:
     """Minimal HTTP client with cookie memory, so a session survives requests."""
 
     def __init__(self, port):
         self.port = port
         self.cookie = None
+
+    def _with_retry(self, fn):
+        try:
+            return fn()
+        except _TRANSPORT_ERRORS:
+            time.sleep(0.05)
+            return fn()
 
     def _headers(self, extra=None):
         h = dict(extra or {})
@@ -48,6 +67,9 @@ class Client:
             self.cookie = raw.split(";")[0]
 
     def get(self, path):
+        return self._with_retry(lambda: self._get(path))
+
+    def _get(self, path):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         conn.request("GET", path, headers=self._headers())
         resp = conn.getresponse()
@@ -57,6 +79,9 @@ class Client:
         return resp.status, resp.getheader("Location"), body
 
     def post_json(self, path, payload):
+        return self._with_retry(lambda: self._post_json(path, payload))
+
+    def _post_json(self, path, payload):
         body = json.dumps(payload).encode()
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         conn.request("POST", path, body=body,
@@ -69,6 +94,9 @@ class Client:
         return resp.status, resp.getheader("Location"), out
 
     def post_form(self, path, fields):
+        return self._with_retry(lambda: self._post_form(path, fields))
+
+    def _post_form(self, path, fields):
         body = urllib.parse.urlencode(fields).encode()
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         conn.request("POST", path, body=body,

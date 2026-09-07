@@ -99,13 +99,21 @@ if (-not $SkipLocal) {
         if ($LASTEXITCODE -eq 0) { $true } else { "py_compile exit $LASTEXITCODE" }
     }
     Check "full test suite green" {
-        $out  = (& python -m pytest -q 2>&1 | Out-String)
+        # --tb=line gives one line of REASON per failure. Without it a failing
+        # run prints only the test name, which is not enough to diagnose from.
+        $out  = (& python -m pytest -q --tb=line 2>&1 | Out-String)
         $code = $LASTEXITCODE
         $summary = ($out -split "`r?`n" | Where-Object { $_ -match "passed|failed|error" } | Select-Object -Last 1)
         if ($code -eq 0) { Write-Host ("      " + $summary.Trim()) -ForegroundColor DarkGray; return $true }
         # On failure, name the tests - a count alone is not actionable.
-        $failed = $out -split "`r?`n" | Where-Object { $_ -match "^(FAILED|ERROR) " }
-        foreach ($f in $failed) { Write-Host ("      " + $f.Trim()) -ForegroundColor Yellow }
+        $lines = $out -split "`r?`n"
+        foreach ($f in ($lines | Where-Object { $_ -match "^(FAILED|ERROR) " })) {
+            Write-Host ("      " + $f.Trim()) -ForegroundColor Yellow
+        }
+        # The --tb=line reasons: "/path/to/test.py:123: AssertionError: ..."
+        foreach ($r in ($lines | Where-Object { $_ -match "^[A-Za-z]:?[\\/].*\.py:\d+:" } | Select-Object -First 5)) {
+            Write-Host ("      " + $r.Trim()) -ForegroundColor DarkYellow
+        }
         return $summary.Trim()
     }
     Check "route harness present" {

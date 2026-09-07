@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  # The suite as it has always run: SQLite, no services.
+  sqlite:
     runs-on: ubuntu-latest
 
     steps:
@@ -37,3 +38,66 @@ jobs:
           SECRET_KEY: "test-secret-key-ci"
         run: |
           pytest tests/ -v --tb=short
+
+  # Phase 2b: the same schema and the same call idioms against a real Postgres.
+  # Without this job the two engines are free to drift apart, and the drift
+  # would only surface during the migration in Phase 2c - with real data.
+  postgres:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jobhunter_ci
+        ports:
+          - 5432:5432
+        # Do not start the tests before the server is actually accepting
+        # connections - otherwise the failure looks like a driver bug.
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Postgres integration tests
+        env:
+          JH_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/jobhunter_ci
+          SECRET_KEY: "test-secret-key-ci"
+        run: |
+          pytest tests/test_pg_integration.py -v --tb=short
+
+      - name: Fail if the Postgres tests silently skipped
+        env:
+          JH_TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/jobhunter_ci
+        run: |
+          # A skipped suite passes, which would make this job a green rubber
+          # stamp. Assert the tests actually ran.
+          pytest tests/test_pg_integration.py -q 2>&1 | tee /tmp/pg.txt
+          if grep -q "skipped" /tmp/pg.txt; then
+            echo "::error::Postgres tests skipped - JH_TEST_PG_URL did not reach pytest"
+            exit 1
+          fi
