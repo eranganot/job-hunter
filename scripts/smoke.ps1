@@ -17,6 +17,11 @@
 param(
     [string]$BaseUrl = "https://web-production-192b7.up.railway.app",
     [int]$ExpectedSchema = 0,          # 0 = read it from local migrations.py
+    # Which engine the box is supposed to be serving. "" = do not care, but the
+    # refusal check below still runs. Pin it to "postgres" during a cutover so a
+    # silent fallback to SQLite fails the smoke instead of passing it.
+    [ValidateSet("", "sqlite", "postgres")]
+    [string]$ExpectBackend = "",
     [switch]$SkipLocal
 )
 
@@ -130,8 +135,31 @@ Check "GET /api/health is 200 and well-formed" {
     if ($r.Code -ne 200) { return "status $($r.Code)" }
     $script:health = $r.Body | ConvertFrom-Json
     if ($script:health.status -ne "ok") { return "status field = $($script:health.status)" }
-    Write-Host ("      users=" + $script:health.active_users + "  jobs=" + $script:health.total_jobs + "  schema=" + $script:health.schema_version) -ForegroundColor DarkGray
+    Write-Host ("      users=" + $script:health.active_users + "  jobs=" + $script:health.total_jobs + "  schema=" + $script:health.schema_version + "  backend=" + $script:health.db_backend) -ForegroundColor DarkGray
     $true
+}
+# 2026-09-07: production ran for a while on an empty Postgres and reported
+# "ok" the whole time, because nothing in the smoke looked at WHICH database
+# was behind the app. These two checks are that gap closed.
+Check "the box is not falling back after refusing its configured database" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $refused = $script:health.db_backend_refused
+    if ([string]::IsNullOrEmpty($refused)) { $true }
+    else { "the app refused its Postgres target and is serving SQLite instead: $refused" }
+}
+Check "the box is serving the engine it is supposed to" {
+    if ($null -eq $script:health) { return "no health payload" }
+    if ($ExpectBackend -eq "") {
+        Write-Host "      (not pinned - pass -ExpectBackend to assert)" -ForegroundColor DarkGray
+        return $true
+    }
+    $got = $script:health.db_backend
+    if ($got -eq $ExpectBackend) {
+        if ($got -eq "postgres") {
+            Write-Host ("      pool: " + ($script:health.db_pool.PSObject.Properties.Name -join ", ")) -ForegroundColor DarkGray
+        }
+        $true
+    } else { "db_backend=$got, expected $ExpectBackend" }
 }
 Check "deployed schema is at the expected migration version" {
     if ($null -eq $script:health) { return "no health payload" }

@@ -6,6 +6,7 @@ import json
 import os
 import dbdriver
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import migrations
 
@@ -18,6 +19,12 @@ def set_database_url(url: str):
     DATABASE_URL = url
 
 
+# Set by preflight() when a configured Postgres target is refused. /api/health
+# reports it, so the misconfiguration is visible from outside instead of the
+# app looking healthy while serving the wrong data.
+BACKEND_REFUSAL = None
+
+
 def backend() -> str:
     """
     Which engine get_db() will open.
@@ -26,10 +33,118 @@ def backend() -> str:
     NOT enough - Railway hands reference variables out freely, and a variable
     appearing by accident must never silently repoint a live app at a different
     database.
+
+    That guarded one direction and left the other open, and on 2026-09-07 the
+    other direction is what happened: DB_BACKEND=postgres ALONE was enough.
+    Production picked up Railway's auto-injected DATABASE_URL, which pointed at
+    the default 'railway' database, ran its own migrations there, and served
+    nine users an empty account while /api/health reported "ok". One variable
+    should never be able to do that, so preflight() now has to agree; when it
+    refuses, this returns sqlite regardless of DB_BACKEND.
     """
+    if BACKEND_REFUSAL:
+        return dbdriver.SQLITE
     if os.environ.get("DB_BACKEND", "sqlite").strip().lower() == "postgres":
         return dbdriver.POSTGRES
     return dbdriver.SQLITE
+
+
+def _refuse(reason: str) -> str:
+    global BACKEND_REFUSAL
+    BACKEND_REFUSAL = reason
+    bar = "=" * 78
+    print(bar, flush=True)
+    print("REFUSING THE CONFIGURED POSTGRES TARGET", flush=True)
+    print("  " + reason, flush=True)
+    print("  Serving the SQLite volume instead. Fix the variables and redeploy.", flush=True)
+    print(bar, flush=True)
+    return reason
+
+
+def _sqlite_user_count():
+    """
+    How many users the SQLite volume holds; None when there is no usable file.
+
+    Opened read-only - a preflight check must never be able to modify the very
+    data it exists to protect.
+    """
+    if not DB_PATH or not os.path.exists(DB_PATH):
+        return None
+    try:
+        conn = sqlite3.connect("file:%s?mode=ro" % os.path.abspath(DB_PATH), uri=True)
+    except Exception:
+        return None
+    try:
+        if not conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='users'"
+        ).fetchone()[0]:
+            return None
+        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def preflight() -> str:
+    """
+    Decide whether the configured Postgres target is one worth serving. Call it
+    once at startup, BEFORE init_db() - the failure this exists to prevent was
+    the app cheerfully running its migrations on a database nobody chose.
+
+    Returns the refusal reason, or "" when the configuration is fine.
+
+    Two checks, both written against what actually went wrong rather than
+    against what might:
+
+      1. The database must be named on purpose. Railway injects DATABASE_URL
+         the moment a Postgres service is attached, so DB_BACKEND=postgres on
+         its own selects whatever that happens to point at. JH_PG_DATABASE
+         must be set and must match the database in the URL.
+
+      2. An empty Postgres must never displace a populated SQLite volume. Zero
+         users there and nine here is a cutover that has not happened yet.
+    """
+    global BACKEND_REFUSAL
+    BACKEND_REFUSAL = None
+
+    if os.environ.get("DB_BACKEND", "sqlite").strip().lower() != "postgres":
+        return ""
+
+    url = DATABASE_URL or os.environ.get("DATABASE_URL", "")
+    if not url:
+        return _refuse("DB_BACKEND=postgres but DATABASE_URL is empty.")
+
+    target = (urlparse(url).path or "").lstrip("/")
+    intended = os.environ.get("JH_PG_DATABASE", "").strip()
+    if not intended:
+        return _refuse(
+            "DB_BACKEND=postgres but JH_PG_DATABASE is unset, so nothing states which "
+            "database was meant. DATABASE_URL points at %r, which may be one Railway "
+            "injected rather than one you chose. Set JH_PG_DATABASE=%s to confirm."
+            % (target, target or "<name>"))
+    if intended != target:
+        return _refuse(
+            "JH_PG_DATABASE=%s but DATABASE_URL points at database %r." % (intended, target))
+
+    try:
+        conn = dbdriver.connect_postgres(url, pooled=False)
+    except Exception as exc:
+        return _refuse("cannot reach Postgres database %r: %s" % (target, exc))
+    try:
+        try:
+            pg_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        except Exception:
+            pg_users = 0            # no users table at all - an untouched database
+    finally:
+        conn.close()
+
+    lite_users = _sqlite_user_count()
+    if not pg_users and lite_users:
+        return _refuse(
+            "database %r holds 0 users while the SQLite volume at %s holds %d. The data "
+            "has not been migrated yet." % (target, DB_PATH, lite_users))
+    return ""
 
 
 def set_db_path(path: str):

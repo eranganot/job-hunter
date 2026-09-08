@@ -5757,6 +5757,9 @@ class Handler(BaseHTTPRequestHandler):
                 # script asserts the migrations actually ran on the box.
                 "schema_version": _schema_version,
                 "db_backend": database.backend(),
+                # Non-null means a Postgres target was configured and refused;
+                # the app is serving SQLite instead. smoke.ps1 asserts on it.
+                "db_backend_refused": database.BACKEND_REFUSAL,
                 # Pool exhaustion looks like "the app hung" from outside; this
                 # makes it visible. Empty on SQLite.
                 "db_pool": _pool_stats,
@@ -7375,6 +7378,10 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"\n🎯  Job Hunter (Multi-User) starting…")
+    # Before init_db(), deliberately: on 2026-09-07 init_db() is what built the
+    # schema on a database nobody had chosen, which is what made the wrong
+    # target look healthy. The guard has to run first or it guards nothing.
+    database.preflight()
     database.init_db()
     try:
         _exp = auth.cleanup_expired_sessions()
