@@ -676,3 +676,60 @@ def test_foreign_user_cannot_delete_anothers_rejected_pattern(stack, users):
     still = conn.execute("SELECT COUNT(*) FROM rejected_patterns WHERE id=?", (pid,)).fetchone()[0]
     conn.close()
     assert still == 1, "user B deleted A's rejected pattern"
+
+
+# ── Phase 3: run-search writes a row instead of spawning a thread ────────────
+
+def _clear_queue(database):
+    """
+    Other tests in this file enqueue runs, and the queue's dedupe is global per
+    user - so a test that asserts "this enqueue worked" has to start from a
+    known state or it reads someone else's leftover row as its own failure.
+    """
+    conn = database.get_db()
+    conn.execute("DELETE FROM job_runs")
+    conn.commit()
+    conn.close()
+
+
+def test_run_search_enqueues_instead_of_starting_a_thread(stack, users, monkeypatch):
+    """
+    The change users feel: the request returns after a write, not after
+    starting a minutes-long thread inside the web process.
+    """
+    import ratelimit
+    ratelimit.reset_all()
+    _clear_queue(stack["db"])
+    monkeypatch.setattr(stack["app"], "GEMINI_KEY", "test-key", raising=False)
+
+    status, _l, body = users["a"].post_json("/api/run-search", {})
+    assert status == 200
+    out = json.loads(body)
+    assert out["status"] == "queued" and out["run_id"], body
+
+    conn = stack["db"].get_db()
+    row = conn.execute("SELECT kind, status FROM job_runs WHERE id=?", (out["run_id"],)).fetchone()
+    conn.close()
+    ratelimit.reset_all()
+    assert row["kind"] == "search" and row["status"] == "queued"
+
+
+def test_pressing_search_twice_does_not_queue_two_runs(stack, users, monkeypatch):
+    """The dedupe, from the user's side: a double-click is not a second search."""
+    import ratelimit
+    ratelimit.reset_all()
+    _clear_queue(stack["db"])
+    monkeypatch.setattr(stack["app"], "GEMINI_KEY", "test-key", raising=False)
+
+    first = json.loads(users["b"].post_json("/api/run-search", {})[2])
+    second = json.loads(users["b"].post_json("/api/run-search", {})[2])
+    ratelimit.reset_all()
+
+    assert first["status"] == "queued" and first["run_id"]
+    assert second["status"] == "already_running" and second["run_id"] is None
+
+
+def test_health_reports_queue_depth(stack, users):
+    _st, _l, body = users["a"].get("/api/health")
+    q = json.loads(body)["queue"]
+    assert "queued" in q and "running" in q, q

@@ -29,6 +29,7 @@ import crypto
 import db as database
 import jobqueue
 import ratelimit
+import worker
 import storage
 from ai_analysis import analyze_cv
 
@@ -510,8 +511,14 @@ def _check_scheduled_jobs() -> None:
                 if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
                     run_search = False
                 if run_search:
-                    print(f'[scheduler] Triggering search for user {uid} at hour {sh}')
-                    threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
+                    # Enqueued, not spawned: the queue's one-run-per-user rule
+                    # is what stops a second instance double-firing the same
+                    # user's daily search, and an unfinished run survives a
+                    # redeploy instead of vanishing with the process.
+                    if jobqueue.enqueue(uid, "search"):
+                        print(f'[scheduler] Queued search for user {uid} at hour {sh}')
+                    else:
+                        print(f'[scheduler] Search already in flight for user {uid}; skipped')
             # Apply: check hour + frequency/day
             if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
                 run_apply = True
@@ -520,8 +527,14 @@ def _check_scheduled_jobs() -> None:
                 if not auto_apply:
                     run_apply = False
                 if run_apply:
-                    print(f'[scheduler] Triggering apply for user {uid} at hour {ah}')
-                    threading.Thread(target=run_job_apply, args=(uid,), daemon=True).start()
+                    # Routed through the queue too, so un-parking auto-apply is
+                    # a kill-switch change rather than a rewrite. The engine
+                    # itself stays off: apply_engine no-ops without
+                    # APPLY_ENGINE_ENABLED.
+                    if jobqueue.enqueue(uid, "apply"):
+                        print(f'[scheduler] Queued apply for user {uid} at hour {ah}')
+                    else:
+                        print(f'[scheduler] Apply already in flight for user {uid}; skipped')
     except Exception as e:
         print(f'[scheduler] Error: {e}')
 
@@ -7147,8 +7160,11 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": f"Search was run too many times recently. "
                                          f"Try again in about {_mins} minute(s)."}, 429)
                 return
-            threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
-            self.send_json({"status": "started"})
+            # A row, not a thread. Pressing the button twice while one is in
+            # flight is now a no-op rather than a second Gemini-spending search.
+            _run_id = jobqueue.enqueue(uid, "search")
+            self.send_json({"status": "queued" if _run_id else "already_running",
+                            "run_id": _run_id})
             return
 
         # ── Run Apply Now ─────────────────────────────────────────────────────────
@@ -7511,6 +7527,12 @@ if __name__ == "__main__":
     database.preflight()
     crypto.warn_if_unconfigured()
     database.init_db()
+    # Handlers are registered from here, not imported by the worker, so that
+    # worker.py stays free of app.py - which is what makes moving it to its own
+    # process later a CMD change rather than a refactor.
+    worker.register("search", lambda user_id, _payload=None: run_job_search(user_id))
+    worker.register("apply", lambda user_id, _payload=None: run_job_apply(user_id))
+    worker.start_background()
     try:
         _exp = auth.cleanup_expired_sessions()
         if _exp:

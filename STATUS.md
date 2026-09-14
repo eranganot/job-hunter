@@ -61,6 +61,18 @@ Two-folder drift (being retired); sandbox can't push; Playwright browser binarie
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-09-14 — **The worker runs, and a search stops being a thread inside a request.** `worker.py` drains `job_runs` as a daemon thread **in-process** (the decision on record: no second Railway service yet). Both entry points that used to call `threading.Thread(target=run_job_search).start()` now enqueue instead - `/api/run-search` and the scheduler - and there are **zero** such spawns left in `app.py`. Apply is routed through the queue too, so un-parking auto-apply later is a kill-switch change rather than a rewrite; the engine stays off regardless, since `apply_engine` no-ops without `APPLY_ENGINE_ENABLED`.
+
+  **The boundary is deliberate.** `worker.py` imports only `jobqueue`; the handlers are registered into it from `app.py` at startup. That is what keeps the two free of a circular import, and what makes moving the worker to its own process a `CMD` change rather than a refactor - which is what Chromium will want when apply un-parks.
+
+  **The heartbeat runs on its own timer thread** while a handler executes, because a handler is a minutes-long blocking call that cannot pause to say it is alive. Without it the stuck-run sweeper would eventually reclaim work from a worker doing exactly what it was told - tested directly: a handler is held open, the sweeper runs with a 1-second staleness threshold, and the run must still be there afterwards.
+
+  **What a user feels:** the request returns after a write instead of after starting a thread; pressing "Run search" twice while one is in flight is now a no-op (`already_running`) rather than a second Gemini-spending search; and an unfinished run survives a redeploy, because the row is still there to be claimed.
+
+  **Two faults in my own tests, both found rather than assumed.** (1) The new route tests failed in the full suite and passed alone. A probe printed the queue contents at the point of failure: the rate-limit tests now leave rows in `job_runs`, so the dedupe correctly answered `already_running`. **The app was right and the test was wrong** - it assumed an empty queue. Tests that assert an enqueue now clear the queue first, with a comment saying why. (2) A real indexing bug in the second test: `post_json` returns `(status, location, body)` and I read `[1]`, so `json.loads(None)` raised `TypeError` - which is what the suite was actually reporting.
+
+  Suite **350 → 361**, mutation-checked: putting the thread back in place of the enqueue fails exactly the two tests that assert the route uses the queue. **Still open in Phase 3:** the advisory-locked scheduler (only needed once a second instance exists - today the queue's one-run-per-user rule already prevents double-firing), cost guardrails, and `print()` → logging.
+
 - 2026-09-14 — **Phase 3 runtime: the work queue, and the plan's claim design does not work against this codebase.** Migration **6** adds `job_runs` (`user_id, kind, status, payload, attempts, locked_by, locked_at, run_after, …`) with indexes for the two questions the claim asks. New `jobqueue.py` - **not** `queue.py`, which in the repo root would shadow the standard library's module for every import in the process; a test asserts it doesn't.
 
   **The plan specified `SELECT … FOR UPDATE SKIP LOCKED`. It cannot be used here, for two independent reasons, both checked rather than assumed:**
