@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlparse
 
 import auth
 import db as database
+import storage
 from ai_analysis import analyze_cv
 
 # ── Compiled Tailwind CSS (gzipped + base64, 19KB → 4KB stored) ───────────────
@@ -137,6 +138,9 @@ def _effectively_onboarded(u):
 DB_FILE     = _cfg("DATABASE_PATH", "_db_path", os.path.join(BASE_DIR, "jobs.db"))
 UPLOADS_DIR = _cfg("UPLOADS_DIR",   "_uploads",  os.path.join(BASE_DIR, "uploads"))
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+# Phase 2d: the CV bytes live in the database; this directory is now a cache
+# that any container can rebuild. See storage.py.
+storage.set_uploads_dir(UPLOADS_DIR)
 
 # ── Local IP (for mobile access) ─────────────────────────────────────────────
 
@@ -1182,7 +1186,7 @@ def run_job_search(user_id: int):
                 ).fetchone()
                 _conn2.close()
                 _cv_text = (_prof2["cv_summary"] or "") if _prof2 else ""
-                _cv_path = (_prof2["cv_path"] or "") if _prof2 else ""
+                _cv_path = _cv_file(user_id, (_prof2["cv_path"] or "") if _prof2 else "")
             except Exception:
                 _cv_text = ""
                 _cv_path = ""
@@ -2045,9 +2049,9 @@ def run_job_apply(user_id: int) -> int:
         email     = user["email"] if user else ""
         applicant = apply_engine.extract_applicant_data(cv_text, email)
 
-        cv_path = None
-        if profile and profile["cv_path"]:
-            cv_path = profile["cv_path"]
+        # The apply engine hands this path to a browser file input, so the file
+        # has to exist on disk - rebuilt from the database if the volume is cold.
+        cv_path = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
 
         today = datetime.now().strftime("%Y-%m-%d")
         count = 0
@@ -2207,7 +2211,7 @@ def _trigger_apply_bg(user_id: int, job_id: int):
             cv_text   = (profile["cv_summary"] or "") if profile else ""
             email     = user["email"] if user else ""
             applicant = apply_engine.extract_applicant_data(cv_text, email)
-            cv_path   = (profile["cv_path"] or None) if profile else None
+            cv_path   = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
 
             res = _submit_application_guarded(
                 job["url"], job["title"], job["company"],
@@ -5259,6 +5263,29 @@ setInterval(loadAll, 5 * 60 * 1000);
 # HTTP HANDLER
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _cv_file(user_id, recorded_path=""):
+    """
+    A readable path to this user's CV, or "".
+
+    Phase 2d: user_profiles.cv_path is still written and still honoured, but it
+    is no longer the thing that decides whether the file is there. storage
+    rebuilds the cached file from the database when the volume is cold - a
+    fresh container, a restored backup, a redeploy that lost its volume - so
+    the callers below keep passing a path around and simply stop being wrong
+    about it. The recorded path is the fallback for the window before a user's
+    legacy upload has been adopted.
+    """
+    try:
+        path = storage.file_path(user_id)
+        if path:
+            return path
+    except Exception as exc:
+        print("[cv] storage lookup failed for user %s: %s" % (user_id, exc))
+    if recorded_path and os.path.exists(recorded_path):
+        return recorded_path
+    return ""
+
+
 def _extract_cv_text(cv_path, cv_summary):
     if cv_path and os.path.exists(cv_path):
         try:
@@ -5783,15 +5810,16 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user:
                 return
-            _cvp = os.path.join(UPLOADS_DIR, str(user["id"]), "cv.pdf")
-            if not os.path.exists(_cvp):
-                self.send_json({"error": "No CV uploaded yet."}, 404)
-                return
+            # Phase 2d: served from the database, so this works on a box whose
+            # uploads volume is empty (a fresh container, a restored backup).
             try:
-                with open(_cvp, "rb") as _f:
-                    _data = _f.read()
-            except Exception:
+                _data = storage.get_bytes(user["id"])
+            except Exception as _se:
+                print("[cv] read failed for user %s: %s" % (user["id"], _se))
                 self.send_json({"error": "Could not read CV."}, 500)
+                return
+            if not _data:
+                self.send_json({"error": "No CV uploaded yet."}, 404)
                 return
             _fname = "cv.pdf"
             try:
@@ -6485,12 +6513,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not filename.lower().endswith(".pdf"):
                     self.send_json({"error": "Only PDF files are accepted."})
                     return
-                user_upload_dir = os.path.join(UPLOADS_DIR, str(user_id))
-                os.makedirs(user_upload_dir, exist_ok=True)
-                cv_path = os.path.join(user_upload_dir, "cv.pdf")
-                with open(cv_path, "wb") as f:
-                    f.write(file_data)
                 _orig_name = os.path.basename(filename) or "cv.pdf"
+                # Phase 2d: store the bytes first - the volume copy that
+                # storage.put() writes afterwards is a cache, and a lost volume
+                # must not be able to lose a CV.
+                try:
+                    _stored = storage.put(user_id, file_data, _orig_name)
+                except ValueError as _ve:
+                    self.send_json({"error": str(_ve)})
+                    return
+                cv_path = _stored["path"]
+                print("[cv] stored %d bytes for user %s (sha256 %s)"
+                      % (_stored["size"], user_id, _stored["sha256"][:12]))
                 _uploaded_at = datetime.now().isoformat(timespec="seconds")
                 auth.update_profile(user_id, cv_path=cv_path, cv_analyzed=0,
                                     cv_filename=_orig_name, cv_uploaded_date=_uploaded_at)
@@ -6517,8 +6551,8 @@ class Handler(BaseHTTPRequestHandler):
             conn = database.get_db()
             row = conn.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
             conn.close()
-            cv_path = row["cv_path"] if row else None
-            if not cv_path or not os.path.exists(cv_path):
+            cv_path = _cv_file(user_id, (row["cv_path"] or "") if row else "")
+            if not cv_path:
                 self.send_json({"error": "No CV uploaded yet. Please upload your PDF first."})
                 return
             try:

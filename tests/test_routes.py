@@ -9,10 +9,12 @@ touch user A's data.
 
 Nothing here talks to Gemini, Resend, Playwright or the network.
 """
+import base64
 import http.client
 import itertools
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -135,6 +137,13 @@ def stack():
     auth.set_db_getter(database.get_db)
     auth.set_admin_email(os.environ["ADMIN_EMAIL"])
     app_module.UPLOADS_DIR = os.environ["UPLOADS_DIR"]
+    # storage.py holds its own copy, set by app.py at import time. Re-wire it for
+    # the same reason the lines above exist: if another test module imported app
+    # first, that import fixed the value from a different env, and without this
+    # these tests would read and write the CV cache of whatever directory that
+    # importer chose.
+    import storage                    # noqa: E402
+    storage.set_uploads_dir(os.environ["UPLOADS_DIR"])
     os.makedirs(os.environ["UPLOADS_DIR"], exist_ok=True)
 
     database.init_db()
@@ -350,3 +359,63 @@ def test_logout_ends_the_session(stack, users):
     c.get("/logout")
     status, location, _ = c.get("/api/me")
     assert status == 302 and location == "/login", "session survived logout"
+
+
+# ── Phase 2d: CV bytes live in the database, the volume is a cache ────────────
+
+# Not valid UTF-8, contains NULs, ends with one: anything that mangled it on the
+# way through would show up as a length or byte mismatch rather than as silence.
+_PDF = b"%PDF-1.7\n" + bytes(range(256)) + b"\x00trailer\n%%EOF\x00"
+
+
+def _upload_cv(client, data=_PDF, filename="resume.pdf"):
+    return client.post_json("/api/upload-cv", {
+        "filename": filename,
+        "data": base64.b64encode(data).decode(),
+    })
+
+
+def test_cv_upload_then_download_returns_the_same_bytes(stack, users):
+    status, _loc, body = _upload_cv(users["a"])
+    assert status == 200, body
+    assert json.loads(body).get("success") is True
+
+    status, _loc, got = users["a"].get("/api/cv")
+    assert status == 200
+    assert got == _PDF, "the CV came back different from the one uploaded"
+
+
+def test_the_cv_survives_losing_the_uploads_volume(stack, users):
+    """
+    The whole point of Phase 2d. A redeploy without a volume, a fresh container,
+    a restored backup: the files are gone and the CV must still be served.
+    """
+    _upload_cv(users["b"])
+    shutil.rmtree(os.environ["UPLOADS_DIR"])          # the volume is gone
+    os.makedirs(os.environ["UPLOADS_DIR"], exist_ok=True)
+
+    status, _loc, got = users["b"].get("/api/cv")
+    assert status == 200, "a cold volume made the CV unreachable"
+    assert got == _PDF
+
+
+def test_a_user_cannot_download_another_users_cv(stack, users):
+    """The bytes moved into a shared table; tenant isolation has to move with them."""
+    _upload_cv(users["a"], b"%PDF-alice-only\x00")
+    _upload_cv(users["b"], b"%PDF-bob-only\x00")
+
+    _st, _l, alice = users["a"].get("/api/cv")
+    _st, _l, bob = users["b"].get("/api/cv")
+    assert alice == b"%PDF-alice-only\x00"
+    assert bob == b"%PDF-bob-only\x00"
+
+
+def test_no_cv_is_a_404_not_a_500(stack, users):
+    status, _loc, _body = users["admin"].get("/api/cv")
+    assert status == 404
+
+
+def test_a_non_pdf_upload_is_refused(stack, users):
+    status, _loc, body = _upload_cv(users["a"], b"MZ\x90not a pdf", "payload.exe")
+    assert status == 200
+    assert "error" in json.loads(body)

@@ -38,6 +38,7 @@ import migrations        # noqa: E402
 TABLE_ORDER = [
     "users",
     "user_profiles",
+    "user_files",
     "sessions",
     "application_answers",
     "jobs",

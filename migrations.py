@@ -16,6 +16,8 @@ db.init_db() has always created - moved here verbatim, not rewritten.
 Phase 2b adds the Postgres dialect; the two introspection helpers below are the
 only place that needs to know which engine it is talking to.
 """
+import re
+
 import dbdriver
 
 SCHEMA_MIGRATIONS_DDL = """
@@ -122,6 +124,7 @@ def ddl_for(sql, conn):
     Only two constructs in this schema are not portable:
       * INTEGER PRIMARY KEY AUTOINCREMENT -> BIGSERIAL PRIMARY KEY
       * TEXT DEFAULT (datetime('now'))    -> the same TEXT format via to_char
+      * BLOB                              -> BYTEA
 
     Everything else - TEXT, INTEGER, UNIQUE(...), FOREIGN KEY ... ON DELETE
     CASCADE, partial unique indexes - is valid on both. A test builds the schema
@@ -132,6 +135,9 @@ def ddl_for(sql, conn):
         return sql
     out = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
     out = dbdriver._DATETIME_NOW.sub(dbdriver.PG_NOW, out)
+    # Whole word only: a column merely *named* something containing "blob" must
+    # not have its name rewritten.
+    out = re.sub(r"\bBLOB\b", "BYTEA", out)
     return out
 
 
@@ -348,11 +354,51 @@ def m0004_app_flags(conn):
     conn.commit()
 
 
+def m0005_user_files(conn):
+    """
+    Phase 2d: the CV bytes move into the database.
+
+    Until now a CV lived only at UPLOADS_DIR/<user_id>/cv.pdf on a Railway
+    volume, with the path recorded in user_profiles.cv_path. A volume belongs
+    to one service in one environment: it is not in the database dump, it does
+    not follow a rollback, and a redeploy without it silently starts empty -
+    which is exactly what happened to production on 2026-06-23. So the data
+    could move to Postgres while the files stayed behind, and production would
+    still have been pinned to one machine's disk.
+
+    Storing the bytes here makes the database the system of record and the
+    volume a cache (see storage.py). `sha256` is what makes that claim
+    checkable rather than assumed - the backfill verifies a byte-for-byte
+    round trip against it, and so does the test suite.
+
+    A table rather than a column on user_profiles: `kind` leaves room for the
+    cover letters and optimised CVs the app already generates, without another
+    migration and another special case.
+    """
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS user_files (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            kind          TEXT NOT NULL,
+            filename      TEXT,
+            content_type  TEXT DEFAULT 'application/pdf',
+            content       BLOB NOT NULL,
+            size          INTEGER NOT NULL,
+            sha256        TEXT NOT NULL,
+            uploaded_date TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, kind),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """, conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
     (3, "backfill_queued_apply_status", m0003_backfill_queued_apply_status),
     (4, "app_flags",                    m0004_app_flags),
+    (5, "user_files",                   m0005_user_files),
 ]
 
 

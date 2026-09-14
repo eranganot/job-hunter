@@ -44,6 +44,7 @@ _INSERT_REPLACE = re.compile(
 _UPSERT_KEYS = {
     "app_flags": ("key",),
     "push_subscriptions": ("user_id", "endpoint"),
+    "user_files": ("user_id", "kind"),
 }
 _LAST_ROWID = re.compile(r"last_insert_rowid\(\s*\)", re.IGNORECASE)
 
@@ -159,12 +160,31 @@ class Row(dict):
         return iter(self.values())
 
 
+def _normalise(value):
+    """
+    Binary columns must come back as `bytes`, exactly as sqlite3 returns a BLOB.
+
+    Phase 2d stores CV PDFs in a bytea column. Depending on the driver version a
+    bytea can arrive as a memoryview, which is *almost* bytes - it slices and
+    compares, so a shallow test passes - but it hashes differently, will not
+    json-serialise, and str()s to "<memory at 0x...>". Left alone it would turn
+    the migration verifier's value-level checksum into a comparison of two
+    pointer addresses, which is exactly the class of silent corruption that
+    checksum exists to catch.
+    """
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    if isinstance(value, bytearray):
+        return bytes(value)
+    return value
+
+
 def _row_factory(cursor):
     """psycopg row factory producing Row objects."""
     cols = [d.name for d in (cursor.description or [])]
 
     def make(values):
-        return Row(zip(cols, values))
+        return Row(zip(cols, (_normalise(v) for v in values)))
 
     return make
 
