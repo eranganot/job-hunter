@@ -12,6 +12,10 @@ playwright-stealth==1.0.6
 
 # Web Push (VAPID) notifications for the mobile PWA
 pywebpush==2.3.0
+# Direct dependency since Phase 3: crypto.py encrypts the notification
+# credentials at rest. It arrived transitively via pywebpush; pinning it here
+# means an upstream change cannot silently remove it.
+cryptography==50.0.0
 
 # ── Ingestion pipeline (multi-source sourcing + fuzzy dedup) ──
 # Unified Pydantic schema that normalizes Big-Tech endpoints vs aggregator APIs

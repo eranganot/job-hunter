@@ -476,3 +476,67 @@ def test_the_unreachable_delete_is_gone():
     import io as _io
     src = _io.open("app.py", encoding="utf-8").read()
     assert "DELETE FROM jobs WHERE user_id=? AND url LIKE" not in src
+
+
+# ── Phase 3: credentials encrypted at rest, end to end over HTTP ─────────────
+
+_BOT_TOKEN = "987654321:AAF-a-real-shaped-telegram-token"
+
+
+def _stored_token(database, email):
+    conn = database.get_db()
+    row = conn.execute(
+        "SELECT p.telegram_token FROM user_profiles p JOIN users u ON u.id=p.user_id "
+        "WHERE u.email=?", (email,)).fetchone()
+    conn.close()
+    return row["telegram_token"] if row else None
+
+
+def test_a_saved_credential_is_ciphertext_in_the_database(stack, users, monkeypatch):
+    monkeypatch.setenv("JH_ENCRYPTION_KEY", "a long random passphrase for tests")
+
+    status, _l, _b = users["a"].post_json("/api/save-notifications", {
+        "notification_channel": "telegram",
+        "telegram_token": _BOT_TOKEN,
+        "telegram_chat_id": "555",
+    })
+    assert status == 200
+
+    stored = _stored_token(stack["db"], "alice@example.test")
+    assert stored.startswith("enc:v1:"), "the token was written in the clear"
+    assert _BOT_TOKEN not in stored
+
+
+def test_the_settings_page_still_sees_the_real_value(stack, users, monkeypatch):
+    """Encrypted at rest must not mean ciphertext in the user's input box."""
+    monkeypatch.setenv("JH_ENCRYPTION_KEY", "a long random passphrase for tests")
+
+    users["a"].post_json("/api/save-notifications",
+                         {"telegram_token": _BOT_TOKEN, "telegram_chat_id": "555"})
+    status, _l, body = users["a"].get("/api/me")
+    assert status == 200
+    me = json.loads(body)
+    assert me["telegram_token"] == _BOT_TOKEN
+    assert me["telegram_chat_id"] == "555", "a non-secret field was mangled"
+
+
+def test_without_a_key_the_behaviour_is_exactly_what_it_was(stack, users, monkeypatch):
+    """Turning the feature off must be a non-regression, not an error."""
+    monkeypatch.delenv("JH_ENCRYPTION_KEY", raising=False)
+
+    users["b"].post_json("/api/save-notifications",
+                         {"telegram_token": "plain-token-no-key", "telegram_chat_id": "7"})
+    assert _stored_token(stack["db"], "bob@example.test") == "plain-token-no-key"
+
+    status, _l, body = users["b"].get("/api/me")
+    assert status == 200 and json.loads(body)["telegram_token"] == "plain-token-no-key"
+
+
+def test_health_says_whether_credentials_are_encrypted(stack, users, monkeypatch):
+    monkeypatch.setenv("JH_ENCRYPTION_KEY", "a long random passphrase for tests")
+    _st, _l, body = users["a"].get("/api/health")
+    assert json.loads(body)["credentials_encrypted"] is True
+
+    monkeypatch.delenv("JH_ENCRYPTION_KEY", raising=False)
+    _st, _l, body = users["a"].get("/api/health")
+    assert json.loads(body)["credentials_encrypted"] is False

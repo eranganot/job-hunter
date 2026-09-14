@@ -4,6 +4,8 @@ auth.py — Authentication helpers for Job Hunter
 import hashlib
 import hmac
 import secrets
+
+import crypto
 from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
 
@@ -142,7 +144,10 @@ def get_session_user(token: str):
         WHERE s.token=? AND s.expires_date > datetime('now') AND u.is_active=1
     """, (token,)).fetchone()
     conn.close()
-    return dict(row) if row else None
+    # The profile this returns is what /api/me hands the browser, so the
+    # credentials have to be readable here or the settings page shows
+    # ciphertext in the input boxes.
+    return crypto.decrypt_row(row) if row else None
 
 
 def delete_session(token: str):
@@ -166,6 +171,9 @@ def cleanup_expired_sessions() -> int:
 def update_profile(user_id: int, **kwargs):
     if not kwargs:
         return
+    # Every credential write in the app goes through here, so this is the one
+    # place encryption has to happen. Non-secret fields pass through untouched.
+    kwargs = crypto.encrypt_fields(kwargs)
     conn = _get_db()
     sets = ", ".join(f"{k}=?" for k in kwargs)
     vals = list(kwargs.values()) + [user_id]

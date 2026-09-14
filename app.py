@@ -25,6 +25,7 @@ from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
 import auth
+import crypto
 import db as database
 import storage
 from ai_analysis import analyze_cv
@@ -281,6 +282,8 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
         send_web_push_to_user(user_id, message, url_suffix)
     except Exception as _pe:
         print(f"[push] deliver error: {_pe}")
+    # Read straight from user_profiles, so it needs decrypting here too.
+    p = crypto.decrypt_row(p)
     channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",")]
     if not channels or channels == ["none"]:
         print(f"[notify] No notification channels configured for user {user_id}")
@@ -5817,6 +5820,9 @@ class Handler(BaseHTTPRequestHandler):
                 # read as a failure (2026-09-07).
                 "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7],
                 "db_backend": database.backend(),
+                # False means the notification credentials are stored in the
+                # clear - and so are in every dump of this database.
+                "credentials_encrypted": crypto.available(),
                 # Non-null means a Postgres target was configured and refused;
                 # the app is serving SQLite instead. smoke.ps1 asserts on it.
                 "db_backend_refused": database.BACKEND_REFUSAL,
@@ -7457,6 +7463,7 @@ if __name__ == "__main__":
     # schema on a database nobody had chosen, which is what made the wrong
     # target look healthy. The guard has to run first or it guards nothing.
     database.preflight()
+    crypto.warn_if_unconfigured()
     database.init_db()
     try:
         _exp = auth.cleanup_expired_sessions()

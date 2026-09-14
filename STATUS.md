@@ -25,6 +25,8 @@ _Seeded from git history + prior transcripts._
 - HEAD `ac96c03` (2026-09-08, "Guard: one variable can no longer repoint the app at an empty database"). Full suite **257** passing. _(Corrected 2026-09-14: this line read `4e4a04a` / suite 147 — eleven commits and 110 tests stale.)_
 
 ## 🔴 Ops actions (Eran only) — with age
+- **Set `JH_ENCRYPTION_KEY` on production and staging** (new, 2026-09-14). Generate it locally (`python -c "import secrets;print(secrets.token_urlsafe(48))"`) - never a value pasted into a chat. Without it the notification credentials keep being written in plaintext and `/api/health` reports `credentials_encrypted: false`.
+- **Then run `scripts/encrypt_credentials.py` against each environment** (new, 2026-09-14). Encryption happens on write, and nobody re-saves their notification settings, so the rows already stored stay in plaintext until this is run. `--dry-run` first; it refuses to run without a key.
 - ~~Check `DB_BACKEND` on the production `job-hunter` service~~ **CLOSED same day (2026-09-07): there is no split brain, because the `job-hunter` service no longer exists.** Eran deleted it in BOTH production and Staging (the Phase 0.2 decision), so production now runs exactly three services - `web`, `Postgres`, `Redis` - and the incident's blast radius was `web` alone. That also closes the Phase 0.2 'retire the stale service' item.
 _Dates are when the item was FIRST flagged, and are carried forward, never reset._
 
@@ -59,6 +61,21 @@ Two-folder drift (being retired); sandbox can't push; Playwright browser binarie
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-09-14 — **Phase 3: the notification credentials are encrypted at rest.** `telegram_token`, `twilio_auth_token` and `email_smtp_pass` are live credentials for someone else's account - a bot token sends messages *as* that bot - and they sat in plain `TEXT` columns. Phase 2 raised the stakes rather than creating them: a database dump is a file that gets copied to laptops and kept in backups, and every copy carried working credentials in the clear.
+
+  **Two chokepoints, not eleven call sites.** Every credential write in the app goes through `auth.update_profile()`, and the profile the browser sees comes from `auth.get_session_user()`. Encrypting in the first and decrypting in the second covers the whole app; `deliver_notification()` reads `user_profiles` directly and decrypts there too. Fernet (`cryptography`, now **pinned** at 50.0.0 - it was only present transitively via pywebpush), key from **`JH_ENCRYPTION_KEY`** hashed to 32 bytes so any passphrase works. Note `SECRET_KEY` was NOT reused: CI sets it and the smoke script mentions it, but **no Python in this repo reads it**, so it was a name with nothing behind it.
+
+  **Three design decisions, each written against a way this goes wrong:**
+  - **Values carry their own format** (`enc:v1:<token>`). A value without the prefix is legacy plaintext and returns unchanged, so the two states coexist and there is no flag day.
+  - **No key means no encryption, loudly.** The app behaves exactly as before, warns at boot, and `/api/health` reports `credentials_encrypted: false`. Refusing to start would turn hardening into downtime; encrypting under a key nobody chose would be worse, because the data would be unrecoverable the first time the environment was rebuilt.
+  - **A wrong key raises rather than returning ciphertext as a value** - otherwise the app would POST gibberish to Telegram's API and log "Sent OK". Reads are deliberately tolerant in the other direction: `decrypt_row` turns one unreadable credential into `""` and logs it, so a page load never 500s over it.
+
+  **Verified on real rows, not fixtures.** `scripts/encrypt_credentials.py` converted a seeded profile's three credentials, read each back and compared to the original, and then the file itself was searched: **the plaintext token no longer appears anywhere in the database file** (`b'REAL-BOT-TOKEN' in open(db,'rb').read()` → `False`), while `telegram_chat_id` was untouched. A second run reports "0 encrypted, 3 already encrypted". The script refuses to run at all without a key, since writing rows the app cannot read is the one unrecoverable mistake here. Suite **294 → 310**, mutation-checked: removing the one `encrypt_fields` line fails the test that reads the raw column.
+
+  **Two ops actions, and the second is not optional.** (1) Set `JH_ENCRYPTION_KEY` on production and staging - **generate it locally, do not use a value that has been pasted into a chat**. (2) Then run `scripts/encrypt_credentials.py` against each, or the rows already stored stay in plaintext forever: encryption happens on write, and nobody re-saves their notification settings. Until both are done `/api/health` will keep answering `credentials_encrypted: false`, which is the honest state rather than a bug.
+
+  **Recovery, stated plainly:** lose the key and the stored credentials cannot be read back - each user re-enters their Telegram/Twilio/SMTP details. Annoying, not catastrophic, and the reason the key belongs wherever the rest of the deployment's secrets live.
+
 - 2026-09-14 — **Phase 3 security, first cut: the plan's premise was wrong, and the real hole was somewhere else.** The plan said "**CSRF tokens on every POST** (none today)". The token half is true - `grep -i csrf` over the Python returns **0** - but the exposure it implies is not, because `auth.make_session_cookie()` has always issued `session=...; HttpOnly; Secure; SameSite=Lax`. **Lax already stops the browser sending that cookie on a cross-site POST**, so all 42 POST routes were covered by the thing nobody had checked. Second unexamined ops claim in a week; the Google OAuth rule applies again - a plan item resting on an unverified premise is not a task, it is a guess with a due date.
 
   **What Lax does NOT cover is a top-level GET navigation - the cookie rides along - and an audit of all 810 lines of `do_GET` found two routes that change state:**
