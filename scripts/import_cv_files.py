@@ -32,6 +32,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import db as database      # noqa: E402
 import migrations          # noqa: E402
 import storage             # noqa: E402
+
+# A one-shot script opens one connection and exits: a pool is overhead here, and
+# an extra dependency to install wherever this runs. `railway run` executes on
+# the operator's machine, not on Railway - which is exactly where a missing
+# psycopg_pool stopped this script on 2026-09-14.
+os.environ.setdefault("JH_PG_POOL", "0")
 from scripts.sqlite_to_pg import with_database  # noqa: E402
 
 

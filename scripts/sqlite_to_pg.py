@@ -33,6 +33,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import dbdriver          # noqa: E402
 import migrations        # noqa: E402
 
+# A one-shot script opens one connection and exits: a pool is overhead here, and
+# an extra dependency to install wherever this runs. `railway run` executes on
+# the operator's machine, not on Railway - which is exactly where a missing
+# psycopg_pool stopped this script on 2026-09-14.
+os.environ.setdefault("JH_PG_POOL", "0")
+
 # Parents before children: every FK points at a table earlier in this list.
 # Copying out of order would fail on the foreign keys Postgres actually enforces.
 TABLE_ORDER = [

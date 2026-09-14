@@ -249,3 +249,60 @@ def test_unpooled_connection_still_closes_for_real():
 
     dbdriver.PgConnection(FakeConn()).close()
     assert closed == [True]
+
+
+# ── Pooling: who needs it, and what happens when it is missing ────────────────
+#
+# 2026-09-14: `railway run python scripts/import_cv_files.py ...` died on
+# ModuleNotFoundError: psycopg_pool. `railway run` injects variables and runs
+# the command on the OPERATOR'S machine - so a script inherited the server's
+# pooled path and, with it, a dependency that had no business being required to
+# copy eight files.
+
+def test_the_server_pools_by_default(monkeypatch):
+    monkeypatch.delenv("JH_PG_POOL", raising=False)
+    assert dbdriver.pooling_wanted() is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "OFF", " 0 "])
+def test_a_script_can_opt_out(monkeypatch, value):
+    monkeypatch.setenv("JH_PG_POOL", value)
+    assert dbdriver.pooling_wanted() is False
+
+
+def test_every_one_shot_script_opts_out():
+    """The fix has to be in the scripts, not only available to them."""
+    import io as _io
+    for path in ("scripts/import_cv_files.py", "scripts/sqlite_to_pg.py"):
+        src = _io.open(path, encoding="utf-8").read()
+        assert 'JH_PG_POOL", "0"' in src, "%s still takes the server's pooled path" % path
+
+
+def test_a_missing_pool_library_degrades_rather_than_crashing(monkeypatch):
+    """
+    An outage is the wrong answer to a missing performance dependency - but so
+    is silence, which turns it into "Postgres is slow" for a reason that is not
+    about Postgres.
+    """
+    import sys
+    monkeypatch.setitem(sys.modules, "psycopg_pool", None)   # import raises
+    monkeypatch.setattr(dbdriver, "_POOLS", {}, raising=False)
+    monkeypatch.setattr(dbdriver, "POOL_UNAVAILABLE", None, raising=False)
+
+    assert dbdriver._get_pool("postgresql://u:p@h:5432/db") is None
+    assert dbdriver.POOL_UNAVAILABLE, "the reason was not recorded"
+
+
+def test_health_reports_that_pooling_is_unavailable(monkeypatch):
+    """Pooled and unpooled look identical from outside unless the box says so."""
+    monkeypatch.setattr(dbdriver, "_POOLS", {}, raising=False)
+    monkeypatch.setattr(dbdriver, "POOL_UNAVAILABLE", "No module named 'psycopg_pool'",
+                        raising=False)
+    stats = dbdriver.pool_stats()
+    assert "unavailable" in stats.get("pooling", "")
+
+
+def test_pooling_is_decided_by_the_environment_not_hardcoded():
+    """connect_postgres must default to 'ask', so JH_PG_POOL actually reaches it."""
+    import inspect
+    assert inspect.signature(dbdriver.connect_postgres).parameters["pooled"].default is None

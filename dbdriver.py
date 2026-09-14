@@ -291,13 +291,47 @@ _POOL_LOCK = threading.Lock()
 POOL_MIN = int(os.environ.get("JH_PG_POOL_MIN", "1"))
 POOL_MAX = int(os.environ.get("JH_PG_POOL_MAX", "10"))
 
+# Set when psycopg_pool could not be imported. /api/health reports it, because
+# "the app is quietly unpooled" and "the app is pooled" look identical from
+# outside and differ by more than an order of magnitude in connection cost.
+POOL_UNAVAILABLE = None
+
+
+def pooling_wanted() -> bool:
+    """
+    Whether THIS process should pool.
+
+    The server should: get_db() is called at ~189 sites, often several times per
+    request. A one-shot CLI script should not - it opens one connection and
+    exits, so a pool is pure overhead and an extra dependency to install
+    wherever the script happens to run. `railway run` executes on the operator's
+    laptop, not on Railway, which is where that bit us (2026-09-14).
+    """
+    return os.environ.get("JH_PG_POOL", "1").strip().lower() not in ("0", "false", "no", "off")
+
 
 def _get_pool(url: str):
     """One pool per URL per process, created on first use."""
     with _POOL_LOCK:
         pool = _POOLS.get(url)
         if pool is None:
-            from psycopg_pool import ConnectionPool
+            global POOL_UNAVAILABLE
+            try:
+                from psycopg_pool import ConnectionPool
+            except ImportError as exc:
+                # Refusing to start would turn a performance feature into an
+                # outage. Running unpooled in silence would turn it into a
+                # mystery - "Postgres is slow" for a reason that is not about
+                # Postgres. So: carry on, loudly, and say so in /api/health.
+                POOL_UNAVAILABLE = str(exc)
+                print("=" * 78, flush=True)
+                print("CONNECTION POOLING IS OFF: %s" % exc, flush=True)
+                print("  Every get_db() will open a new Postgres connection - "
+                      "roughly 14x the cost per call.", flush=True)
+                print("  Fix: pip install -r requirements.txt "
+                      "(psycopg[binary,pool]==3.3.5 provides it).", flush=True)
+                print("=" * 78, flush=True)
+                return None
 
             def _configure(conn):
                 # Mirrors db.get_db()'s SQLite setup (isolation_level=None), so
@@ -326,6 +360,8 @@ def pool_stats(url: str = None):
     with _POOL_LOCK:
         pools = _POOLS if url is None else {url: _POOLS.get(url)}
         out = {}
+        if POOL_UNAVAILABLE and not pools:
+            return {"pooling": "unavailable: " + POOL_UNAVAILABLE}
         for key, pool in pools.items():
             if pool is None:
                 continue
@@ -337,7 +373,7 @@ def pool_stats(url: str = None):
         return out
 
 
-def connect_postgres(url: str, connect_timeout: int = 15, pooled: bool = True) -> PgConnection:
+def connect_postgres(url: str, connect_timeout: int = 15, pooled: bool = None) -> PgConnection:
     """
     Borrow a pooled Postgres connection wearing the sqlite-compatible interface.
 
@@ -347,11 +383,15 @@ def connect_postgres(url: str, connect_timeout: int = 15, pooled: bool = True) -
     """
     import psycopg  # imported lazily: SQLite-only deployments need not install it
 
-    if not pooled:
-        return PgConnection(psycopg.connect(url, autocommit=True,
-                                            connect_timeout=connect_timeout))
-    pool = _get_pool(url)
-    return PgConnection(pool.getconn(), pool=pool)
+    if pooled is None:
+        pooled = pooling_wanted()
+    if pooled:
+        pool = _get_pool(url)
+        if pool is not None:
+            return PgConnection(pool.getconn(), pool=pool)
+        # _get_pool said pooling is unavailable and has already said why.
+    return PgConnection(psycopg.connect(url, autocommit=True,
+                                        connect_timeout=connect_timeout))
 
 
 def dialect_of(conn) -> str:
