@@ -105,9 +105,18 @@ def main():
     if not files:
         sys.exit("[FAIL] no <user_id>/cv.pdf under that directory - wrong path?")
 
-    conn = database.get_db()
-    applied = migrations.run(conn)
-    conn.close()
+    try:
+        conn = database.get_db()
+        applied = migrations.run(conn)
+        conn.close()
+    except Exception as exc:
+        import dbdriver
+        log("")
+        log("[FAIL] could not open the target database:")
+        log("  %s" % exc)
+        log("")
+        log(dbdriver.describe_server(url if not args.sqlite else ""))
+        sys.exit(1)
     log("[OK] schema ready (migrations applied: %s)" % (applied or "already current"))
 
     if args.dry_run:

@@ -394,6 +394,59 @@ def connect_postgres(url: str, connect_timeout: int = 15, pooled: bool = None) -
                                         connect_timeout=connect_timeout))
 
 
+def describe_server(url: str) -> str:
+    """
+    Ask a server what databases it actually has.
+
+    Used to turn `FATAL: database "x" does not exist` into something that names
+    the server it asked and lists what is on it. On 2026-09-14 that bare FATAL
+    was the whole diagnostic, while the app was serving thousands of rows out
+    of the very database the error said was missing - so the useful question
+    was never "does it exist" but "on WHICH server does it exist".
+
+    Read-only, and never prints or returns credentials.
+    """
+    from urllib.parse import urlparse, urlunparse
+    try:
+        import psycopg
+    except ImportError as exc:
+        # A diagnostic that raises is worse than no diagnostic: it replaces the
+        # real error with its own.
+        return "  (cannot inspect the server: %s)" % exc
+
+    parsed = urlparse(url)
+    where = "%s:%s" % (parsed.hostname, parsed.port or 5432)
+    lines = ["  server : %s" % where, "  asked for database: %r" % (parsed.path or "/").lstrip("/")]
+
+    for probe in ("postgres", "railway", ""):
+        try:
+            target = urlunparse(parsed._replace(path="/" + probe)) if probe else url
+            conn = psycopg.connect(target, autocommit=True, connect_timeout=10)
+        except Exception:
+            continue
+        try:
+            rows = conn.execute(
+                "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname"
+            ).fetchall()
+            names = [r[0] for r in rows]
+            lines.append("  databases on THIS server: %s" % ", ".join(names))
+        except Exception as exc:
+            lines.append("  (could not list databases: %s)" % exc)
+        finally:
+            conn.close()
+        break
+    else:
+        lines.append("  (could not reach this server at all to ask)")
+
+    lines.append("")
+    lines.append("  If the database you want exists but not here, you are pointed at a "
+                 "DIFFERENT Postgres instance -")
+    lines.append("  Railway gives each environment its own copy of a service, and "
+                 "`railway run` uses whichever")
+    lines.append("  environment the CLI is linked to. Check with `railway status`.")
+    return "\n".join(lines)
+
+
 def dialect_of(conn) -> str:
     """Which engine is behind this connection."""
     return getattr(conn, "dialect", SQLITE)
