@@ -22,6 +22,11 @@ param(
     # silent fallback to SQLite fails the smoke instead of passing it.
     [ValidateSet("", "sqlite", "postgres")]
     [string]$ExpectBackend = "",
+    # Railway swaps containers on a variable change; for a minute or so the OLD
+    # build still answers. Smoking that build and believing the result is how
+    # the staging Postgres flip first read as a failure (2026-09-07). Pass this
+    # only when you deliberately mean to smoke a box that is not on local HEAD.
+    [switch]$AllowStaleDeploy,
     [switch]$SkipLocal
 )
 
@@ -141,6 +146,26 @@ Check "GET /api/health is 200 and well-formed" {
 # 2026-09-07: production ran for a while on an empty Postgres and reported
 # "ok" the whole time, because nothing in the smoke looked at WHICH database
 # was behind the app. These two checks are that gap closed.
+Check "the box is running the build we think it is" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $deployed = $script:health.commit
+    if ([string]::IsNullOrEmpty($deployed)) {
+        Write-Host "      (box reports no commit - predates this check)" -ForegroundColor DarkGray
+        return $true
+    }
+    $local = (& git rev-parse --short=7 HEAD 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { Write-Host "      (no local git: $local)" -ForegroundColor DarkGray; return $true }
+    Write-Host ("      deployed=" + $deployed + "  local HEAD=" + $local) -ForegroundColor DarkGray
+    if ($deployed -eq $local) { $true }
+    elseif ($AllowStaleDeploy) {
+        Write-Host "      differs, allowed by -AllowStaleDeploy" -ForegroundColor DarkGray
+        $true
+    }
+    else {
+        "deployed build is $deployed but local HEAD is $local - either the deploy has not finished " +
+        "(wait and re-run) or you are smoking a different build. -AllowStaleDeploy to proceed anyway."
+    }
+}
 Check "the box is not falling back after refusing its configured database" {
     if ($null -eq $script:health) { return "no health payload" }
     $refused = $script:health.db_backend_refused

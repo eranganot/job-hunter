@@ -5756,6 +5756,11 @@ class Handler(BaseHTTPRequestHandler):
                 # Phase 2a: lets a deploy be verified from outside - the smoke
                 # script asserts the migrations actually ran on the box.
                 "schema_version": _schema_version,
+                # Which build is answering. Without this a smoke run cannot tell
+                # a green deploy from a green *previous* deploy still being
+                # swapped out - which is how the Postgres flip on staging first
+                # read as a failure (2026-09-07).
+                "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7],
                 "db_backend": database.backend(),
                 # Non-null means a Postgres target was configured and refused;
                 # the app is serving SQLite instead. smoke.ps1 asserts on it.
