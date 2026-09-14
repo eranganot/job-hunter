@@ -144,6 +144,13 @@ def stack():
     # importer chose.
     import storage                    # noqa: E402
     storage.set_uploads_dir(os.environ["UPLOADS_DIR"])
+    # Same trap, one constant further along. app.py reads ADMIN_EMAIL at import
+    # time too, so if another test module imported app first this is frozen at
+    # "" - and every route gated on `user["email"] != ADMIN_EMAIL` then returns
+    # 403 to everybody, including the admin. Any authorisation test against such
+    # a route would pass without proving anything. Found 2026-09-14 when an
+    # isolation test expected 404 and got 403.
+    app_module.ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
     os.makedirs(os.environ["UPLOADS_DIR"], exist_ok=True)
 
     database.init_db()
@@ -611,3 +618,61 @@ def test_separate_addresses_are_separate_buckets():
     assert ratelimit.check_and_record("register", "203.0.113.1") == 0
     assert ratelimit.check_and_record("register", "203.0.113.2") == 0
     ratelimit.reset_all()
+
+
+# ── Phase 3: the isolation sweep ─────────────────────────────────────────────
+#
+# A static pass over app.py found 45 SQL statements touching user-owned tables
+# with no user_id in the WHERE clause. Most are background workers acting on ids
+# already resolved from a scoped query. The ones that matter are the routes that
+# take an id FROM THE CALLER, and of those, three had no test: cover-letter,
+# check-status, and patterns/forget. These attack all three.
+
+def test_even_the_admin_cannot_write_a_cover_letter_onto_someone_elses_job(stack, users):
+    """
+    This route is admin-only, so attacking it as an ordinary user proves nothing
+    - the 403 fires before any scoping does. The admin is the only caller that
+    gets past the gate, so the admin is who has to be blocked by the scope.
+    """
+    db = stack["db"]
+    job_id = _new_job(db, _user_id(db, "alice@example.test"))
+
+    status, _l, _b = users["admin"].post_json(
+        f"/api/jobs/{job_id}/cover-letter", {"action": "save", "letter": "written by admin"})
+
+    row = _job_row(db, job_id)
+    letter = row["cover_letter"] if "cover_letter" in row.keys() else None
+    assert status == 404, f"admin reached another user's job (status {status})"
+    assert letter != "written by admin", "the admin wrote a cover letter onto A's job"
+
+
+def test_foreign_user_cannot_trigger_a_status_check_on_a_job(stack, users):
+    db = stack["db"]
+    job_id = _new_job(db, _user_id(db, "alice@example.test"))
+    before = _job_row(db, job_id)
+
+    status, _l, _b = users["b"].post_json(f"/api/jobs/{job_id}/check-status", {})
+
+    after = _job_row(db, job_id)
+    assert status == 404, f"check-status on a foreign job returned {status}"
+    assert after["status"] == before["status"], "user B changed A's job via check-status"
+
+
+def test_foreign_user_cannot_delete_anothers_rejected_pattern(stack, users):
+    db = stack["db"]
+    alice = _user_id(db, "alice@example.test")
+    conn = db.get_db()
+    conn.execute(
+        "INSERT INTO rejected_patterns (user_id, company, title, notes) VALUES (?,?,?,?)",
+        (alice, "AcmeOnly", "VP Product", "alice's pattern"))
+    pid = conn.execute("SELECT id FROM rejected_patterns WHERE company=?",
+                       ("AcmeOnly",)).fetchone()[0]
+    conn.commit()
+    conn.close()
+
+    users["b"].post_json("/api/patterns/forget", {"id": pid})
+
+    conn = db.get_db()
+    still = conn.execute("SELECT COUNT(*) FROM rejected_patterns WHERE id=?", (pid,)).fetchone()[0]
+    conn.close()
+    assert still == 1, "user B deleted A's rejected pattern"

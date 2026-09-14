@@ -61,6 +61,23 @@ Two-folder drift (being retired); sandbox can't push; Playwright browser binarie
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-09-14 — **Phase 3 security closed: the tenant-isolation sweep, which found nothing in the app and a real hole in the tests.** A static pass over `app.py` flagged **45** SQL statements touching user-owned tables with no `user_id` in the WHERE clause. Triaged rather than reported: most are background workers acting on ids already resolved by a scoped query, or routes that establish ownership first (`SELECT ... WHERE id=? AND user_id=?`, 404 if absent) and then act on the id. **Eight route families take an id from the caller**; Phase 0 already attacked five of them, leaving **cover-letter, check-status and patterns/forget** untested. All three turned out to be correctly scoped - now proven by attack tests rather than assumed.
+
+  **One of those tests was vacuous and the mutation check caught it.** Attacking `/api/jobs/<id>/cover-letter` as an ordinary user proved nothing: the route is admin-only, so the 403 fires before any scoping does, and the test would have passed with the scope removed. Rewritten to attack as the **admin** - the only caller that gets past the gate, and therefore the only one the scope has to stop.
+
+  **That rewrite exposed a real defect, and not in the app.** The test passed alone and failed in the full suite with **403 where 404 was expected**. Root cause, proven by direct probe rather than inferred: `app.py` reads `ADMIN_EMAIL` at **import** time, Python caches modules, and the routes fixture re-wired `set_db_path` / `set_db_getter` / `set_admin_email` / `UPLOADS_DIR` / `storage` - **but never `app.ADMIN_EMAIL`**. Importing `app` after any other test module froze it at `''`:
+
+  ```
+  app imported first                     -> app.ADMIN_EMAIL = 'admin@example.test'
+  app imported after another module did  -> app.ADMIN_EMAIL = ''
+  ```
+
+  **Blast radius: tests only** - in production `app.py` is the entry point and imports first - **but the consequence was that the 2 routes gated on `user["email"] != ADMIN_EMAIL` returned 403 to everybody in the full suite, so any authorisation or isolation test against them passed without proving anything.** This is the third appearance of the same import-time-constant trap (admin role, 09-07; uploads dir, 09-14; admin email, now). Fixed in the fixture with a comment naming the pattern; suite verified order-independent (332 in the full run, 57 for the file alone).
+
+  **Ruled out** along the way: a scoping bug in the route (it 403'd before reaching the scope), and a broken admin session (`test_admin_account_gets_the_admin_role` passes, because it checks the role through `auth` rather than app's constant - which is exactly why it never caught this).
+
+  **Noted, not fixed:** the codebase has **two** admin gates - 11 routes check `user["role"] != "admin"`, 2 check `user["email"] != ADMIN_EMAIL`. Both fail closed, so neither is dangerous, but one of them is testable only if a module-level constant happens to be set. Worth unifying on the role check; not done blind. Suite **329 → 332**. **Phase 3 security is complete**: cross-site gate, credentials encrypted at rest, rate limiting on all three doors, isolation swept.
+
 - 2026-09-14 — **Rate limiting: I was wrong that it was absent, and the real gaps were the two doors nobody had looked at.** I reported "login/register rate limiting confirmed absent - the only 429 handling is outbound, to Gemini". **That was my error, not the plan's.** `app.py:6391` has had a login limiter all along: per-IP **and** per-email, 8 failures per rolling 15 minutes, thread-safe, returning 429 with a wait. My grep missed it because the message reads "Too many **login** attempts" (not my search string "too many attempts") and the helpers are named `_login_check` / `_login_fail` / `_login_ok` - no "rate" or "limit" anywhere. **A grep that cannot find a thing is not evidence the thing is missing**, which is the same mistake as the Google OAuth row and the CSRF premise, this time made by me while checking someone else's claim.
 
   **What was genuinely missing:** `/register` had **no limit at all** - a script could create accounts in a loop - and `/api/run-search` had none either, while each call spawns a minutes-long thread that spends Gemini quota. Gemini 429s have already degraded production scoring twice (STATUS, round 8/10), so that one is a cost control as much as an abuse control.
