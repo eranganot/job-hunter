@@ -393,12 +393,60 @@ def m0005_user_files(conn):
     conn.commit()
 
 
+def m0006_job_runs(conn):
+    """
+    Phase 3: the work queue.
+
+    Today a search is an unbounded `threading.Thread` started inside the web
+    process and forgotten. Nothing bounds how many run, nothing survives a
+    redeploy mid-run, and nothing stops two instances firing the same user's
+    daily search twice. A row per run fixes all three, and it is the
+    prerequisite for un-parking auto-apply later.
+
+    `locked_by` / `locked_at` are the claim; a worker that dies leaves them set,
+    which is exactly what makes the stuck-run sweeper possible - a run whose
+    heartbeat has gone stale is requeued rather than lost.
+
+    Dates are TEXT 'YYYY-MM-DD HH:MM:SS' like every other date in this schema,
+    so string comparison keeps working on both engines.
+    """
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS job_runs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL,
+            kind         TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'queued',
+            payload      TEXT,
+            attempts     INTEGER NOT NULL DEFAULT 0,
+            locked_by    TEXT,
+            locked_at    TEXT,
+            run_after    TEXT DEFAULT (datetime('now')),
+            created_date TEXT DEFAULT (datetime('now')),
+            started_date TEXT,
+            finished_date TEXT,
+            detail       TEXT,
+            error        TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """, conn))
+    # The claim query's access path: pending work, oldest first.
+    conn.execute(ddl_for(
+        "CREATE INDEX IF NOT EXISTS idx_job_runs_claim "
+        "ON job_runs (status, run_after, id)", conn))
+    # "One run per user at a time" asks this question on every claim.
+    conn.execute(ddl_for(
+        "CREATE INDEX IF NOT EXISTS idx_job_runs_user_status "
+        "ON job_runs (user_id, status)", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
     (3, "backfill_queued_apply_status", m0003_backfill_queued_apply_status),
     (4, "app_flags",                    m0004_app_flags),
     (5, "user_files",                   m0005_user_files),
+    (6, "job_runs",                     m0006_job_runs),
 ]
 
 

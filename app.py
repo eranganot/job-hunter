@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 import auth
 import crypto
 import db as database
+import jobqueue
 import ratelimit
 import storage
 from ai_analysis import analyze_cv
@@ -5792,6 +5793,12 @@ class Handler(BaseHTTPRequestHandler):
 
         # Health check (no auth required)
         if path == "/api/health":
+            def _queue_depth():
+                try:
+                    return jobqueue.depth()
+                except Exception as _qe:
+                    return {"unavailable": str(_qe)[:120]}
+
             import time as _ht
             conn = database.get_db()
             user_count = conn.execute("SELECT COUNT(*) FROM users WHERE is_active=1").fetchone()[0]
@@ -5839,6 +5846,11 @@ class Handler(BaseHTTPRequestHandler):
                 # holds the SAME key as the app before it writes anything.
                 "credentials_key": crypto.fingerprint(),
                 "rate_limit": ratelimit.snapshot(),
+                # Queue depth and the age of the oldest running job: a wedged
+                # worker looks exactly like a healthy one from outside without
+                # this. Guarded because a box that predates migration 6 has no
+                # such table, and health must answer on every build.
+                "queue": _queue_depth(),
                 # Non-null means a Postgres target was configured and refused;
                 # the app is serving SQLite instead. smoke.ps1 asserts on it.
                 "db_backend_refused": database.BACKEND_REFUSAL,
