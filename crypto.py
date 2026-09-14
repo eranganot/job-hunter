@@ -60,6 +60,27 @@ def _key():
     return base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest())
 
 
+def fingerprint():
+    """
+    A short, safe identifier for the configured key - or None.
+
+    2026-09-14: the encryptor checked that a key was PRESENT, never that it was
+    the RIGHT one, and a placeholder string got used as the key. On that run the
+    table happened to be empty so nothing was written; with rows present it
+    would have encrypted them under a key the app does not have, which is the
+    one unrecoverable mistake in this design. `is_encrypted()` is a prefix test,
+    so those rows would even have counted as "already encrypted" on the next
+    run - the damage would have looked like success.
+
+    This is a hash of the derived key, not the key: it reveals nothing, and it
+    lets /api/health and the script be compared at a glance.
+    """
+    key = _key()
+    if key is None:
+        return None
+    return hashlib.sha256(key).hexdigest()[:12]
+
+
 def available() -> bool:
     """Whether encryption is configured. /api/health reports this."""
     return _key() is not None

@@ -8,6 +8,7 @@ keep working, and a wrong key must fail loudly rather than hand the caller
 plausible-looking garbage.
 """
 import importlib
+import io
 
 import pytest
 
@@ -127,3 +128,43 @@ def test_decrypt_row_is_tolerant_so_one_bad_value_does_not_break_a_login(keyed, 
 
 def test_decrypt_row_handles_a_missing_row(keyed):
     assert keyed.decrypt_row(None) is None
+
+
+# ── Proving the key is the RIGHT key ─────────────────────────────────────────
+#
+# 2026-09-14: a placeholder string was used as the key by mistake. The table was
+# empty so nothing was written - but with rows present, the encryptor would have
+# written them under a key the app does not have. Worse, `is_encrypted()` is a
+# prefix test, so on the next run those rows would have counted as "already
+# encrypted": the damage would have looked like success.
+
+def test_the_fingerprint_identifies_the_key(keyed):
+    assert keyed.fingerprint() and len(keyed.fingerprint()) == 12
+
+
+def test_different_keys_have_different_fingerprints(monkeypatch):
+    seen = set()
+    for value in ("the real key", "<the value from the web service>", "another"):
+        monkeypatch.setenv("JH_ENCRYPTION_KEY", value)
+        importlib.reload(crypto)
+        seen.add(crypto.fingerprint())
+    assert len(seen) == 3, "two different keys produced the same fingerprint"
+
+
+def test_the_fingerprint_does_not_leak_the_key(monkeypatch):
+    secret = "a-very-distinctive-passphrase-value"
+    monkeypatch.setenv("JH_ENCRYPTION_KEY", secret)
+    importlib.reload(crypto)
+    fp = crypto.fingerprint()
+    assert secret not in fp and secret[:8] not in fp
+
+
+def test_no_key_has_no_fingerprint(unkeyed):
+    assert unkeyed.fingerprint() is None
+
+
+def test_the_encryptor_refuses_a_key_that_cannot_read_existing_data():
+    """The guard has to be in the script, not merely available to it."""
+    src = io.open("scripts/encrypt_credentials.py", encoding="utf-8").read()
+    assert "cannot decrypt the credentials already stored" in src
+    assert "Nothing was written" in src

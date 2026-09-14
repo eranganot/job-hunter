@@ -50,9 +50,18 @@ def main():
     args = ap.parse_args()
 
     if not crypto.available():
-        sys.exit("[FAIL] JH_ENCRYPTION_KEY is not set, so there is nothing to encrypt WITH.\n"
-                 "       Set it to the same value the app uses, or this would write rows\n"
-                 "       the app cannot read.")
+        sys.exit(
+            "[FAIL] JH_ENCRYPTION_KEY is not set, so there is nothing to encrypt WITH.\n"
+            "       Writing rows the app cannot read is the one unrecoverable mistake here,\n"
+            "       so this refuses rather than guessing.\n"
+            "\n"
+            "       If you ran this under `railway run --service <X>`: that injects the\n"
+            "       variables of service X, and JH_ENCRYPTION_KEY lives on the `web`\n"
+            "       service. `--service Postgres` will never see it.\n"
+            "\n"
+            "       The reliable way is to run this from the `web` service's Console in the\n"
+            "       Railway dashboard - inside that container every variable is present AND\n"
+            "       postgres.railway.internal resolves, which it does not from a laptop.")
 
     if args.sqlite:
         database.set_db_path(args.sqlite)
@@ -71,6 +80,9 @@ def main():
         target = "postgres:" + url.rsplit("/", 1)[-1]
 
     cols = ", ".join(crypto.SECRET_FIELDS)
+    log("  key    : fingerprint %s" % crypto.fingerprint())
+    log("           compare with `credentials_key` at /api/health - they MUST match,")
+    log("           or this would write rows the app cannot read.")
     log("=== encrypt stored credentials ===")
     log("  target : %s" % target)
     log("  fields : %s" % cols)
@@ -83,6 +95,31 @@ def main():
     except Exception as exc:
         conn.close()
         sys.exit("[FAIL] could not read user_profiles: %s" % exc)
+
+    # Positive proof where it is available: if anything is already encrypted,
+    # this key must be able to read it. Presence of a key is not evidence that
+    # it is the right key.
+    for row in rows:
+        for field in crypto.SECRET_FIELDS:
+            if crypto.is_encrypted(row[field]):
+                try:
+                    crypto.decrypt(row[field])
+                except crypto.DecryptionError:
+                    conn.close()
+                    sys.exit(
+                        "[FAIL] this key cannot decrypt the credentials already stored "
+                        "(user %s, %s).\n"
+                        "       It is NOT the key the app used. Nothing was written.\n"
+                        "       Fingerprint here: %s - compare with /api/health."
+                        % (row["user_id"], field, crypto.fingerprint()))
+                log("[OK] key verified against an existing encrypted value")
+                break
+        else:
+            continue
+        break
+    else:
+        log("[note] nothing is encrypted yet, so the key could not be verified against")
+        log("       stored data - check the fingerprint against /api/health before the real run.")
 
     changed = skipped = 0
     failures = []

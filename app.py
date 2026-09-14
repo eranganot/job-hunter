@@ -5823,6 +5823,9 @@ class Handler(BaseHTTPRequestHandler):
                 # False means the notification credentials are stored in the
                 # clear - and so are in every dump of this database.
                 "credentials_encrypted": crypto.available(),
+                # Not the key - a hash of it. Lets a migration script prove it
+                # holds the SAME key as the app before it writes anything.
+                "credentials_key": crypto.fingerprint(),
                 # Non-null means a Postgres target was configured and refused;
                 # the app is serving SQLite instead. smoke.ps1 asserts on it.
                 "db_backend_refused": database.BACKEND_REFUSAL,
