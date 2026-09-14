@@ -5498,6 +5498,34 @@ class Handler(BaseHTTPRequestHandler):
     def get_user(self):
         token = auth.get_token_from_request(self.headers)
         return auth.get_session_user(token)
+    def reject_cross_site(self) -> bool:
+        """
+        Refuse a state-changing request that a browser made from another site.
+
+        The session cookie is already `SameSite=Lax` (auth.make_session_cookie),
+        which stops the browser sending it on a cross-site POST. What Lax does
+        NOT stop is a top-level GET navigation - the cookie rides along - and on
+        2026-09-14 an audit found two admin GETs that change state:
+        /api/admin/dedup deletes rows, and /api/admin/apply-test?mode=live
+        submits a real application and deliberately bypasses the kill switch.
+        A link in an email, clicked while signed in as admin, was enough.
+
+        `Sec-Fetch-Site` is the check because it needs no client change: every
+        browser that would send the cookie cross-site also sends this header,
+        and the live PWA bundle still calls dedup as a GET - so requiring POST
+        would have meant a bundle rebuild to close a hole that this closes now.
+
+        Absent header means the caller is not a browser (curl, a script, Eran
+        testing by hand). Those cannot be CSRF - the attack needs a browser
+        holding someone else's cookie - so they pass.
+        """
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site and site not in ("same-origin", "none"):
+            print(f"[security] refused cross-site {self.command} {self.path} (Sec-Fetch-Site: {site})")
+            self.send_json({"error": "Cross-site state-changing requests are refused."}, 403)
+            return True
+        return False
+
     def require_auth(self):
         """Returns user dict or None (and sends redirect if not authed)."""
         user = self.get_user()
@@ -5846,13 +5874,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json({"publicKey": VAPID_PUBLIC_KEY})
             return
-            conn = database.get_db()
-            cur = conn.execute(
-                "DELETE FROM jobs WHERE user_id=? AND url LIKE 'https://example.com/demo/%'",
-                (user["id"],))
-            conn.commit(); n = cur.rowcount; conn.close()
-            self.send_json({"deleted": n})
-            return
 
         if path == "/api/stats":
             user = self.require_auth()
@@ -5995,6 +6016,11 @@ class Handler(BaseHTTPRequestHandler):
             import apply_engine as _ae
             _jid = (qs.get("job_id", [""])[0] or "").strip()
             _mode = (qs.get("mode", ["dry"])[0] or "dry").strip().lower()
+            # The dry run only reads; mode=live submits an application and
+            # bypasses the global kill switch, so it must not be reachable by
+            # following a link.
+            if _mode == "live" and self.reject_cross_site():
+                return
             if not _jid.isdigit():
                 # No job_id → list candidate jobs (with their IDs) to pick from.
                 _lc = database.get_db()
@@ -6237,6 +6263,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/admin/dedup":
+            # Deletes rows on a GET. Guarded until it can become a POST, which
+            # needs a web_bundle rebuild (Phase 4).
+            if self.reject_cross_site():
+                return
             user = self.require_auth()
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "forbidden"}, status=403)
@@ -6341,6 +6371,12 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST_inner(self):
         parsed = urlparse(self.path)
         path   = parsed.path
+
+        # SameSite=Lax already stops the browser sending the session cookie on a
+        # cross-site POST. This is the second lock: it costs one header read and
+        # does not depend on cookie-policy behaviour staying as it is today.
+        if self.reject_cross_site():
+            return
 
         # ── Login ──
         if path == "/login":

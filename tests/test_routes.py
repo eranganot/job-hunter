@@ -68,27 +68,27 @@ class Client:
         if raw:
             self.cookie = raw.split(";")[0]
 
-    def get(self, path):
-        return self._with_retry(lambda: self._get(path))
+    def get(self, path, extra_headers=None):
+        return self._with_retry(lambda: self._get(path, extra_headers))
 
-    def _get(self, path):
+    def _get(self, path, extra_headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        conn.request("GET", path, headers=self._headers())
+        conn.request("GET", path, headers=self._headers(extra_headers))
         resp = conn.getresponse()
         body = resp.read()
         self._capture_cookie(resp)
         conn.close()
         return resp.status, resp.getheader("Location"), body
 
-    def post_json(self, path, payload):
-        return self._with_retry(lambda: self._post_json(path, payload))
+    def post_json(self, path, payload, extra_headers=None):
+        return self._with_retry(lambda: self._post_json(path, payload, extra_headers))
 
-    def _post_json(self, path, payload):
+    def _post_json(self, path, payload, extra_headers=None):
         body = json.dumps(payload).encode()
+        hdrs = {"Content-Type": "application/json", "Content-Length": str(len(body))}
+        hdrs.update(extra_headers or {})
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        conn.request("POST", path, body=body,
-                     headers=self._headers({"Content-Type": "application/json",
-                                            "Content-Length": str(len(body))}))
+        conn.request("POST", path, body=body, headers=self._headers(hdrs))
         resp = conn.getresponse()
         out = resp.read()
         self._capture_cookie(resp)
@@ -419,3 +419,60 @@ def test_a_non_pdf_upload_is_refused(stack, users):
     status, _loc, body = _upload_cv(users["a"], b"MZ\x90not a pdf", "payload.exe")
     assert status == 200
     assert "error" in json.loads(body)
+
+
+# ── Phase 3: state-changing requests made from another site ──────────────────
+#
+# The session cookie is already SameSite=Lax, so a cross-site POST never carries
+# it. What Lax does not cover is a top-level GET navigation - and an audit on
+# 2026-09-14 found two admin GETs that change state: /api/admin/dedup deletes
+# rows, and /api/admin/apply-test?mode=live submits an application and bypasses
+# the kill switch. A link clicked while signed in as admin was enough.
+
+CROSS_SITE = {"Sec-Fetch-Site": "cross-site"}
+SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
+
+
+def test_a_cross_site_get_cannot_delete_jobs(stack, users):
+    status, _loc, body = users["admin"].get("/api/admin/dedup", CROSS_SITE)
+    assert status == 403, "a cross-site GET reached the row-deleting route"
+    assert b"Cross-site" in body
+
+
+def test_a_cross_site_get_cannot_submit_an_application(stack, users):
+    status, _loc, _b = users["admin"].get(
+        "/api/admin/apply-test?job_id=1&mode=live", CROSS_SITE)
+    assert status == 403
+
+
+def test_the_dry_run_is_still_reachable_cross_site(stack, users):
+    """Only the half that changes state is refused; the diagnostic still works."""
+    status, _loc, _b = users["admin"].get("/api/admin/apply-test", CROSS_SITE)
+    assert status != 403
+
+
+def test_a_cross_site_post_is_refused(stack, users):
+    status, _loc, _b = users["a"].post_json("/api/save-notifications", {}, CROSS_SITE)
+    assert status == 403
+
+
+def test_same_origin_requests_are_unaffected(stack, users):
+    """The gate must not break the app it protects."""
+    status, _loc, _b = users["admin"].get("/api/admin/dedup", SAME_ORIGIN)
+    assert status == 200, "the admin panel's own call was refused"
+
+
+def test_requests_without_the_header_still_work(stack, users):
+    """
+    curl, scripts and Eran testing by hand send no Sec-Fetch-Site. They cannot
+    be CSRF - that needs a browser holding someone else's cookie - so they pass.
+    """
+    status, _loc, _b = users["admin"].get("/api/admin/dedup")
+    assert status == 200
+
+
+def test_the_unreachable_delete_is_gone():
+    """Dead code holding a DELETE is a landmine: removing one `return` re-arms it."""
+    import io as _io
+    src = _io.open("app.py", encoding="utf-8").read()
+    assert "DELETE FROM jobs WHERE user_id=? AND url LIKE" not in src
