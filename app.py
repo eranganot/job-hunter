@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 import auth
 import crypto
 import db as database
+import ratelimit
 import storage
 from ai_analysis import analyze_cv
 
@@ -98,23 +99,20 @@ _LOGIN_LOCK = _threading_rl.Lock()
 _LOGIN_WINDOW = 900   # rolling 15-minute window
 _LOGIN_MAX = 8        # max failed attempts per window before lockout
 
+# Login's limiter moved into ratelimit.py unchanged (still 8 failures per 15
+# minutes, still keyed on IP *and* email). These three names are kept so the
+# call sites read the same; the behaviour is identical, the bookkeeping is now
+# shared with register and run-search, and stale keys are swept rather than
+# accumulating forever under IP rotation.
 def _login_check(key):
     """Seconds to wait if this key is currently locked out, else 0."""
-    now = _time_rl.time()
-    with _LOGIN_LOCK:
-        fails = [t for t in _LOGIN_FAILS.get(key, []) if now - t < _LOGIN_WINDOW]
-        _LOGIN_FAILS[key] = fails
-        if len(fails) >= _LOGIN_MAX:
-            return int(_LOGIN_WINDOW - (now - fails[0])) + 1
-    return 0
+    return ratelimit.retry_after("login", key)
 
 def _login_fail(key):
-    with _LOGIN_LOCK:
-        _LOGIN_FAILS.setdefault(key, []).append(_time_rl.time())
+    ratelimit.record("login", key)
 
 def _login_ok(key):
-    with _LOGIN_LOCK:
-        _LOGIN_FAILS.pop(key, None)
+    ratelimit.clear("login", key)
 
 
 def _effectively_onboarded(u):
@@ -5501,6 +5499,20 @@ class Handler(BaseHTTPRequestHandler):
     def get_user(self):
         token = auth.get_token_from_request(self.headers)
         return auth.get_session_user(token)
+    def client_ip(self) -> str:
+        """
+        The caller's address as well as it can be known.
+
+        Railway terminates TLS and appends X-Forwarded-For, so the socket peer
+        is the proxy and would put every user in one bucket - a global lockout
+        the first time anyone typo'd a password. The first entry is the client.
+        It is spoofable, which is why anything that matters is limited on a
+        second, unspoofable key as well (login on the email, run-search on the
+        user id): rotating a header does not help you against those.
+        """
+        fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
+        return fwd or (self.client_address[0] if self.client_address else "?")
+
     def reject_cross_site(self) -> bool:
         """
         Refuse a state-changing request that a browser made from another site.
@@ -5826,6 +5838,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Not the key - a hash of it. Lets a migration script prove it
                 # holds the SAME key as the app before it writes anything.
                 "credentials_key": crypto.fingerprint(),
+                "rate_limit": ratelimit.snapshot(),
                 # Non-null means a Postgres target was configured and refused;
                 # the app is serving SQLite instead. smoke.ps1 asserts on it.
                 "db_backend_refused": database.BACKEND_REFUSAL,
@@ -6418,6 +6431,14 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Register ──
         if path == "/register":
+            # Nothing stopped a script creating accounts in a loop. Attempt-based,
+            # because here the call IS the abuse - there is no "failure" to count.
+            _rwait = ratelimit.check_and_record("register", self.client_ip())
+            if _rwait:
+                _mins = max(1, _rwait // 60)
+                self.send_html(REGISTER_HTML.replace("{error_block}", error_block(
+                    f"Too many accounts created from this address. Try again in about {_mins} minute(s).")), 429)
+                return
             body = urllib.parse.parse_qs(self.read_body().decode())
             name     = body.get("name", [""])[0].strip()
             email    = body.get("email", [""])[0]
@@ -7104,6 +7125,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "No AI key configured. Set GEMINI_API_KEY in this service."}, 400)
                 return
             uid = user["id"]
+            # Each call spawns a minutes-long thread that spends Gemini quota,
+            # and nothing capped how many. Gemini 429s have already degraded
+            # scoring in production twice (STATUS, round 8/10). Keyed on the user
+            # id, so it cannot be dodged by changing address.
+            _swait = ratelimit.check_and_record("run_search", str(uid))
+            if _swait:
+                _mins = max(1, _swait // 60)
+                self.send_json({"error": f"Search was run too many times recently. "
+                                         f"Try again in about {_mins} minute(s)."}, 429)
+                return
             threading.Thread(target=run_job_search, args=(uid,), daemon=True).start()
             self.send_json({"status": "started"})
             return

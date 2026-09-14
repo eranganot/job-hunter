@@ -540,3 +540,74 @@ def test_health_says_whether_credentials_are_encrypted(stack, users, monkeypatch
     monkeypatch.delenv("JH_ENCRYPTION_KEY", raising=False)
     _st, _l, body = users["a"].get("/api/health")
     assert json.loads(body)["credentials_encrypted"] is False
+
+
+# ── Phase 3: the two doors that had no limiter ───────────────────────────────
+
+def test_register_is_rate_limited_per_address(stack, users, monkeypatch):
+    """A script could create accounts in a loop; nothing counted them."""
+    import ratelimit
+    ratelimit.reset_all()
+    monkeypatch.setenv("JH_RL_REGISTER_MAX", "3")
+
+    c = Client(stack["port"])
+    seen = []
+    for i in range(5):
+        status, _l, _b = c.post_form("/register", {
+            "name": "bot%d" % i, "email": "bot%d@example.test" % i,
+            "password": "correct-horse-1", "password2": "correct-horse-1"})
+        seen.append(status)
+    ratelimit.reset_all()
+
+    assert 429 in seen, "register accepted every attempt: %s" % seen
+    assert seen.index(429) >= 3, "limited too early: %s" % seen
+
+
+def test_run_search_is_rate_limited_per_user(stack, users, monkeypatch):
+    """
+    Each call spawns a thread that spends Gemini quota, and nothing capped it.
+
+    Note the handler's order: the "no AI key configured" 400 comes FIRST, so an
+    unconfigured server is never rate-limited - there is nothing to spend. That
+    is right, and it is why this test has to configure one. The search itself is
+    stubbed: the point is the gate, not the search.
+    """
+    import ratelimit
+    ratelimit.reset_all()
+    monkeypatch.setenv("JH_RL_RUN_SEARCH_MAX", "2")
+    monkeypatch.setattr(stack["app"], "GEMINI_KEY", "test-key", raising=False)
+    monkeypatch.setattr(stack["app"], "run_job_search", lambda *_a, **_k: None, raising=False)
+
+    seen = [users["a"].post_json("/api/run-search", {})[0] for _ in range(4)]
+    ratelimit.reset_all()
+
+    assert seen[:2] == [200, 200], "the first calls were not allowed: %s" % seen
+    assert 429 in seen, "run-search accepted every attempt: %s" % seen
+
+
+def test_one_users_limit_does_not_block_another(stack, users, monkeypatch):
+    import ratelimit
+    ratelimit.reset_all()
+    monkeypatch.setenv("JH_RL_RUN_SEARCH_MAX", "1")
+    monkeypatch.setattr(stack["app"], "GEMINI_KEY", "test-key", raising=False)
+    monkeypatch.setattr(stack["app"], "run_job_search", lambda *_a, **_k: None, raising=False)
+
+    assert users["a"].post_json("/api/run-search", {})[0] == 200
+    blocked = users["a"].post_json("/api/run-search", {})[0]
+    other = users["b"].post_json("/api/run-search", {})[0]
+    ratelimit.reset_all()
+
+    assert blocked == 429
+    assert other != 429, "limiting one user locked out another"
+
+
+def test_separate_addresses_are_separate_buckets():
+    """
+    Behind Railway the socket peer is the proxy. Keying on it would put every
+    user in one bucket - one typo'd password locking out everybody.
+    """
+    import ratelimit
+    ratelimit.reset_all()
+    assert ratelimit.check_and_record("register", "203.0.113.1") == 0
+    assert ratelimit.check_and_record("register", "203.0.113.2") == 0
+    ratelimit.reset_all()
