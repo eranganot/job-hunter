@@ -181,7 +181,11 @@ def users(stack):
             "name": key, "email": email,
             "password": "correct-horse-1", "password2": "correct-horse-1"})
         assert status == 302, f"register {email} returned {status}"
-        assert location == "/onboarding"
+        # /app, not /onboarding: the setup flow moved into the PWA (2026-09-15)
+        # and decides whether to show itself from the onboarding flags on
+        # /api/me. Sending new accounts to the legacy page was the last route by
+        # which a brand-new user met the old design before anything else.
+        assert location == "/app", location
         assert c.cookie, f"no session cookie for {email}"
         made[key] = c
     return made
@@ -919,3 +923,37 @@ def test_worker_health_degrades_rather_than_raising(stack, monkeypatch):
                         lambda: (_ for _ in ()).throw(RuntimeError("queue gone")))
     out = app_module.worker_health()
     assert "queue gone" in out["unavailable"]
+
+
+# ── Onboarding lives in the app now ──────────────────────────────────────────
+
+def test_a_new_account_lands_in_the_app_not_the_legacy_page(stack):
+    """The whole point of moving the flow: a brand-new user's first screen is
+    the product, not a server-rendered page that looks like a different one."""
+    c = Client(stack["port"])
+    status, location, _ = c.post_form("/register", {
+        "name": "newbie", "email": "newbie@example.test",
+        "password": "correct-horse-1", "password2": "correct-horse-1"})
+    assert status == 302
+    assert location == "/app", location
+
+
+def test_the_legacy_onboarding_url_redirects_into_the_app(stack, users):
+    """A bookmark or an old link must not drop someone back into the old UI."""
+    status, location, _ = users["a"].get("/onboarding")
+    assert status == 302
+    assert location == "/app", location
+
+
+def test_legacy_onboarding_can_be_brought_back_for_one_release(stack, users, monkeypatch):
+    """LEGACY_UI=1 is the escape hatch. Without a way back, replacing a flow
+    that every new signup hits is a one-way door."""
+    monkeypatch.setattr(stack["app"], "LEGACY_UI", True)
+    status, _location, body = users["a"].get("/onboarding")
+    assert status == 200
+    assert b"Upload your CV" in body
+
+
+def test_onboarding_is_still_behind_auth(stack):
+    status, location, _ = Client(stack["port"]).get("/onboarding")
+    assert status == 302 and location == "/login"

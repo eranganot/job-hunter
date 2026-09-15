@@ -170,3 +170,40 @@ def test_the_settings_sheet_uses_the_screen(pattern, what):
         "%s is missing from the built CSS - settings would open as a 576px "
         "column in the middle of a 1280px screen, which is the thing the "
         "desktop pass was for." % what)
+
+
+# ── The onboarding flow made it into the bundle ──────────────────────────────
+#
+# Tailwind only emits what it finds in the source, so these rules are evidence
+# that OnboardingView is compiled in rather than tree-shaken or unreferenced.
+# A new signup hitting an unstyled or absent wizard is the one failure nobody
+# would see in testing, because nobody on the team signs up twice.
+
+ONBOARDING_RULES = [
+    ("max-w-3xl{",   "the setup flow's column width"),
+    # Tailwind escapes the dot, so the file says `.gap-1\.5{`. Written without
+    # the backslash this matched nothing and passed on a bundle that had the
+    # rule - the exact trap the note above the desktop rules describes, walked
+    # straight into one screen later.
+    ("gap-1\\.5{",  "the step-progress row"),
+]
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+@pytest.mark.parametrize("pattern, what", ONBOARDING_RULES,
+                         ids=[w for _p, w in ONBOARDING_RULES])
+def test_the_onboarding_flow_survived_the_build(pattern, what):
+    assert pattern in _bundle_css(), "%s is missing from the built CSS" % what
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_the_onboarding_copy_is_in_the_shipped_script():
+    """The CSS proves the layout compiled; this proves the flow itself did.
+    Checked on the built JS because that is the artefact users receive."""
+    import re
+    html = (BUNDLE / "index.html").read_text(encoding="utf-8")
+    rels = re.findall(r'src="[^"]*?(assets/[^"]+\.js)"', html)
+    assert rels, "index.html loads no script"
+    js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
+    for needle in ("Set up Job Hunter", "Upload your CV", "Your job profile"):
+        assert needle in js, "onboarding string %r is not in the shipped bundle" % needle

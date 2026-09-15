@@ -57,6 +57,17 @@ export type Me = {
   cv_filename?: string | null;
   cv_uploaded_date?: string | null;
   cv_optimizer_date?: string | null;
+  cv_analyzed?: number | null;
+  // Set once the setup flow is finished; `dismissed` is the user saying "never
+  // ask again". Both come straight from user_profiles via /api/me.
+  onboarding_complete?: number | null;
+  onboarding_dismissed?: number | null;
+  job_titles?: string | string[] | null;
+  keywords?: string | string[] | null;
+  locations?: string | string[] | null;
+  schedule_frequency?: string | null;
+  search_hour?: number | null;
+  notification_channel?: string | null;
 };
 
 export type CvOptimizerResult = {
@@ -151,6 +162,8 @@ export const api = {
     locations?: string[]; seniority?: string; experience_years?: number;
     error?: string;
   }>("/api/analyze-cv", "POST", {}),
+
+  dismissOnboarding: () => request("/api/dismiss-onboarding", "POST", {}),
 
   changePassword: (current_password: string, new_password: string) =>
     request<{ success: boolean; error?: string; signed_out_other_sessions?: boolean }>(

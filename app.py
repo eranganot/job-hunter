@@ -74,6 +74,13 @@ GEMINI_KEY    = _cfg("GEMINI_API_KEY",     "gemini_api_key")
 # re-enable the Anthropic Claude fallback for search discovery/scoring.
 SEARCH_USE_ANTHROPIC = _cfg("SEARCH_USE_ANTHROPIC", "search_use_anthropic", "0") == "1"
 ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
+
+# Where a brand-new account is sent. The setup flow is a view inside the PWA now;
+# the app decides whether to show it from the onboarding flags on /api/me.
+ONBOARDING_ENTRY = "/app"
+# Escape hatch for the legacy server-rendered pages during the convergence.
+# Set LEGACY_UI=1 to serve /onboarding from ONBOARDING_HTML again.
+LEGACY_UI = os.environ.get("LEGACY_UI", "").strip().lower() in ("1", "true", "yes", "on")
 SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for relay↔server calls
 PORT          = int(_cfg("PORT", "port", "5001"))
 VAPID_PUBLIC_KEY      = _cfg("VAPID_PUBLIC_KEY", "vapid_public_key")
@@ -5886,7 +5893,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", auth.make_session_cookie(_token))
             self.send_header("Set-Cookie", "g_state=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
             self.send_header("Set-Cookie", "g_verifier=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
-            self.send_header("Location", "/onboarding" if _is_new else "/dashboard")
+            self.send_header("Location", ONBOARDING_ENTRY if _is_new else "/app")
             self.end_headers()
             return
 
@@ -5915,6 +5922,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/onboarding", "/onboarding/"):
             user = self.require_auth()
             if not user:
+                return
+            # The flow moved into /app. This stays reachable so a bookmark or an
+            # old link still works, and so LEGACY_UI=1 can bring the old one back
+            # for a release if the new one turns out to be wrong.
+            if not LEGACY_UI:
+                self.redirect(ONBOARDING_ENTRY)
                 return
             self.send_html(ONBOARDING_HTML)
             return
@@ -6640,7 +6653,13 @@ class Handler(BaseHTTPRequestHandler):
             token = auth.create_session(user_id)
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
-            self.send_header("Location", "/onboarding")
+            # /app, not /onboarding. The setup flow lives inside the app now and
+            # decides for itself whether to show, from onboarding_complete and
+            # onboarding_dismissed on /api/me - so a user who abandons it halfway
+            # gets it back, and a returning user never sees it. Sending them to
+            # the legacy page was also the last route by which a brand-new
+            # account met the old design before anything else.
+            self.send_header("Location", ONBOARDING_ENTRY)
             self.end_headers()
             return
 

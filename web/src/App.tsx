@@ -60,6 +60,10 @@ export function SwipeFlow() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState<"left" | "right" | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  // Set the moment onboarding finishes, so the next render leaves the flow even
+  // though /api/me has not come back yet. Without it the wizard reappears for
+  // one frame on top of the dashboard.
+  const [dismissedOnboarding, setDismissedOnboarding] = useState(false);
   const [selectedJob, setSelectedJob] = useState<UiJob | null>(null);
   const [pendingReject, setPendingReject] = useState<UiJob | null>(null);
   const [undo, setUndo] = useState<{ type: "approve" | "defer"; job: UiJob } | null>(null);
@@ -249,6 +253,16 @@ export function SwipeFlow() {
 
   if (loading) return <CenterState icon={<Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />} title="Loading your jobs…" />;
   if (error) return <CenterState icon={<AlertCircle className="w-10 h-10 text-red-400" />} title={error} action={{ label: "Retry", onClick: loadAll }} />;
+
+  /* A brand-new account has no titles, no keywords and no analysed CV, so the
+     dashboard it would otherwise land on is three empty lists and a search that
+     can only fail. Shown until they finish it or skip it; `onboarding_dismissed`
+     means never ask again. Note /dashboard (legacy) still self-heals
+     onboarding_complete=1 on visit, so a user who detours there is treated as
+     onboarded - that goes away with the legacy UI. */
+  if (me && !me.onboarding_complete && !me.onboarding_dismissed && !dismissedOnboarding) {
+    return <OnboardingView me={me} onDone={() => { setDismissedOnboarding(true); loadAll(); }} />;
+  }
 
   if (view === "dashboard") {
     return (
@@ -786,17 +800,18 @@ function JobDetailModal({ job, onClose, onRetry }: { job: UiJob; onClose: () => 
   );
 }
 
-function TagInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+function TagInput({ value, onChange, noun = "role", example = "VP Product" }:
+    { value: string[]; onChange: (v: string[]) => void; noun?: string; example?: string }) {
   const [draft, setDraft] = useState("");
   const add = () => { const v = draft.trim().replace(/,$/, ""); if (v && !value.includes(v)) onChange([...value, v]); setDraft(""); };
   return (
     <div>
       <div className="flex flex-wrap gap-2 mb-2">
         {value.map((t) => (<span key={t} className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-full text-sm">{t}<button onClick={() => onChange(value.filter((x) => x !== t))} className="w-4 h-4 flex items-center justify-center rounded-full bg-indigo-500/40 active:bg-indigo-500"><X className="w-3 h-3" /></button></span>))}
-        {value.length === 0 && <span className="text-xs text-gray-500">No titles yet — add one below.</span>}
+        {value.length === 0 && <span className="text-xs text-gray-500">No {noun}s yet — add one below.</span>}
       </div>
-      <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder="e.g. VP Product" className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><button onClick={add} className="px-3.5 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl flex items-center justify-center"><Plus className="w-5 h-5" /></button></div>
-      <p className="text-xs text-gray-500 mt-1.5">Press Enter to add each role.</p>
+      <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><button onClick={add} className="px-3.5 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl flex items-center justify-center"><Plus className="w-5 h-5" /></button></div>
+      <p className="text-xs text-gray-500 mt-1.5">Press Enter to add each {noun}.</p>
     </div>
   );
 }
@@ -897,6 +912,255 @@ function AdminModal({ onClose }: { onClose: () => void }) {
       </motion.div>
     </motion.div>
   );
+}
+
+/* ── Onboarding ──────────────────────────────────────────────────────────────
+ *
+ * Replaces ONBOARDING_HTML (app.py, 804 lines). It is not a port: the steps are
+ * the same five because they are the five things the app cannot run without,
+ * but every control here is the one /app already uses - TagInput, the channel
+ * picker, uploadCv - so there is exactly one implementation of each and the two
+ * screens cannot drift.
+ *
+ * The step that justifies the whole flow is CV -> profile. /app could upload a
+ * CV and never read it, so a new user faced three empty tag fields and no idea
+ * what to type. Here the upload runs analyze-cv immediately and the next step
+ * opens already filled in, for review rather than authorship.
+ *
+ * Every step is skippable and the flow is dismissible. A setup wizard that
+ * cannot be escaped is a support ticket: the data it collects is all reachable
+ * from Settings afterwards, and `onboarding_dismissed` means never ask again.
+ */
+const OB_STEPS = ["Welcome", "Your CV", "Your profile", "Schedule", "Alerts"] as const;
+
+function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
+  const parse = (v: any): string[] => {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); }
+    catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); }
+  };
+
+  const [step, setStep] = useState(0);
+  const [titles, setTitles] = useState<string[]>(parse(me.job_titles));
+  const [keywords, setKeywords] = useState<string[]>(parse(me.keywords));
+  const [locations, setLocations] = useState<string[]>(parse(me.locations));
+  const [cvName, setCvName] = useState<string>(me.cv_filename || "");
+  const [cvMsg, setCvMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [freq, setFreq] = useState<string>(me.schedule_frequency || "daily");
+  const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
+  const [perm, setPerm] = useState(pushState());
+  const [pushMsg, setPushMsg] = useState("");
+  const [finishing, setFinishing] = useState(false);
+
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+  const fmtHour = (h: number) => {
+    const ampm = h < 12 ? "AM" : "PM";
+    const hr = h % 12 === 0 ? 12 : h % 12;
+    return `${String(hr).padStart(2, "0")}:00 ${ampm}`;
+  };
+
+  /* Upload and read in one go. Two buttons here would be two chances to skip
+     the half that matters. */
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setBusy(true); setCvMsg("Uploading…");
+    try {
+      const info = await uploadCv(file);
+      setCvName(info.filename || file.name);
+      setCvMsg("Reading your CV…");
+      const r = await api.analyzeCv();
+      if (r?.error) { setCvMsg("Uploaded. Couldn't read it automatically — you can fill the next step in yourself."); return; }
+      if (r.job_titles?.length) setTitles(r.job_titles);
+      if (r.keywords?.length) setKeywords(r.keywords);
+      if (r.locations?.length) setLocations(r.locations);
+      setCvMsg("✓ Read your CV — the next step is filled in for you to check.");
+    } catch {
+      setCvMsg("Upload failed. You can add your details by hand instead.");
+    } finally { setBusy(false); }
+  };
+
+  const enableNotifs = async () => {
+    setPushMsg("Enabling…");
+    const r = await enablePush();
+    setPerm(pushState());
+    setPushMsg(r.ok ? "✓ Notifications on" : (r.reason || "Couldn't enable — you can turn these on later in Settings"));
+  };
+
+  /* Saves before it closes. A wizard that discards what was typed because the
+     last button was "Skip" is worse than no wizard. */
+  const finish = async (dismissed: boolean) => {
+    setFinishing(true);
+    try {
+      if (titles.length || keywords.length || locations.length) {
+        await api.saveProfile({ job_titles: titles, keywords, locations });
+      }
+      await api.saveSchedule({
+        schedule_frequency: freq,
+        search_hour: parseInt(searchHour, 10),
+        onboarding_complete: 1,
+      });
+      if (dismissed) await api.dismissOnboarding();
+    } catch { /* never trap the user behind a failed save */ }
+    finally { setFinishing(false); onDone(); }
+  };
+
+  const next = () => setStep((s) => Math.min(s + 1, OB_STEPS.length));
+  const back = () => setStep((s) => Math.max(s - 1, 0));
+  const card = "bg-gray-800 rounded-2xl border border-gray-700 p-5";
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 text-white">
+      <div className="mx-auto w-full max-w-3xl px-5 lg:px-8 py-8 safe-top">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl flex items-center justify-center shrink-0"><Briefcase className="w-6 h-6 text-white" /></div>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-bold leading-tight">Set up Job Hunter</h1>
+            <p className="text-xs text-gray-400">{me?.name ? `Welcome, ${String(me.name).split(" ")[0]}` : "A few quick questions"}</p>
+          </div>
+          <button onClick={() => finish(true)} className="text-xs text-gray-400 hover:text-gray-200 shrink-0">Skip setup</button>
+        </div>
+
+        {/* Progress. Named steps, not a bare bar: "3 of 5" says nothing about
+            what is left, and what is left is what decides whether to continue. */}
+        <div className="flex items-center gap-1.5 mb-6">
+          {OB_STEPS.map((label, i) => (
+            <div key={label} className="flex-1">
+              <div className={`h-1.5 rounded-full transition-colors ${i <= step ? "bg-indigo-500" : "bg-gray-700"}`} />
+              <p className={`mt-1.5 text-[10px] truncate ${i === step ? "text-indigo-300" : "text-gray-500"}`}>{label}</p>
+            </div>
+          ))}
+        </div>
+
+        {step === 0 && (
+          <div className={card}>
+            <h2 className="text-lg font-semibold mb-2">Your AI job search assistant</h2>
+            <p className="text-sm text-gray-300 mb-4">Job Hunter searches for roles that fit you, scores each one against your CV, and lines up the good ones for you to review. Three things to set up and you're done.</p>
+            <ul className="space-y-2.5 mb-5">
+              {[[FileText, "Your CV", "So matches are scored against your real experience"],
+                [SearchIcon, "What you're looking for", "Titles, skills and locations — read from your CV"],
+                [Bell, "When to run and how to hear about it", "A daily search, and an alert when there is something good"]].map(([Icon, t, s]: any, i) => (
+                <li key={i} className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0 mt-0.5"><Icon className="w-4 h-4 text-indigo-300" /></div>
+                  <div><p className="text-sm font-medium">{t}</p><p className="text-xs text-gray-400">{s}</p></div>
+                </li>
+              ))}
+            </ul>
+            <button onClick={next} className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Get started</button>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className={card}>
+            <h2 className="text-lg font-semibold mb-1">Upload your CV</h2>
+            <p className="text-sm text-gray-400 mb-4">A PDF. We read it to fill in the next step, and score every job against it.</p>
+            {cvName && (
+              <div className="flex items-center gap-3 p-3 mb-3 bg-gray-900/60 rounded-xl border border-gray-700">
+                <div className="w-9 h-9 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-indigo-300" /></div>
+                <p className="text-sm font-medium truncate">{cvName}</p>
+              </div>
+            )}
+            <label className={`block border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer bg-gray-900/40 hover:border-indigo-500 ${busy ? "opacity-60 pointer-events-none" : ""}`}>
+              <input type="file" accept=".pdf" className="hidden" onChange={onPick} />
+              {busy ? <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto mb-2" /> : <FileText className="w-6 h-6 text-gray-500 mx-auto mb-2" />}
+              <p className="text-sm text-gray-300">{cvName ? "Choose a different PDF" : "Choose your CV (PDF)"}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Max 5MB</p>
+            </label>
+            {cvMsg && <p className="text-xs text-gray-300 mt-3">{cvMsg}</p>}
+            <div className="flex gap-2 mt-5">
+              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
+              <button onClick={next} disabled={busy} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold disabled:opacity-60">{cvName ? "Next" : "Skip for now"}</button>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className={card}>
+            <h2 className="text-lg font-semibold mb-1">Your job profile</h2>
+            <p className="text-sm text-gray-400 mb-4">{cvName ? "Read from your CV. Change anything that looks wrong — this is what the search actually uses." : "What should we search for?"}</p>
+            <div className="space-y-5">
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Briefcase className="w-4 h-4 text-indigo-400" />Job titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="VP Product" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-400" />Skills &amp; keywords</h3><TagInput value={keywords} onChange={setKeywords} noun="skill" example="experimentation" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><MapPin className="w-4 h-4 text-indigo-400" />Locations</h3><TagInput value={locations} onChange={setLocations} noun="location" example="Tel Aviv" /></div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
+              <button onClick={next} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Next</button>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className={card}>
+            <h2 className="text-lg font-semibold mb-1">When should we look?</h2>
+            <p className="text-sm text-gray-400 mb-4">Job Hunter runs on its own and has results waiting for you.</p>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {[["daily", "Every day"], ["weekly", "Once a week"]].map(([id, label]) => (
+                <button key={id} onClick={() => setFreq(id)}
+                  className={`py-3 rounded-xl border text-sm font-medium ${freq === id ? "bg-indigo-600 border-indigo-500" : "bg-gray-900/40 border-gray-700 text-gray-400 hover:bg-gray-700/50"}`}>{label}</button>
+              ))}
+            </div>
+            <Field label="Search at" sub="Your local time"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field>
+            <div className="flex gap-2 mt-5">
+              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
+              <button onClick={next} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Next</button>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className={card}>
+            <h2 className="text-lg font-semibold mb-1">Stay notified</h2>
+            <p className="text-sm text-gray-400 mb-4">Optional. Without it you'll just find the results waiting next time you open the app.</p>
+            {perm !== "unsupported" && (
+              <button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-900/40 border border-gray-700 rounded-xl font-medium disabled:opacity-60 mb-2">
+                {perm === "granted" ? "✓ Push notifications on" : "Enable push notifications"}
+              </button>
+            )}
+            {pushMsg && <p className="text-xs text-gray-400 mb-3">{pushMsg}</p>}
+            <NotificationChannels me={me} />
+            <div className="flex gap-2 mt-5">
+              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
+              <button onClick={next} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Next</button>
+            </div>
+          </div>
+        )}
+
+        {step === 5 && (
+          <div className={`${card} text-center`}>
+            <div className="w-16 h-16 rounded-2xl bg-green-500/15 border border-green-600/40 flex items-center justify-center mx-auto mb-4"><CheckCircle className="w-8 h-8 text-green-400" /></div>
+            <h2 className="text-lg font-semibold mb-1">You're all set</h2>
+            <p className="text-sm text-gray-400 mb-5">
+              {titles.length
+                ? `We'll look for ${titles.slice(0, 2).join(" and ")}${titles.length > 2 ? ` and ${titles.length - 2} more` : ""}${locations.length ? ` in ${locations.slice(0, 2).join(", ")}` : ""}.`
+                : "You can add what you're looking for any time in Settings."}
+            </p>
+            <button onClick={() => finish(false)} disabled={finishing} className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
+              {finishing ? <Loader2 className="w-5 h-5 animate-spin" /> : null}{finishing ? "Saving…" : "Start reviewing jobs"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Upload a CV. Extracted so onboarding and settings cannot drift apart - the
+ *  base64 framing is the API's, not the caller's, and duplicating it is how the
+ *  two screens end up disagreeing about what "uploaded" means. */
+async function uploadCv(file: File): Promise<{ filename?: string; uploaded_date?: string }> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const res = await fetch("/api/upload-cv", {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, data: btoa(bin) }),
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  try { return await res.json(); } catch { return {}; }
 }
 
 function NotificationChannels({ me }: { me: any }) {
@@ -1072,7 +1336,16 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const enableNotifs = async () => { setPushMsg("Enabling…"); const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "✓ Notifications enabled" : (r.reason || "Couldn't enable")); };
   const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch { setPushMsg("Test failed"); } };
   const save = async () => { setSaving(true); setSaved(false); try { await api.saveProfile({ phone, job_titles: titles, keywords, locations }); await api.saveSchedule({ search_hour: parseInt(searchHour, 10), apply_hour: parseInt(applyHour, 10) }); if (email && email !== me.email) await api.saveNotifications({ email_address: email }); setSaved(true); } catch {} finally { setSaving(false); } };
-  const onCvPick = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; setCvMsg("Uploading…"); try { const buf = await file.arrayBuffer(); let bin = ""; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]); const res = await fetch("/api/upload-cv", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, data: btoa(bin) }) }); if (res.ok) { let info: any = {}; try { info = await res.json(); } catch { /* ignore */ } setCvName(info.filename || file.name); setCvDate(info.uploaded_date || new Date().toISOString()); setCvAnalysis(null); setAnalyzeMsg(""); setCvMsg("✓ Uploaded"); } else setCvMsg("Upload failed"); } catch { setCvMsg("Upload failed"); } };
+  const onCvPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setCvMsg("Uploading…");
+    try {
+      const info = await uploadCv(file);
+      setCvName(info.filename || file.name);
+      setCvDate(info.uploaded_date || new Date().toISOString());
+      setCvAnalysis(null); setAnalyzeMsg(""); setCvMsg("✓ Uploaded");
+    } catch { setCvMsg("Upload failed"); }
+  };
   const hours = Array.from({ length: 24 }, (_, h) => h);
   const fmtHour = (h: number) => { const ampm = h < 12 ? "AM" : "PM"; const hr = h % 12 === 0 ? 12 : h % 12; return `${String(hr).padStart(2, "0")}:00 ${ampm}`; };
 
@@ -1089,9 +1362,9 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
             </button>
           )}
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic Schedule</h3><div className="space-y-3"><Field label="Daily Job Search" sub="Run search automatically"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field><Field label="Daily Auto-Apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field></div></div>
-          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} /></div>
-          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-400" />Key Skills & Keywords</h3><TagInput value={keywords} onChange={setKeywords} /></div>
-          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><MapPin className="w-5 h-5 text-indigo-400" />Preferred Locations</h3><TagInput value={locations} onChange={setLocations} /></div>
+          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="VP Product" /></div>
+          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-400" />Key Skills & Keywords</h3><TagInput value={keywords} onChange={setKeywords} noun="skill" example="experimentation" /></div>
+          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><MapPin className="w-5 h-5 text-indigo-400" />Preferred Locations</h3><TagInput value={locations} onChange={setLocations} noun="location" example="Tel Aviv" /></div>
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-400" />Resume / CV</h3>
             {cvName && (
