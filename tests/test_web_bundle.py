@@ -158,7 +158,6 @@ def test_the_phone_layout_is_not_collateral_damage():
 
 SETTINGS_RULES = [
     ("lg\\:max-w-4xl{",  "the settings sheet widening past a phone column"),
-    ("lg\\:columns-2{",  "its sections flowing into two columns"),
 ]
 
 
@@ -231,3 +230,28 @@ def test_no_app_string_ships_a_literal_backslash_u():
     assert not offenders, (
         "the shipped bundle contains string(s) a user will read as a literal "
         "escape sequence:\n  - " + "\n  - ".join(dict.fromkeys(offenders)))
+
+
+# ── Settings is five tabs, not one long scroll ───────────────────────────────
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_settings_ships_its_five_tabs():
+    """Replaced the two-column scroll on 2026-09-15. The CSS rule that test used
+    to assert (lg:columns-2) is deliberately gone, so the evidence moves to the
+    shipped script: the tab labels themselves."""
+    import re
+    html = (BUNDLE / "index.html").read_text(encoding="utf-8")
+    rels = re.findall(r'src="[^"]*?(assets/[^"]+\.js)"', html)
+    js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
+    for label in ("Job preferences", "Resume / CV", "Alerts & schedule", "Account"):
+        assert label in js, "settings tab %r is not in the shipped bundle" % label
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_admin_ships_as_a_destination_not_a_hover_window():
+    import re
+    html = (BUNDLE / "index.html").read_text(encoding="utf-8")
+    rels = re.findall(r'src="[^"]*?(assets/[^"]+\.js)"', html)
+    js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
+    assert "AdminModal" not in js, "the admin modal is back"
+    assert '"admin"' in js, "the admin tab id is missing from the bundle"

@@ -14,6 +14,7 @@ import http.client
 import itertools
 import json
 import os
+import pathlib
 import shutil
 import tempfile
 import threading
@@ -957,3 +958,30 @@ def test_legacy_onboarding_can_be_brought_back_for_one_release(stack, users, mon
 def test_onboarding_is_still_behind_auth(stack):
     status, location, _ = Client(stack["port"]).get("/onboarding")
     assert status == 302 and location == "/login"
+
+
+def test_the_weekly_day_index_matches_what_the_scheduler_compares(stack, users):
+    """The PWA sends search_day_of_week as an index into its own day list, and
+    the scheduler compares it against datetime.weekday() - Python's
+    0=Monday..6=Sunday. If the two conventions ever disagree, every weekly
+    user's search silently moves by a day and nothing on screen says so."""
+    from datetime import datetime
+    assert datetime(2026, 9, 14).weekday() == 0, "2026-09-14 is a Monday"
+    assert datetime(2026, 9, 20).weekday() == 6, "2026-09-20 is a Sunday"
+
+    tsx = (pathlib.Path(stack["app"].BASE_DIR) / "web" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert 'const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]' in tsx, \
+        "the day picker is no longer Monday-first, but the scheduler still is"
+
+
+def test_saving_a_weekly_schedule_keeps_the_chosen_day(stack, users):
+    """A weekly user used to inherit whatever the column already held."""
+    status, _loc, _b = users["a"].post_json(
+        "/api/save-schedule",
+        {"schedule_frequency": "weekly", "search_hour": 9, "search_day_of_week": 3},
+        {"Sec-Fetch-Site": "same-origin"})
+    assert status == 200
+    _s, _l, body = users["a"].get("/api/me")
+    me = json.loads(body)
+    assert me["schedule_frequency"] == "weekly"
+    assert me["search_day_of_week"] == 3, me.get("search_day_of_week")

@@ -19,6 +19,11 @@ export type ApiJob = {
   match_score?: number | null;
   candidate_score?: number | null;
   url_verified?: number | null;
+  // Demotion from the user's own pass history, 0-60. The API already sorts by
+  // (match_score - feedback_penalty); the PWA dropped both fields on the floor
+  // and then re-sorted by the raw score, undoing it. See SCORING.md §4.
+  feedback_penalty?: number | null;
+  feedback_reason?: string | null;
   apply_status?: string | null;
   apply_confirmation?: string | null;
   apply_error?: string | null;
@@ -37,6 +42,10 @@ export type UiJob = {
   whyFits: string;
   matchScore: number | null;
   candidateScore: number | null;
+  /** 0-60, from the user's own pass history. The effective rank is
+   *  matchScore - feedbackPenalty; see SCORING.md. */
+  feedbackPenalty: number;
+  feedbackReason: string;
   verified: boolean;
   timeAgo: string;
   status: string;
@@ -211,6 +220,8 @@ export function toUiJob(j: ApiJob): UiJob {
     whyFits: j.why_relevant || "",
     matchScore: j.match_score ?? null,
     candidateScore: j.candidate_score ?? null,
+    feedbackPenalty: j.feedback_penalty ?? 0,
+    feedbackReason: j.feedback_reason || "",
     verified: j.url_verified === 1,
     timeAgo: timeAgo(j.found_date),
     status: j.status,

@@ -11,7 +11,7 @@ import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOp
 import { enablePush, pushState } from "./lib/push";
 
 type View = "swipe" | "dashboard";
-type DashboardTab = "queue" | "applied" | "deferred" | "passed" | "activity" | "analytics";
+type DashboardTab = "queue" | "applied" | "deferred" | "passed" | "activity" | "analytics" | "admin";
 
 const NAV_KEY = "jh.nav";
 
@@ -485,16 +485,27 @@ const TABS: [DashboardTab, string, any][] = [
   ["queue", "Queue", CheckCircle], ["applied", "Applied", Rocket], ["deferred", "Deferred", Clock],
   ["passed", "Passed", XCircle], ["activity", "Activity", List], ["analytics", "Analytics", BarChart3],
 ];
+// Admin is a page, not a window floating over Settings. Kept out of TABS so a
+// non-admin never renders it at all.
+const ADMIN_TAB: [DashboardTab, string, any] = ["admin", "Admin", ShieldCheck];
 
 function DashboardView(p: any) {
   const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, onMarkApplied, onRemoveQueued, onRetry, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings, onReload, stats } = p;
   const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
   const [sortBy, setSortBy] = useState<"match" | "date" | "company">("match");
+  const isAdmin = me?.role === "admin" || (me as any)?.is_admin;
   const sortJobs = (arr: UiJob[]) => {
     const a = [...(arr || [])];
     if (sortBy === "company") a.sort((x, y) => (x.company || "").localeCompare(y.company || ""));
     else if (sortBy === "date") a.sort((x, y) => (y.foundDate || "").localeCompare(x.foundDate || ""));
-    else a.sort((x, y) => (y.matchScore ?? -1) - (x.matchScore ?? -1));
+    else {
+      // Effective score, not the raw one. /api/jobs already orders by
+      // (match_score - feedback_penalty) in SQL; sorting here by matchScore
+      // alone silently undid that, so a job the system had demoted 20 points
+      // for being somewhere the user keeps passing on sat at the top anyway.
+      const eff = (j: UiJob) => (j.matchScore ?? -1) - (j.feedbackPenalty || 0);
+      a.sort((x, y) => eff(y) - eff(x));
+    }
     return a;
   };
   return (
@@ -508,7 +519,7 @@ function DashboardView(p: any) {
           <div className="min-w-0"><h1 className="text-base font-bold text-white leading-tight">Job Hunter</h1><p className="text-xs text-gray-400 truncate">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div>
         </div>
         <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-1">
-          {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (
+          {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (
             <button key={id} onClick={() => setActiveTab(id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-transparent border-transparent text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"}`}>
               <Icon className="w-[18px] h-[18px] shrink-0" /><span className="truncate">{label}</span>
@@ -540,7 +551,7 @@ function DashboardView(p: any) {
           <StatCard label="Passed" value={rejectedCount} sub="Not a fit" icon={<XCircle className="w-5 h-5 text-red-500" />} />
         </div>
         <div className="grid grid-cols-3 gap-2 mb-4 lg:hidden">
-          {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
+          {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
         </div>
         {["queue", "applied", "deferred"].includes(activeTab) && (
           <div className="flex items-center justify-end gap-2 mb-3">
@@ -558,6 +569,7 @@ function DashboardView(p: any) {
           {activeTab === "deferred" && <DeferredTab jobs={sortJobs(deferredJobs)} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} />}
           {activeTab === "passed" && <PassedTab />}
           {activeTab === "activity" && <ActivityTab />}
+          {activeTab === "admin" && isAdmin && <AdminPanel />}
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={stats?.applied ?? appliedJobs.length} totalSuggested={stats?.total ?? 0} />}
         </div>
       </div>
@@ -571,6 +583,16 @@ function DashboardView(p: any) {
 
 function StatCard({ label, value, sub, icon }: any) {
   return (<div className="bg-gray-800 rounded-xl p-4 border border-gray-700"><div className="flex items-center justify-between mb-1.5"><span className="text-sm font-medium text-gray-400">{label}</span>{icon}</div><div className="text-2xl font-bold text-white">{value}</div><p className="text-xs text-gray-500 mt-0.5">{sub}</p></div>);
+}
+
+function FeedbackBadge({ job }: { job: UiJob }) {
+  if (!job.feedbackPenalty) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-950/50 border border-orange-800/60 text-orange-300"
+          title={`Ranked ${job.feedbackPenalty} points lower because of your past feedback`}>
+      <TrendingUp className="w-3 h-3 rotate-180" />{job.feedbackReason || "Adjusted from your feedback"}
+    </span>
+  );
 }
 
 function ApplyBadge({ job }: { job: UiJob }) {
@@ -609,18 +631,45 @@ function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any)
       {checkMsg && <p className="text-xs text-gray-400 -mt-1">{checkMsg}</p>}
       {!jobs.length
         ? <EmptyTab icon={CheckCircle} title="No jobs in queue" sub="Approved jobs appear here" />
-        : <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3 items-start">{jobs.map((job: UiJob) => <QueueJobCard key={job.id} job={job} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}</div>}
+        : <div className="space-y-2">{jobs.map((job: UiJob, i: number) => <QueueJobCard key={job.id} job={job} rank={i + 1} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}</div>}
     </div>
   );
 }
 
-function QueueJobCard({ job, onSelect, onMarkApplied, onRemove }: any) {
+function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove }: any) {
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-      <div className="flex items-center gap-3 p-3.5 active:bg-gray-700/40 cursor-pointer" onClick={() => onSelect(job)}>
-        <div className="w-12 h-12 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-xl flex items-center justify-center shrink-0"><Building2 className="w-6 h-6 text-indigo-400" /></div>
-        <div className="flex-1 min-w-0"><h4 className="font-semibold text-white truncate">{job.title}</h4><p className="text-sm text-gray-400 truncate">{job.company}</p><div className="mt-1"><ApplyBadge job={job} /></div></div>
-        <div className="text-right shrink-0"><div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "\u2014" : `${job.matchScore}%`}</div><div className="text-[10px] text-gray-500">match</div></div>
+      <div className="flex items-start gap-3 p-3.5 hover:bg-gray-700/30 cursor-pointer" onClick={() => onSelect(job)}>
+        {/* The rank is the queue's whole point: these are ordered by effective
+            score, and a grid of equal cards hid that they were ordered at all. */}
+        <div className="w-8 h-8 rounded-lg bg-gray-900/70 border border-gray-700 flex items-center justify-center shrink-0 mt-0.5">
+          <span className="text-xs font-bold text-gray-400">{rank}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h4 className="font-semibold text-white truncate">{job.title}</h4>
+            <span className="text-sm text-gray-400 truncate">{job.company}</span>
+            {job.location && <span className="text-xs text-gray-500 truncate">{job.location}</span>}
+          </div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap"><ApplyBadge job={job} /><FeedbackBadge job={job} /></div>
+          {/* Written by the scorer and shown on the swipe card, then dropped the
+              moment a job reached the queue - which is where the decision to
+              actually apply gets made. */}
+          {job.whyFits && (
+            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
+              <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
+            </p>
+          )}
+        </div>
+        <div className="text-right shrink-0 pl-2">
+          <div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div>
+          <div className="text-[10px] text-gray-500">match</div>
+          {job.feedbackPenalty > 0 && (
+            <div className="text-[10px] text-orange-400 mt-0.5" title="Effective rank after your past feedback">
+              ranks {Math.max(0, (job.matchScore ?? 0) - job.feedbackPenalty)}
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex border-t border-gray-700 divide-x divide-gray-700">
         <button onClick={() => onMarkApplied(job)} className="flex-1 py-2.5 text-xs font-medium text-green-300 active:bg-gray-700 flex items-center justify-center gap-1"><CheckCircle className="w-4 h-4" />Mark applied</button>
@@ -819,7 +868,7 @@ function TagInput({ value, onChange, noun = "role", example = "VP Product" }:
   );
 }
 
-function AdminModal({ onClose }: { onClose: () => void }) {
+function AdminPanel() {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [busy, setBusy] = useState("");
@@ -860,13 +909,7 @@ function AdminModal({ onClose }: { onClose: () => void }) {
     </button>
   );
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
-      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
-        <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-5 flex items-center justify-between z-10">
-          <h2 className="text-lg font-bold text-white flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-400" />Admin</h2>
-          <button onClick={onClose} className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button>
-        </div>
-        <div className="p-5 space-y-6">
+    <div className="space-y-6">
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-indigo-400" />Queue overview</h3>
             <div className="grid grid-cols-3 gap-2.5">
@@ -911,9 +954,7 @@ function AdminModal({ onClose }: { onClose: () => void }) {
               {users.length === 0 && <p className="text-sm text-gray-500 text-center py-3">No users.</p>}
             </div>
           </div>
-        </div>
-      </motion.div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -935,6 +976,11 @@ function AdminModal({ onClose }: { onClose: () => void }) {
  * from Settings afterwards, and `onboarding_dismissed` means never ask again.
  */
 const OB_STEPS = ["Welcome", "Your CV", "Your profile", "Schedule", "Alerts"] as const;
+// Monday first, because the index IS the stored value: the scheduler compares
+// search_day_of_week against `now.weekday()` (app.py:597), which is Python's
+// 0=Monday..6=Sunday. Labelling this Sunday-first would have shifted every
+// weekly user's search by a day with nothing on screen to show it.
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
   const parse = (v: any): string[] => {
@@ -953,6 +999,7 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [freq, setFreq] = useState<string>(me.schedule_frequency || "daily");
   const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
+  const [searchDow, setSearchDow] = useState<number>(me.search_day_of_week ?? 1);
   const [perm, setPerm] = useState(pushState());
   const [pushMsg, setPushMsg] = useState("");
   const [finishing, setFinishing] = useState(false);
@@ -1002,6 +1049,10 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
       await api.saveSchedule({
         schedule_frequency: freq,
         search_hour: parseInt(searchHour, 10),
+        // Only meaningful weekly, but always sent: leaving it unset meant a
+        // weekly user silently inherited whatever day the column happened to
+        // hold, with nothing on screen saying which.
+        ...(freq === "weekly" ? { search_day_of_week: searchDow } : {}),
         onboarding_complete: 1,
       });
       if (dismissed) await api.dismissOnboarding();
@@ -1011,11 +1062,11 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
 
   const next = () => setStep((s) => Math.min(s + 1, OB_STEPS.length));
   const back = () => setStep((s) => Math.max(s - 1, 0));
-  const card = "bg-gray-800 rounded-2xl border border-gray-700 p-5";
+  const card = "bg-gray-800 rounded-2xl border border-gray-700 p-5 lg:p-8 lg:max-w-3xl lg:mx-auto";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 text-white">
-      <div className="mx-auto w-full max-w-3xl px-5 lg:px-8 py-8 safe-top">
+      <div className={`${SHELL} px-5 lg:px-12 py-8 safe-top`}>
         <div className="flex items-center gap-3 mb-6">
           <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl flex items-center justify-center shrink-0"><Briefcase className="w-6 h-6 text-white" /></div>
           <div className="min-w-0 flex-1">
@@ -1104,6 +1155,17 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
                   className={`py-3 rounded-xl border text-sm font-medium ${freq === id ? "bg-indigo-600 border-indigo-500" : "bg-gray-900/40 border-gray-700 text-gray-400 hover:bg-gray-700/50"}`}>{label}</button>
               ))}
             </div>
+            {freq === "weekly" && (
+              <div className="mb-3">
+                <p className="text-sm font-medium mb-2">Which day?</p>
+                <div className="grid grid-cols-7 gap-1.5">
+                  {DOW.map((d, i) => (
+                    <button key={d} onClick={() => setSearchDow(i)}
+                      className={`py-2.5 rounded-lg border text-xs font-medium ${searchDow === i ? "bg-indigo-600 border-indigo-500" : "bg-gray-900/40 border-gray-700 text-gray-400 hover:bg-gray-700/50"}`}>{d}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             <Field label="Search at" sub="Your local time"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field>
             <div className="flex gap-2 mt-5">
               <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
@@ -1292,6 +1354,13 @@ function ChangePassword() {
   );
 }
 
+type SettingsTab = "profile" | "prefs" | "cv" | "alerts" | "account";
+const SETTINGS_TABS: [SettingsTab, string, any][] = [
+  ["profile", "Profile", Users], ["prefs", "Job preferences", Briefcase],
+  ["cv", "Resume / CV", FileText], ["alerts", "Alerts & schedule", Bell],
+  ["account", "Account", ShieldCheck],
+];
+
 function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const parseTitles = (v: any): string[] => { if (!v) return []; if (Array.isArray(v)) return v; try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); } catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); } };
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
@@ -1305,13 +1374,13 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [cvName, setCvName] = useState<string>(me.cv_filename || (me.cv_path ? String(me.cv_path).split("/").pop() || "" : ""));
   const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
   const [cvMsg, setCvMsg] = useState("");
+  const [tab, setTab] = useState<SettingsTab>("profile");
   const [analyzing, setAnalyzing] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractMsg, setExtractMsg] = useState("");
   const [cvAnalysis, setCvAnalysis] = useState<CvOptimizerResult | null>(null);
   const [analyzeMsg, setAnalyzeMsg] = useState("");
   const [perm, setPerm] = useState(pushState()); const [pushMsg, setPushMsg] = useState("");
-  const [showAdmin, setShowAdmin] = useState(false);
   const isAdmin = me.role === "admin" || (me as any).is_admin;
 
   useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
@@ -1357,17 +1426,28 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
       <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-xl lg:max-w-4xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
         <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-5 flex items-center justify-between z-10"><h2 className="text-lg font-bold text-white">Settings</h2><button onClick={onClose} className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button></div>
-        <div className="p-5 space-y-6 lg:space-y-0 lg:columns-2 lg:gap-6 [&>*]:lg:break-inside-avoid [&>*]:lg:mb-6">
-          {isAdmin && (
-            <button onClick={() => setShowAdmin(true)} className="w-full flex items-center justify-between gap-2 p-4 bg-indigo-600/15 border border-indigo-600/40 rounded-xl active:bg-indigo-600/25">
-              <span className="flex items-center gap-2 text-indigo-200 font-semibold"><ShieldCheck className="w-5 h-5" />Admin Panel</span>
-              <span className="text-indigo-300 text-sm">Queue tools & users →</span>
+        {/* Five tabs. One column of eleven headings is a scroll, not a settings
+            page - and these are the groupings people actually think in: who I
+            am, what I am looking for, my CV, when and how you tell me, my
+            account. */}
+        <div className="px-5 pt-4 border-b border-gray-700 flex gap-1 overflow-x-auto no-scrollbar">
+          {SETTINGS_TABS.map(([id, label, Icon]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`flex items-center gap-1.5 px-3 py-2.5 rounded-t-lg text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${tab === id ? "border-indigo-500 text-white" : "border-transparent text-gray-400 hover:text-gray-200"}`}>
+              <Icon className="w-4 h-4" />{label}
             </button>
-          )}
-          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic Schedule</h3><div className="space-y-3"><Field label="Daily Job Search" sub="Run search automatically"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field><Field label="Daily Auto-Apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field></div></div>
+          ))}
+        </div>
+        <div className="p-5 space-y-6">
+          {tab === "profile" && (<>
+          <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
+          </>)}
+          {tab === "prefs" && (<>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="VP Product" /></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-400" />Key Skills & Keywords</h3><TagInput value={keywords} onChange={setKeywords} noun="skill" example="experimentation" /></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><MapPin className="w-5 h-5 text-indigo-400" />Preferred Locations</h3><TagInput value={locations} onChange={setLocations} noun="location" example="Tel Aviv" /></div>
+          </>)}
+          {tab === "cv" && (<>
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-400" />Resume / CV</h3>
             {cvName && (
@@ -1388,20 +1468,26 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
             {analyzeMsg && <p className="text-xs text-gray-400 mt-2">{analyzeMsg}</p>}
             {cvAnalysis && <CvAnalysisPanel data={cvAnalysis} fmtDate={fmtDate} />}
           </div>
+          </>)}
+          {tab === "alerts" && (<>
+          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic Schedule</h3><div className="space-y-3"><Field label="Daily Job Search" sub="Run search automatically"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field><Field label="Daily Auto-Apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field></div></div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
           <NotificationChannels me={me} />
+          </>)}
+          {tab === "account" && (<>
           <ChangePassword />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><LogOut className="w-5 h-5 text-gray-400" />Account</h3>
             <p className="text-xs text-gray-400 mb-2">Signed in as {me?.email || me?.name}</p>
             <a href="/logout" className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><LogOut className="w-4 h-4" />Sign out</a>
           </div>
-          <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
+          </>)}
+          {tab !== "account" && (
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
+          )}
         </div>
       </motion.div>
     </motion.div>
-    <AnimatePresence>{showAdmin && <AdminModal onClose={() => setShowAdmin(false)} />}</AnimatePresence>
     </>
   );
 }
