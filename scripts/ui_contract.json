@@ -170,6 +170,11 @@
       "since": "2026-09-15",
       "what": "a bulk-marked job can go back to review",
       "needle": "Send back to review"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "all bulk-marked jobs can go back at once",
+      "needle": "back to review"
     }
   ]
 }

@@ -79,6 +79,14 @@ ADMIN_EMAIL   = _cfg("ADMIN_EMAIL",        "admin_email")
 # Where a brand-new account is sent. The setup flow is a view inside the PWA now;
 # the app decides whether to show it from the onboarding flags on /api/me.
 ONBOARDING_ENTRY = "/app"
+
+# Phase 4 item 6: where a signed-in user lands. /app is the product now; the
+# legacy pages stay reachable by typing the URL for one release, so nothing is
+# deleted before anyone has confirmed they can live without it.
+# Set LEGACY_UI=1 on Railway to send everyone back to /dashboard without a
+# deploy - the escape hatch, and the reason this is a variable and not an edit.
+def home_url() -> str:
+    return "/dashboard" if (os.environ.get("LEGACY_UI", "") or "").strip().lower() in ("1", "true", "yes", "on") else "/app"
 # Escape hatch for the legacy server-rendered pages during the convergence.
 # Set LEGACY_UI=1 to serve /onboarding from ONBOARDING_HTML again.
 LEGACY_UI = os.environ.get("LEGACY_UI", "").strip().lower() in ("1", "true", "yes", "on")
@@ -5850,7 +5858,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/login", "/login/"):
             user = self.get_user()
             if user:
-                self.redirect("/dashboard")
+                self.redirect(home_url())
             else:
                 self.send_html(LOGIN_HTML.replace("{error_block}", ""))
             return
@@ -5858,7 +5866,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/register", "/register/"):
             user = self.get_user()
             if user:
-                self.redirect("/dashboard")
+                self.redirect(home_url())
             else:
                 self.send_html(REGISTER_HTML.replace("{error_block}", ""))
             return
@@ -5957,7 +5965,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", auth.make_session_cookie(_token))
             self.send_header("Set-Cookie", "g_state=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
             self.send_header("Set-Cookie", "g_verifier=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
-            self.send_header("Location", ONBOARDING_ENTRY if _is_new else "/app")
+            self.send_header("Location", ONBOARDING_ENTRY if _is_new else home_url())
             self.end_headers()
             return
 
@@ -6008,7 +6016,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             if user.get("role") != "admin":
-                self.redirect("/dashboard")
+                self.redirect(home_url())
                 return
             self.send_html(ADMIN_HTML)
             return
@@ -6672,7 +6680,7 @@ class Handler(BaseHTTPRequestHandler):
             token = auth.create_session(user["id"])
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
-            dest = "/dashboard"
+            dest = home_url()
             self.send_header("Location", dest)
             self.end_headers()
             return
@@ -7362,6 +7370,44 @@ class Handler(BaseHTTPRequestHandler):
             database.log_activity(user["id"], "stage_update",
                 f"Stage updated to {stage} for job {job_id}")
             self.send_json({"ok": True}); return
+
+        # ── Put bulk-marked "applied" jobs back in the review queue ───────────
+        if path == "/api/jobs/restore-bulk-marked":
+            # A one-time cleanup once marked every queued job as applied to empty
+            # the queue, without applying to any of them. Those jobs were never
+            # reviewed and never sent anywhere, so they are recoverable: this
+            # puts them back where they should have stayed.
+            #
+            # Scoped tightly on purpose - applied_via='bulk' is written by
+            # exactly two cleanup paths and by nothing else, so a real
+            # application can never be caught by this. Jobs the user marked
+            # applied by hand ('manual') and engine submissions ('engine') are
+            # untouchable here whatever anyone passes in.
+            conn = database.get_db()
+            rows = conn.execute(
+                "SELECT id FROM jobs WHERE user_id=? AND status='applied' AND applied_via='bulk'",
+                (user_id,)
+            ).fetchall()
+            ids = [r["id"] for r in rows]
+            for job_id in ids:
+                conn.execute(
+                    "UPDATE jobs SET status='new', applied_via=NULL, apply_status=NULL, "
+                    "apply_error=NULL, apply_confirmation=NULL, apply_failure_type=NULL, "
+                    "apply_failure_detail=NULL, apply_attempts=0, apply_next_attempt_at=NULL, "
+                    "applied_date=NULL, stage=NULL, notes='' WHERE id=? AND user_id=?",
+                    (job_id, user_id)
+                )
+            # The cleanup also left a rejected_patterns row for nothing; the jobs
+            # were never passed on, so nothing to undo there. But a restored job
+            # must not be filtered straight back out by its own company+title.
+            conn.commit()
+            conn.close()
+            if ids:
+                database.log_activity(user_id, "restore_bulk_marked",
+                    f"Put {len(ids)} bulk-marked job(s) back in the review queue")
+            database.write_approved_jobs(BASE_DIR)
+            self.send_json({"success": True, "restored": len(ids)})
+            return
 
         # ── Bulk job actions ──────────────────────────────────────────────────────
         if path == "/api/jobs/bulk":

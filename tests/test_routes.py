@@ -328,8 +328,13 @@ def test_dashboard_and_app_shell_render_for_a_member(users):
 
 
 def test_non_admin_is_kept_out_of_admin(users):
+    # The property is "bounced away from /admin, to wherever home is" - not a
+    # literal path. Pinning "/dashboard" made this fail when the home
+    # destination flipped to /app (Phase 4 item 6), which is a test asserting a
+    # decision rather than a behaviour.
+    import app as _app
     status, location, _ = users["b"].get("/admin")
-    assert status == 302 and location == "/dashboard"
+    assert status == 302 and location == _app.home_url()
     status, _, body = users["b"].get("/api/admin/users")
     assert status == 403, f"non-admin reached the admin user list ({status})"
 

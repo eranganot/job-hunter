@@ -880,6 +880,19 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
     .filter((j: UiJob) => !origin || (j.appliedVia || "unknown") === origin)
     .filter((j: UiJob) => !restored.has(j.id));
 
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const restoreAllBulk = async () => {
+    const n = origins["bulk"] || 0;
+    if (!confirm(`Put all ${n} bulk-marked jobs back in your review queue?\n\nThey were never applied to. They will reappear in your swipe queue to decide on properly.`)) return;
+    setBulkBusy(true); setRestoreMsg("");
+    try {
+      const r = await api.restoreBulkMarked();
+      setRestoreMsg(`Moved ${r?.restored ?? n} job${(r?.restored ?? n) === 1 ? "" : "s"} back to review \u2014 open Swipe to go through them.`);
+      if (onReload) await onReload();
+    } catch (e: any) { setRestoreMsg(e?.message || "Could not move those jobs"); }
+    finally { setBulkBusy(false); }
+  };
+
   const sendBackToReview = async (job: UiJob) => {
     if (!confirm(`Put "${job.title}" at ${job.company} back in your review queue?\n\nIt was marked applied by a bulk cleanup, not by an actual application.`)) return;
     setRestoreMsg("");
@@ -932,10 +945,16 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
         </div>
       ) : null}
       {origin === "bulk" && (
-        <p className="text-xs text-amber-300/90">
-          These were never reviewed and never applied to. A one-off cleanup marked them applied to
-          empty the queue. Send any of them back to review to decide properly.
-        </p>
+        <div className="bg-amber-950/30 border border-amber-700/50 rounded-xl p-3.5 space-y-2">
+          <p className="text-xs text-amber-200/90">
+            These {origins["bulk"]} were never reviewed and never applied to — a one-off cleanup marked
+            them applied to empty the queue. They are real jobs you never got to decide on.
+          </p>
+          <button onClick={restoreAllBulk} disabled={!!bulkBusy}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">
+            {bulkBusy ? "Moving\u2026" : `Send all ${origins["bulk"]} back to review`}
+          </button>
+        </div>
       )}
       {restoreMsg && <p className="text-xs text-indigo-300">{restoreMsg}</p>}
       {!shown.length && <p className="text-sm text-gray-500 py-6 text-center">Nothing at this stage yet.</p>}
@@ -1117,17 +1136,31 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
   const notApplied    = n("applied_bulk") + n("applied_no_url");
   const appliedUnknown = n("applied_unknown");
 
-  // Jobs he actually decided on. The system's own rejections are not decisions
-  // and do not belong in the denominator of HIS approval rate.
-  const reviewed  = hasBreakdown
-    ? n("passed_by_user") + n("passed_unknown") + approvedCount + appliedCount + deferredCount
-    : approvedCount + rejectedCount + deferredCount;
-  const filtered  = n("passed_by_system");
+  /* Eran's model, 2026-09-15: a job the system threw away was never a real
+     candidate, so it is excluded from EVERY number here - including "found".
+     Counting it made the sourcing look more productive than it was and the
+     approval rate look worse than it was, in the same breath.
+
+     "Filtered out" is the system's own rejections PLUS the jobs that aged out
+     of the queue after three days. Those were counted in `total` and in no
+     bucket at all, which is why the dashboard could show 33 jobs that existed
+     nowhere on screen. */
+  const filtered  = n("passed_by_system") + n("expired");
   const archived  = n("rejected_archived");
+  /* Archived passes count as HIS. The rows were deleted and the origin is
+     unknowable, but almost every pass is his, and excluding them understated
+     the denominator by more than including them overstates it. */
+  const yourPasses = n("passed_by_user") + n("passed_unknown") + archived;
+  /* Decided = you made a call on it. Still-new and deferred are not decisions
+     yet, so they sit outside the rate rather than dragging it down. */
+  const decided   = hasBreakdown
+    ? approvedCount + appliedCount + yourPasses
+    : approvedCount + rejectedCount;
+  const reviewed  = decided;
 
   const approvedAllTime = approvedCount + appliedCount;
   const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
-  const approvalRate = pct(approvedAllTime, reviewed);
+  const approvalRate = pct(approvedAllTime, decided);
   const applyRate    = pct(reallyApplied, approvedAllTime);
 
   /* Every figure on this screen, and how they meet.
@@ -1138,10 +1171,12 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
      so, so the only honest fix is to show the whole sum rather than two
      summaries of it. */
   const stillNew  = n("new");
-  const found     = totalSuggested || 0;
-  const reviewable = found - filtered - archived;
-  const parts     = approvedAllTime + n("passed_by_user") + n("passed_unknown") + stillNew + deferredCount;
-  const reconciles = reviewable === parts;
+  /* "Found" means found FOR YOU: everything the system discarded is removed
+     from the top line, not just from the rate. */
+  const foundRaw  = totalSuggested || 0;
+  const found     = foundRaw - filtered;
+  const parts     = approvedAllTime + yourPasses + stillNew + deferredCount;
+  const reconciles = found === parts;
 
   const Row = ({ label, value, sub, tone }: any) => (
     <div className="flex items-start justify-between gap-3 py-2.5 border-b border-gray-700/60 last:border-0">
@@ -1159,8 +1194,8 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
         <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-2xl p-5 border border-blue-800/50">
           <h4 className="text-sm font-medium text-gray-400 mb-1">Approval rate</h4>
           <div className="text-3xl font-bold text-blue-400 mb-1">{approvalRate}%</div>
-          <p className="text-sm text-gray-500">{approvedAllTime} approved of {reviewed} you reviewed</p>
-          {filtered > 0 && <p className="text-xs text-gray-500 mt-1">{filtered} more were filtered out before you saw them</p>}
+          <p className="text-sm text-gray-500">{approvedAllTime} approved of {decided} you decided on</p>
+          {filtered > 0 && <p className="text-xs text-gray-500 mt-1">{filtered} more never reached you and are not counted</p>}
         </div>
         <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50">
           <h4 className="text-sm font-medium text-gray-400 mb-1">Actually applied</h4>
@@ -1179,19 +1214,10 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
           </p>
           <div className="font-mono text-sm space-y-1">
             <div className="flex justify-between gap-3 text-gray-200">
-              <span>Jobs found for you</span><span className="font-semibold">{found}</span>
-            </div>
-            <div className="flex justify-between gap-3 text-gray-400 pl-4">
-              <span>&minus; filtered out before you saw them</span><span>{filtered}</span>
-            </div>
-            <div className="flex justify-between gap-3 text-gray-400 pl-4">
-              <span>&minus; passed, then archived after 30 days</span><span>{archived}</span>
-            </div>
-            <div className="flex justify-between gap-3 text-white border-t border-gray-700 pt-1 mt-1">
-              <span>= reached your review queue</span><span className="font-semibold">{reviewable}</span>
+              <span>Jobs that reached you</span><span className="font-semibold">{found}</span>
             </div>
             <div className="flex justify-between gap-3 text-green-300 pl-4 pt-1"><span>approved</span><span>{approvedAllTime}</span></div>
-            <div className="flex justify-between gap-3 text-red-300 pl-4"><span>you passed</span><span>{n("passed_by_user") + n("passed_unknown")}</span></div>
+            <div className="flex justify-between gap-3 text-red-300 pl-4"><span>you passed</span><span>{yourPasses}</span></div>
             <div className="flex justify-between gap-3 text-amber-300 pl-4"><span>deferred</span><span>{deferredCount}</span></div>
             <div className="flex justify-between gap-3 text-gray-400 pl-4"><span>still waiting for you</span><span>{stillNew}</span></div>
             <div className={`flex justify-between gap-3 border-t border-gray-700 pt-1 mt-1 ${reconciles ? "text-white" : "text-amber-300"}`}>
@@ -1200,9 +1226,22 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
             </div>
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            The approval rate is {approvedAllTime} of the {reviewed} you actually decided on
-            {archived > 0 ? ` — the ${archived} archived passes are left out of it because their rows were deleted and nothing records whether they were your decision or the system's.` : "."}
+            Approval rate = {approvedAllTime} approved ÷ ({approvedAllTime} approved + {yourPasses} passed) = <span className="text-blue-300 font-medium">{approvalRate}%</span>.
+            {deferredCount + stillNew > 0 ? ` The ${deferredCount + stillNew} you have not decided on yet are left out of it.` : ""}
           </p>
+          {filtered > 0 && (
+            <p className="text-xs text-gray-500 mt-2">
+              A further <span className="text-gray-300">{filtered}</span> were discarded by the app before
+              they reached you — dead links, expired postings, jobs already attempted. They are not counted
+              anywhere above, including in the total: they were never real candidates.
+            </p>
+          )}
+          {archived > 0 && (
+            <p className="text-xs text-gray-500 mt-2">
+              {archived} of your passes are older than 30 days and their rows have been deleted to save
+              space, so only the count survives.
+            </p>
+          )}
         </div>
       )}
 
@@ -1233,7 +1272,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
         <h4 className="font-semibold text-white mb-4">Your decisions</h4>
         <div className="space-y-3">
           {[["Approved", approvedAllTime, "bg-green-500"],
-            ["Passed", hasBreakdown ? n("passed_by_user") + n("passed_unknown") : rejectedCount, "bg-red-500"],
+            ["Passed", hasBreakdown ? yourPasses : rejectedCount, "bg-red-500"],
             ["Deferred", deferredCount, "bg-amber-500"]].map(([label, v, color]: any) => (
             <div key={label}>
               <div className="flex items-center justify-between mb-1">
@@ -1241,7 +1280,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
                 <span className="text-sm font-medium text-white">{v}</span>
               </div>
               <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                <div className={`h-full ${color}`} style={{ width: `${reviewed ? (v / reviewed) * 100 : 0}%` }} />
+                <div className={`h-full ${color}`} style={{ width: `${decided ? (v / decided) * 100 : 0}%` }} />
               </div>
             </div>
           ))}
@@ -1251,9 +1290,9 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
       <div className="bg-gradient-to-br from-indigo-900/20 to-slate-800/40 rounded-2xl p-5 border border-indigo-800/40">
         <h4 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Insights</h4>
         <ul className="space-y-2 text-sm text-gray-300">
-          <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>You've reviewed {reviewed} job{reviewed !== 1 ? "s" : ""} out of {totalSuggested || 0} found.</span></li>
+          <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>You've decided on {decided} job{decided !== 1 ? "s" : ""} of the {found} that reached you.</span></li>
           <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{approvalRate}% approval rate — {approvalRate > 50 ? "you're casting a wide net" : "you're being selective"}.</span></li>
-          {filtered > 0 && <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{pct(filtered, filtered + reviewed)}% of what the sources returned was filtered out before it reached you.</span></li>}
+          {filtered > 0 && <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{pct(filtered, foundRaw)}% of what the sources returned never reached you — {filtered} of {foundRaw}.</span></li>}
         </ul>
       </div>
     </div>

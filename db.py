@@ -336,6 +336,14 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         "deferred": _n("AND status='deferred'"),
         "rejected": rejected_live + archived_count,
         "total":    _n("") + archived_count,
+        # Jobs expire_old_jobs() aged out of the review queue after 3 days.
+        # They were counted in `total` and in NO bucket, so they were invisible
+        # on every screen while still inflating "found" - which is why the
+        # dashboard could show 33 jobs that existed nowhere. The startup
+        # migration converts them to rejected, so the number is only ever the
+        # rows that aged out since the last restart; that is exactly the window
+        # in which they were unaccounted for.
+        "expired":  _n("AND status='expired'"),
     }
     if not has_provenance:
         return base
@@ -346,6 +354,11 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         "applied_no_url":  _n("AND status='applied' AND applied_via='no_url'"),
         "applied_unknown": _n("AND status='applied' AND applied_via IS NULL"),
 
+        # Archived passes are HIS decisions for the purposes of the approval
+        # rate (Eran's call, 2026-09-15): the rows were deleted after 30 days
+        # and their origin is unknowable, but the overwhelming majority of
+        # passes are his, and leaving them out understated the denominator by
+        # more than including them overstates it.
         "passed_by_user":    _n("AND status='rejected' AND rejected_by='user'"),
         "passed_by_system":  _n("AND status='rejected' AND rejected_by='system'"),
         "passed_unknown":    _n("AND status='rejected' AND rejected_by IS NULL"),

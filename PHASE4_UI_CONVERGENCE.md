@@ -76,7 +76,9 @@ Ordered by what blocks a public paid launch, not by size.
 | 3 | **Pipeline stages + bulk actions** | M | **DONE** — and both endpoints were broken | The power features that make `/dashboard` still worth opening. |
 | 4 | **Admin redesign + user toggle + apply probes** | M | **DONE** — `apply-test` live deliberately left out | Once nothing else needs the legacy UI. |
 | 5 | **Restyle login / register / Google button** | S | **DONE** — and now self-contained | Shared pages; the seam a new user sees first. |
-| 6 | **Flip `/dashboard` → `/app`, then delete** | S | **NOT STARTED** | ~2,900 lines out of `app.py`. Behind `LEGACY_UI=1` for one release. |
+| 6 | **Flip `/dashboard` → `/app`** | S | **DONE** — delete deferred one release | ~2,900 lines out of `app.py`. Behind `LEGACY_UI=1` for one release. |
+
+**Phase 4 is complete.** The deletion of the legacy constants is deliberately NOT done: `LEGACY_UI=1` has to survive one release in production first, so there is a way back that is a console toggle rather than a rollback.
 
 ### Verified remaining, 2026-09-15 (checked against the code, not this table)
 

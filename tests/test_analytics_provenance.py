@@ -263,3 +263,104 @@ def test_the_backfill_is_idempotent(tmp_path):
 
     assert first == ["bulk", "manual"], first
     assert second == first, "re-running the backfill reclassified rows"
+
+
+# ── Recovering the jobs a cleanup marked applied without applying ───────────
+
+def _seed(stack, uid, via, n=1, status="applied"):
+    ids = []
+    conn = stack["db"].get_db()
+    for _ in range(n):
+        job_id = _new_job(stack["db"], uid)
+        conn.execute("UPDATE jobs SET status=?, applied_via=?, apply_status='manual' WHERE id=?",
+                     (status, via, job_id))
+        ids.append(job_id)
+    conn.commit(); conn.close()
+    return ids
+
+
+def test_bulk_marked_jobs_can_be_sent_back_to_review(stack, users):
+    """84 real jobs on production carry applied_via='bulk': never reviewed,
+    never applied to. They are recoverable, and recovering them is the only
+    honest thing to do with a status that was never true."""
+    uid = _user_id(stack["db"], "alice@example.test")
+    bulk = _seed(stack, uid, "bulk", 3)
+    status, _loc, body = users["a"].post_json("/api/jobs/restore-bulk-marked", {})
+    assert status == 200
+    import json as _json
+    assert _json.loads(body)["restored"] >= 3
+    for job_id in bulk:
+        row = _job_row(stack["db"], job_id)
+        assert row["status"] == "new", "a bulk-marked job did not go back to the queue"
+        assert row["applied_via"] is None
+        assert row["apply_status"] is None, "it would still render an apply badge"
+
+
+def test_it_cannot_touch_a_real_application(stack, users):
+    """The guard that matters. An engine submission and a hand-marked apply are
+    real events; nothing here may undo them, whatever is passed in."""
+    uid = _user_id(stack["db"], "alice@example.test")
+    engine = _seed(stack, uid, "engine", 2)
+    manual = _seed(stack, uid, "manual", 2)
+    users["a"].post_json("/api/jobs/restore-bulk-marked", {})
+    for job_id in engine + manual:
+        row = _job_row(stack["db"], job_id)
+        assert row["status"] == "applied", "a real application was reverted"
+    assert _job_row(stack["db"], engine[0])["applied_via"] == "engine"
+    assert _job_row(stack["db"], manual[0])["applied_via"] == "manual"
+
+
+def test_it_cannot_reach_another_users_jobs(stack, users):
+    """Two independent scopes guard this - the SELECT that picks the ids and the
+    UPDATE that writes them. Removing either one alone leaves the behaviour
+    correct, because the other still holds; removing BOTH fails this test, which
+    is what proves it is not vacuous. That is defence in depth working as
+    intended, not a gap in the test."""
+    theirs = _seed(stack, _user_id(stack["db"], "alice@example.test"), "bulk", 2)
+    users["b"].post_json("/api/jobs/restore-bulk-marked", {})
+    for job_id in theirs:
+        assert _job_row(stack["db"], job_id)["status"] == "applied", "crossed a tenant boundary"
+
+
+def test_running_it_twice_is_harmless(stack, users):
+    uid = _user_id(stack["db"], "alice@example.test")
+    _seed(stack, uid, "bulk", 2)
+    users["a"].post_json("/api/jobs/restore-bulk-marked", {})
+    status, _loc, body = users["a"].post_json("/api/jobs/restore-bulk-marked", {})
+    import json as _json
+    assert status == 200 and _json.loads(body)["restored"] == 0
+
+
+# ── Expired jobs were counted as found and shown nowhere ────────────────────
+
+def test_expired_jobs_are_no_longer_invisible(tmp_path, monkeypatch):
+    """expire_old_jobs() ages an un-swiped job out after 3 days. get_stats
+    counted it in `total` and in NO bucket, so the dashboard could report jobs
+    that appeared on no screen - which is exactly what "I have 0 new" plus a
+    non-zero found meant. Proven by reproduction before the fix."""
+    import sqlite3
+    from datetime import datetime, timedelta
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE jobs (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT,
+                           apply_status TEXT, notes TEXT, company TEXT, title TEXT,
+                           applied_via TEXT, rejected_by TEXT, found_date TEXT);
+        CREATE TABLE user_profiles (user_id INTEGER PRIMARY KEY, passed_archived_count INTEGER DEFAULT 0);
+    """)
+    old = (datetime.now() - timedelta(days=9)).isoformat()
+    for i in range(4):
+        conn.execute("INSERT INTO jobs (user_id,status,found_date) VALUES (1,'new',?)", (old,))
+    conn.execute("INSERT INTO jobs (user_id,status,found_date) VALUES (1,'new',datetime('now'))")
+    conn.execute("INSERT INTO user_profiles (user_id) VALUES (1)")
+    conn.commit()
+
+    stats = database.get_stats(conn, 1)        # calls expire_old_jobs
+    conn.close()
+
+    assert stats["expired"] == 4, "expired jobs are still unaccounted for"
+    buckets = (stats["new"] + stats["approved"] + stats["applied"]
+               + stats["deferred"] + stats["rejected"] + stats["expired"])
+    assert buckets == stats["total"], (
+        "%d rows are in `total` and in no bucket - invisible on every screen"
+        % (stats["total"] - buckets))

@@ -141,6 +141,9 @@ export type Stats = {
   passed_by_user?: number;
   passed_by_system?: number;
   passed_unknown?: number;
+  // Aged out of the review queue after 3 days. Was in `total` and in no
+  // bucket - counted as found, visible nowhere.
+  expired?: number;
   rejected_archived?: number;
 };
 
@@ -198,6 +201,10 @@ export const api = {
   // way to undo a bulk-marked "applied" that was never applied to.
   restore: (id: number) => request<{ success?: boolean }>(`/api/jobs/${id}/restore`, "POST", {}),
   runSearch: () => request("/api/run-search", "POST", {}),
+  // Puts every applied_via='bulk' job back in the review queue. Scoped to that
+  // origin in SQL, so a real application can never be caught by it.
+  restoreBulkMarked: () =>
+    request<{ success?: boolean; restored?: number }>("/api/jobs/restore-bulk-marked", "POST", {}),
   setStage: (id: number, stage: string) =>
     request<{ ok?: boolean; error?: string }>("/api/set-stage", "POST", { id, stage }),
   bulk: (action: "approve" | "reject", ids: number[]) =>
