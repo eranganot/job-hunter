@@ -5,7 +5,7 @@ import {
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
-  ShieldCheck, Trash2, Users, Send, Wand2,
+  ShieldCheck, Trash2, Users, Send, Wand2, LogOut,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -517,6 +517,9 @@ function DashboardView(p: any) {
         <div className="px-3 py-3 border-t border-gray-700 space-y-1">
           <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
           <button onClick={onOpenSettings} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><Settings className="w-[18px] h-[18px] shrink-0" />Settings</button>
+          {/* A full-page navigation, not a fetch: /logout clears the session
+              cookie in its response, which only a real navigation applies. */}
+          <a href="/logout" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><LogOut className="w-[18px] h-[18px] shrink-0" />Sign out</a>
         </div>
       </aside>
 
@@ -573,7 +576,7 @@ function StatCard({ label, value, sub, icon }: any) {
 function ApplyBadge({ job }: { job: UiJob }) {
   const s = job.applyStatus;
   if (!s || s === "queued") return <span className="text-xs text-gray-500">Queued · ready to apply</span>;
-  if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying\u2026</span>;
+  if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying…</span>;
   if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
   if (s === "failed") return <span className="inline-flex items-center gap-1 text-xs text-red-300"><XCircle className="w-3 h-3" />Apply failed{job.applyFailureType ? ` (${job.applyFailureType})` : ""}</span>;
   if (s === "confirmed") return <span className="inline-flex items-center gap-1 text-xs text-green-300"><CheckCircle className="w-3 h-3" />Confirmed</span>;
@@ -1232,7 +1235,7 @@ function NotificationChannels({ me }: { me: any }) {
         </div>
       )}
       {channel === "email" && (
-        <input value={mailTo} onChange={(e) => setMailTo(e.target.value)} placeholder="Send alerts to\u2026" className={input} />
+        <input value={mailTo} onChange={(e) => setMailTo(e.target.value)} placeholder="Send alerts to…" className={input} />
       )}
       {channel !== "none" && (
         <div className="flex gap-2 mt-3">
@@ -1388,6 +1391,11 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
           <NotificationChannels me={me} />
           <ChangePassword />
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><LogOut className="w-5 h-5 text-gray-400" />Account</h3>
+            <p className="text-xs text-gray-400 mb-2">Signed in as {me?.email || me?.name}</p>
+            <a href="/logout" className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><LogOut className="w-4 h-4" />Sign out</a>
+          </div>
           <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
         </div>

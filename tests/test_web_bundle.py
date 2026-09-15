@@ -207,3 +207,27 @@ def test_the_onboarding_copy_is_in_the_shipped_script():
     js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
     for needle in ("Set up Job Hunter", "Upload your CV", "Your job profile"):
         assert needle in js, "onboarding string %r is not in the shipped bundle" % needle
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_no_app_string_ships_a_literal_backslash_u():
+    """The source check in tests/test_jsx_escapes.py names the file and line;
+    this is the backstop on the artefact users actually receive.
+
+    A JS escape becomes the real character at build time, so anything still
+    spelled \\uXXXX in the OUTPUT is a string someone will read that way. Only
+    QUOTED strings are inspected: a broken JSX text node or attribute compiles
+    to one, while React's own escapes live in regex literals
+    (/^[:A-Z_a-z\\u00C0-.../). That distinction is what makes this precise
+    without an allowlist - a first version tried to allowlist the regexes by
+    their surrounding characters and reported nine false positives.
+    """
+    import re
+    html = (BUNDLE / "index.html").read_text(encoding="utf-8")
+    rels = re.findall(r'src="[^"]*?(assets/[^"]+\.js)"', html)
+    js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
+
+    offenders = re.findall(r'"[^"\n]{0,80}?\\u[0-9a-fA-F]{4}[^"\n]{0,40}?"', js)
+    assert not offenders, (
+        "the shipped bundle contains string(s) a user will read as a literal "
+        "escape sequence:\n  - " + "\n  - ".join(dict.fromkeys(offenders)))
