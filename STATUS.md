@@ -21,6 +21,7 @@ _Seeded from git history + prior transcripts._
 - Sourcing prefers **direct-ATS URLs** over job-board aggregators. SPA queue actions: mark applied / remove / open, 6 reject reasons, apply-result detail + retry, score explainer, list sorting, view-CV PDF.
 - **Apply engine hardened**: parked-link fix (no more false "Verified" on parked domains), timeout hardening, truthful submit-verification, auto-answers required questions, failure diagnostics + removal reasons, push self-heal.
 - **Admin panel** (admin-only): mobile Settings → Admin modal + `/admin` panel — queue overview, maintenance (clear attempted/applied, rescore, dedup), users; new admin endpoints; queue-stats use `get_stats` so Passed/Total match the dashboard. SW cache bumped to v7.
+- **`/app` has a real desktop layout**: a persistent left rail above `lg`, a `max-w-[1600px]` shell, and job lists at 2 columns from `xl` / 3 from `2xl`. Phone and tablet are unchanged. **The SPA build is now verified rather than trusted** - `scripts/build_web.ps1` builds, bumps the SW cache, clears stale assets and refuses to publish a bundle that fails `scripts/verify_web_bundle.py`; the suite runs the same verifier against what is committed. The bundle went from 22 asset files (5.0 MB) to 2.
 - **Sessions are 14-day sliding, stamped in UTC, and revoked on password change.** The expiry comparison used to be decorative - a "T"-separated local-time stamp compared lexicographically against a space-separated UTC one, so a session survived the whole of its expiry day (Changelog, 2026-09-15). `JH_SESSION_DAYS` / `JH_SESSION_REFRESH_AFTER_HOURS` tune it; migration 8 converted the existing rows rather than signing anyone out.
 - **`/api/health` distinguishes liveness from usefulness**: `db_check` is a real `SELECT 1` round trip with latency, and `worker` reports the age of the oldest claimed job, flagged `stuck` past the requeue threshold - queue depth alone cannot tell a wedged worker from an idle one.
 - **Every module logs through `log.py`**, which carries a **request id and user id on every line** and emits one access line per request (`GET /api/jobs -> 200 in 34ms`). Successful static assets are DEBUG so a PWA shell load does not bury the request that matters; 4xx logs WARNING, 5xx ERROR. `JH_LOG_LEVEL` tunes it. Legacy `print()` calls in thirteen modules route through it unchanged, graded INFO/WARNING/ERROR by message text - with WARNING covering the vocabulary an exception message actually uses, which is what stopped a failed credential decryption being logged as INFO.
@@ -65,6 +66,44 @@ Two-folder drift (being retired); sandbox can't push; Playwright browser binarie
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+
+- 2026-09-15 — **Phase 4 begins: the desktop layout, and the build story that had to be fixed before it could ship.** Eran's ask was direct - the web UI is a narrow centred column on a 1920px screen and should use the whole thing. The layout was the easy half.
+
+  **The build was already broken, and its corpse was still committed.** `web_bundle/assets/index-8bxnukfH.css` is **393 bytes**, and its entire content is
+
+  ```
+  @tailwind base;@tailwind components;@tailwind utilities;html,body,#root{height:100%}...
+  ```
+
+  the Tailwind **directives, verbatim**. PostCSS never ran, so every utility class in the app resolved to nothing. **Vite still emitted a valid file and still exited 0.** That is the shape of this failure: nothing errors, the page loads, and it is simply unstyled - and since Railway does not build the frontend, whatever sits in `web_bundle/` is what users get. CLAUDE.md has warned for months to "check the built CSS is ~25KB (not ~400 bytes)"; nothing enforced it.
+
+  **A second fault, found while looking at the first:** `web_bundle/assets/` held **22 files, of which `index.html` referenced 2**. Vite's `emptyOutDir` cleans `dist/`, not `web_bundle/`, so every build since the beginning left its predecessor behind - **5.0 MB** of dead JavaScript in the repo and in every Docker image. Removed; the bundle is now 2 files.
+
+  **`scripts/verify_web_bundle.py` is the gate,** and the size check the plan asked for is the weaker half of it. The check that actually names the fault is a **content** check: a stylesheet still containing `@tailwind` is broken at any size. It also catches a stub script, a dangling `index.html` reference (the one failure that takes the app down rather than merely unstyling it), a missing service-worker `VERSION`, and any stale asset. `scripts/build_web.ps1` installs, builds, bumps the SW cache version, **clears `assets/` before copying**, and refuses to leave a bundle that does not verify. `tests/test_web_bundle.py` runs the same verifier against the committed bundle, so a broken bundle cannot be committed either - the build script is the thing a person can forget to run.
+
+  **The verifier is tested rather than trusted.** Seven fixtures plant each fault - including the 393-byte stylesheet byte for byte - and assert it is caught, plus one asserting a healthy bundle passes, without which the others would all pass on a verifier that always fails.
+
+  **The layout.** Above `lg` a persistent left rail carries the six tabs plus Swipe and Settings, and the small-screen button grid and header buttons are `lg:hidden` - one navigation rendered two ways, not two navigations to keep in sync. The shell is `max-w-[1600px]`: capped rather than unbounded, so 1920px fills with comfortable gutters while an ultrawide does not stretch rows past the point where the eye loses its place. Job lists go `xl:grid-cols-2 2xl:grid-cols-3`. **Measured, not eyeballed** - the real built bundle was rendered headless at four widths with the API stubbed:
+
+  ```
+  390px   sidebar hidden   cards 316px   1 column    no horizontal overflow
+  768px   sidebar hidden   cards 694px   1 column    no horizontal overflow
+  1280px  sidebar 256px    cards 457px   2 columns   no horizontal overflow
+  1920px  sidebar 256px    cards 493px   3 columns   no horizontal overflow
+  ```
+
+  The phone layout is byte-identical to before: the sidebar is purely additive.
+
+  **A regression test with no browser in it.** Tailwind only emits a class it finds in the source, so the built stylesheet is *evidence* about the layout: `tests/test_web_bundle.py` asserts the shipped CSS contains the width cap, the rail's rules and both column breakpoints, and separately that the base grid utilities the phone depends on are still there. A Playwright test would have skipped on most machines, and a skip is never a pass.
+
+  **Also fixed, a visible one-character bug:** `App.tsx:531` contained the literal text `\u00b7` inside JSX, so every queued job rendered "Queued \u00b7 ready to apply" on screen. JSX does not process escape sequences in text nodes. Visible in Eran's own screenshot.
+
+  **One thing I broke and caught in the same turn:** the first service-worker bump extracted the version with `grep -o '[0-9]*$'` against `VERSION = "jh-v8"` - the digits precede a closing quote, so `$` anchored on nothing and it matched the empty string. The `sed` that followed silently matched nothing, so no damage was done, but the shipped PowerShell script now anchors on a capture group and the reason is written next to it. SW cache **jh-v8 -> jh-v9**.
+
+  Suite **437 -> 453**. Six mutations checked: restoring the 393-byte stylesheet, leaving a stale asset, deleting a referenced file, stripping the rail's sticky rule, removing the width cap, and blinding the verifier to stale files each fail exactly the tests that assert that property.
+
+  **Still open in Phase 4:** porting the legacy-only features (onboarding, pipeline stages, bulk actions, change password, CV analysis, admin probes), restyling the server-rendered pages, and the `/dashboard` flip and delete. This ship is the foundation - the build is trustworthy and the desktop shell exists.
+
 
 - 2026-09-15 — **The session expiry check was not checking. Found while auditing what Phase 3 actually had left.** The plan's remaining Phase 3 items read "advisory-locked scheduler" and "session rotation; 30-day -> 14-day sliding sessions". The advisory lock buys nothing until a second instance exists, so I went to read the session code first - and found a bug there rather than a feature gap.
 

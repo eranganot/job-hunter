@@ -462,6 +462,11 @@ function CenterState({ icon, title, action }: { icon: any; title: string; action
   return (<div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex flex-col items-center justify-center p-6 text-center">{icon}<p className="text-gray-300 mt-4 mb-4">{title}</p>{action && <button onClick={action.onClick} className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-medium">{action.label}</button>}</div>);
 }
 
+// One width for the whole desktop shell. Capped rather than unbounded: at
+// 1920px this fills the screen with comfortable gutters, and on an ultrawide it
+// stops rows growing so long the eye loses its place returning to the next one.
+const SHELL = "mx-auto w-full max-w-[1600px]";
+
 const TABS: [DashboardTab, string, any][] = [
   ["queue", "Queue", CheckCircle], ["applied", "Applied", Rocket], ["deferred", "Deferred", Clock],
   ["passed", "Passed", XCircle], ["activity", "Activity", List], ["analytics", "Analytics", BarChart3],
@@ -479,21 +484,45 @@ function DashboardView(p: any) {
     return a;
   };
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <header className="bg-gray-800 border-b border-gray-700 safe-top">
-        <div className="max-w-3xl mx-auto px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center"><Briefcase className="w-5 h-5 text-white" /></div><div><h1 className="text-lg font-bold text-white">Dashboard</h1><p className="text-xs text-gray-400">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div></div>
-          <div className="flex items-center gap-2"><button onClick={onBackToSwipe} className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl text-sm font-medium flex items-center gap-2"><Briefcase className="w-4 h-4" />Swipe</button><button onClick={onOpenSettings} className="p-2.5 bg-gray-800 rounded-xl border border-gray-700 active:bg-gray-700"><Settings className="w-5 h-5 text-gray-300" /></button></div>
+    <div className="min-h-screen bg-gray-900 text-white lg:flex">
+      {/* Desktop navigation rail. Below lg it does not exist and the button grid
+          below carries navigation instead - one nav, rendered two ways, rather
+          than two navigations to keep in sync. */}
+      <aside className="hidden lg:flex lg:flex-col lg:w-56 xl:w-64 lg:shrink-0 lg:sticky lg:top-0 lg:h-screen bg-gray-800 border-r border-gray-700">
+        <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-700">
+          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center shrink-0"><Briefcase className="w-5 h-5 text-white" /></div>
+          <div className="min-w-0"><h1 className="text-base font-bold text-white leading-tight">Job Hunter</h1><p className="text-xs text-gray-400 truncate">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div>
+        </div>
+        <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-1">
+          {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (
+            <button key={id} onClick={() => setActiveTab(id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-transparent border-transparent text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"}`}>
+              <Icon className="w-[18px] h-[18px] shrink-0" /><span className="truncate">{label}</span>
+            </button>); })}
+        </nav>
+        <div className="px-3 py-3 border-t border-gray-700 space-y-1">
+          <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
+          <button onClick={onOpenSettings} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><Settings className="w-[18px] h-[18px] shrink-0" />Settings</button>
+        </div>
+      </aside>
+
+      <div className="flex-1 min-w-0">
+      <header className="bg-gray-800 border-b border-gray-700 safe-top lg:bg-gray-900">
+        <div className={`${SHELL} px-5 lg:px-8 py-4 flex items-center justify-between`}>
+          <div className="flex items-center gap-3"><div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center lg:hidden"><Briefcase className="w-5 h-5 text-white" /></div><div><h1 className="text-lg font-bold text-white lg:text-2xl">Dashboard</h1><p className="text-xs text-gray-400 lg:hidden">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div></div>
+          {/* The rail carries these above lg; two copies on screen at once would
+              be the thing a user notices before they notice the extra width. */}
+          <div className="flex items-center gap-2 lg:hidden"><button onClick={onBackToSwipe} className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl text-sm font-medium flex items-center gap-2"><Briefcase className="w-4 h-4" />Swipe</button><button onClick={onOpenSettings} className="p-2.5 bg-gray-800 rounded-xl border border-gray-700 active:bg-gray-700"><Settings className="w-5 h-5 text-gray-300" /></button></div>
         </div>
       </header>
-      <div className="max-w-3xl mx-auto px-5 py-5">
+      <div className={`${SHELL} px-5 lg:px-8 py-5`}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <StatCard label="Queue" value={approvedCount} sub="Ready to apply" icon={<CheckCircle className="w-5 h-5 text-green-500" />} />
           <StatCard label="Applied" value={appliedJobs.length} sub="Submitted" icon={<Rocket className="w-5 h-5 text-blue-500" />} />
           <StatCard label="Deferred" value={deferredCount} sub="Decide later" icon={<Clock className="w-5 h-5 text-amber-500" />} />
           <StatCard label="Passed" value={rejectedCount} sub="Not a fit" icon={<XCircle className="w-5 h-5 text-red-500" />} />
         </div>
-        <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="grid grid-cols-3 gap-2 mb-4 lg:hidden">
           {TABS.map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
         </div>
         {["queue", "applied", "deferred"].includes(activeTab) && (
@@ -515,6 +544,7 @@ function DashboardView(p: any) {
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={stats?.applied ?? appliedJobs.length} totalSuggested={stats?.total ?? 0} />}
         </div>
       </div>
+      </div>
       {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} />}
       <AnimatePresence>{removeTarget && <RejectReasonSheet job={removeTarget} onPick={(k) => { onRemoveQueued(removeTarget, k ? (REJECT_REASONS[k] || k) : "Removed from queue"); setRemoveTarget(null); }} onUndo={() => setRemoveTarget(null)} />}</AnimatePresence>
       <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={onCloseSettings} />}</AnimatePresence>
@@ -528,7 +558,7 @@ function StatCard({ label, value, sub, icon }: any) {
 
 function ApplyBadge({ job }: { job: UiJob }) {
   const s = job.applyStatus;
-  if (!s || s === "queued") return <span className="text-xs text-gray-500">Queued \u00b7 ready to apply</span>;
+  if (!s || s === "queued") return <span className="text-xs text-gray-500">Queued · ready to apply</span>;
   if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying\u2026</span>;
   if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
   if (s === "failed") return <span className="inline-flex items-center gap-1 text-xs text-red-300"><XCircle className="w-3 h-3" />Apply failed{job.applyFailureType ? ` (${job.applyFailureType})` : ""}</span>;
@@ -562,7 +592,7 @@ function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any)
       {checkMsg && <p className="text-xs text-gray-400 -mt-1">{checkMsg}</p>}
       {!jobs.length
         ? <EmptyTab icon={CheckCircle} title="No jobs in queue" sub="Approved jobs appear here" />
-        : jobs.map((job: UiJob) => <QueueJobCard key={job.id} job={job} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}
+        : <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3 items-start">{jobs.map((job: UiJob) => <QueueJobCard key={job.id} job={job} onSelect={onSelectJob} onMarkApplied={onMarkApplied} onRemove={onRemove} />)}</div>}
     </div>
   );
 }
@@ -586,7 +616,7 @@ function QueueJobCard({ job, onSelect, onMarkApplied, onRemove }: any) {
 
 function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emptySub, heading }: any) {
   if (!jobs.length) return <EmptyTab icon={EI} title={emptyTitle} sub={emptySub} />;
-  return (<div className="space-y-3"><h3 className="text-base font-semibold text-white mb-1">{heading}</h3>{jobs.map((job: UiJob) => <JobCard key={job.id} job={job} onSelect={onSelectJob} showStatus={showStatus} />)}</div>);
+  return (<div className="space-y-3"><h3 className="text-base font-semibold text-white mb-1">{heading}</h3><div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3 items-start">{jobs.map((job: UiJob) => <JobCard key={job.id} job={job} onSelect={onSelectJob} showStatus={showStatus} />)}</div></div>);
 }
 
 function DeferredTab({ jobs, onSelectJob, onUnDefer }: any) {
@@ -594,6 +624,7 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer }: any) {
   return (
     <div className="space-y-3">
       <h3 className="text-base font-semibold text-white mb-1">{jobs.length} deferred</h3>
+      <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3 items-start">
       {jobs.map((job: UiJob) => (
         <div key={job.id} className="flex items-center gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700">
           <div className="w-12 h-12 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-xl flex items-center justify-center shrink-0" onClick={() => onSelectJob(job)}><Building2 className="w-6 h-6 text-indigo-400" /></div>
@@ -601,6 +632,7 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer }: any) {
           <button onClick={() => onUnDefer(job)} className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0">Move to review</button>
         </div>
       ))}
+      </div>
     </div>
   );
 }
