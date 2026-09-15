@@ -2491,53 +2491,118 @@ _COMMON_HEAD = """
 
 # ── Auth pages ────────────────────────────────────────────────────────────────
 
+_AUTH_HEAD = """
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0f172a"/>
+  <style>
+    /* Deliberately self-contained: this page links no external stylesheet.
+       These two pages are the first thing a stranger sees, and the legacy
+       Tailwind file they used to link is a frozen gzip+base64 blob in app.py
+       that no build step regenerates - so the sign-in screen was the one
+       surface whose look depended on an artifact nobody can rebuild. The
+       palette is /app's, matched by value. */
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+           padding:1.25rem; color:#e5e7eb; background:#0f172a;
+           background-image: radial-gradient(60rem 40rem at 15% -10%, rgba(99,102,241,.18), transparent 60%),
+                             radial-gradient(50rem 40rem at 110% 110%, rgba(56,89,248,.14), transparent 60%);
+           font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    .wrap { width:100%; max-width:26rem; }
+    .brand { text-align:center; margin-bottom:1.75rem; }
+    .mark { width:3.5rem; height:3.5rem; margin:0 auto .9rem; border-radius:1rem;
+            display:flex; align-items:center; justify-content:center;
+            background:linear-gradient(135deg,#6366f1,#4338ca); box-shadow:0 10px 30px rgba(79,70,229,.35); }
+    .mark svg { width:1.65rem; height:1.65rem; stroke:#fff; }
+    .brand h1 { margin:0; font-size:1.6rem; font-weight:700; color:#fff; letter-spacing:-.01em; }
+    .brand p { margin:.35rem 0 0; font-size:.85rem; color:#94a3b8; }
+    .card { background:#1f2937; border:1px solid #374151; border-radius:1.25rem; padding:1.75rem;
+            box-shadow:0 24px 60px rgba(0,0,0,.45); }
+    .card h2 { margin:0 0 1.25rem; font-size:1.05rem; font-weight:650; color:#fff; }
+    label { display:block; font-size:.78rem; font-weight:500; color:#9ca3af; margin-bottom:.4rem; }
+    .field { margin-bottom:.9rem; }
+    input { width:100%; padding:.75rem 1rem; font-size:.9rem; color:#fff;
+            background:#111827; border:1px solid #374151; border-radius:.75rem; outline:none; }
+    input::placeholder { color:#6b7280; }
+    input:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.25); }
+    .pw { position:relative; }
+    .pw input { padding-right:3rem; }
+    .reveal { position:absolute; right:.4rem; top:50%; transform:translateY(-50%);
+              background:none; border:0; color:#9ca3af; cursor:pointer; padding:.5rem;
+              font-size:.72rem; font-weight:600; }
+    .reveal:hover { color:#e5e7eb; }
+    button.primary { width:100%; margin-top:.35rem; padding:.85rem 1rem; font-size:.92rem; font-weight:600;
+                     color:#fff; border:0; border-radius:.75rem; cursor:pointer;
+                     background:linear-gradient(90deg,#4f46e5,#4338ca); }
+    button.primary:hover { filter:brightness(1.08); }
+    button.primary:active { transform:scale(.99); }
+    .google { display:flex; align-items:center; justify-content:center; gap:.65rem; width:100%;
+              padding:.75rem 1rem; font-size:.9rem; font-weight:600; color:#e5e7eb; text-decoration:none;
+              background:#111827; border:1px solid #374151; border-radius:.75rem; }
+    .google:hover { background:#374151; }
+    .or { display:flex; align-items:center; gap:.75rem; margin:1.15rem 0; }
+    .or span { font-size:.72rem; color:#6b7280; font-weight:500; }
+    .or i { flex:1; height:1px; background:#374151; }
+    .alt { text-align:center; font-size:.85rem; color:#9ca3af; margin:1.4rem 0 0; }
+    .alt a { color:#a5b4fc; font-weight:600; text-decoration:none; }
+    .alt a:hover { text-decoration:underline; }
+    .err { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); color:#fca5a5;
+           border-radius:.75rem; padding:.75rem 1rem; font-size:.85rem; margin-bottom:1rem; }
+  </style>
+  <script>
+    function revealPw(btn){
+      var i = btn.parentNode.querySelector('input');
+      var on = i.type === 'password';
+      i.type = on ? 'text' : 'password';
+      btn.textContent = on ? 'Hide' : 'Show';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  </script>
+"""
+
+_MARK = ('<div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" '
+         'stroke-linecap="round" stroke-linejoin="round">'
+         '<rect x="2" y="7" width="20" height="14" rx="2"/>'
+         '<path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div>')
+
+_GOOGLE_SVG = ('<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">'
+  '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>'
+  '<path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>'
+  '<path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/>'
+  '<path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z"/></svg>')
+
+
 LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en">
-<head>""" + _COMMON_HEAD + """
-  <title>Job Hunter — Sign In</title>
+<head>""" + _AUTH_HEAD + """
+  <title>Job Hunter — Sign in</title>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-blue-900 flex items-center justify-center p-4">
-<div class="w-full max-w-md fade">
-  <div class="text-center mb-8">
-    <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-xl">
-      <span class="text-3xl">🎯</span>
-    </div>
-    <h1 class="text-3xl font-bold text-white">Job Hunter</h1>
-    <p class="text-blue-300 mt-1 text-sm">Your AI-powered job search assistant</p>
+<body>
+<div class="wrap">
+  <div class="brand">""" + _MARK + """
+    <h1>Job Hunter</h1>
+    <p>Your AI-powered job search assistant</p>
   </div>
-
-  <div class="bg-white rounded-2xl shadow-2xl p-8">
-    <h2 class="text-xl font-bold text-slate-900 mb-6">Sign in to your account</h2>
-
+  <div class="card">
+    <h2>Sign in to your account</h2>
     {error_block}
-
-    <a href="/auth/google/start" class="flex items-center justify-center gap-3 w-full border border-slate-300 rounded-lg py-2.5 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
-      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z"/></svg>
-      Continue with Google
-    </a>
-
-    <div class="flex items-center gap-3 my-5">
-      <div class="h-px bg-slate-200 flex-1"></div>
-      <span class="text-xs text-slate-400 font-medium">or</span>
-      <div class="h-px bg-slate-200 flex-1"></div>
-    </div>
-
-    <form method="POST" action="/login" class="space-y-4">
-      <div>
-        <label class="label" for="email">Email</label>
-        <input class="input" type="email" name="email" id="email" placeholder="you@example.com" required autofocus/>
+    <a class="google" href="/auth/google/start">""" + _GOOGLE_SVG + """Continue with Google</a>
+    <div class="or"><i></i><span>or</span><i></i></div>
+    <form method="POST" action="/login">
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" name="email" id="email" autocomplete="email" placeholder="you@example.com" required autofocus/>
       </div>
-      <div>
-        <label class="label" for="password">Password</label>
-        <input class="input" type="password" name="password" id="password" placeholder="••••••••" required/>
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="pw">
+          <input type="password" name="password" id="password" autocomplete="current-password" placeholder="Your password" required/>
+          <button type="button" class="reveal" aria-pressed="false" aria-label="Show password" onclick="revealPw(this)">Show</button>
+        </div>
       </div>
-      <button type="submit" class="btn btn-primary w-full mt-2">Sign in →</button>
+      <button type="submit" class="primary">Sign in</button>
     </form>
-
-    <p class="text-center text-sm text-slate-500 mt-6">
-      Don't have an account?
-      <a href="/register" class="text-blue-600 font-semibold hover:underline">Create one</a>
-    </p>
+    <p class="alt">Don't have an account? <a href="/register">Create one</a></p>
   </div>
 </div>
 </body>
@@ -2545,59 +2610,46 @@ LOGIN_HTML = """<!DOCTYPE html>
 
 REGISTER_HTML = """<!DOCTYPE html>
 <html lang="en">
-<head>""" + _COMMON_HEAD + """
-  <title>Job Hunter — Create Account</title>
+<head>""" + _AUTH_HEAD + """
+  <title>Job Hunter — Create account</title>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-blue-900 flex items-center justify-center p-4">
-<div class="w-full max-w-md fade">
-  <div class="text-center mb-8">
-    <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl mb-4 shadow-xl">
-      <span class="text-3xl">🎯</span>
-    </div>
-    <h1 class="text-3xl font-bold text-white">Job Hunter</h1>
-    <p class="text-blue-300 mt-1 text-sm">Let's get you set up</p>
+<body>
+<div class="wrap">
+  <div class="brand">""" + _MARK + """
+    <h1>Job Hunter</h1>
+    <p>Let's get you set up</p>
   </div>
-
-  <div class="bg-white rounded-2xl shadow-2xl p-8">
-    <h2 class="text-xl font-bold text-slate-900 mb-6">Create your account</h2>
-
+  <div class="card">
+    <h2>Create your account</h2>
     {error_block}
-
-    <a href="/auth/google/start" class="flex items-center justify-center gap-3 w-full border border-slate-300 rounded-lg py-2.5 font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
-      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.706A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.706V4.962H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.038l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.167 6.656 3.58 9 3.58z"/></svg>
-      Continue with Google
-    </a>
-
-    <div class="flex items-center gap-3 my-5">
-      <div class="h-px bg-slate-200 flex-1"></div>
-      <span class="text-xs text-slate-400 font-medium">or</span>
-      <div class="h-px bg-slate-200 flex-1"></div>
-    </div>
-
-    <form method="POST" action="/register" class="space-y-4">
-      <div>
-        <label class="label" for="name">Full name</label>
-        <input class="input" type="text" name="name" id="name" placeholder="Eran Ganot" required autofocus/>
+    <a class="google" href="/auth/google/start">""" + _GOOGLE_SVG + """Continue with Google</a>
+    <div class="or"><i></i><span>or</span><i></i></div>
+    <form method="POST" action="/register">
+      <div class="field">
+        <label for="name">Full name</label>
+        <input type="text" name="name" id="name" autocomplete="name" placeholder="Jane Cohen" required autofocus/>
       </div>
-      <div>
-        <label class="label" for="email">Work email</label>
-        <input class="input" type="email" name="email" id="email" placeholder="you@example.com" required/>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" name="email" id="email" autocomplete="email" placeholder="you@example.com" required/>
       </div>
-      <div>
-        <label class="label" for="password">Password</label>
-        <input class="input" type="password" name="password" id="password" placeholder="At least 8 characters" required minlength="8"/>
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="pw">
+          <input type="password" name="password" id="password" autocomplete="new-password" placeholder="At least 8 characters" required minlength="8"/>
+          <button type="button" class="reveal" aria-pressed="false" aria-label="Show password" onclick="revealPw(this)">Show</button>
+        </div>
       </div>
-      <div>
-        <label class="label" for="password2">Confirm password</label>
-        <input class="input" type="password" name="password2" id="password2" placeholder="••••••••" required minlength="8"/>
+      <div class="field">
+        <label for="password2">Confirm password</label>
+        <div class="pw">
+          <input type="password" name="password2" id="password2" autocomplete="new-password" placeholder="Type it again" required minlength="8"/>
+          <button type="button" class="reveal" aria-pressed="false" aria-label="Show password" onclick="revealPw(this)">Show</button>
+        </div>
       </div>
-      <button type="submit" class="btn btn-primary w-full mt-2">Create account →</button>
+      <button type="submit" class="primary">Create account</button>
     </form>
-
-    <p class="text-center text-sm text-slate-500 mt-6">
-      Already have an account?
-      <a href="/login" class="text-blue-600 font-semibold hover:underline">Sign in</a>
-    </p>
+    <p class="alt">Already have an account? <a href="/login">Sign in</a></p>
   </div>
 </div>
 </body>
@@ -2606,7 +2658,7 @@ REGISTER_HTML = """<!DOCTYPE html>
 def error_block(msg: str) -> str:
     if not msg:
         return ""
-    return f"""<div class="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">{msg}</div>"""
+    return f"""<div class="err">{msg}</div>"""
 
 # ── Onboarding ────────────────────────────────────────────────────────────────
 

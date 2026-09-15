@@ -865,10 +865,30 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
      scroll position for no new information. */
   const [local, setLocal] = useState<Record<number, string>>({});
   const [filter, setFilter] = useState<string>("");
+  /* "What are those 84?" was the question the breakdown could not answer,
+     because it gave a number with no way to reach the rows behind it. */
+  const [origin, setOrigin] = useState<string>("");
+  const [restored, setRestored] = useState<Set<number>>(new Set());
+  const [restoreMsg, setRestoreMsg] = useState("");
   const stageOf = (j: UiJob) => local[j.id] ?? j.stage;
   const counts: Record<string, number> = {};
   for (const j of jobs) { const st = stageOf(j) || "none"; counts[st] = (counts[st] || 0) + 1; }
-  const shown = filter ? jobs.filter((j: UiJob) => stageOf(j) === filter) : jobs;
+  const origins: Record<string, number> = {};
+  for (const j of jobs) { const o = j.appliedVia || "unknown"; origins[o] = (origins[o] || 0) + 1; }
+  const shown = jobs
+    .filter((j: UiJob) => !filter || stageOf(j) === filter)
+    .filter((j: UiJob) => !origin || (j.appliedVia || "unknown") === origin)
+    .filter((j: UiJob) => !restored.has(j.id));
+
+  const sendBackToReview = async (job: UiJob) => {
+    if (!confirm(`Put "${job.title}" at ${job.company} back in your review queue?\n\nIt was marked applied by a bulk cleanup, not by an actual application.`)) return;
+    setRestoreMsg("");
+    try {
+      await api.restore(job.id);
+      setRestored((c) => new Set(c).add(job.id));
+      setRestoreMsg("Moved back to review. It will appear in your swipe queue.");
+    } catch (e: any) { setRestoreMsg(e?.message || "Could not move that job"); }
+  };
 
   if (!jobs.length) return <EmptyTab icon={EI} title={emptyTitle} sub={emptySub} />;
   return (
@@ -891,6 +911,33 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
           )}
         </div>
       )}
+      {stages && (origins["bulk"] || origins["no_url"] || origins["unknown"]) ? (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] text-gray-500 mr-0.5">Origin</span>
+          {([["", "All", jobs.length],
+             ["engine", "Sent by Job Hunter", origins["engine"] || 0],
+             ["manual", "You marked applied", origins["manual"] || 0],
+             ["bulk", "Bulk-marked, never applied", origins["bulk"] || 0],
+             ["no_url", "No link", origins["no_url"] || 0],
+             ["unknown", "Unknown", origins["unknown"] || 0]] as [string, string, number][])
+            .filter(([id, , c]) => id === "" || c > 0)
+            .map(([id, label, c]) => (
+              <button key={id || "all"} onClick={() => setOrigin(origin === id ? "" : id)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                  origin === id ? "bg-indigo-600 border-indigo-500 text-white"
+                                : "bg-gray-900/50 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+                {label} {c}
+              </button>
+            ))}
+        </div>
+      ) : null}
+      {origin === "bulk" && (
+        <p className="text-xs text-amber-300/90">
+          These were never reviewed and never applied to. A one-off cleanup marked them applied to
+          empty the queue. Send any of them back to review to decide properly.
+        </p>
+      )}
+      {restoreMsg && <p className="text-xs text-indigo-300">{restoreMsg}</p>}
       {!shown.length && <p className="text-sm text-gray-500 py-6 text-center">Nothing at this stage yet.</p>}
       <div className="space-y-2">
         {shown.map((job: UiJob, i: number) => (
@@ -905,10 +952,20 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
                 <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
               </p>
             )}
-            {stages && (
+            {stages && (job.appliedVia === "bulk" || job.appliedVia === "no_url") ? (
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-amber-300/90">
+                  {job.appliedVia === "bulk" ? "Bulk-marked — no application was sent" : "Recorded as sent with no link"}
+                </span>
+                <button onClick={(e) => { e.stopPropagation(); sendBackToReview(job); }}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-indigo-500/50 text-indigo-200 hover:bg-indigo-500/10">
+                  Send back to review
+                </button>
+              </div>
+            ) : stages ? (
               <StagePicker job={{ ...job, stage: stageOf(job) }}
                            onChanged={(id: number, st: string) => setLocal((c) => ({ ...c, [id]: st }))} />
-            )}
+            ) : null}
           </RankedRow>
         ))}
       </div>
@@ -1073,6 +1130,19 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
   const approvalRate = pct(approvedAllTime, reviewed);
   const applyRate    = pct(reallyApplied, approvedAllTime);
 
+  /* Every figure on this screen, and how they meet.
+     "Passed 435" and "137 approved of 337 you reviewed" are both true and are
+     built from DIFFERENT SETS, which is why subtracting one from the other
+     gave nonsense: the archived passes sit inside Passed and outside reviewed,
+     and the still-new jobs sit inside Found and inside neither. Nothing said
+     so, so the only honest fix is to show the whole sum rather than two
+     summaries of it. */
+  const stillNew  = n("new");
+  const found     = totalSuggested || 0;
+  const reviewable = found - filtered - archived;
+  const parts     = approvedAllTime + n("passed_by_user") + n("passed_unknown") + stillNew + deferredCount;
+  const reconciles = reviewable === parts;
+
   const Row = ({ label, value, sub, tone }: any) => (
     <div className="flex items-start justify-between gap-3 py-2.5 border-b border-gray-700/60 last:border-0">
       <div className="min-w-0">
@@ -1102,11 +1172,47 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
 
       {hasBreakdown && (
         <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
+          <h4 className="font-semibold text-white mb-1">Where every job went</h4>
+          <p className="text-xs text-gray-500 mb-3">
+            The two percentages above are measured over different sets, which is why they cannot be
+            subtracted from each other. This is the whole sum.
+          </p>
+          <div className="font-mono text-sm space-y-1">
+            <div className="flex justify-between gap-3 text-gray-200">
+              <span>Jobs found for you</span><span className="font-semibold">{found}</span>
+            </div>
+            <div className="flex justify-between gap-3 text-gray-400 pl-4">
+              <span>&minus; filtered out before you saw them</span><span>{filtered}</span>
+            </div>
+            <div className="flex justify-between gap-3 text-gray-400 pl-4">
+              <span>&minus; passed, then archived after 30 days</span><span>{archived}</span>
+            </div>
+            <div className="flex justify-between gap-3 text-white border-t border-gray-700 pt-1 mt-1">
+              <span>= reached your review queue</span><span className="font-semibold">{reviewable}</span>
+            </div>
+            <div className="flex justify-between gap-3 text-green-300 pl-4 pt-1"><span>approved</span><span>{approvedAllTime}</span></div>
+            <div className="flex justify-between gap-3 text-red-300 pl-4"><span>you passed</span><span>{n("passed_by_user") + n("passed_unknown")}</span></div>
+            <div className="flex justify-between gap-3 text-amber-300 pl-4"><span>deferred</span><span>{deferredCount}</span></div>
+            <div className="flex justify-between gap-3 text-gray-400 pl-4"><span>still waiting for you</span><span>{stillNew}</span></div>
+            <div className={`flex justify-between gap-3 border-t border-gray-700 pt-1 mt-1 ${reconciles ? "text-white" : "text-amber-300"}`}>
+              <span>{reconciles ? "= same number" : "= does NOT match \u2014 a job is in two places or none"}</span>
+              <span className="font-semibold">{parts}</span>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            The approval rate is {approvedAllTime} of the {reviewed} you actually decided on
+            {archived > 0 ? ` — the ${archived} archived passes are left out of it because their rows were deleted and nothing records whether they were your decision or the system's.` : "."}
+          </p>
+        </div>
+      )}
+
+      {hasBreakdown && (
+        <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
           <h4 className="font-semibold text-white mb-1">What &ldquo;applied&rdquo; is made of</h4>
           <p className="text-xs text-gray-500 mb-2">{appliedCount} jobs carry the applied status. They did not all get an application.</p>
           <Row label="Submitted by Job Hunter" sub="The apply engine filled and sent a form" value={n("applied_engine")} tone="text-green-300" />
           <Row label="You marked it applied" sub="You applied yourself and told the app" value={n("applied_manual")} tone="text-green-300" />
-          <Row label="Bulk-marked, not applied" sub="A one-off cleanup emptied the queue by marking it applied" value={n("applied_bulk")} tone="text-amber-300" />
+          <Row label="Bulk-marked, not applied" sub="A one-off cleanup emptied the queue by marking it applied — these were never reviewed. Find them under Applied → Origin." value={n("applied_bulk")} tone="text-amber-300" />
           <Row label="No link to apply to" sub="Recorded as submitted with no URL" value={n("applied_no_url")} tone="text-amber-300" />
           {appliedUnknown > 0 && <Row label="Origin unknown" sub="Recorded before the app tracked this" value={appliedUnknown} tone="text-gray-400" />}
         </div>

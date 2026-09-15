@@ -29,6 +29,9 @@ export type ApiJob = {
   // apply_status on purpose: one records that we submitted, the other what
   // came back. /api/set-stage used to write apply_status and destroy the first.
   stage?: string | null;
+  // engine | manual | bulk | no_url | null. 'bulk' means a one-off cleanup
+  // marked it applied without applying to anything; see migration 9.
+  applied_via?: string | null;
   apply_confirmation?: string | null;
   apply_error?: string | null;
   apply_failure_type?: string | null;
@@ -56,6 +59,8 @@ export type UiJob = {
   applyStatus: string | null;
   /** screening | interviewing | offer | rejected, or "" */
   stage: string;
+  /** engine | manual | bulk | no_url, or "" */
+  appliedVia: string;
   applyConfirmation: string;
   applyError: string;
   applyFailureType: string;
@@ -189,7 +194,9 @@ export const api = {
   applyNow: (id: number) => request(`/api/jobs/${id}/apply-now`, "POST", {}),
   markApplied: (id: number) => request(`/api/jobs/${id}/applied`, "POST", { notes: "Marked applied manually" }),
   later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
-  restore: (id: number) => request(`/api/jobs/${id}/restore`, "POST", {}),
+  // Puts a job back in the review queue and clears every apply field. Also the
+  // way to undo a bulk-marked "applied" that was never applied to.
+  restore: (id: number) => request<{ success?: boolean }>(`/api/jobs/${id}/restore`, "POST", {}),
   runSearch: () => request("/api/run-search", "POST", {}),
   setStage: (id: number, stage: string) =>
     request<{ ok?: boolean; error?: string }>("/api/set-stage", "POST", { id, stage }),
@@ -269,6 +276,7 @@ export function toUiJob(j: ApiJob): UiJob {
     status: j.status,
     applyStatus: j.apply_status ?? null,
     stage: j.stage || "",
+    appliedVia: j.applied_via || "",
     applyConfirmation: j.apply_confirmation || "",
     applyError: j.apply_error || "",
     applyFailureType: j.apply_failure_type || "",

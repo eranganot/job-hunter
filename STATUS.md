@@ -73,6 +73,26 @@ Two-folder drift (being retired); sandbox can't push; Playwright browser binarie
 
 ## Changelog (newest first)
 
+- 2026-09-15 (Phase 4 item 5 + the approval-rate question) — **"Something doesn't add up." It did add up; nothing on screen showed the sum.**
+
+  Eran read 605 found, 435 passed, 337 reviewed, 137 approved and said it could not be right. Solving it from his own screenshot: **the arithmetic reconciles exactly**, and the reason it looks wrong is that the two headline numbers are measured over **different sets** and the screen never said so.
+
+  ```
+    605  found
+  -  33  filtered out before he saw them      (in Passed, not in reviewed)
+  - 202  passed, then archived after 30 days  (in Passed, not in reviewed)
+  = 370  reached the review queue
+         137 approved + 200 he passed + 33 still new + 0 deferred = 370  ✓
+  ```
+
+  So `Passed(435) − reviewed(337)` is meaningless: the 202 archived passes sit inside Passed and outside reviewed, and the 33 still-new jobs sit inside Found and inside neither. **A screen that shows two true summaries and no bridge between them is not more honest than a wrong number — it just moves the error into the reader.** The Analytics tab now shows the whole sum as a reconciliation, ending in a line that says whether the two sides match and turns amber if they ever stop matching.
+
+  **"What are those 84?"** The breakdown named them and gave no way to reach them. They are `applied_via='bulk'`: jobs a one-time cleanup marked applied to empty the queue, without applying to anything — **never reviewed, never sent**. Applied now has an **Origin** filter, and a bulk-marked row carries **Send back to review**, which puts it back in the swipe queue via `/api/jobs/<id>/restore`. That is 84 real jobs he can still decide on rather than a number he has to take on faith.
+
+  **Item 5: `/login` and `/register` restyled — and unhooked from a file nobody can rebuild.** They were the last two surfaces styled by `/static/tw.css`, a frozen gzip+base64 Tailwind blob inside `app.py` that no build step regenerates. **The first thing a stranger sees depended on an artifact that cannot be rebuilt.** Both are now self-contained dark pages matching `/app`, with the password reveal shipped earlier today. The tests protect what a restyle silently breaks rather than how it looks: the input names the POST handlers read, the `{error_block}` slot (which renders as literal text to the user if it is dropped — failing in both directions at once), the Google button, and the absence of any external stylesheet. Mutation-checked: renaming one input fails 1, dropping the error slot fails 2.
+
+  Suite **599 → 614**. SW `jh-v20`. **Phase 4 is now one item from done** — only the `/dashboard` → `/app` flip remains.
+
 - 2026-09-15 (Phase 4 item 4) — **The admin user switch was a one-click, unrecoverable lockout, and four admin endpoints answered 500 where they meant 403.**
 
   **Self-disable.** `/api/admin/users/<id>/toggle` ran `SET is_active = 1 - is_active` with no guard on the target being **you**. `get_session_user` requires `is_active=1`, so the next request 302s to `/login` and the undo answers **401** — and there is one admin account, so the only way back was editing the database by hand. Proven by driving the route: `BEFORE is_active=1` → toggle self → `AFTER is_active=0` → `GET /api/me` → 302 → undo → 401. It was about to get a button. Now refused with `cannot_disable_self`, the row shows "you" instead of a switch, the handler 404s on an id that does not exist (it used to answer `{"success": true}` for **any number at all**), and it returns the new state so the UI renders what *is* rather than what it assumed.
