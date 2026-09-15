@@ -69,14 +69,39 @@ a frozen gzip+base64 Tailwind blob at `app.py:33` that no build step regenerates
 
 Ordered by what blocks a public paid launch, not by size.
 
-| # | Piece | Size | Why here |
-|---:|---|---|---|
-| 1 | **Settings: channels, password, CV analysis** | M | Closes the encryption loop, and `analyze-cv` is the dependency onboarding needs anyway. |
-| 2 | **Onboarding** | L | First thing a new signup sees; the whole point of Phase 5+. Reuses everything from (1). |
-| 3 | **Pipeline stages + bulk actions** | M | The power features that make `/dashboard` still worth opening. |
-| 4 | **Admin redesign + user toggle + apply probes** | M | Once nothing else needs the legacy UI. |
-| 5 | **Restyle login / register / Google button** | S | Shared pages; the seam a new user sees first. |
-| 6 | **Flip `/dashboard` → `/app`, then delete** | S | ~2,900 lines out of `app.py`. Behind `LEGACY_UI=1` for one release. |
+| # | Piece | Size | Status | Why here |
+|---:|---|---|---|---|
+| 1 | **Settings: channels, password, CV analysis** | M | **DONE** (`a2574df`…`1aa0f4d`) | Closes the encryption loop, and `analyze-cv` is the dependency onboarding needs anyway. |
+| 2 | **Onboarding** | L | **DONE** | First thing a new signup sees; the whole point of Phase 5+. Reuses everything from (1). |
+| 3 | **Pipeline stages + bulk actions** | M | **DONE** — and both endpoints were broken | The power features that make `/dashboard` still worth opening. |
+| 4 | **Admin redesign + user toggle + apply probes** | M | **PART DONE** — redesign shipped; toggle and probes open | Once nothing else needs the legacy UI. |
+| 5 | **Restyle login / register / Google button** | S | **NOT STARTED** | Shared pages; the seam a new user sees first. |
+| 6 | **Flip `/dashboard` → `/app`, then delete** | S | **NOT STARTED** | ~2,900 lines out of `app.py`. Behind `LEGACY_UI=1` for one release. |
+
+### Verified remaining, 2026-09-15 (checked against the code, not this table)
+
+Grepped `web/src/` for every endpoint in the gap table above. `/api/set-stage`
+and `/api/jobs/bulk` are now wired (2026-09-15). **Still zero references** to
+`/api/jobs/<id>/cover-letter`, `/api/jobs/<id>/check-status`,
+`/api/admin/users/<id>/toggle` and the three admin apply probes — those are the
+real remainder, alongside items 5 and 6.
+
+**One loose end of my own:** `api.runApply` exists in `client.ts` and is called
+from nothing (`grep -c 'api.runApply' App.tsx` → 0). Either wire the button or
+delete the function; a dead API wrapper reads as a shipped feature to the next
+person looking.
+
+**The flip (6) is three hardcoded destinations, not a refactor:** `dest =
+"/dashboard"` on login POST (`app.py:6622`), and `/login` + `/register` GET
+redirecting an already-authenticated user to `/dashboard` (`:5801`, `:5809`).
+`/register` POST already sends new accounts to `/app`. Non-admins hitting
+`/admin` also land on `/dashboard` (`:5959`).
+
+**Settings gained more than item 1 asked for**, from Eran's hands-on rounds:
+four tabs with Account merged into Profile, full name + LinkedIn URL, schedule
+frequency with Monday-first day pickers for search AND apply, multi-select
+notification channels, per-field password reveal, an auto-apply toggle behind
+`entitlements.can_auto_apply()`, and `?onboarding=1` to replay setup.
 
 Design language is settled and not up for redesign: the dark palette already in
 `/app`, the `max-w-[1600px]` shell, the `lg:` sidebar, and the card grid at

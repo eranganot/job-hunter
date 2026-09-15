@@ -25,6 +25,10 @@ export type ApiJob = {
   feedback_penalty?: number | null;
   feedback_reason?: string | null;
   apply_status?: string | null;
+  // Where the application got to AFTER it was sent. A separate column from
+  // apply_status on purpose: one records that we submitted, the other what
+  // came back. /api/set-stage used to write apply_status and destroy the first.
+  stage?: string | null;
   apply_confirmation?: string | null;
   apply_error?: string | null;
   apply_failure_type?: string | null;
@@ -50,6 +54,8 @@ export type UiJob = {
   timeAgo: string;
   status: string;
   applyStatus: string | null;
+  /** screening | interviewing | offer | rejected, or "" */
+  stage: string;
   applyConfirmation: string;
   applyError: string;
   applyFailureType: string;
@@ -185,6 +191,10 @@ export const api = {
   later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
   restore: (id: number) => request(`/api/jobs/${id}/restore`, "POST", {}),
   runSearch: () => request("/api/run-search", "POST", {}),
+  setStage: (id: number, stage: string) =>
+    request<{ ok?: boolean; error?: string }>("/api/set-stage", "POST", { id, stage }),
+  bulk: (action: "approve" | "reject", ids: number[]) =>
+    request<{ success?: boolean; updated?: number }>("/api/jobs/bulk", "POST", { action, ids }),
   runApply: () => request<{ started?: boolean; status?: string; error?: string }>(
     "/api/run-apply", "POST", {}),
 
@@ -251,6 +261,7 @@ export function toUiJob(j: ApiJob): UiJob {
     timeAgo: timeAgo(j.found_date),
     status: j.status,
     applyStatus: j.apply_status ?? null,
+    stage: j.stage || "",
     applyConfirmation: j.apply_confirmation || "",
     applyError: j.apply_error || "",
     applyFailureType: j.apply_failure_type || "",

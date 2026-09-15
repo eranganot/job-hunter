@@ -125,6 +125,26 @@
       "since": "2026-09-15",
       "what": "analytics counts real applications",
       "needle": "Actually applied"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "pipeline stage picker",
+      "needle": "Interviewing"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "stage filter on Applied",
+      "needle": "not tracked yet"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "bulk selection",
+      "needle": "selected"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "bulk remove from queue",
+      "needle": "Remove from queue"
     }
   ]
 }

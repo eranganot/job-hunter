@@ -7291,8 +7291,19 @@ class Handler(BaseHTTPRequestHandler):
             if not job_id or stage not in ("screening","interviewing","offer","rejected"):
                 self.send_json({"error": "invalid"}, 400); return
             conn = database.get_db()
+            # WRITES `stage`, NOT `apply_status`. It wrote apply_status until
+            # 2026-09-15, which was wrong in both directions at once:
+            #   - the column the UI READS to highlight the selected stage is
+            #     `stage` (app.py:4828-4831), and nothing ever wrote it, so a
+            #     successful update lit up no button and the choice vanished on
+            #     reload while the toast said "Stage updated";
+            #   - `apply_status` records whether the application was actually
+            #     submitted/confirmed/failed, and overwriting it DESTROYED that.
+            #     Moving a confirmed application to "interviewing" erased the
+            #     evidence it had ever been sent.
+            # Proven by driving the route and reading the row back.
             conn.execute(
-                "UPDATE jobs SET apply_status=? WHERE id=? AND user_id=?",
+                "UPDATE jobs SET stage=? WHERE id=? AND user_id=?",
                 (stage, job_id, user["id"])
             )
             conn.commit(); conn.close()
@@ -7317,7 +7328,12 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if not job:
                     continue
-                conn.execute("UPDATE jobs SET status=? WHERE id=?", (new_status, job_id))
+                # rejected_by: a bulk pass is still the USER'S decision, and
+                # without this every bulk-passed job reads as "origin unknown"
+                # in the analytics that separates his passes from the system's.
+                conn.execute(
+                    "UPDATE jobs SET status=?, rejected_by=? WHERE id=?",
+                    (new_status, "user" if action == "reject" else None, job_id))
                 if action == "reject":
                     conn.execute(
                         "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
