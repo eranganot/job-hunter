@@ -227,3 +227,93 @@ def test_the_module_does_not_shadow_the_standard_library():
     import queue as stdlib_queue
     assert "jobqueue" not in (stdlib_queue.__file__ or "")
     assert hasattr(stdlib_queue, "Queue")
+
+
+# ── Daily run caps ───────────────────────────────────────────────────────────
+#
+# The call ceiling in gemini.py and this run cap guard different things. A call
+# ceiling alone still lets one account start fifty searches before lunch and
+# spend the whole day's global allowance; a run cap alone says nothing about a
+# single run that scores ten thousand jobs. Both, or neither is worth much.
+#
+# The cap lives on enqueue() rather than on the HTTP route because the scheduler
+# enqueues too, and a scheduler-started search costs exactly what a
+# button-started one costs.
+
+def test_a_user_cannot_start_more_runs_than_the_day_allows(q, monkeypatch):
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "2")
+    r1 = q.enqueue(1, "search")
+    q.complete(q.claim()["id"], "done")
+    r2 = q.enqueue(1, "search")
+    q.complete(q.claim()["id"], "done")
+    assert r1 and r2
+
+    with pytest.raises(q.DailyCapReached) as e:
+        q.enqueue(1, "search")
+    assert e.value.used == 2 and e.value.limit == 2
+
+
+def test_the_cap_counts_runs_that_failed(q, monkeypatch):
+    """Creations, not completions. Counting completions would let a user retry
+    a crashing run forever, and a run that died still spent what it spent."""
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "1")
+    q.enqueue(1, "search")
+    run = q.claim()
+    for _ in range(q.MAX_ATTEMPTS):
+        q.fail(run["id"], "boom")
+        nxt = q.claim()
+        if not nxt:
+            break
+        run = nxt
+
+    with pytest.raises(q.DailyCapReached):
+        q.enqueue(1, "search")
+
+
+def test_one_users_cap_is_not_another_users_cap(q, monkeypatch):
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "1")
+    q.enqueue(1, "search")
+    assert q.enqueue(2, "search")
+
+
+def test_the_cap_is_per_kind(q, monkeypatch):
+    """Spending the day's searches must not also stop applying."""
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "1")
+    monkeypatch.setenv("JH_RUNS_APPLY_PER_DAY", "1")
+    q.enqueue(1, "search")
+    assert q.enqueue(1, "apply")
+
+
+def test_a_cap_of_zero_is_off_not_locked_shut(q, monkeypatch):
+    """Same reasoning as the rate limiter's env knobs: a limit that cannot be
+    relaxed from the dashboard is its own outage."""
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "0")
+    for _ in range(5):
+        rid = q.enqueue(1, "search")
+        assert rid
+        q.complete(q.claim()["id"], "done")
+
+
+def test_an_unparseable_limit_falls_back_to_the_default_not_to_zero(q, monkeypatch):
+    """A typo in a Railway variable must not silently remove the cap."""
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "twenty")
+    assert q.daily_limit("search") == q.DEFAULT_DAILY_RUNS["search"]
+
+
+def test_an_internal_requeue_does_not_spend_the_users_allowance(q, monkeypatch):
+    """cap=False is for work already counted once - a retry, not a new run."""
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "1")
+    q.enqueue(1, "search")
+    q.complete(q.claim()["id"], "done")
+    assert q.enqueue(1, "search", cap=False)
+
+
+def test_yesterdays_runs_do_not_count_against_today(q, monkeypatch):
+    monkeypatch.setenv("JH_RUNS_SEARCH_PER_DAY", "1")
+    conn = database.get_db()
+    conn.execute("INSERT INTO job_runs (user_id, kind, status, created_date) "
+                 "VALUES (?,?,?,?)", (1, "search", "done", "2020-01-01 09:00:00"))
+    conn.commit()
+    conn.close()
+
+    assert q.enqueue(1, "search")

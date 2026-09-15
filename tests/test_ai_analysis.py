@@ -401,3 +401,66 @@ class TestAnalyzeCv:
         assert isinstance(result.get("keywords"), list)
         assert isinstance(result.get("locations"), list)
         assert isinstance(result.get("recommendations"), list)
+
+
+# ── Behaviour when the budget is spent ───────────────────────────────────────
+#
+# Two call sites, two right answers. Scoring has a keyword heuristic to fall
+# back to, so a spent budget should degrade quietly and keep the jobs page
+# working. A cover letter has no fallback, so it must fail rather than hand the
+# user something the model did not write.
+
+class TestSpentBudget:
+    def test_scoring_degrades_to_the_keyword_heuristic(self, monkeypatch):
+        import ai_analysis
+        import gemini
+
+        def _spent(body, **kw):
+            raise gemini.BudgetExceeded("global", 50000, 50000, "calls")
+
+        monkeypatch.setattr(gemini, "generate", _spent)
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+        job = {"title": "VP of Product", "description": "product strategy roadmap"}
+        profile = {"keywords": '["product", "strategy"]',
+                   "job_titles": '["VP of Product"]', "seniority": "vp"}
+        score = ai_analysis.compute_match_score(job, profile, api_key="test-key")
+
+        assert isinstance(score, int) and score > 0, \
+            "a spent budget took the jobs page down with it"
+
+    def test_a_cover_letter_fails_rather_than_being_faked(self, monkeypatch):
+        import ai_analysis
+        import gemini
+        import pytest as _pytest
+
+        def _spent(body, **kw):
+            raise gemini.BudgetExceeded("global", 50000, 50000, "calls")
+
+        monkeypatch.setattr(gemini, "generate", _spent)
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+        with _pytest.raises(Exception) as e:
+            ai_analysis.generate_cover_letter(
+                {"title": "VP Product", "company": "Acme", "description": "d"},
+                {"cv_summary": "s"}, api_key="test-key")
+        assert "ceiling" in str(e.value).lower() or "budget" in str(e.value).lower()
+
+    def test_the_spend_is_attributed_to_the_user_the_work_is_for(self, monkeypatch):
+        """Per-user ceilings are only as good as the attribution under them."""
+        import ai_analysis
+        import gemini
+        seen = {}
+
+        def _capture(body, **kw):
+            seen.update(kw)
+            return {"candidates": [{"content": {"parts": [
+                {"text": '{"keyword_score":40,"title_score":20,"seniority_score":5}'}]}}]}
+
+        monkeypatch.setattr(gemini, "generate", _capture)
+        ai_analysis.compute_match_score(
+            {"title": "VP of Product", "description": "d"},
+            {"keywords": '["product"]', "job_titles": '["VP of Product"]'},
+            api_key="test-key", user_id=99)
+
+        assert seen["user_id"] == 99

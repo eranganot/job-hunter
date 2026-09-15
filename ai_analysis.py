@@ -8,8 +8,10 @@ import re
 import urllib.request
 import urllib.error
 
+import gemini
 
-def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
+
+def analyze_cv(pdf_path: str, api_key: str = "", user_id: int | None = None) -> dict:
     """
     Analyze a CV/resume PDF using Gemini 2.5 Flash (Claude Sonnet fallback).
 
@@ -98,20 +100,15 @@ def analyze_cv(pdf_path: str, api_key: str = "") -> dict:
                 "temperature": 0.1,
             },
         }).encode()
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               "gemini-2.5-flash:generateContent?key=" + gemini_key)
-        req = urllib.request.Request(url, data=body, method="POST",
-                                     headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                result = json.loads(resp.read())
+            result = gemini.generate(body, purpose="analyze_cv", user_id=user_id,
+                                     key=gemini_key, timeout=90)
             raw = result["candidates"][0]["content"]["parts"][0]["text"].strip()
             raw = _strip_fences(raw)
             print("[analyze-cv] Done via Gemini 2.5 Flash")
             return _normalise(json.loads(raw))
-        except urllib.error.HTTPError as e:
-            gemini_err = e.read().decode()
-            raise RuntimeError(f"Gemini API error {e.code}: {gemini_err}")
+        except gemini.BudgetExceeded:
+            raise
         except Exception as e:
             raise RuntimeError(f"Gemini error: {e}")
 
@@ -241,6 +238,7 @@ def _gemini_match_score(
     job_title: str,
     api_key: str = "",
     feedback_notes: str = "",
+    user_id: "int | None" = None,
 ) -> "tuple[int, int, int] | None":
     """Use Gemini 2.5 Flash for semantic job-fit scoring.
 
@@ -291,13 +289,10 @@ def _gemini_match_score(
                 "thinkingConfig": {"thinkingBudget": 0},
             },
         }).encode()
-        url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-               "gemini-2.5-flash:generateContent?key=" + key)
-        req = urllib.request.Request(url, data=body,
-                                     headers={"Content-Type": "application/json"},
-                                     method="POST")
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            resp_data = json.loads(resp.read().decode("utf-8"))
+        # timeout stays short and retries stay off: this runs once per job in a
+        # scoring loop, and the caller already degrades to the keyword heuristic.
+        resp_data = gemini.generate(body, purpose="match_score", user_id=user_id,
+                                    key=key, timeout=12, retries=0)
         candidates = resp_data.get("candidates") or []
         if not candidates:
             return None
@@ -313,6 +308,12 @@ def _gemini_match_score(
             min(30, max(0, int(scores.get("title_score", 0)))),
             min(10, max(0, int(scores.get("seniority_score", 0)))),
         )
+    except gemini.BudgetExceeded as be:
+        # Deliberate degrade, not an error: the caller's keyword heuristic runs
+        # instead. Named explicitly so narrowing the except below can never turn
+        # a spent budget into a 500 for the whole jobs page.
+        print("[match-score] %s - scoring with the keyword heuristic" % be)
+        return None
     except Exception:
         return None
 
@@ -320,7 +321,8 @@ def _gemini_match_score(
 # Backward-compat alias — some callers still use the old name
 _haiku_match_score = _gemini_match_score
 
-def compute_match_score(job: dict, user_profile: dict, api_key: str = "", signals: "dict | None" = None) -> int:
+def compute_match_score(job: dict, user_profile: dict, api_key: str = "",
+                        signals: "dict | None" = None, user_id: "int | None" = None) -> int:
     """
     Compute 0-100 match score using Claude Haiku for semantic scoring.
     Falls back to keyword overlap (60/30/10) when the API is unavailable.
@@ -349,7 +351,9 @@ def compute_match_score(job: dict, user_profile: dict, api_key: str = "", signal
     job_title_lower = (job.get("title") or "").lower()
     seniority = (user_profile.get("seniority") or "").lower()
     feedback_notes = _feedback_notes(signals)
-    gemini_result = _gemini_match_score(job_text, user_keywords, user_titles, seniority, job_title_lower, gemini_key, feedback_notes)
+    gemini_result = _gemini_match_score(job_text, user_keywords, user_titles, seniority,
+                                        job_title_lower, gemini_key, feedback_notes,
+                                        user_id=user_id)
     if gemini_result is not None:
         kw_score, title_score, seniority_score = gemini_result
         return min(100, max(0, kw_score + title_score + seniority_score))
@@ -415,7 +419,8 @@ def compute_candidate_score(job: dict, user_profile: dict) -> int:
 
 # ── Job status check (Claude API + URL fetch) ──────────────────────────────────
 
-def check_job_status(job_url: str, job_title: str, job_company: str, api_key: str) -> dict:
+def check_job_status(job_url: str, job_title: str, job_company: str, api_key: str,
+                     user_id: "int | None" = None) -> dict:
     """
     Fetch the job URL and ask Claude (Haiku) whether the role is still open.
 
@@ -489,17 +494,8 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
             "thinkingConfig": {"thinkingBudget": 0},
         },
     }).encode()
-    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-2.5-flash:generateContent?key=" + gemini_key)
-    req = urllib.request.Request(url, data=body,
-                                 headers={"Content-Type": "application/json"},
-                                 method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        raise RuntimeError(f"Gemini API error {e.code}: {error_body}")
+    result = gemini.generate(body, purpose="check_job_status", user_id=user_id,
+                             key=gemini_key, timeout=30)
 
     candidates = result.get("candidates") or []
     if not candidates:
@@ -526,7 +522,8 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
 
 
 
-def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
+def generate_cover_letter(job: dict, profile: dict, api_key: str = "",
+                          user_id: "int | None" = None) -> str:
     """Generate a personalised cover letter via Gemini 2.5 Flash (Claude Sonnet fallback).
 
     Raises RuntimeError with the full error message so the UI status bar shows it.
@@ -594,12 +591,8 @@ def generate_cover_letter(job: dict, profile: dict, api_key: str = "") -> str:
                     "thinkingConfig": {"thinkingBudget": 0},
                 },
             }).encode("utf-8")
-            url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                   "gemini-2.5-flash:generateContent?key=" + gemini_key)
-            greq = urllib.request.Request(url, data=body,
-                                          headers={"Content-Type": "application/json"}, method="POST")
-            with urllib.request.urlopen(greq, timeout=45) as resp:
-                gdata = json.loads(resp.read().decode("utf-8"))
+            gdata = gemini.generate(body, purpose="cover_letter", user_id=user_id,
+                                    key=gemini_key, timeout=45)
 
             candidates = gdata.get("candidates", [])
             if not candidates:

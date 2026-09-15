@@ -1,4 +1,4 @@
-<#
+﻿<#
     smoke.ps1 - prove a deploy is alive, on the expected schema, and still
     enforcing its auth gates. Supersedes smoke_phase0.ps1.
 
@@ -248,6 +248,41 @@ Check "GET /api/admin/users leaks nothing anonymously" {
     if ("$($r.Body)" -match "@") { return "response contained an email address" }
     $true
 }
+Write-Host ""
+
+# --- Cost guardrails (Gemini spend ceiling + daily run caps) ------------------
+Write-Host "-- cost guardrails --" -ForegroundColor Cyan
+Check "health reports today's Gemini spend" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $llm = $script:health.llm
+    if ($null -eq $llm) {
+        return "no 'llm' block in /api/health - gemini.py is not wired on this box, so nothing is counting Gemini calls"
+    }
+    Write-Host ("      day:    " + $llm.day) -ForegroundColor DarkGray
+    Write-Host ("      spent:  " + $llm.global.calls + " calls, " + $llm.global.tokens + " tokens") -ForegroundColor DarkGray
+    Write-Host ("      limits: " + $llm.limits.global_calls + " calls/day global, " + $llm.limits.user_calls + " calls/day per user") -ForegroundColor DarkGray
+    $true
+}
+Check "the spend ceiling is actually enforcing" {
+    if ($null -eq $script:health -or $null -eq $script:health.llm) { return "no llm payload" }
+    if ([int]$script:health.llm.limits.enforce -eq 1) { $true }
+    else { "JH_LLM_ENFORCE=0 on this box - spend is counted and alerted but nothing is blocked" }
+}
+Check "at least one ceiling is finite" {
+    # All-zero means every ceiling is switched off, which reads identical to
+    # 'guardrails shipped' from the outside and is the failure this catches.
+    if ($null -eq $script:health -or $null -eq $script:health.llm) { return "no llm payload" }
+    $l = $script:health.llm.limits
+    $finite = @($l.global_calls, $l.global_tokens, $l.user_calls, $l.user_tokens) |
+        Where-Object { [int]$_ -gt 0 }
+    if ($finite.Count -gt 0) { $true }
+    else { "every JH_LLM_* ceiling is 0 - nothing would ever be blocked" }
+}
+Write-Host ""
+Write-Host "      NOTE: the ceilings above shipped generous on purpose - no Gemini" -ForegroundColor DarkGray
+Write-Host "      call in this app had ever been counted before the llm_usage ledger." -ForegroundColor DarkGray
+Write-Host "      Re-run this after a week and set JH_LLM_GLOBAL_CALLS from the real" -ForegroundColor DarkGray
+Write-Host "      number; it is a Railway variable, no deploy needed." -ForegroundColor DarkGray
 Write-Host ""
 
 # --- Apply engine must stay off (parked) --------------------------------------

@@ -63,27 +63,45 @@ class TestExtractApplicantFallback:
 
 
 class TestClaudeHelperIsGemini:
-    def test_claude_calls_gemini_endpoint(self, monkeypatch):
-        import json as _json
+    """_claude is a Gemini call despite the name, and it goes through the door.
+
+    This used to patch urlopen and assert on the URL. It now asserts at the
+    gemini.generate seam instead: the URL is built inside gemini.py, and a test
+    that reaches around the meter to check the host would pass just as happily
+    if apply_engine went back to calling urlopen itself - which is exactly the
+    regression the meter exists to prevent.
+    """
+
+    def test_claude_goes_through_the_metered_door(self, monkeypatch):
         import apply_engine as ae
+        import gemini
         monkeypatch.setattr(ae, "GEMINI_KEY", "test-key")
-        captured = {}
+        seen = {}
 
-        class _Resp:
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
-            def read(self):
-                return _json.dumps({"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}).encode()
+        def _fake_generate(body, **kw):
+            seen["body"] = body
+            seen["kw"] = kw
+            return {"candidates": [{"content": {"parts": [{"text": "hello"}]}}]}
 
-        def _fake_urlopen(req, timeout=90):
-            captured["url"] = req.full_url
-            return _Resp()
+        monkeypatch.setattr(gemini, "generate", _fake_generate)
+        assert ae._claude("hi there") == "hello"
+        assert seen["kw"]["purpose"]
+        assert seen["body"]["contents"][0]["parts"][0]["text"] == "hi there"
 
-        monkeypatch.setattr(ae.urllib.request, "urlopen", _fake_urlopen)
-        out = ae._claude("hi there")
-        assert out == "hello"
-        assert "generativelanguage.googleapis.com" in captured["url"]
-        assert "anthropic" not in captured["url"].lower()
+    def test_a_spent_budget_reaches_the_caller_rather_than_being_swallowed(self, monkeypatch):
+        """apply spends more per run than anything else in the app; a silent
+        fallback here would be the expensive kind of quiet."""
+        import apply_engine as ae
+        import gemini
+        import pytest as _pytest
+        monkeypatch.setattr(ae, "GEMINI_KEY", "test-key")
+
+        def _broke(body, **kw):
+            raise gemini.BudgetExceeded("global", 10, 10, "calls")
+
+        monkeypatch.setattr(gemini, "generate", _broke)
+        with _pytest.raises(gemini.BudgetExceeded):
+            ae._claude("hi there")
 
 
 # ── Parked / expired-domain detection (regression for false "Verified" badge) ──

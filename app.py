@@ -19,14 +19,17 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
+import functools
+
 import auth
 import crypto
 import db as database
+import gemini
 import jobqueue
 import ratelimit
 import worker
@@ -392,6 +395,87 @@ def notify_admin_new_user(new_user_email: str, new_user_name: str):
         print(f"[admin-notify] failed (non-fatal): {e}")
 
 
+_LLM_PRUNED_ON = [""]
+
+
+def _llm_ledger_write(day, user_id, purpose, model, calls, ptok, otok, ttok, ok, error):
+    """One row per Gemini call. Called by gemini.py, which never imports this."""
+    conn = database.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO llm_usage (day, user_id, purpose, model, calls, prompt_tokens, "
+            "output_tokens, total_tokens, ok, error) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (day, user_id, purpose, model, calls, ptok, otok, ttok, ok, error))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _llm_usage_today(day):
+    """Re-seed the in-process counters from the ledger.
+
+    This is what stops a restart from handing the current day a fresh budget —
+    which matters most in the one case the ceiling exists for, since a runaway
+    loop is also the thing most likely to have restarted the process.
+    """
+    conn = database.get_db()
+    try:
+        if _LLM_PRUNED_ON[0] != day:
+            _LLM_PRUNED_ON[0] = day
+            try:
+                keep = int(os.environ.get("JH_LLM_RETENTION_DAYS", "90"))
+                if keep > 0:
+                    cutoff = (datetime.utcnow() - timedelta(days=keep)).strftime("%Y-%m-%d")
+                    conn.execute("DELETE FROM llm_usage WHERE day < ?", (cutoff,))
+                    conn.commit()
+            except Exception as _pe:
+                print(f"[llm-ledger] prune skipped: {_pe}")
+        g = conn.execute(
+            "SELECT COALESCE(SUM(calls),0), COALESCE(SUM(total_tokens),0) "
+            "FROM llm_usage WHERE day=?", (day,)).fetchone()
+        rows = conn.execute(
+            "SELECT user_id, COALESCE(SUM(calls),0), COALESCE(SUM(total_tokens),0) "
+            "FROM llm_usage WHERE day=? AND user_id IS NOT NULL GROUP BY user_id",
+            (day,)).fetchall()
+        return {
+            "global": {"calls": g[0] or 0, "tokens": g[1] or 0},
+            "users": {r[0]: {"calls": r[1] or 0, "tokens": r[2] or 0} for r in rows},
+        }
+    finally:
+        conn.close()
+
+
+def _llm_breach_alert(message: str):
+    """Tell the admin a Gemini ceiling was crossed — on every channel they have.
+
+    Logged to activity_log as well as pushed, because a notification that fails
+    to deliver must still leave a record that the ceiling was hit.
+    """
+    admin_id = None
+    try:
+        conn = database.get_db()
+        row = conn.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
+                           (ADMIN_EMAIL or "",)).fetchone()
+        conn.close()
+        admin_id = row["id"] if row else None
+    except Exception as e:
+        print(f"[llm-alert] admin lookup failed: {e}")
+    try:
+        database.log_activity(admin_id or 0, "llm_budget_breach", message[:500])
+    except Exception as e:
+        print(f"[llm-alert] log failed: {e}")
+    if admin_id:
+        try:
+            deliver_notification(admin_id, message, url_suffix="/dashboard")
+        except Exception as e:
+            print(f"[llm-alert] notify failed (non-fatal): {e}")
+
+
+gemini.set_ledger_writer(_llm_ledger_write)
+gemini.set_sync_source(_llm_usage_today)
+gemini.set_alert_sender(_llm_breach_alert)
+
+
 def bump_onboarding(user_id: int, key: str):
     """Set a single onboarding milestone to true (idempotent)."""
     try:
@@ -432,35 +516,18 @@ def check_notifications():
         print(f"[notify] Error: {e}")
 
 
-def _gemini_generate(url: str, body_bytes: bytes, timeout: int = 90, retries: int = 4) -> str:
-    """POST to the Gemini REST API with exponential backoff on 429/503 (honours
-    Retry-After). A single un-retried 429 was collapsing job SCORING to the weak
-    keyword heuristic, which starves the queue — this smooths per-minute rate
-    limits so sourced jobs actually get scored + inserted."""
-    import urllib.request as _u, urllib.error as _ue, time as _t, random as _r
-    last = None
-    for attempt in range(retries + 1):
-        try:
-            req = _u.Request(url, data=body_bytes,
-                             headers={"Content-Type": "application/json"}, method="POST")
-            with _u.urlopen(req, timeout=timeout) as resp:
-                return resp.read().decode("utf-8")
-        except _ue.HTTPError as e:
-            last = e
-            if e.code in (429, 500, 503) and attempt < retries:
-                _ra = e.headers.get("Retry-After") if e.headers else None
-                delay = float(_ra) if (_ra and str(_ra).isdigit()) else min(2 ** attempt + _r.random(), 30)
-                print(f"[gemini] HTTP {e.code} — backoff retry {attempt + 1}/{retries} in {delay:.1f}s")
-                _t.sleep(delay)
-                continue
-            raise
-        except Exception as e:
-            last = e
-            if attempt < retries:
-                _t.sleep(min(2 ** attempt, 8))
-                continue
-            raise
-    raise last  # pragma: no cover
+def _gemini_generate(body_bytes: bytes, timeout: int = 90, retries: int = 4,
+                     purpose: str = "search_scoring", user_id=None) -> str:
+    """POST to the Gemini REST API and return the raw JSON text.
+
+    The retry/backoff that used to live here moved into gemini.generate(), which
+    is now the single door every Gemini call in this app goes through — so the
+    seven call sites that never had backoff have it too. This shim stays only
+    because three callers already speak "bytes in, JSON text out"; it no longer
+    takes a URL, because building the URL is what let a call site slip past the
+    ceiling."""
+    return json.dumps(gemini.generate(body_bytes, purpose=purpose, user_id=user_id,
+                                      timeout=timeout, retries=retries))
 
 
 def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
@@ -515,10 +582,13 @@ def _check_scheduled_jobs() -> None:
                     # is what stops a second instance double-firing the same
                     # user's daily search, and an unfinished run survives a
                     # redeploy instead of vanishing with the process.
-                    if jobqueue.enqueue(uid, "search"):
-                        print(f'[scheduler] Queued search for user {uid} at hour {sh}')
-                    else:
-                        print(f'[scheduler] Search already in flight for user {uid}; skipped')
+                    try:
+                        if jobqueue.enqueue(uid, "search"):
+                            print(f'[scheduler] Queued search for user {uid} at hour {sh}')
+                        else:
+                            print(f'[scheduler] Search already in flight for user {uid}; skipped')
+                    except jobqueue.DailyCapReached as _cap:
+                        print(f'[scheduler] {_cap} (user {uid}); skipped')
             # Apply: check hour + frequency/day
             if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
                 run_apply = True
@@ -531,10 +601,13 @@ def _check_scheduled_jobs() -> None:
                     # a kill-switch change rather than a rewrite. The engine
                     # itself stays off: apply_engine no-ops without
                     # APPLY_ENGINE_ENABLED.
-                    if jobqueue.enqueue(uid, "apply"):
-                        print(f'[scheduler] Queued apply for user {uid} at hour {ah}')
-                    else:
-                        print(f'[scheduler] Apply already in flight for user {uid}; skipped')
+                    try:
+                        if jobqueue.enqueue(uid, "apply"):
+                            print(f'[scheduler] Queued apply for user {uid} at hour {ah}')
+                        else:
+                            print(f'[scheduler] Apply already in flight for user {uid}; skipped')
+                    except jobqueue.DailyCapReached as _cap:
+                        print(f'[scheduler] {_cap} (user {uid}); skipped')
     except Exception as e:
         print(f'[scheduler] Error: {e}')
 
@@ -559,6 +632,23 @@ def file_watcher():
 _search_running: set = set()
 
 
+def _attribute_gemini_to(fn):
+    """Bind this thread's Gemini calls to the user the run belongs to.
+
+    A decorator rather than a `with` block inside each function: run_job_search
+    and run_job_apply are long, and re-indenting them to add attribution would
+    bury the change in whitespace. See gemini.bind_user for the thread-local's
+    limits — most relevantly, work these functions hand to a NEW thread records
+    against no user rather than the wrong one.
+    """
+    @functools.wraps(fn)
+    def _wrapped(user_id, *a, **kw):
+        with gemini.bind_user(user_id):
+            return fn(user_id, *a, **kw)
+    return _wrapped
+
+
+@_attribute_gemini_to
 def run_job_search(user_id: int):
     """Search for new jobs via multi-round Anthropic web-search (one call per job title)."""
     if user_id in _search_running:
@@ -1351,9 +1441,8 @@ def run_job_search(user_id: int):
                             'contents': [{'parts': _parts}],
                             'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 12288, 'thinkingConfig': {'thinkingBudget': 0}}
                         }).encode('utf-8')
-                        _g_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                  'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY)
-                        _g_data = _js2.loads(_gemini_generate(_g_url, _g_body, timeout=90))
+                        _g_data = _js2.loads(_gemini_generate(
+                            _g_body, timeout=90, purpose="search_scoring", user_id=user_id))
                         _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
                         result_ = _parse_scored_response(_g_text)
                         print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
@@ -1475,9 +1564,8 @@ def run_job_search(user_id: int):
                             'tools': [{'google_search': {}}],
                             'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048, 'thinkingConfig': {'thinkingBudget': 0}}
                         }).encode('utf-8')
-                        _ws_url = ('https://generativelanguage.googleapis.com/v1beta/models/'
-                                   'gemini-2.5-flash:generateContent?key=' + _GEMINI_KEY_WS)
-                        _ws_data = _js2.loads(_gemini_generate(_ws_url, _ws_body, timeout=60))
+                        _ws_data = _js2.loads(_gemini_generate(
+                            _ws_body, timeout=60, purpose="web_search", user_id=user_id))
                         _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
                         _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
                         if _ws_si >= 0 and _ws_ei > _ws_si:
@@ -1651,9 +1739,9 @@ def run_job_search(user_id: int):
                                         "contents": [{"parts": _parts_d}],
                                         "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}}
                                     }).encode()
-                                    _url_d = ("https://generativelanguage.googleapis.com/v1beta/models/"
-                                              "gemini-2.5-flash:generateContent?key=" + _TB_GEMINI)
-                                    _resp_d = _js2.loads(_gemini_generate(_url_d, _body_d, timeout=90))
+                                    _resp_d = _js2.loads(_gemini_generate(
+                                        _body_d, timeout=90, purpose="search_scoring_desc",
+                                        user_id=user_id))
                                     _text_d = _resp_d["candidates"][0]["content"]["parts"][0]["text"]
                                     _scored_d = _parse_desc_resp(_text_d)
                                     _out_d = _apply_desc_scores(_scored_d, batch_d_)
@@ -1985,6 +2073,7 @@ def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
     return ("failed", (datetime.now() + _td(seconds=backoff)).isoformat())
 
 
+@_attribute_gemini_to
 def run_job_apply(user_id: int) -> int:
     """Submit applications to all approved jobs using browser automation + Claude."""
     # Global kill-switch: apply engine disabled by default (2026-07-20).
@@ -5326,7 +5415,7 @@ def _extract_cv_text(cv_path, cv_summary):
     return cv_summary or ''
 
 
-def _call_gemini_cv_optimizer(cv_text: str = "", cv_path: str = ""):
+def _call_gemini_cv_optimizer(cv_text: str = "", cv_path: str = "", user_id=None):
     import urllib.request as _ureq, base64 as _b64
     _key = os.environ.get('GEMINI_API_KEY', '')
     if not _key:
@@ -5358,16 +5447,8 @@ def _call_gemini_cv_optimizer(cv_text: str = "", cv_path: str = ""):
             'maxOutputTokens': 1024,
         },
     }).encode('utf-8')
-    _url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + _key
-    _req = _ureq.Request(_url, data=_body, headers={'Content-Type': 'application/json'}, method='POST')
-    try:
-        with _ureq.urlopen(_req, timeout=60) as _r:
-            _d = json.loads(_r.read().decode('utf-8'))
-    except Exception as _he:
-        _eb = b''
-        try: _eb = _he.read()
-        except Exception: pass
-        raise Exception('Gemini API error: ' + str(_he) + (' - ' + _eb.decode('utf-8', errors='replace')[:300] if _eb else ''))
+    _d = gemini.generate(_body, purpose='cv_optimizer', user_id=user_id,
+                         key=_key, timeout=60)
     _t = _d['candidates'][0]['content']['parts'][0]['text'].strip()
     if _t.startswith('```'):
         _lines = _t.split('\n')
@@ -5859,6 +5940,11 @@ class Handler(BaseHTTPRequestHandler):
                 # holds the SAME key as the app before it writes anything.
                 "credentials_key": crypto.fingerprint(),
                 "rate_limit": ratelimit.snapshot(),
+                # Today's Gemini spend against today's ceilings. This is the
+                # number that decides what the ceiling should actually be — it
+                # ships generous on purpose, because nothing here had ever been
+                # measured before the ledger existed.
+                "llm": gemini.usage(),
                 # Queue depth and the age of the oldest running job: a wedged
                 # worker looks exactly like a healthy one from outside without
                 # this. Guarded because a box that predates migration 6 has no
@@ -6016,7 +6102,7 @@ class Handler(BaseHTTPRequestHandler):
                                     if jd.get("match_score") is not None:
                                         continue
                                     try:
-                                        ms = compute_match_score(jd, pd, signals=sig)
+                                        ms = compute_match_score(jd, pd, signals=sig, user_id=uid)
                                         cs = compute_candidate_score(jd, pd)
                                         pen, rsn = _bg_fb_penalty(jd, sig, pd)
                                         c2.execute(
@@ -6647,7 +6733,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "No CV uploaded yet. Please upload your PDF first."})
                 return
             try:
-                data = analyze_cv(cv_path, GEMINI_KEY)
+                data = analyze_cv(cv_path, GEMINI_KEY, user_id=user_id)
                 # Save to profile
                 auth.update_profile(
                     user_id,
@@ -6803,7 +6889,7 @@ class Handler(BaseHTTPRequestHandler):
                     _cv_text = _extract_cv_text(_cv_path, _prof['cv_summary'])
                     if not _cv_path and (not _cv_text or len(_cv_text.strip()) < 30):
                         self.send_json({'error': 'No CV found. Please upload your CV first.'}); return
-                    _result = _call_gemini_cv_optimizer(cv_text=_cv_text, cv_path=_cv_path)
+                    _result = _call_gemini_cv_optimizer(cv_text=_cv_text, cv_path=_cv_path, user_id=user_id)
                     _result['cached'] = False
                     _now = _dt.now().isoformat()
                     _result['analyzed_date'] = _now
@@ -7061,7 +7147,8 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
             try:
                 from ai_analysis import generate_cover_letter
-                letter = generate_cover_letter(dict(job), dict(profile) if profile else {}, GEMINI_KEY)
+                letter = generate_cover_letter(dict(job), dict(profile) if profile else {},
+                                               GEMINI_KEY, user_id=user_id)
             except Exception as gen_err:
                 self.send_json({"error": str(gen_err)}, 500)
                 return
@@ -7162,7 +7249,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # A row, not a thread. Pressing the button twice while one is in
             # flight is now a no-op rather than a second Gemini-spending search.
-            _run_id = jobqueue.enqueue(uid, "search")
+            try:
+                _run_id = jobqueue.enqueue(uid, "search")
+            except jobqueue.DailyCapReached as _cap:
+                # 429, not 403: this clears by itself at midnight UTC, and the
+                # message says so rather than reading as a permanent refusal.
+                self.send_json({"error": f"Daily search limit reached "
+                                         f"({_cap.used} of {_cap.limit} today). "
+                                         f"Resets at midnight UTC.",
+                                "status": "daily_cap"}, 429)
+                return
             self.send_json({"status": "queued" if _run_id else "already_running",
                             "run_id": _run_id})
             return
@@ -7172,11 +7268,21 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
-            # Fire-and-forget: Playwright can take 30–120 s per job, far beyond
-            # Railway's HTTP request timeout.  Return immediately and let the
-            # background thread deliver a notification when done.
-            threading.Thread(target=run_job_apply, args=(user["id"],), daemon=True).start()
-            self.send_json({"started": True})
+            # Queued, not spawned. This was the last raw thread left: the
+            # scheduler's apply already went through the queue, so a manual
+            # apply skipped the one-run-per-user rule AND the daily cap - the
+            # exact hole the cap exists to close.
+            try:
+                _arun = jobqueue.enqueue(user["id"], "apply")
+            except jobqueue.DailyCapReached as _cap:
+                self.send_json({"error": f"Daily apply limit reached "
+                                         f"({_cap.used} of {_cap.limit} today). "
+                                         f"Resets at midnight UTC.",
+                                "status": "daily_cap"}, 429)
+                return
+            self.send_json({"started": bool(_arun),
+                            "status": "queued" if _arun else "already_running",
+                            "run_id": _arun})
             return
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
@@ -7291,10 +7397,11 @@ class Handler(BaseHTTPRequestHandler):
                     _parts_rs.append({'text': prompt_rs})
                     _body_rs = _js_rs.dumps({'contents': [{'parts': _parts_rs}],
                                              'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 4096}}).encode()
-                    _url_rs = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY_RS}'
-                    _req_rs = urllib.request.Request(_url_rs, data=_body_rs, headers={'Content-Type': 'application/json'}, method='POST')
-                    with urllib.request.urlopen(_req_rs, timeout=90) as _resp_rs:
-                        _data_rs = _js_rs.loads(_resp_rs.read().decode())
+                    # Attributed to the user whose jobs are rescored, not to the
+                    # admin who pressed the button — the spend is theirs.
+                    _data_rs = gemini.generate(_body_rs, purpose='resume_search',
+                                               user_id=int(target_uid), key=GEMINI_KEY_RS,
+                                               timeout=90)
                     _text_rs = _data_rs['candidates'][0]['content']['parts'][0]['text'].strip()
                     si = _text_rs.rfind('['); ei = _text_rs.rfind(']')
                     if si >= 0 and ei > si:

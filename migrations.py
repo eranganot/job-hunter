@@ -440,6 +440,40 @@ def m0006_job_runs(conn):
     conn.commit()
 
 
+def m0007_llm_usage(conn):
+    """One row per Gemini call - the ledger the daily spend ceiling reads.
+
+    Deliberately NOT foreign-keyed to users with ON DELETE CASCADE: deleting a
+    user would then erase their spend from the day's global total, which is the
+    one number a ceiling must not be able to lose. user_id is a plain nullable
+    column; system calls (no user attached) store NULL.
+    """
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS llm_usage (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            day           TEXT NOT NULL,
+            user_id       INTEGER,
+            purpose       TEXT NOT NULL,
+            model         TEXT NOT NULL,
+            calls         INTEGER NOT NULL DEFAULT 1,
+            prompt_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            total_tokens  INTEGER NOT NULL DEFAULT 0,
+            ok            INTEGER NOT NULL DEFAULT 1,
+            error         TEXT,
+            created_date  TEXT DEFAULT (datetime('now'))
+        )
+    """, conn))
+    # The two questions the ceiling asks on every sync.
+    conn.execute(ddl_for(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_day "
+        "ON llm_usage (day)", conn))
+    conn.execute(ddl_for(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_day_user "
+        "ON llm_usage (day, user_id)", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -447,6 +481,7 @@ MIGRATIONS = [
     (4, "app_flags",                    m0004_app_flags),
     (5, "user_files",                   m0005_user_files),
     (6, "job_runs",                     m0006_job_runs),
+    (7, "llm_usage",                    m0007_llm_usage),
 ]
 
 

@@ -32,6 +32,7 @@ import json
 import os
 import socket
 import time
+from datetime import datetime, timezone
 
 import db as database
 
@@ -41,6 +42,63 @@ QUEUED, RUNNING, DONE, FAILED = "queued", "running", "done", "failed"
 # than the slowest legitimate run: a search is minutes, not an hour.
 STUCK_AFTER_SECONDS = int(os.environ.get("JH_QUEUE_STUCK_AFTER", 1800))
 MAX_ATTEMPTS = int(os.environ.get("JH_QUEUE_MAX_ATTEMPTS", 3))
+
+# How many runs of one kind a single user may start per UTC day.
+#
+# This is the RUN cap; gemini.py holds the CALL cap. They guard different
+# things and both are needed: a per-day call ceiling still lets one user start
+# fifty searches and spend everyone else's budget before lunch, and a run cap
+# alone says nothing about a single run that scores ten thousand jobs.
+#
+# Counted on the queue rather than on the HTTP route because the scheduler
+# enqueues too, and scheduler-started searches cost exactly the same money as
+# button-started ones. ratelimit.py's run_search policy (6/hour) is the burst
+# guard on the button; this is the daily one on the work itself.
+DEFAULT_DAILY_RUNS = {"search": 20, "apply": 20}
+
+
+def daily_limit(kind):
+    """0 disables the cap for that kind, so a bad number is never an outage."""
+    env = os.environ.get("JH_RUNS_%s_PER_DAY" % str(kind).upper())
+    if env is not None:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+    return DEFAULT_DAILY_RUNS.get(kind, 0)
+
+
+class DailyCapReached(RuntimeError):
+    """Raised by enqueue() when a user has started their day's allowance.
+
+    An exception rather than a None return, because enqueue() already returns
+    None for "deduped" - and a capped user told "already running" would go and
+    wait for a run that is never coming.
+    """
+
+    def __init__(self, kind, used, limit):
+        self.kind, self.used, self.limit = kind, used, limit
+        super().__init__("Daily %s limit reached: %s of %s started today"
+                         % (kind, used, limit))
+
+
+def runs_today(user_id, kind, conn=None):
+    """How many runs of this kind the user has STARTED today (UTC).
+
+    Creations, not completions: a run that failed still spent what it spent,
+    and counting completions would let a user retry a crashing run forever.
+    """
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    own = conn is None
+    conn = conn or database.get_db()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM job_runs WHERE user_id=? AND kind=? AND created_date >= ?",
+            (user_id, kind, day)).fetchone()
+        return int(row[0] or 0)
+    finally:
+        if own:
+            conn.close()
 
 # How many candidate rows to consider before giving up on a claim pass. Bounds
 # the work when many rows are locked or ineligible.
@@ -57,16 +115,26 @@ def _now_sql():
     return "datetime('now')"
 
 
-def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True):
+def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True, cap=True):
     """
     Add work. Returns the new run id, or None when `dedupe` suppressed it.
 
     Dedupe is on by default because the thing that enqueues is usually a user
     pressing a button: a second press while the first run is still queued or
     running should be a no-op, not a second search.
+
+    Raises DailyCapReached when the user has used the day's allowance for this
+    kind. `cap=False` is for internal re-enqueues (a retry of work already
+    counted), never for a new user-initiated run.
     """
     conn = database.get_db()
     try:
+        if cap:
+            limit = daily_limit(kind)
+            if limit:
+                used = runs_today(user_id, kind, conn)
+                if used >= limit:
+                    raise DailyCapReached(kind, used, limit)
         if dedupe:
             existing = conn.execute(
                 "SELECT id FROM job_runs WHERE user_id=? AND kind=? AND status IN (?,?)",

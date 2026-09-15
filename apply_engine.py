@@ -16,6 +16,8 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 
+import gemini
+
 # ── Playwright ────────────────────────────────────────────────────────────────
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
@@ -643,7 +645,8 @@ _CONFIRMATION_PHRASES = [
 
 # ── Claude helpers ────────────────────────────────────────────────────────────
 
-def _claude(prompt: str, max_tokens: int = 1024, timeout: int = 90) -> str:
+def _claude(prompt: str, max_tokens: int = 1024, timeout: int = 90,
+            purpose: str = "apply") -> str:
     """Call Gemini Flash and return the text response.
 
     Kept named _claude for backward-compat with every apply-engine caller; the
@@ -651,31 +654,27 @@ def _claude(prompt: str, max_tokens: int = 1024, timeout: int = 90) -> str:
     key = GEMINI_KEY or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
     if not key:
         raise RuntimeError("GEMINI_API_KEY not configured")
-    payload = json.dumps({
+    payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         # gemini-2.5-flash "thinking" otherwise eats the output budget and the
         # call returns prose with no JSON (e.g. extract_applicant_data: "No JSON
         # found"). Disable thinking so the structured output comes back.
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_tokens,
                              "thinkingConfig": {"thinkingBudget": 0}},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
+    }
+    # user_id comes from the gemini.bind_user() the apply run opened; see the
+    # docstring there for why this helper does not take one.
+    result = gemini.generate(payload, purpose=purpose, key=key, timeout=timeout)
     text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text.strip())
     return text.strip()
 
-def _claude_json(prompt: str, max_tokens: int = 1024, timeout: int = 90):
+def _claude_json(prompt: str, max_tokens: int = 1024, timeout: int = 90,
+                 purpose: str = "apply"):
     """Call Gemini and parse the JSON response."""
-    text = _claude(prompt, max_tokens, timeout=timeout)
+    text = _claude(prompt, max_tokens, timeout=timeout, purpose=purpose)
     try:
         return json.loads(text)
     except Exception:

@@ -733,3 +733,69 @@ def test_health_reports_queue_depth(stack, users):
     _st, _l, body = users["a"].get("/api/health")
     q = json.loads(body)["queue"]
     assert "queued" in q and "running" in q, q
+
+
+# ── Cost guardrails at the route boundary ────────────────────────────────────
+#
+# jobqueue and gemini own the limits; these tests are about what the USER is
+# told when one trips. A cap that answers with a generic 500, or with
+# "already_running" for work that is never coming, is a support ticket rather
+# than a guardrail.
+
+def test_health_publishes_todays_spend_against_todays_ceilings(stack, users):
+    """The number that decides what the ceiling should be has to be readable
+    from outside the box, or the ceiling stays the guess it shipped as."""
+    status, _loc, body = users["admin"].get("/api/health")
+    assert status == 200
+    llm = json.loads(body)["llm"]
+    assert set(llm) >= {"day", "global", "limits"}
+    assert set(llm["limits"]) >= {"global_calls", "user_calls", "enforce"}
+    assert set(llm["global"]) == {"calls", "tokens"}
+
+
+def test_a_capped_search_says_so_and_says_when_it_clears(stack, users, monkeypatch):
+    """429 and a reason, not 403 and a shrug: this clears at midnight UTC."""
+    import jobqueue
+    c = Client(stack["port"])
+    c.post_form("/register", {"name": "capped", "email": "capped@example.test",
+                              "password": "correct-horse-1", "password2": "correct-horse-1"})
+    uid = stack["db"].get_db().execute(
+        "SELECT id FROM users WHERE email='capped@example.test'").fetchone()["id"]
+
+    # The route refuses with 400 before any of this when no key is configured.
+    monkeypatch.setattr(stack["app"], "GEMINI_KEY", "test-key")
+
+    real = jobqueue.enqueue
+    def _capped(user_id, kind, *a, **kw):
+        if user_id == uid and kind == "search":
+            raise jobqueue.DailyCapReached("search", 20, 20)
+        return real(user_id, kind, *a, **kw)
+    monkeypatch.setattr(jobqueue, "enqueue", _capped)
+
+    status, _loc, body = c.post_json("/api/run-search", {},
+                                     {"Sec-Fetch-Site": "same-origin"})
+    assert status == 429
+    payload = json.loads(body)
+    assert payload["status"] == "daily_cap"
+    assert "20 of 20" in payload["error"] and "midnight" in payload["error"].lower()
+    # The thing a capped user must NOT be told is that work is on its way.
+    assert "already_running" not in body.decode()
+
+
+def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
+    """The last raw thread in the app. A spawned apply skipped both the
+    one-run-per-user rule and the daily cap, which is the hole the cap exists
+    to close - so the route is asserted to go through the queue, not to start
+    a thread."""
+    import jobqueue
+    seen = []
+    real = jobqueue.enqueue
+    monkeypatch.setattr(jobqueue, "enqueue",
+                        lambda uid, kind, *a, **kw: (seen.append((uid, kind)),
+                                                     real(uid, kind, *a, **kw))[1])
+    status, _loc, body = users["a"].post_json("/api/run-apply", {},
+                                              {"Sec-Fetch-Site": "same-origin"})
+    assert status == 200
+    assert any(k == "apply" for _u, k in seen), \
+        "/api/run-apply did not enqueue - it is spawning a thread again"
+    assert json.loads(body)["status"] in ("queued", "already_running")
