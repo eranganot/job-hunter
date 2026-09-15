@@ -250,6 +250,32 @@ Check "GET /api/admin/users leaks nothing anonymously" {
 }
 Write-Host ""
 
+# --- Liveness vs usefulness ---------------------------------------------------
+Write-Host "-- database and worker --" -ForegroundColor Cyan
+Check "the database answers a real query" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $db = $script:health.db_check
+    if ($null -eq $db) { return "no 'db_check' in /api/health - this build predates it" }
+    if ($db.ok) {
+        Write-Host ("      round trip: " + $db.ms + "ms") -ForegroundColor DarkGray
+        $true
+    } else { "the box is up but its database is not answering: " + $db.error }
+}
+Check "no job is claimed and abandoned" {
+    # A worker that died mid-job leaves its row RUNNING forever, and from
+    # outside that is indistinguishable from an idle worker - both are just a
+    # number. The age of the oldest claim is what tells them apart.
+    if ($null -eq $script:health) { return "no health payload" }
+    $w = $script:health.worker
+    if ($null -eq $w) { return "no 'worker' in /api/health - this build predates it" }
+    if ($w.unavailable) { return "worker health unavailable: " + $w.unavailable }
+    Write-Host ("      worker running: " + $w.running + ", claimed: " + $w.claimed +
+                ", oldest claim: " + $(if ($null -eq $w.oldest_claim_age_s) { "none" } else { "$($w.oldest_claim_age_s)s" })) -ForegroundColor DarkGray
+    if ($w.stuck) { "a claimed job has gone past the stuck threshold with no heartbeat" }
+    else { $true }
+}
+Write-Host ""
+
 # --- Cost guardrails (Gemini spend ceiling + daily run caps) ------------------
 Write-Host "-- cost guardrails --" -ForegroundColor Cyan
 Check "health reports today's Gemini spend" {

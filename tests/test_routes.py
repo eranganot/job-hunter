@@ -874,3 +874,43 @@ def test_two_requests_get_two_different_ids(stack, users, caplog):
     ids = [r.rid for r in lines]
     assert len(ids) == 2, ids
     assert ids[0] != ids[1]
+
+
+def test_health_reports_a_real_database_round_trip_and_the_worker(stack, users):
+    status, _loc, body = users["admin"].get("/api/health")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["db_check"]["ok"] is True
+    assert isinstance(payload["db_check"]["ms"], int)
+    w = payload["worker"]
+    assert "running" in w and "stuck" in w
+
+
+def test_db_check_fails_when_the_database_cannot_answer(stack, monkeypatch):
+    """Liveness is not usefulness. get_db() can hand back a pooled connection
+    to a server that has gone away, which reads as healthy until the first real
+    query - so db_check has to actually issue one.
+
+    A first version of this test asserted only ok is True, and passed with the
+    query deleted. The mutation check caught it.
+    """
+    app_module = stack["app"]
+
+    class DeadConn:
+        def execute(self, *a, **k):
+            raise RuntimeError("server closed the connection unexpectedly")
+        def close(self):
+            pass
+
+    monkeypatch.setattr(app_module.database, "get_db", lambda *a, **k: DeadConn())
+    out = app_module.db_check()
+    assert out["ok"] is False
+    assert "server closed" in out["error"]
+
+
+def test_worker_health_degrades_rather_than_raising(stack, monkeypatch):
+    app_module = stack["app"]
+    monkeypatch.setattr(app_module.worker, "health",
+                        lambda: (_ for _ in ()).throw(RuntimeError("queue gone")))
+    out = app_module.worker_health()
+    assert "queue gone" in out["unavailable"]

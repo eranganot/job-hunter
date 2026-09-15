@@ -480,6 +480,29 @@ def m0007_llm_usage(conn):
     conn.commit()
 
 
+def m0008_session_expiry_format(conn):
+    """Rewrite session expiry stamps into the format the comparison can read.
+
+    auth.create_session used to write datetime.now().isoformat() -
+    "2026-10-15T05:48:31.558130": a "T" separator, local time, microseconds.
+    Every check compares it against SQL datetime('now') - "2026-09-15 05:48:31":
+    a space, UTC. The comparison is lexicographic on TEXT and "T" (0x54) sorts
+    after " " (0x20), so on the expiry date itself an ALREADY EXPIRED token
+    compared greater than the current time and was accepted for the remainder
+    of that day. Proven by observation, 2026-09-15.
+
+    Existing rows are converted rather than deleted: signing everyone out to fix
+    a formatting bug is a worse outcome than the bug. The local-vs-UTC skew on
+    converted rows cannot be recovered - the stored string carries no offset -
+    so those sessions keep up to a few hours of extra life and then expire
+    normally. New sessions are written in UTC from the start.
+    """
+    conn.execute(
+        "UPDATE sessions SET expires_date = REPLACE(SUBSTR(expires_date, 1, 19), 'T', ' ') "
+        "WHERE expires_date LIKE '%T%'")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -488,6 +511,7 @@ MIGRATIONS = [
     (5, "user_files",                   m0005_user_files),
     (6, "job_runs",                     m0006_job_runs),
     (7, "llm_usage",                    m0007_llm_usage),
+    (8, "session_expiry_format",        m0008_session_expiry_format),
 ]
 
 

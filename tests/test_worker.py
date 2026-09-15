@@ -154,3 +154,36 @@ def test_starting_the_worker_twice_does_not_start_two(wq):
     b = wq.start_background()
     assert a is b
     wq.stop_background(timeout=2)
+
+
+# ── health(): telling a wedged worker from an idle one ───────────────────────
+
+def test_health_reports_a_job_nobody_has_touched_as_stuck(wq, monkeypatch):
+    """Queue depth cannot distinguish these: depth 0 and depth 50 are both just
+    a number, and a worker that died mid-job leaves its row claimed forever.
+    The distinguishing fact is a claim with no recent heartbeat.
+
+    Asserted by making a claim OLD, not by asserting stuck is False on a clean
+    queue - that version passed with the threshold comparison deleted.
+    """
+    jobqueue.enqueue(1, "search")
+    run = jobqueue.claim()
+    assert run
+
+    conn = database.get_db()
+    conn.execute("UPDATE job_runs SET locked_at=? WHERE id=?",
+                 ("2020-01-01 00:00:00", run["id"]))
+    conn.commit()
+    conn.close()
+
+    h = worker.health()
+    assert h["claimed"] == 1
+    assert h["stuck"] is True, h
+    assert h["oldest_claim_age_s"] > jobqueue.STUCK_AFTER_SECONDS
+
+
+def test_health_does_not_cry_stuck_over_a_fresh_claim(wq):
+    jobqueue.enqueue(1, "search")
+    assert jobqueue.claim()
+    h = worker.health()
+    assert h["claimed"] == 1 and h["stuck"] is False, h

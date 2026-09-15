@@ -21,6 +21,8 @@ _Seeded from git history + prior transcripts._
 - Sourcing prefers **direct-ATS URLs** over job-board aggregators. SPA queue actions: mark applied / remove / open, 6 reject reasons, apply-result detail + retry, score explainer, list sorting, view-CV PDF.
 - **Apply engine hardened**: parked-link fix (no more false "Verified" on parked domains), timeout hardening, truthful submit-verification, auto-answers required questions, failure diagnostics + removal reasons, push self-heal.
 - **Admin panel** (admin-only): mobile Settings → Admin modal + `/admin` panel — queue overview, maintenance (clear attempted/applied, rescore, dedup), users; new admin endpoints; queue-stats use `get_stats` so Passed/Total match the dashboard. SW cache bumped to v7.
+- **Sessions are 14-day sliding, stamped in UTC, and revoked on password change.** The expiry comparison used to be decorative - a "T"-separated local-time stamp compared lexicographically against a space-separated UTC one, so a session survived the whole of its expiry day (Changelog, 2026-09-15). `JH_SESSION_DAYS` / `JH_SESSION_REFRESH_AFTER_HOURS` tune it; migration 8 converted the existing rows rather than signing anyone out.
+- **`/api/health` distinguishes liveness from usefulness**: `db_check` is a real `SELECT 1` round trip with latency, and `worker` reports the age of the oldest claimed job, flagged `stuck` past the requeue threshold - queue depth alone cannot tell a wedged worker from an idle one.
 - **Every module logs through `log.py`**, which carries a **request id and user id on every line** and emits one access line per request (`GET /api/jobs -> 200 in 34ms`). Successful static assets are DEBUG so a PWA shell load does not bury the request that matters; 4xx logs WARNING, 5xx ERROR. `JH_LOG_LEVEL` tunes it. Legacy `print()` calls in thirteen modules route through it unchanged, graded INFO/WARNING/ERROR by message text - with WARNING covering the vocabulary an exception message actually uses, which is what stopped a failed credential decryption being logged as INFO.
 - **Queue durability**: legacy modal adds broken-link / job-gone reasons; redeploys no longer resurface handled jobs; one-time prune of already-attempted jobs.
 - HEAD `ac96c03` (2026-09-08, "Guard: one variable can no longer repoint the app at an empty database"). Full suite **257** passing. _(Corrected 2026-09-14: this line read `4e4a04a` / suite 147 — eleven commits and 110 tests stale.)_
@@ -63,6 +65,32 @@ Two-folder drift (being retired); sandbox can't push; Playwright browser binarie
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+
+- 2026-09-15 — **The session expiry check was not checking. Found while auditing what Phase 3 actually had left.** The plan's remaining Phase 3 items read "advisory-locked scheduler" and "session rotation; 30-day -> 14-day sliding sessions". The advisory lock buys nothing until a second instance exists, so I went to read the session code first - and found a bug there rather than a feature gap.
+
+  **Proven by direct observation, in a five-line script.** `auth.create_session` wrote `datetime.now().isoformat()` - `2026-10-15T05:48:31.558130`: a **"T" separator**, **local time**, microseconds. Every check compares that column against SQL `datetime('now')` - `2026-09-15 05:48:31`: a **space**, **UTC**. The column is TEXT, so the comparison is lexicographic, and `"T"` (0x54) sorts after `" "` (0x20). A token stamped to expire an hour ago was fed to the live query and **came back valid**:
+
+  ```
+  token that expired 1 hour ago: '2026-09-15T04:48:31.558387'
+    still accepted by the live query? -> YES
+  same instant, space separator:  '2026-09-15 04:48:31.558387'
+    still accepted? -> no
+  ```
+
+  **Blast radius:** on its expiry date a session was valid for the **rest of that day** regardless of the time, and `cleanup_expired_sessions` - which uses the same comparison - could not delete it either, so the row stayed. On top of that the stamp followed the local clock while the comparison used UTC, adding another ~3 hours in Israel. Real lifetime: 30 days, plus up to a day, plus three hours.
+
+  **Why it survived this long, which is the part worth keeping:** every existing test of session expiry used a token expiring days away or days past, where the **date** differs and the separator never gets to decide the comparison. The fault only appears on the boundary day - the one day nobody writes a fixture for. The same shape hid the `/api/jobs` cover-letter test earlier this month: a test that exercises the easy region of a boundary proves the boundary works.
+
+  **Fixed, with the rest of the plan's session item done at the same time.** Stamps are written in UTC in the exact format the database compares against (`_stamp`/`_utc_now`, and a test asserts the stored string and `datetime('now')` have the same separator and the same width). Sessions are now **14-day sliding** rather than 30-day fixed - `JH_SESSION_DAYS` - extended on use but only once the window has aged past `JH_SESSION_REFRESH_AFTER_HOURS` (default 24), so an active session never expires under someone and a busy page does not become one database write per request. The slide reuses the row the session lookup already read rather than spending a second query on it. A row in the old unparseable format is **rewritten** rather than trusted: a window nobody can read is a window nobody can enforce.
+
+  **And the gap that was not a formatting bug: `change_password` did not revoke anything.** Changing your password - the single action a person takes when they think someone else is in their account - updated the hash and left every other session alive for the rest of its life. It now deletes all of that user's other sessions, keeping the token making the request so the user is not signed out of the tab they are typing in. A **failed** password change revokes nothing, and revocation cannot reach another user's rows; both are tested, because "sign everyone out" is a fine denial-of-service if it can be triggered with a wrong password.
+
+  **Migration 8** converts existing rows (`REPLACE(SUBSTR(expires_date,1,19),'T',' ')`) instead of deleting them - signing all nine users out to fix a formatting bug is a worse outcome than the bug. The local-vs-UTC skew on converted rows cannot be recovered, since the stored string carries no offset, so those sessions keep a few hours of extra life and then expire normally.
+
+  **Also closed: the rest of the plan's item 6.** `/api/health` now reports `db_check` (an actual `SELECT 1` round trip and its latency - a pooled handle to a server that has gone away reads as healthy right up until the first real query) and `worker` (running, handlers, claimed count, and the **age of the oldest claim**, flagged `stuck` past the same threshold the requeue sweeper uses). Queue depth alone could never tell a wedged worker from an idle one: depth 0 and depth 50 are both just a number. `smoke.ps1` asserts both.
+
+  Suite **419 -> 437**. **Three of the first eight mutations survived, and fixing the tests was the real work.** (1) `test_a_new_session_is_stamped_in_utc_not_local_time` passed with the clock put back to `datetime.now()`, because CI and the sandbox both run in UTC where local and UTC are the same number - it now replaces `datetime` with one whose local time is deliberately three hours off. (2) The worker test asserted `stuck is False` on a clean queue, which is exactly what deleting the threshold comparison produces - it now ages a real claim and asserts `stuck is True`. (3) The health test asserted `db_check.ok is True`, which still holds with the query deleted - `db_check` and `worker_health` were lifted out of the request handler to module level so a test can point them at a dead connection and assert they say so. All eight mutations bite now.
+
 
 - 2026-09-15 — **Phase 3 observability: a request id, a user id, and the half of this item that was already done.** The plan's item 6 reads "`print()` -> `logging` (BACKLOG #7, ~166 calls), request logs carrying user id, Sentry". The audit changed what was worth building.
 

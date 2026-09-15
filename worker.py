@@ -20,6 +20,7 @@ was doing exactly what it was told.
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 
 import jobqueue
 
@@ -137,6 +138,39 @@ def start_background():
     _thread = threading.Thread(target=loop, name="jobworker", daemon=True)
     _thread.start()
     return _thread
+
+
+def health():
+    """What /api/health needs to tell a wedged worker from an idle one.
+
+    Queue depth alone cannot: depth 0 and depth 50 are both just a number, and
+    a worker that died mid-job leaves its row claimed and RUNNING forever. The
+    distinguishing fact is how long the oldest claimed job has gone without a
+    heartbeat - past jobqueue.STUCK_AFTER_SECONDS it is presumed dead, which is
+    the same threshold the requeue sweeper uses, so this reports the condition
+    the app is already acting on rather than a second opinion about it.
+    """
+    alive = bool(_thread and _thread.is_alive())
+    out = {"running": alive, "handlers": sorted(HANDLERS)}
+    try:
+        d = jobqueue.depth()
+    except Exception as exc:
+        out["queue_unavailable"] = str(exc)[:120]
+        return out
+    out["claimed"] = d.get(jobqueue.RUNNING, 0)
+    since = d.get("oldest_running_since")
+    out["oldest_claim_age_s"] = None
+    out["stuck"] = False
+    if since:
+        try:
+            started = datetime.strptime(str(since)[:19], "%Y-%m-%d %H:%M:%S")
+            age = int((datetime.now(timezone.utc).replace(tzinfo=None) - started)
+                      .total_seconds())
+            out["oldest_claim_age_s"] = age
+            out["stuck"] = age > jobqueue.STUCK_AFTER_SECONDS
+        except (ValueError, TypeError) as exc:
+            out["oldest_claim_age_s"] = "unparseable: %s" % str(since)[:40]
+    return out
 
 
 def stop_background(timeout=5.0):

@@ -171,3 +171,53 @@ def test_migrations_never_swallow_a_failure():
                      "except Exception:\n        pass",
                      "except:\n"):
         assert offender not in src, f"migrations.py swallows failures again: {offender!r}"
+
+
+# ── Migration 8: session expiry format ───────────────────────────────────────
+
+def test_m0008_converts_the_old_expiry_stamps(tmp_path, monkeypatch):
+    """Rows written before the fix carry a 'T' and microseconds, which the
+    comparison mis-sorts. They are converted, not deleted - signing everyone
+    out to fix a formatting bug is worse than the bug."""
+    import db as database
+    import migrations as m
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "m8.db"), raising=False)
+    monkeypatch.setattr(database, "DATABASE_URL", None, raising=False)
+    monkeypatch.setattr(database, "BACKEND_REFUSAL", None, raising=False)
+    monkeypatch.delenv("DB_BACKEND", raising=False)
+    database.init_db()
+
+    conn = database.get_db()
+    conn.execute("INSERT INTO users (id,name,email,password_hash,salt) VALUES (1,'u','u@e.test','h','s')")
+    conn.execute("INSERT INTO sessions (token,user_id,expires_date) VALUES (?,?,?)",
+                 ("legacy", 1, "2026-10-15T05:48:31.558130"))
+    conn.execute("INSERT INTO sessions (token,user_id,expires_date) VALUES (?,?,?)",
+                 ("already-ok", 1, "2026-10-15 05:48:31"))
+    conn.commit()
+
+    m.m0008_session_expiry_format(conn)
+
+    rows = dict(conn.execute("SELECT token, expires_date FROM sessions").fetchall())
+    conn.close()
+    assert rows["legacy"] == "2026-10-15 05:48:31", rows["legacy"]
+    assert rows["already-ok"] == "2026-10-15 05:48:31", "a correct row was rewritten"
+
+
+def test_m0008_is_idempotent(tmp_path, monkeypatch):
+    import db as database
+    import migrations as m
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "m8b.db"), raising=False)
+    monkeypatch.setattr(database, "DATABASE_URL", None, raising=False)
+    monkeypatch.setattr(database, "BACKEND_REFUSAL", None, raising=False)
+    monkeypatch.delenv("DB_BACKEND", raising=False)
+    database.init_db()
+    conn = database.get_db()
+    conn.execute("INSERT INTO users (id,name,email,password_hash,salt) VALUES (1,'u','u@e.test','h','s')")
+    conn.execute("INSERT INTO sessions (token,user_id,expires_date) VALUES ('t',1,'2026-10-15T05:48:31.558130')")
+    conn.commit()
+    m.m0008_session_expiry_format(conn)
+    once = conn.execute("SELECT expires_date FROM sessions WHERE token='t'").fetchone()[0]
+    m.m0008_session_expiry_format(conn)
+    twice = conn.execute("SELECT expires_date FROM sessions WHERE token='t'").fetchone()[0]
+    conn.close()
+    assert once == twice

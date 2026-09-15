@@ -467,6 +467,34 @@ gemini.set_sync_source(_llm_usage_today)
 gemini.set_alert_sender(_llm_breach_alert)
 
 
+def db_check():
+    """A round trip, not the fact that a handle exists.
+
+    get_db() can hand back a pooled connection to a server that has since gone
+    away; that reads as perfectly healthy right up until the first real query,
+    which is the moment a user finds it instead of the health check.
+    """
+    import time as _dbt
+    t0 = _dbt.time()
+    try:
+        c = database.get_db()
+        try:
+            c.execute("SELECT 1").fetchone()
+        finally:
+            c.close()
+        return {"ok": True, "ms": int((_dbt.time() - t0) * 1000)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
+
+
+def worker_health():
+    """Age of the oldest claimed job. See worker.health()."""
+    try:
+        return worker.health()
+    except Exception as e:
+        return {"unavailable": str(e)[:120]}
+
+
 def bump_onboarding(user_id: int, key: str):
     """Set a single onboarding milestone to true (idempotent)."""
     try:
@@ -5973,6 +6001,11 @@ class Handler(BaseHTTPRequestHandler):
                 # this. Guarded because a box that predates migration 6 has no
                 # such table, and health must answer on every build.
                 "queue": _queue_depth(),
+                # Liveness is not the same as usefulness. The three below are
+                # the ways this box can be up and doing nothing: the database
+                # unreachable, the worker wedged, or sessions unenforced.
+                "db_check": db_check(),
+                "worker": worker_health(),
                 # Non-null means a Postgres target was configured and refused;
                 # the app is serving SQLite instead. smoke.ps1 asserts on it.
                 "db_backend_refused": database.BACKEND_REFUSAL,
@@ -6986,11 +7019,17 @@ class Handler(BaseHTTPRequestHandler):
         # ── Change password ──
         if path == "/api/change-password":
             data = self.read_json()
-            err = auth.change_password(user_id, data.get("current_password",""), data.get("new_password",""))
+            # The caller's own token is kept so they are not signed out of the
+            # tab they just typed in; every OTHER session for this user dies
+            # with the old password.
+            err = auth.change_password(user_id, data.get("current_password", ""),
+                                       data.get("new_password", ""),
+                                       keep_token=auth.get_token_from_request(self.headers))
             if err:
                 self.send_json({"success": False, "error": err})
             else:
-                self.send_json({"success": True})
+                self.send_json({"success": True,
+                                "signed_out_other_sessions": True})
             return
 
         # ── Job actions ──
