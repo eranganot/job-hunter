@@ -74,8 +74,16 @@ export type Me = {
   job_titles?: string | string[] | null;
   keywords?: string | string[] | null;
   locations?: string | string[] | null;
+  linkedin_url?: string | null;
+  phone?: string | null;
+  email_address?: string | null;
   schedule_frequency?: string | null;
   search_hour?: number | null;
+  apply_hour?: number | null;
+  // 0=Monday..6=Sunday, matching Python's datetime.weekday() - the scheduler
+  // compares these columns against it directly (app.py:597).
+  search_day_of_week?: number | null;
+  apply_day_of_week?: number | null;
   notification_channel?: string | null;
 };
 

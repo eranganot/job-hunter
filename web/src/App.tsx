@@ -64,6 +64,24 @@ export function SwipeFlow() {
   // though /api/me has not come back yet. Without it the wizard reappears for
   // one frame on top of the dashboard.
   const [dismissedOnboarding, setDismissedOnboarding] = useState(false);
+  /* Setup runs once and then can never be seen again - which made it the one
+     flow nobody could check after shipping it. ?onboarding=1 replays it for
+     anyone; Settings links here rather than needing a DB edit. The param is
+     stripped on finish so a bookmark or a refresh does not trap the user in
+     the wizard forever. */
+  const [replayOnboarding, setReplayOnboarding] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("onboarding") === "1"; }
+    catch { return false; }
+  });
+  const endOnboarding = () => {
+    setReplayOnboarding(false);
+    setDismissedOnboarding(true);
+    try {
+      const u = new URL(window.location.href);
+      if (u.searchParams.has("onboarding")) { u.searchParams.delete("onboarding"); window.history.replaceState({}, "", u.pathname + u.search + u.hash); }
+    } catch {}
+    loadAll();
+  };
   const [selectedJob, setSelectedJob] = useState<UiJob | null>(null);
   const [pendingReject, setPendingReject] = useState<UiJob | null>(null);
   const [undo, setUndo] = useState<{ type: "approve" | "defer"; job: UiJob } | null>(null);
@@ -260,8 +278,8 @@ export function SwipeFlow() {
      means never ask again. Note /dashboard (legacy) still self-heals
      onboarding_complete=1 on visit, so a user who detours there is treated as
      onboarded - that goes away with the legacy UI. */
-  if (me && !me.onboarding_complete && !me.onboarding_dismissed && !dismissedOnboarding) {
-    return <OnboardingView me={me} onDone={() => { setDismissedOnboarding(true); loadAll(); }} />;
+  if (me && (replayOnboarding || (!me.onboarding_complete && !me.onboarding_dismissed && !dismissedOnboarding))) {
+    return <OnboardingView me={me} onDone={endOnboarding} />;
   }
 
   if (view === "dashboard") {
@@ -304,7 +322,7 @@ export function SwipeFlow() {
       </div>
 
       <header className="relative z-10 bg-gray-800/80 backdrop-blur-lg border-b border-gray-700 safe-top">
-        <div className="max-w-2xl mx-auto px-5 py-4 flex items-center justify-between">
+        <div className={`${SHELL} px-5 lg:px-8 py-4 flex items-center justify-between`}>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center"><Briefcase className="w-5 h-5 text-white" /></div>
             <div><h1 className="text-xl font-bold text-white">Job Hunter</h1><p className="text-xs text-gray-400">Swipe to find your next role</p></div>
@@ -318,7 +336,7 @@ export function SwipeFlow() {
       </header>
 
       <div className="relative z-10 bg-gray-800/80 backdrop-blur-lg border-b border-gray-700">
-        <div className="max-w-2xl mx-auto px-5 py-3">
+        <div className={`${SHELL} px-5 lg:px-8 py-3`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-300">{remainingCount} job{remainingCount !== 1 ? "s" : ""} to review</span>
             <span className="text-sm text-gray-500">{currentIndex + 1} / {reviewJobs.length}</span>
@@ -327,15 +345,15 @@ export function SwipeFlow() {
         </div>
       </div>
 
-      <div className="relative z-10 max-w-2xl mx-auto px-5 pt-3">
-        <button onClick={runSearchNow} className="w-full py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium flex items-center justify-center gap-2"><SearchIcon className="w-4 h-4" />Run a new search</button>
+      <div className={`relative z-10 ${SHELL} px-5 lg:px-8 pt-3`}>
+        <button onClick={runSearchNow} className="w-full lg:max-w-md lg:mx-auto py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium flex items-center justify-center gap-2"><SearchIcon className="w-4 h-4" />Run a new search</button>
         {searchMsg && <p className="text-xs text-indigo-300 mt-1.5 text-center">{searchMsg}</p>}
         {actionError && <p className="text-xs text-red-300 mt-1.5 text-center">{actionError}</p>}
       </div>
 
       <NotifyNudge />
 
-      <div className="relative z-10 max-w-xl mx-auto px-5 py-6 pb-10">
+      <div className="relative z-10 mx-auto w-full max-w-xl lg:max-w-5xl px-5 lg:px-8 py-6 pb-10">
         <AnimatePresence mode="wait">
           {currentJob && <SwipeCard key={currentJob.id} job={currentJob} direction={direction} onApprove={handleApprove} onPass={handlePass} onDefer={handleDefer} />}
         </AnimatePresence>
@@ -371,8 +389,8 @@ function NotifyNudge() {
   const dismiss = () => { try { localStorage.setItem("jh_notify_nudge", "1"); } catch {} setShow(false); };
   const enable = async () => { setMsg("…"); const r = await enablePush(); if (r.ok) dismiss(); else setMsg(r.reason || "Couldn't enable"); };
   return (
-    <div className="relative z-10 max-w-2xl mx-auto px-5 pt-3">
-      <div className="flex items-center gap-3 bg-indigo-600/15 border border-indigo-600/40 rounded-2xl px-4 py-3">
+    <div className={`relative z-10 ${SHELL} px-5 lg:px-8 pt-3`}>
+      <div className="flex items-center gap-3 lg:max-w-3xl lg:mx-auto bg-indigo-600/15 border border-indigo-600/40 rounded-2xl px-4 py-3">
         <Bell className="w-5 h-5 text-indigo-300 shrink-0" />
         <div className="flex-1 min-w-0"><p className="text-sm font-medium text-white leading-tight">Get notified about new jobs</p>{msg && <p className="text-xs text-gray-400">{msg}</p>}</div>
         <button onClick={enable} className="px-3 py-1.5 bg-indigo-600 active:bg-indigo-700 text-white text-sm font-medium rounded-xl shrink-0">Enable</button>
@@ -398,9 +416,10 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
             <div className="min-w-0"><h3 className="text-xl font-bold text-white truncate">{job.company}</h3><div className="flex items-center gap-2 text-white/90 text-sm mt-0.5"><MapPin className="w-4 h-4" /><span className="truncate">{(job.location || "").split(",")[0]}</span></div></div>
           </div>
         </div>
-        <div className="p-5 space-y-5">
+        <div className="p-5 lg:p-7 lg:grid lg:grid-cols-2 lg:gap-7 lg:items-start">
+          <div className="space-y-5">
           <div>
-            <h2 className="text-xl font-bold text-white mb-2">{job.title}</h2>
+            <h2 className="text-xl lg:text-2xl font-bold text-white mb-2">{job.title}</h2>
             <div className="flex items-center gap-4 flex-wrap">
               {job.source && <div className="flex items-center gap-1.5 text-sm text-gray-400"><Briefcase className="w-4 h-4" /><span>{job.source.split("/")[0]}</span></div>}
               {job.timeAgo && <div className="flex items-center gap-1.5 text-sm text-gray-400"><Clock className="w-4 h-4" /><span>{job.timeAgo}</span></div>}
@@ -423,12 +442,15 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
             )}
           </div>
           {job.whyFits && (<div className="bg-gradient-to-br from-amber-950/50 to-orange-950/50 rounded-2xl p-4 border-2 border-amber-700"><div className="flex items-center gap-2 mb-2"><div className="w-7 h-7 bg-amber-500 rounded-full flex items-center justify-center"><Sparkles className="w-4 h-4 text-white" /></div><h4 className="font-bold text-amber-400 text-sm">Why this is a strong fit</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
+          </div>
+          <div className="space-y-5 mt-5 lg:mt-0">
           {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${job.verified ? "bg-green-950/50 text-green-400 border border-green-800" : "bg-orange-950/50 text-orange-400 border border-orange-800"}`}>
             {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">URL verified — ready to apply</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
           </div>
+          </div>
         </div>
-        <div className="p-5 pt-0 space-y-3">
+        <div className="p-5 lg:px-7 pt-0 space-y-3 lg:max-w-2xl lg:mx-auto lg:w-full">
           <div className="flex gap-3">
             <motion.button whileTap={{ scale: 0.95 }} onClick={onPass} className="flex-1 py-4 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><X className="w-5 h-5" />Pass</motion.button>
             <motion.button whileTap={{ scale: 0.95 }} onClick={onApprove} className="flex-1 py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><Check className="w-5 h-5" />Approve</motion.button>
@@ -664,11 +686,6 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove }: any) {
         <div className="text-right shrink-0 pl-2">
           <div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div>
           <div className="text-[10px] text-gray-500">match</div>
-          {job.feedbackPenalty > 0 && (
-            <div className="text-[10px] text-orange-400 mt-0.5" title="Effective rank after your past feedback">
-              ranks {Math.max(0, (job.matchScore ?? 0) - job.feedbackPenalty)}
-            </div>
-          )}
         </div>
       </div>
       <div className="flex border-t border-gray-700 divide-x divide-gray-700">
@@ -680,9 +697,59 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove }: any) {
   );
 }
 
+/* One row shape for every list on the dashboard. The queue was already a
+   ranked list while Applied and Deferred were grids of equal cards, which read
+   as two different apps and hid that these lists are ordered at all. */
+function RankedRow({ job, rank, onSelect, right, children }: any) {
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+      <div className="flex items-start gap-3 p-3.5 hover:bg-gray-700/30 cursor-pointer" onClick={() => onSelect && onSelect(job)}>
+        <div className="w-8 h-8 rounded-lg bg-gray-900/70 border border-gray-700 flex items-center justify-center shrink-0 mt-0.5">
+          <span className="text-xs font-bold text-gray-400">{rank}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h4 className="font-semibold text-white truncate">{job.title}</h4>
+            <span className="text-sm text-gray-400 truncate">{job.company}</span>
+            {job.location && <span className="text-xs text-gray-500 truncate">{job.location.split(",")[0]}</span>}
+          </div>
+          {children}
+        </div>
+        <div className="flex items-center gap-3 shrink-0 pl-2">
+          <div className="text-right">
+            <div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div>
+            <div className="text-[10px] text-gray-500">match</div>
+          </div>
+          {right}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emptySub, heading }: any) {
   if (!jobs.length) return <EmptyTab icon={EI} title={emptyTitle} sub={emptySub} />;
-  return (<div className="space-y-3"><h3 className="text-base font-semibold text-white mb-1">{heading}</h3><div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3 items-start">{jobs.map((job: UiJob) => <JobCard key={job.id} job={job} onSelect={onSelectJob} showStatus={showStatus} />)}</div></div>);
+  return (
+    <div className="space-y-3">
+      <h3 className="text-base font-semibold text-white mb-1">{heading}</h3>
+      <div className="space-y-2">
+        {jobs.map((job: UiJob, i: number) => (
+          <RankedRow key={job.id} job={job} rank={i + 1} onSelect={onSelectJob}
+                     right={showStatus && job.applyStatus ? <StatusPill s={job.applyStatus} /> : null}>
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
+              {job.timeAgo && <span className="text-xs text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
+              <FeedbackBadge job={job} />
+            </div>
+            {job.whyFits && (
+              <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
+                <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
+              </p>
+            )}
+          </RankedRow>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function DeferredTab({ jobs, onSelectJob, onUnDefer }: any) {
@@ -690,13 +757,20 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer }: any) {
   return (
     <div className="space-y-3">
       <h3 className="text-base font-semibold text-white mb-1">{jobs.length} deferred</h3>
-      <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3 items-start">
-      {jobs.map((job: UiJob) => (
-        <div key={job.id} className="flex items-center gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700">
-          <div className="w-12 h-12 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-xl flex items-center justify-center shrink-0" onClick={() => onSelectJob(job)}><Building2 className="w-6 h-6 text-indigo-400" /></div>
-          <div className="flex-1 min-w-0" onClick={() => onSelectJob(job)}><h4 className="font-semibold text-white truncate">{job.title}</h4><p className="text-sm text-gray-400 truncate">{job.company}</p></div>
-          <button onClick={() => onUnDefer(job)} className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0">Move to review</button>
-        </div>
+      <div className="space-y-2">
+      {jobs.map((job: UiJob, i: number) => (
+        <RankedRow key={job.id} job={job} rank={i + 1} onSelect={onSelectJob}
+                   right={<button onClick={(e: any) => { e.stopPropagation(); onUnDefer(job); }} className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0">Move to review</button>}>
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
+            {job.timeAgo && <span className="text-xs text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
+            <FeedbackBadge job={job} />
+          </div>
+          {job.whyFits && (
+            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
+              <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
+            </p>
+          )}
+        </RankedRow>
       ))}
       </div>
     </div>
@@ -1234,7 +1308,16 @@ function NotificationChannels({ me }: { me: any }) {
      all four. These are also the exact three fields crypto.py encrypts at rest
      (telegram_token, twilio_auth_token, email_smtp_pass), so until now the
      encryption had no UI that could reach it. */
-  const [channel, setChannel] = useState<string>(me.notification_channel || "none");
+  /* Stored as a comma-joined string because that is exactly what the sender
+     already reads: deliver_notification() splits notification_channel on ","
+     and loops (app.py:288). The single-choice UI here was the only thing
+     making it look like one channel at a time. */
+  const parseChannels = (v: any): string[] =>
+    String(v || "none").split(",").map((c: string) => c.trim()).filter((c: string) => c && c !== "none");
+  const [channels, setChannels] = useState<string[]>(parseChannels(me.notification_channel));
+  const has = (id: string) => channels.includes(id);
+  const toggle = (id: string) =>
+    setChannels((cur) => (cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id]));
   const [tgToken, setTgToken] = useState(me.telegram_token || "");
   const [tgChat, setTgChat] = useState(me.telegram_chat_id || "");
   const [waSid, setWaSid] = useState(me.twilio_account_sid || "");
@@ -1245,14 +1328,17 @@ function NotificationChannels({ me }: { me: any }) {
   const [msg, setMsg] = useState("");
 
   const CHANNELS: [string, string][] = [
-    ["none", "Off"], ["telegram", "Telegram"], ["whatsapp", "WhatsApp"], ["email", "Email"],
+    ["telegram", "Telegram"], ["whatsapp", "WhatsApp"], ["email", "Email"],
   ];
 
   const save = async () => {
     setBusy(true); setMsg("");
     try {
       await api.saveNotifications({
-        notification_channel: channel,
+        // "none" rather than "" - the sender's default when the column is
+        // empty is already "none", and a blank would read as one nameless
+        // channel after the split.
+        notification_channel: channels.length ? channels.join(",") : "none",
         telegram_token: tgToken, telegram_chat_id: tgChat,
         twilio_account_sid: waSid, twilio_auth_token: waToken,
         whatsapp_number: waNumber, email_address: mailTo,
@@ -1262,49 +1348,59 @@ function NotificationChannels({ me }: { me: any }) {
     finally { setBusy(false); }
   };
 
+  /* One test per selected channel: /api/test-notification takes a single
+     channel, and a test that only exercised the first one would have said
+     "sent" while the other two were still misconfigured. */
   const test = async () => {
     setBusy(true); setMsg("Sending\u2026");
-    try {
-      const r = await api.testNotification(channel);
-      setMsg(r?.error ? r.error : "\u2713 Sent \u2014 check " + channel);
-    } catch (e: any) { setMsg(e?.message || "Test failed"); }
-    finally { setBusy(false); }
+    const okd: string[] = [], bad: string[] = [];
+    for (const ch of channels) {
+      try {
+        const r = await api.testNotification(ch);
+        (r?.error || r?.success === false ? bad : okd).push(ch);
+      } catch { bad.push(ch); }
+    }
+    const parts: string[] = [];
+    if (okd.length) parts.push("\u2713 Sent to " + okd.join(", "));
+    if (bad.length) parts.push("Failed: " + bad.join(", "));
+    setMsg(parts.join(" \u00b7 ") || "Pick a channel first");
+    setBusy(false);
   };
 
   const input = "w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm";
   return (
     <div>
-      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channel</h3>
-      <div className="grid grid-cols-4 gap-2 mb-3">
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channels</h3>
+      <p className="text-xs text-gray-500 mb-3">Pick any combination — alerts go to all of them.</p>
+      <div className="grid grid-cols-3 gap-2 mb-3">
         {CHANNELS.map(([id, label]) => (
-          <button key={id} onClick={() => setChannel(id)}
-            className={`py-2.5 rounded-xl border text-xs font-medium transition-colors ${channel === id ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
-            {label}
+          <button key={id} onClick={() => toggle(id)} aria-pressed={has(id)}
+            className={`py-2.5 rounded-xl border text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${has(id) ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+            {has(id) && <Check className="w-3.5 h-3.5" />}{label}
           </button>
         ))}
       </div>
-      {channel === "telegram" && (
+      {!channels.length && <p className="text-xs text-gray-500 mb-3">No channels selected — only in-app and push alerts.</p>}
+      {has("telegram") && (
         <div className="space-y-2">
           <input value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder="Bot token" className={input} />
           <input value={tgChat} onChange={(e) => setTgChat(e.target.value)} placeholder="Chat ID" className={input} />
         </div>
       )}
-      {channel === "whatsapp" && (
+      {has("whatsapp") && (
         <div className="space-y-2">
           <input value={waSid} onChange={(e) => setWaSid(e.target.value)} placeholder="Twilio account SID" className={input} />
           <input value={waToken} onChange={(e) => setWaToken(e.target.value)} placeholder="Twilio auth token" className={input} />
           <input value={waNumber} onChange={(e) => setWaNumber(e.target.value)} placeholder="WhatsApp number" className={input} />
         </div>
       )}
-      {channel === "email" && (
+      {has("email") && (
         <input value={mailTo} onChange={(e) => setMailTo(e.target.value)} placeholder="Send alerts to…" className={input} />
       )}
-      {channel !== "none" && (
-        <div className="flex gap-2 mt-3">
-          <button onClick={save} disabled={busy} className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium disabled:opacity-60">Save channel</button>
-          <button onClick={test} disabled={busy} className="flex-1 py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium disabled:opacity-60">Send test</button>
-        </div>
-      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={save} disabled={busy} className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium disabled:opacity-60">Save channels</button>
+        <button onClick={test} disabled={busy || !channels.length} className="flex-1 py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium disabled:opacity-60">Send test</button>
+      </div>
       {msg && <p className="text-xs text-gray-400 mt-2">{msg}</p>}
     </div>
   );
@@ -1354,11 +1450,13 @@ function ChangePassword() {
   );
 }
 
-type SettingsTab = "profile" | "prefs" | "cv" | "alerts" | "account";
+type SettingsTab = "profile" | "prefs" | "cv" | "alerts";
+/* Four tabs, not five. "Profile" and "Account" were the same question asked
+   twice - who am I and how do I sign in - and splitting them meant your name
+   lived one tab away from your password. */
 const SETTINGS_TABS: [SettingsTab, string, any][] = [
   ["profile", "Profile", Users], ["prefs", "Job preferences", Briefcase],
   ["cv", "Resume / CV", FileText], ["alerts", "Alerts & schedule", Bell],
-  ["account", "Account", ShieldCheck],
 ];
 
 function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
@@ -1366,10 +1464,19 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
   const [keywords, setKeywords] = useState<string[]>(parseTitles(me.keywords));
   const [locations, setLocations] = useState<string[]>(parseTitles(me.locations));
+  const [fullName, setFullName] = useState(me.name || "");
+  const [linkedin, setLinkedin] = useState(me.linkedin_url || "");
   const [phone, setPhone] = useState(me.phone || "");
   const [email, setEmail] = useState(me.email_address || me.email || "");
+  const [freq, setFreq] = useState<string>(me.schedule_frequency || "daily");
   const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
   const [applyHour, setApplyHour] = useState(String(me.apply_hour ?? 17));
+  /* Day-of-week was collected in onboarding and then unreachable: a weekly
+     user who wanted to move their search off Tuesday had nowhere to say so.
+     Indexes are Python's 0=Monday (see DOW), because the value is compared
+     straight against datetime.weekday(). */
+  const [searchDow, setSearchDow] = useState<number>(me.search_day_of_week ?? 1);
+  const [applyDow, setApplyDow] = useState<number>(me.apply_day_of_week ?? 1);
   const [saving, setSaving] = useState(false); const [saved, setSaved] = useState(false);
   const [cvName, setCvName] = useState<string>(me.cv_filename || (me.cv_path ? String(me.cv_path).split("/").pop() || "" : ""));
   const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
@@ -1407,7 +1514,24 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
 
   const enableNotifs = async () => { setPushMsg("Enabling…"); const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "✓ Notifications enabled" : (r.reason || "Couldn't enable")); };
   const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch { setPushMsg("Test failed"); } };
-  const save = async () => { setSaving(true); setSaved(false); try { await api.saveProfile({ phone, job_titles: titles, keywords, locations }); await api.saveSchedule({ search_hour: parseInt(searchHour, 10), apply_hour: parseInt(applyHour, 10) }); if (email && email !== me.email) await api.saveNotifications({ email_address: email }); setSaved(true); } catch {} finally { setSaving(false); } };
+  const save = async () => {
+    setSaving(true); setSaved(false);
+    try {
+      await api.saveProfile({ name: fullName, phone, linkedin_url: linkedin, job_titles: titles, keywords, locations });
+      await api.saveSchedule({
+        schedule_frequency: freq,
+        search_hour: parseInt(searchHour, 10),
+        apply_hour: parseInt(applyHour, 10),
+        // Sent on every save, weekly or not: leaving the columns untouched let
+        // a user switch to weekly and inherit whatever day happened to be
+        // stored, with nothing on screen saying which.
+        search_day_of_week: searchDow,
+        apply_day_of_week: applyDow,
+      });
+      if (email && email !== me.email) await api.saveNotifications({ email_address: email });
+      setSaved(true);
+    } catch {} finally { setSaving(false); }
+  };
   const onCvPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setCvMsg("Uploading…");
@@ -1440,7 +1564,25 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
         </div>
         <div className="p-5 space-y-6">
           {tab === "profile" && (<>
-          <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
+          <div>
+            <h3 className="font-semibold text-white mb-3">About you</h3>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <LabelledInput label="Full name" value={fullName} onChange={setFullName} placeholder="Jane Cohen" />
+              <LabelledInput label="Email" value={email} onChange={setEmail} placeholder="email@example.com" type="email" />
+              <LabelledInput label="Phone" value={phone} onChange={setPhone} placeholder="+972 50 000 0000" type="tel" />
+              <LabelledInput label="LinkedIn URL" value={linkedin} onChange={setLinkedin} placeholder="https://linkedin.com/in/you" />
+            </div>
+          </div>
+          <div className="pt-1 border-t border-gray-700" />
+          <ChangePassword />
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-gray-400" />Account</h3>
+            <p className="text-xs text-gray-400 mb-2">Signed in as {me?.email || me?.name}</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <a href="/app?onboarding=1" className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><Wand2 className="w-4 h-4" />Run setup again</a>
+              <a href="/logout" className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><LogOut className="w-4 h-4" />Sign out</a>
+            </div>
+          </div>
           </>)}
           {tab === "prefs" && (<>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="VP Product" /></div>
@@ -1470,21 +1612,25 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
           </div>
           </>)}
           {tab === "alerts" && (<>
-          <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic Schedule</h3><div className="space-y-3"><Field label="Daily Job Search" sub="Run search automatically"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field><Field label="Daily Auto-Apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field></div></div>
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic schedule</h3>
+            <div className="space-y-3">
+              <Field label="How often" sub={freq === "weekly" ? "Runs once a week, on the days you pick" : "Runs every day"}>
+                <select value={freq} onChange={(e) => setFreq(e.target.value)} className="px-3 py-2 border border-gray-700 rounded-lg bg-gray-700 text-white text-sm shrink-0">
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+              </Field>
+              <Field label="Job search" sub="Find and score new jobs"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field>
+              {freq === "weekly" && <DayPicker label="Search day" value={searchDow} onChange={setSearchDow} />}
+              <Field label="Auto-apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field>
+              {freq === "weekly" && <DayPicker label="Apply day" value={applyDow} onChange={setApplyDow} />}
+            </div>
+          </div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
           <NotificationChannels me={me} />
           </>)}
-          {tab === "account" && (<>
-          <ChangePassword />
-          <div>
-            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><LogOut className="w-5 h-5 text-gray-400" />Account</h3>
-            <p className="text-xs text-gray-400 mb-2">Signed in as {me?.email || me?.name}</p>
-            <a href="/logout" className="w-full flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><LogOut className="w-4 h-4" />Sign out</a>
-          </div>
-          </>)}
-          {tab !== "account" && (
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
-          )}
         </div>
       </motion.div>
     </motion.div>
@@ -1512,6 +1658,32 @@ function CvAnalysisPanel({ data, fmtDate }: { data: CvOptimizerResult; fmtDate: 
         <div><p className="text-xs font-semibold text-indigo-300 mb-1">ATS notes</p><ul className="space-y-1">{data.ats_notes.map((n, i) => <li key={i} className="text-xs text-gray-400 flex gap-2"><AlertCircle className="w-3.5 h-3.5 text-indigo-300 shrink-0 mt-0.5" />{n}</li>)}</ul></div>
       )}
       {data.analyzed_date && <p className="text-[11px] text-gray-500 pt-1">Last analyzed {fmtDate(data.analyzed_date)}</p>}
+    </div>
+  );
+}
+
+function LabelledInput({ label, value, onChange, placeholder, type }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-gray-400 mb-1.5">{label}</span>
+      <input type={type || "text"} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+             className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
+    </label>
+  );
+}
+
+function DayPicker({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="p-3.5 bg-gray-800 rounded-xl border border-gray-700">
+      <p className="font-medium text-white text-sm mb-2">{label}</p>
+      <div className="grid grid-cols-7 gap-1.5">
+        {DOW.map((d, i) => (
+          <button key={d} onClick={() => onChange(i)} aria-pressed={value === i}
+            className={`py-2 rounded-lg text-xs font-medium border transition-colors ${value === i ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-900/60 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+            {d}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

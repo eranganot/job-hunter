@@ -222,6 +222,54 @@ Check "GET /app/index.html serves the built shell" {
 }
 Write-Host ""
 
+# --- The DEPLOYED bundle carries the features, not just the local one --------
+# web_bundle/ is committed, so a stale or half-copied bundle deploys green:
+# every route answers, the page renders, and the controls are simply absent.
+# That is exactly how "settings still cannot do X" survived two rounds. These
+# read the script the deployed box is actually serving.
+Write-Host "-- deployed /app bundle --" -ForegroundColor Cyan
+$script:appJs = ""
+Check "the deployed shell names a script bundle" {
+    $r = Get-Status "$BaseUrl/app/index.html"
+    if ($r.Code -ne 200) { return "index.html status $($r.Code)" }
+    $m = [regex]::Match($r.Body, 'src="[^"]*?(assets/[^"]+\.js)"')
+    if (-not $m.Success) { return "index.html loads no script" }
+    $j = Get-Status "$BaseUrl/app/$($m.Groups[1].Value)"
+    if ($j.Code -ne 200) { return "bundle $($m.Groups[1].Value) status $($j.Code)" }
+    if ($j.Body.Length -lt 100000) { return "bundle is only $($j.Body.Length) bytes - that is not a real build" }
+    $script:appJs = $j.Body
+    $true
+}
+# Each needle is a control a user reported missing. Named individually so a
+# failure says which one, rather than "the bundle is old".
+$bundleNeedles = @(
+    @{ n = "setup can be replayed (?onboarding=1)"; s = "/app?onboarding=1" },
+    @{ n = "weekly schedule day pickers";           s = "Search day" },
+    @{ n = "apply day picker";                      s = "Apply day" },
+    @{ n = "profile carries full name";             s = "Full name" },
+    @{ n = "profile carries LinkedIn URL";          s = "LinkedIn URL" },
+    @{ n = "sign-out is reachable";                 s = "/logout" },
+    @{ n = "queue explains why a job fits";         s = "Why this fits" }
+)
+foreach ($b in $bundleNeedles) {
+    Check "deployed bundle: $($b.n)" {
+        if (-not $script:appJs) { return "no bundle was read" }
+        if ($script:appJs.Contains($b.s)) { $true }
+        else { "the string '$($b.s)' is not in the deployed bundle - web_bundle/ on this deploy is behind the source" }
+    }
+}
+Check "deployed bundle ships no literal backslash-u to users" {
+    if (-not $script:appJs) { return "no bundle was read" }
+    # Regex literals in React's own code legitimately contain these; only
+    # QUOTED strings reach a user's eyes. Mirrors tests/test_web_bundle.py.
+    $bad = @()
+    foreach ($q in [regex]::Matches($script:appJs, '"(?:[^"\\]|\\.)*"')) {
+        if ($q.Value -match '\\u[0-9a-fA-F]{4}') { $bad += $q.Value.Substring(0, [Math]::Min(60, $q.Value.Length)) }
+    }
+    if ($bad.Count -eq 0) { $true } else { "$($bad.Count) string(s) would render literally, e.g. $($bad[0])" }
+}
+Write-Host ""
+
 # --- Auth gates (the part that matters before public signup) ------------------
 Write-Host "-- auth gates (anonymous) --" -ForegroundColor Cyan
 # NOTE: no .GetNewClosure() here. A closure is bound to a NEW dynamic-module

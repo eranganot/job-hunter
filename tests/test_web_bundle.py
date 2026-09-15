@@ -118,8 +118,13 @@ DESKTOP_RULES = [
     ("lg\\:w-56{",         "the sidebar's width"),
     ("lg\\:sticky{",       "the sidebar staying put while content scrolls"),
     ("lg\\:hidden{",       "hiding the small-screen tab grid once the rail exists"),
-    ("xl\\:grid-cols-2{",  "two job columns from xl"),
-    ("2xl\\:grid-cols-3{", "three job columns from 2xl"),
+    # The job lists are ranked rows now, not a grid of equal cards: the order
+    # is the information, and a grid hid it. What has to survive the build is
+    # the swipe page's wide card and its two-column body - the screens Eran
+    # reported as "still centralized".
+    ("lg\\:max-w-5xl{",    "the swipe card using the width at lg"),
+    ("lg\\:grid-cols-2{",  "the swipe card's two-column body at lg"),
+    ("lg\\:px-8{",         "the wide-screen gutter on the swipe chrome"),
 ]
 
 
@@ -255,3 +260,61 @@ def test_admin_ships_as_a_destination_not_a_hover_window():
     js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
     assert "AdminModal" not in js, "the admin modal is back"
     assert '"admin"' in js, "the admin tab id is missing from the bundle"
+
+
+# ── Phase 4 round 2: the things Eran could not reach from /app ───────────────
+#
+# Each of these was a control that existed in the legacy HTML settings page and
+# had no equivalent in the SPA, so the symptom was always "the app just does
+# not let me do that" rather than an error. The CSS proves the markup compiled;
+# the JS proves the wiring did.
+
+def _bundle_js() -> str:
+    import re
+    html = (BUNDLE / "index.html").read_text(encoding="utf-8")
+    rels = re.findall(r'src="[^"]*?(assets/[^"]+\.js)"', html)
+    assert rels, "index.html loads no script"
+    return "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_setup_can_be_replayed_from_a_url():
+    """Onboarding ran once per account and then became untestable - there was
+    no way to see it again short of editing the database. ?onboarding=1 is what
+    the "Run setup again" button links to, so both die together."""
+    js = _bundle_js()
+    assert '"onboarding"' in js, "the ?onboarding query param is not read in the shipped bundle"
+    assert "/app?onboarding=1" in js, "the 'Run setup again' link is not in the shipped bundle"
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_the_weekly_schedule_can_be_configured_from_settings():
+    """Frequency and day-of-week were collected once during setup and then only
+    editable in the legacy page. A weekly user who wanted to move their search
+    off Tuesday had nowhere in /app to say so."""
+    js = _bundle_js()
+    for needle in ("Search day", "Apply day", "schedule_frequency",
+                   "search_day_of_week", "apply_day_of_week"):
+        assert needle in js, "%r is missing - the schedule controls did not ship" % needle
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_the_profile_tab_carries_identity_and_sign_in():
+    """Name and LinkedIn URL are columns the apply engine fills forms from, and
+    neither had an input in /app. Account was merged in rather than left as a
+    fifth tab holding one button."""
+    js = _bundle_js()
+    for needle in ("Full name", "LinkedIn URL", "linkedin_url", "Sign out"):
+        assert needle in js, "%r is missing from the shipped bundle" % needle
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+def test_the_swipe_page_is_not_a_phone_column_on_a_desktop():
+    """The reported symptom, twice: 'the swipe page is still centralized and
+    not using the real estate of the screen'. These are the rules that widen
+    it; Tailwind emits them only if the markup still carries the classes."""
+    css = _bundle_css()
+    for pattern, what in (("lg\\:max-w-5xl{", "the card's desktop width"),
+                          ("lg\\:grid-cols-2{", "the card's two-column body"),
+                          ("lg\\:px-8{", "the wide gutter on the header and progress rows")):
+        assert pattern in css, "%s is missing - the swipe page would render narrow again" % what

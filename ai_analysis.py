@@ -223,11 +223,27 @@ def compute_feedback_penalty(
             if not reason:
                 reason = "Similar to roles you've passed"
 
-    # Location the user has repeatedly passed on (only set when they passed for
-    # a location reason, so this never fights their own preferred city).
+    # Location the user has repeatedly passed on.
+    #
+    # The comment here used to claim this "never fights their own preferred
+    # city" - and nothing checked. The title branch above DOES guard against the
+    # user's own targets (see `if disliked and user_profile is not None`); the
+    # location branch never did. The match is a substring test, so once two
+    # recent passes carried a "Wrong location" reason on jobs in, say,
+    # "Tel Aviv, Israel", EVERY Tel Aviv job was demoted - including the ones in
+    # the city the user actually asked for. Eran hit exactly this on staging
+    # (2026-09-15): a 97% Tel Aviv role badged "Location you've passed on" while
+    # Tel Aviv was his first preferred location.
+    #
+    # A pass on a job that IS in a preferred location is telling us something
+    # about that job, not about the city.
     disliked_loc = signals.get("disliked_locations") or set()
     job_loc = (job.get("location") or "").strip().lower()
-    if job_loc and disliked_loc and any(dl and dl in job_loc for dl in disliked_loc):
+    preferred = [str(l).strip().lower() for l in
+                 _parse_json_list((user_profile or {}).get("locations")) if str(l).strip()]
+    in_preferred = any(pl in job_loc for pl in preferred) if job_loc else False
+    if job_loc and disliked_loc and not in_preferred and \
+            any(dl and dl in job_loc for dl in disliked_loc):
         penalty += 10
         if not reason:
             reason = "Location you've passed on"

@@ -75,3 +75,48 @@ class TestLocation:
             {"company": "Z", "title": "PM", "location": "Berlin, Germany"}, sig
         )
         assert pen >= 10 and "Location" in reason
+
+
+# ── The location penalty must not fight the user's own preferred city ────────
+#
+# Found on staging 2026-09-15: a 97% Tel Aviv role carried the badge
+# "Location you've passed on" while Tel Aviv was the user's FIRST preferred
+# location. The comment above that branch claimed it "never fights their own
+# preferred city"; nothing checked. The title branch two blocks up does guard
+# against the user's own targets - the location branch never did.
+
+def _loc_signals(disliked):
+    """A hand-built signal bundle. Deliberately NOT the module's _signals(uid),
+    which reads real rows - these tests are about the penalty's arithmetic, not
+    about how signals are gathered."""
+    return {"bad_companies": set(), "passed_companies": {},
+            "disliked_title_tokens": set(), "disliked_locations": set(disliked)}
+
+
+def test_a_job_in_a_preferred_location_is_not_demoted_for_its_location():
+    from ai_analysis import compute_feedback_penalty
+    job = {"company": "Acme", "title": "VP Product", "location": "Tel Aviv, Israel"}
+    profile = {"locations": '["Tel Aviv", "Remote"]', "job_titles": '["VP Product"]'}
+    penalty, reason = compute_feedback_penalty(job, _loc_signals({"tel aviv, israel"}), profile)
+    assert penalty == 0, (penalty, reason)
+    assert "Location" not in reason
+
+
+def test_a_job_outside_the_preferred_locations_is_still_demoted():
+    """The guard must not switch the penalty off altogether - a location the
+    user keeps passing on, and never asked for, should still rank lower."""
+    from ai_analysis import compute_feedback_penalty
+    job = {"company": "Acme", "title": "VP Product", "location": "Haifa, Israel"}
+    profile = {"locations": '["Tel Aviv"]', "job_titles": '["VP Product"]'}
+    penalty, reason = compute_feedback_penalty(job, _loc_signals({"haifa"}), profile)
+    assert penalty == 10, (penalty, reason)
+    assert reason == "Location you've passed on"
+
+
+def test_with_no_stated_locations_the_old_behaviour_stands():
+    """A user who never said where they want to work has no preference for the
+    guard to protect, so the signal is all we have."""
+    from ai_analysis import compute_feedback_penalty
+    job = {"company": "Acme", "title": "VP Product", "location": "Tel Aviv, Israel"}
+    penalty, _r = compute_feedback_penalty(job, _loc_signals({"tel aviv"}), {"locations": None})
+    assert penalty == 10
