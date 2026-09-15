@@ -266,6 +266,11 @@ def test_get_apis_require_login(stack, path):
     ("/api/jobs/bulk", {"action": "approve", "ids": [1]}),
     ("/api/set-stage", {"id": 1, "stage": "screening"}),
     ("/api/jobs/1/approve", {}),
+    # The three /app could not reach until 2026-09-15. They are now callable
+    # from the UI, so their gates are worth asserting rather than assuming.
+    ("/api/change-password", {"current_password": "x", "new_password": "y"}),
+    ("/api/analyze-cv", {}),
+    ("/api/test-notification", {"channel": "telegram"}),
 ])
 def test_post_apis_require_login(stack, path, payload):
     status, _, _ = Client(stack["port"]).post_json(path, payload)

@@ -152,3 +152,21 @@ def test_the_phone_layout_is_not_collateral_damage():
     css = _bundle_css()
     for pattern in (r"\.grid\{", r"\.grid-cols-3\{", r"\.grid-cols-2\{"):
         assert re.search(pattern, css), "base layout utility %s missing" % pattern
+
+
+# ── The settings sheet is not a phone column on a desktop ────────────────────
+
+SETTINGS_RULES = [
+    ("lg\\:max-w-4xl{",  "the settings sheet widening past a phone column"),
+    ("lg\\:columns-2{",  "its sections flowing into two columns"),
+]
+
+
+@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
+@pytest.mark.parametrize("pattern, what", SETTINGS_RULES,
+                         ids=[w for _p, w in SETTINGS_RULES])
+def test_the_settings_sheet_uses_the_screen(pattern, what):
+    assert pattern in _bundle_css(), (
+        "%s is missing from the built CSS - settings would open as a 576px "
+        "column in the middle of a 1280px screen, which is the thing the "
+        "desktop pass was for." % what)

@@ -140,6 +140,26 @@ export const api = {
   later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
   restore: (id: number) => request(`/api/jobs/${id}/restore`, "POST", {}),
   runSearch: () => request("/api/run-search", "POST", {}),
+  runApply: () => request<{ started?: boolean; status?: string; error?: string }>(
+    "/api/run-apply", "POST", {}),
+
+  // Reads a CV and fills the profile from it (titles, keywords, locations).
+  // NOT cvOptimizer, which scores a CV and changes nothing - this is the one a
+  // new user needs, and /app had no way to call it.
+  analyzeCv: () => request<{
+    summary?: string; job_titles?: string[]; keywords?: string[];
+    locations?: string[]; seniority?: string; experience_years?: number;
+    error?: string;
+  }>("/api/analyze-cv", "POST", {}),
+
+  changePassword: (current_password: string, new_password: string) =>
+    request<{ success: boolean; error?: string; signed_out_other_sessions?: boolean }>(
+      "/api/change-password", "POST", { current_password, new_password }),
+
+  // The configured channel (Telegram / WhatsApp / email), not web push.
+  testNotification: (channel: string) =>
+    request<{ success?: boolean; error?: string; detail?: string }>(
+      "/api/test-notification", "POST", { channel }),
   cvOptimizerCached: () => request<CvOptimizerResult>("/api/cv-optimizer-analyze"),
   cvOptimizer: () => request<CvOptimizerResult>("/api/cv-optimizer-analyze", "POST", {}),
   validateLinks: () => request<ValidateLinksResult>("/api/validate-links", "POST", {}),

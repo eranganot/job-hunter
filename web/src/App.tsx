@@ -5,7 +5,7 @@ import {
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
-  ShieldCheck, Trash2, Users,
+  ShieldCheck, Trash2, Users, Send, Wand2,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -899,6 +899,132 @@ function AdminModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function NotificationChannels({ me }: { me: any }) {
+  /* Telegram, WhatsApp and email could not be configured from /app at all -
+     web push was the only channel here, while the legacy settings page carried
+     all four. These are also the exact three fields crypto.py encrypts at rest
+     (telegram_token, twilio_auth_token, email_smtp_pass), so until now the
+     encryption had no UI that could reach it. */
+  const [channel, setChannel] = useState<string>(me.notification_channel || "none");
+  const [tgToken, setTgToken] = useState(me.telegram_token || "");
+  const [tgChat, setTgChat] = useState(me.telegram_chat_id || "");
+  const [waSid, setWaSid] = useState(me.twilio_account_sid || "");
+  const [waToken, setWaToken] = useState(me.twilio_auth_token || "");
+  const [waNumber, setWaNumber] = useState(me.whatsapp_number || "");
+  const [mailTo, setMailTo] = useState(me.email_address || "");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  const CHANNELS: [string, string][] = [
+    ["none", "Off"], ["telegram", "Telegram"], ["whatsapp", "WhatsApp"], ["email", "Email"],
+  ];
+
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try {
+      await api.saveNotifications({
+        notification_channel: channel,
+        telegram_token: tgToken, telegram_chat_id: tgChat,
+        twilio_account_sid: waSid, twilio_auth_token: waToken,
+        whatsapp_number: waNumber, email_address: mailTo,
+      });
+      setMsg("\u2713 Saved");
+    } catch (e: any) { setMsg(e?.message || "Could not save"); }
+    finally { setBusy(false); }
+  };
+
+  const test = async () => {
+    setBusy(true); setMsg("Sending\u2026");
+    try {
+      const r = await api.testNotification(channel);
+      setMsg(r?.error ? r.error : "\u2713 Sent \u2014 check " + channel);
+    } catch (e: any) { setMsg(e?.message || "Test failed"); }
+    finally { setBusy(false); }
+  };
+
+  const input = "w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm";
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channel</h3>
+      <div className="grid grid-cols-4 gap-2 mb-3">
+        {CHANNELS.map(([id, label]) => (
+          <button key={id} onClick={() => setChannel(id)}
+            className={`py-2.5 rounded-xl border text-xs font-medium transition-colors ${channel === id ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {channel === "telegram" && (
+        <div className="space-y-2">
+          <input value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder="Bot token" className={input} />
+          <input value={tgChat} onChange={(e) => setTgChat(e.target.value)} placeholder="Chat ID" className={input} />
+        </div>
+      )}
+      {channel === "whatsapp" && (
+        <div className="space-y-2">
+          <input value={waSid} onChange={(e) => setWaSid(e.target.value)} placeholder="Twilio account SID" className={input} />
+          <input value={waToken} onChange={(e) => setWaToken(e.target.value)} placeholder="Twilio auth token" className={input} />
+          <input value={waNumber} onChange={(e) => setWaNumber(e.target.value)} placeholder="WhatsApp number" className={input} />
+        </div>
+      )}
+      {channel === "email" && (
+        <input value={mailTo} onChange={(e) => setMailTo(e.target.value)} placeholder="Send alerts to\u2026" className={input} />
+      )}
+      {channel !== "none" && (
+        <div className="flex gap-2 mt-3">
+          <button onClick={save} disabled={busy} className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium disabled:opacity-60">Save channel</button>
+          <button onClick={test} disabled={busy} className="flex-1 py-2.5 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl text-sm font-medium disabled:opacity-60">Send test</button>
+        </div>
+      )}
+      {msg && <p className="text-xs text-gray-400 mt-2">{msg}</p>}
+    </div>
+  );
+}
+
+function ChangePassword() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [ok, setOk] = useState(false);
+
+  const submit = async () => {
+    setMsg(""); setOk(false);
+    if (next.length < 8) { setMsg("New password must be at least 8 characters."); return; }
+    if (next !== confirm) { setMsg("The two new passwords do not match."); return; }
+    setBusy(true);
+    try {
+      const r = await api.changePassword(current, next);
+      if (r?.error) { setMsg(r.error); }
+      else {
+        setOk(true);
+        /* Said out loud because it is the point of changing a password: any
+           other session - the one you are worried about - is now dead. */
+        setMsg("\u2713 Password changed. Every other signed-in device has been signed out.");
+        setCurrent(""); setNext(""); setConfirm("");
+      }
+    } catch (e: any) { setMsg(e?.message || "Could not change password"); }
+    finally { setBusy(false); }
+  };
+
+  const input = "w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm";
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-gray-400" />Change password</h3>
+      <div className="space-y-2">
+        <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current password" className={input} />
+        <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="New password" className={input} />
+        <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat new password" className={input} />
+      </div>
+      <button onClick={submit} disabled={busy || !current || !next} className="w-full mt-3 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium disabled:opacity-60">
+        {busy ? "Changing\u2026" : "Change password"}
+      </button>
+      {msg && <p className={`text-xs mt-2 ${ok ? "text-green-400" : "text-amber-400"}`}>{msg}</p>}
+    </div>
+  );
+}
+
 function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const parseTitles = (v: any): string[] => { if (!v) return []; if (Array.isArray(v)) return v; try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); } catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); } };
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
@@ -913,6 +1039,8 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
   const [cvMsg, setCvMsg] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState("");
   const [cvAnalysis, setCvAnalysis] = useState<CvOptimizerResult | null>(null);
   const [analyzeMsg, setAnalyzeMsg] = useState("");
   const [perm, setPerm] = useState(pushState()); const [pushMsg, setPushMsg] = useState("");
@@ -922,6 +1050,24 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
   const fmtDate = (iso: string) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); };
   const analyzeCv = async () => { setAnalyzing(true); setAnalyzeMsg(""); try { const r = await api.cvOptimizer(); if (r?.error) setAnalyzeMsg(r.error); else { setCvAnalysis(r); setAnalyzeMsg(r?.cached ? "Showing your most recent analysis" : ""); } } catch (e: any) { setAnalyzeMsg(e?.message || "Analysis failed"); } finally { setAnalyzing(false); } };
+
+  /* The gap that mattered most: /app could upload a CV and never read it, so a
+     new user had to type every title, keyword and location by hand. The fields
+     are filled in place rather than saved outright - the user still reviews
+     them and presses Save, because an AI reading a CV gets things wrong. */
+  const fillFromCv = async () => {
+    setExtracting(true); setExtractMsg("");
+    try {
+      const r = await api.analyzeCv();
+      if (r?.error) { setExtractMsg(r.error); return; }
+      const t = r.job_titles || [], k = r.keywords || [], l = r.locations || [];
+      if (t.length) setTitles(t);
+      if (k.length) setKeywords(k);
+      if (l.length) setLocations(l);
+      setExtractMsg(`Read your CV \u2014 ${t.length} title(s), ${k.length} keyword(s), ${l.length} location(s). Review them, then Save.`);
+    } catch (e: any) { setExtractMsg(e?.message || "Could not read the CV"); }
+    finally { setExtracting(false); }
+  };
 
   const enableNotifs = async () => { setPushMsg("Enabling…"); const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "✓ Notifications enabled" : (r.reason || "Couldn't enable")); };
   const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch { setPushMsg("Test failed"); } };
@@ -933,9 +1079,9 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   return (
     <>
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
-      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
+      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-xl lg:max-w-4xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
         <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-5 flex items-center justify-between z-10"><h2 className="text-lg font-bold text-white">Settings</h2><button onClick={onClose} className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button></div>
-        <div className="p-5 space-y-6">
+        <div className="p-5 space-y-6 lg:space-y-0 lg:columns-2 lg:gap-6 [&>*]:lg:break-inside-avoid [&>*]:lg:mb-6">
           {isAdmin && (
             <button onClick={() => setShowAdmin(true)} className="w-full flex items-center justify-between gap-2 p-4 bg-indigo-600/15 border border-indigo-600/40 rounded-xl active:bg-indigo-600/25">
               <span className="flex items-center gap-2 text-indigo-200 font-semibold"><ShieldCheck className="w-5 h-5" />Admin Panel</span>
@@ -957,14 +1103,20 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
             )}
             <label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">{cvName ? "Tap to replace" : "Tap to upload"}</p><p className="text-xs text-gray-500">PDF, max 5MB</p>{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label>
             {cvName && (
-              <button onClick={analyzeCv} disabled={analyzing} className="w-full mt-3 py-3 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-60">{analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{analyzing ? "Analyzing…" : "✨ Analyze my CV with AI"}</button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                <button onClick={fillFromCv} disabled={extracting} className="py-3 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-60">{extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}{extracting ? "Reading…" : "Fill profile from CV"}</button>
+                <button onClick={analyzeCv} disabled={analyzing} className="py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-60">{analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{analyzing ? "Analyzing…" : "Score my CV"}</button>
+              </div>
             )}
+            {extractMsg && <p className="text-xs text-gray-400 mt-2">{extractMsg}</p>}
             {analyzeMsg && <p className="text-xs text-gray-400 mt-2">{analyzeMsg}</p>}
             {cvAnalysis && <CvAnalysisPanel data={cvAnalysis} fmtDate={fmtDate} />}
           </div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
+          <NotificationChannels me={me} />
+          <ChangePassword />
           <div><h3 className="font-semibold text-white mb-3">Contact Information</h3><div className="space-y-3"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /></div></div>
-          <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
+          <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
         </div>
       </motion.div>
     </motion.div>
