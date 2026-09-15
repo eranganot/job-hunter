@@ -145,6 +145,16 @@
       "since": "2026-09-15",
       "what": "bulk remove from queue",
       "needle": "Remove from queue"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "admin can enable/disable an account",
+      "needle": "Disable"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "apply self-test has a button at last",
+      "needle": "Run apply self-test"
     }
   ]
 }

@@ -6225,7 +6225,7 @@ class Handler(BaseHTTPRequestHandler):
             # only; bypasses the global kill-switch for this one explicit call.
             user = self.require_auth()
             if not user or user.get("role") != "admin":
-                self.send_json({"error": "Forbidden"}, status=403)
+                self.send_json({"error": "Forbidden"}, 403)
                 return
             import apply_engine as _ae
             _jid = (qs.get("job_id", [""])[0] or "").strip()
@@ -6258,7 +6258,7 @@ class Handler(BaseHTTPRequestHandler):
                                 (user["id"],)).fetchone() if job else None
             conn.close()
             if not job:
-                self.send_json({"error": f"job {_jid} not found for this user"}, status=404)
+                self.send_json({"error": f"job {_jid} not found for this user"}, 404)
                 return
             _cv_text = (prof["cv_summary"] or "") if prof else ""
             _cv_path = (prof["cv_path"] or None) if prof else None
@@ -6332,7 +6332,7 @@ class Handler(BaseHTTPRequestHandler):
             # for "the engine applies to nothing regardless of code fixes".
             user = self.require_auth()
             if not user or user.get("role") != "admin":
-                self.send_json({"error": "Forbidden"}, status=403)
+                self.send_json({"error": "Forbidden"}, 403)
                 return
             import apply_engine as _ae
             import time as _t
@@ -6452,7 +6452,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/admin/queue-stats":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
-                self.send_json({"error": "Forbidden"}, status=403)
+                self.send_json({"error": "Forbidden"}, 403)
                 return
             _uid = user["id"]
             conn = database.get_db()
@@ -6483,7 +6483,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             user = self.require_auth()
             if not user or user.get("role") != "admin":
-                self.send_json({"error": "forbidden"}, status=403)
+                self.send_json({"error": "forbidden"}, 403)
                 return
             conn = database.get_db()
             # Find duplicate jobs: same user_id + company + title, keep the one with lowest id
@@ -7357,11 +7357,34 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Forbidden"}, 403)
                 return
             target_id = int(m.group(1))
+            # Disabling YOURSELF is a one-click, unrecoverable lockout: the
+            # session lookup requires is_active=1, so the very next request is a
+            # 302 to /login and the undo answers 401. There is one admin
+            # account, so the only way back was editing the database by hand.
+            # Proven 2026-09-15 by driving the route.
+            if target_id == user["id"]:
+                self.send_json({
+                    "error": "You cannot disable your own account - you would be locked out "
+                             "with no way back in.",
+                    "code": "cannot_disable_self",
+                }, 400)
+                return
             conn = database.get_db()
-            conn.execute("UPDATE users SET is_active = 1 - is_active WHERE id=?", (target_id,))
+            # 404 rather than a cheerful success on an id that does not exist:
+            # the old handler reported {"success": true} for any number at all.
+            row = conn.execute("SELECT is_active FROM users WHERE id=?", (target_id,)).fetchone()
+            if row is None:
+                conn.close()
+                self.send_json({"error": "No such user"}, 404)
+                return
+            new_state = 0 if row["is_active"] else 1
+            conn.execute("UPDATE users SET is_active=? WHERE id=?", (new_state, target_id))
             conn.commit()
             conn.close()
-            self.send_json({"success": True})
+            database.log_activity(user["id"], "admin_user_toggle",
+                f"{'Enabled' if new_state else 'Disabled'} user {target_id}")
+            # The new state, so the UI renders what IS rather than what it guessed.
+            self.send_json({"success": True, "is_active": new_state})
             return
 
         # ── Run Search Now ────────────────────────────────────────────────────────

@@ -74,7 +74,7 @@ Ordered by what blocks a public paid launch, not by size.
 | 1 | **Settings: channels, password, CV analysis** | M | **DONE** (`a2574df`…`1aa0f4d`) | Closes the encryption loop, and `analyze-cv` is the dependency onboarding needs anyway. |
 | 2 | **Onboarding** | L | **DONE** | First thing a new signup sees; the whole point of Phase 5+. Reuses everything from (1). |
 | 3 | **Pipeline stages + bulk actions** | M | **DONE** — and both endpoints were broken | The power features that make `/dashboard` still worth opening. |
-| 4 | **Admin redesign + user toggle + apply probes** | M | **PART DONE** — redesign shipped; toggle and probes open | Once nothing else needs the legacy UI. |
+| 4 | **Admin redesign + user toggle + apply probes** | M | **DONE** — `apply-test` live deliberately left out | Once nothing else needs the legacy UI. |
 | 5 | **Restyle login / register / Google button** | S | **NOT STARTED** | Shared pages; the seam a new user sees first. |
 | 6 | **Flip `/dashboard` → `/app`, then delete** | S | **NOT STARTED** | ~2,900 lines out of `app.py`. Behind `LEGACY_UI=1` for one release. |
 

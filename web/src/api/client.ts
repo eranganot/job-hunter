@@ -239,6 +239,13 @@ export const api = {
   adminRescore: () => request<{ rescored?: number; message?: string }>("/api/admin/rescore", "POST", {}),
   adminDedup: () => request<{ removed: number }>("/api/admin/dedup"),
   adminUsers: () => request<any[]>("/api/admin/users"),
+  // Returns the NEW state, so the row renders what is rather than what it
+  // guessed. 400 with code "cannot_disable_self" if you aim it at yourself.
+  adminToggleUser: (id: number) =>
+    request<{ success?: boolean; is_active?: number; error?: string; code?: string }>(
+      `/api/admin/users/${id}/toggle`, "POST", {}),
+  // Read-only diagnosis of the apply runtime. Submits nothing.
+  adminApplySelftest: () => request<Record<string, any>>("/api/admin/apply-selftest"),
 };
 
 import { timeAgo } from "../lib/format";

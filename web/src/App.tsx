@@ -619,7 +619,7 @@ function DashboardView(p: any) {
           {activeTab === "deferred" && <DeferredTab jobs={sortJobs(deferredJobs)} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} onReload={onReload} />}
           {activeTab === "passed" && <PassedTab />}
           {activeTab === "activity" && <ActivityTab />}
-          {activeTab === "admin" && isAdmin && <AdminPanel />}
+          {activeTab === "admin" && isAdmin && <AdminPanel me={me} />}
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={stats?.applied ?? appliedJobs.length} totalSuggested={stats?.total ?? 0} stats={stats} />}
         </div>
       </div>
@@ -1215,11 +1215,14 @@ function TagInput({ value, onChange, noun = "role", example = "VP Product" }:
   );
 }
 
-function AdminPanel() {
+function AdminPanel({ me }: any) {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
+  const [diag, setDiag] = useState<Record<string, any> | null>(null);
+  const [userMsg, setUserMsg] = useState("");
+  const myId = me?.id;
   const load = () => {
     api.adminQueueStats().then(setStats).catch(() => {});
     api.adminUsers().then((u) => setUsers(Array.isArray(u) ? u : [])).catch(() => {});
@@ -1239,6 +1242,31 @@ function AdminPanel() {
     } catch (e: any) { setMsg(e?.message || "Action failed"); }
     finally { setBusy(""); }
   };
+  /* The 8-week ops item, which has never been run because running it meant
+     hand-crafting a request. It launches a browser against example.com and
+     submits nothing, so it is safe behind a plain button. */
+  const selftest = async () => {
+    setBusy("selftest"); setMsg(""); setDiag(null);
+    try { setDiag(await api.adminApplySelftest()); }
+    catch (e: any) { setMsg(e?.message || "Diagnostics failed"); }
+    finally { setBusy(""); }
+  };
+
+  const toggleUser = async (u: any) => {
+    setUserMsg("");
+    if (u.id === myId) { setUserMsg("You cannot disable your own account."); return; }
+    const verb = u.is_active ? "Disable" : "Enable";
+    if (!confirm(`${verb} ${u.email}?` + (u.is_active ? "\n\nThey will be signed out and cannot sign back in." : ""))) return;
+    setBusy(`user-${u.id}`);
+    try {
+      const r = await api.adminToggleUser(u.id);
+      if (r?.error) { setUserMsg(r.error); return; }
+      // Render the state the SERVER reports, not the one we assumed.
+      setUsers((cur) => cur.map((x) => (x.id === u.id ? { ...x, is_active: r.is_active } : x)));
+    } catch (e: any) { setUserMsg(e?.message || "Could not change that account"); }
+    finally { setBusy(""); }
+  };
+
   const Stat = ({ n, label, color }: { n: number; label: string; color: string }) => (
     <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center">
       <div className={`text-xl font-bold ${color}`}>{n ?? 0}</div>
@@ -1279,6 +1307,30 @@ function AdminPanel() {
             {msg && <p className="text-sm text-indigo-300 mt-3">{msg}</p>}
           </div>
           <div>
+            <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-400" />Apply diagnostics</h3>
+            <p className="text-xs text-gray-500 mb-3">Read-only. Launches a browser against example.com to prove the runtime can drive it. Submits nothing.</p>
+            <button onClick={selftest} disabled={!!busy}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
+              {busy === "selftest" ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <Zap className="w-5 h-5 text-gray-300 shrink-0" />}
+              <span className="block text-sm font-medium text-gray-200">Run apply self-test</span>
+            </button>
+            {diag && (
+              <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5 space-y-1.5">
+                {Object.entries(diag).map(([k, v]) => {
+                  const bad = v === false || v === "(unset)";
+                  return (
+                    <div key={k} className="flex items-start justify-between gap-3 text-xs">
+                      <span className="text-gray-400 min-w-0 break-all">{k}</span>
+                      <span className={`shrink-0 font-medium ${bad ? "text-amber-300" : typeof v === "boolean" ? "text-green-300" : "text-gray-200"}`}>
+                        {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-500 font-normal">({users.length})</span></h3>
             <div className="space-y-2">
               {users.map((u) => (
@@ -1288,7 +1340,20 @@ function AdminPanel() {
                       <p className="text-sm font-medium text-white truncate">{u.name || "?"}{u.role === "admin" && <span className="ml-2 text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full align-middle">admin</span>}</p>
                       <p className="text-xs text-gray-400 truncate">{u.email}</p>
                     </div>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${u.is_active ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}>{u.is_active ? "Active" : "Inactive"}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${u.is_active ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}>{u.is_active ? "Active" : "Inactive"}</span>
+                      {/* No switch on your own row: disabling yourself is an
+                          unrecoverable lockout, and the server refuses it too. */}
+                      {u.id !== myId && (
+                        <button onClick={() => toggleUser(u)} disabled={!!busy}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border disabled:opacity-50 ${
+                            u.is_active ? "border-red-500/40 text-red-300 hover:bg-red-500/10"
+                                        : "border-green-500/40 text-green-300 hover:bg-green-500/10"}`}>
+                          {busy === `user-${u.id}` ? "\u2026" : u.is_active ? "Disable" : "Enable"}
+                        </button>
+                      )}
+                      {u.id === myId && <span className="text-[10px] text-gray-500">you</span>}
+                    </div>
                   </div>
                   <div className="grid grid-cols-4 gap-2 mt-2.5 pt-2.5 border-t border-gray-700 text-center">
                     <div><div className="text-sm font-bold text-white">{u.stats_new || 0}</div><div className="text-[10px] text-gray-500">New</div></div>
@@ -1298,6 +1363,7 @@ function AdminPanel() {
                   </div>
                 </div>
               ))}
+              {userMsg && <p className="text-xs text-amber-300 pt-1">{userMsg}</p>}
               {users.length === 0 && <p className="text-sm text-gray-500 text-center py-3">No users.</p>}
             </div>
           </div>
