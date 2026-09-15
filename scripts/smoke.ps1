@@ -271,7 +271,13 @@ Check "no job is claimed and abandoned" {
     if ($w.unavailable) { return "worker health unavailable: " + $w.unavailable }
     Write-Host ("      worker running: " + $w.running + ", claimed: " + $w.claimed +
                 ", oldest claim: " + $(if ($null -eq $w.oldest_claim_age_s) { "none" } else { "$($w.oldest_claim_age_s)s" })) -ForegroundColor DarkGray
-    if ($w.stuck) { "a claimed job has gone past the stuck threshold with no heartbeat" }
+    if ($w.recovering) {
+        # Past the threshold but inside the window the sweeper is allowed to
+        # take. The app is already fixing this; saying FAIL here trains everyone
+        # to ignore the smoke. Reported, not failed.
+        Write-Host "      a claim is past the threshold and the sweeper has not reached it yet - recovering, not stuck" -ForegroundColor Yellow
+    }
+    if ($w.stuck) { "a claimed job is past the stuck threshold AND past the sweep window - the sweeper is not reaching it" }
     else { $true }
 }
 Write-Host ""

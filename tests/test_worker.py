@@ -187,3 +187,98 @@ def test_health_does_not_cry_stuck_over_a_fresh_claim(wq):
     assert jobqueue.claim()
     h = worker.health()
     assert h["claimed"] == 1 and h["stuck"] is False, h
+
+
+# ── "Stuck" must mean stuck, not "the sweeper has not got to it yet" ─────────
+#
+# Found on production 2026-09-15. The smoke ran minutes after a redeploy and
+# failed on a claim 1845s old - 45 seconds past a 1800s threshold whose sweeper
+# only runs every 120s. Read again fifteen minutes later: claimed=0, and a
+# search had completed in between. It fixed itself, exactly as designed, and the
+# smoke had called it a fault.
+
+def test_a_claim_just_past_the_threshold_is_recovering_not_stuck(wq):
+    jobqueue.enqueue(1, "search")
+    run = jobqueue.claim()
+    _age_claim(run["id"], jobqueue.STUCK_AFTER_SECONDS + 30)
+
+    h = worker.health()
+    assert h["recovering"] is True, h
+    assert h["stuck"] is False, "reported a fault the sweeper was about to fix"
+
+
+def test_a_claim_past_the_sweep_window_too_is_stuck(wq):
+    """Past the threshold AND past the window the sweeper is allowed to take
+    means the sweeper is not reaching it - which is a real fault."""
+    jobqueue.enqueue(1, "search")
+    run = jobqueue.claim()
+    _age_claim(run["id"], jobqueue.STUCK_AFTER_SECONDS + int(worker.SWEEP_EVERY_SECONDS) + 300)
+
+    h = worker.health()
+    assert h["stuck"] is True, h
+    assert h["recovering"] is False
+
+
+def _age_claim(run_id, seconds):
+    import time as _t
+    stale = _t.strftime("%Y-%m-%d %H:%M:%S", _t.gmtime(_t.time() - seconds))
+    conn = database.get_db()
+    conn.execute("UPDATE job_runs SET locked_at=? WHERE id=?", (stale, run_id))
+    conn.commit()
+    conn.close()
+
+
+# ── A redeploy must not strand a run for half an hour ───────────────────────
+
+def test_a_run_orphaned_by_a_restart_goes_back_at_boot(wq, monkeypatch):
+    """The claim is scoped to hostname:pid, so a new process cannot heartbeat
+    what the old one held. Waiting out the full threshold cost a real user 1845
+    seconds of a search that was never coming back on its own."""
+    jobqueue.enqueue(1, "search")
+    run = jobqueue.claim()
+    assert jobqueue.depth()[jobqueue.RUNNING] == 1
+
+    monkeypatch.delenv("JH_WORKER_BOOT_SWEEP", raising=False)
+    out = worker.adopt_orphans()
+
+    assert out["requeued"] == 1, out
+    assert jobqueue.depth()[jobqueue.RUNNING] == 0
+    assert jobqueue.depth()[jobqueue.QUEUED] == 1
+    assert jobqueue.claim(), "the orphaned run is claimable again"
+
+
+def test_the_boot_sweep_can_be_switched_off_for_a_second_instance(wq, monkeypatch):
+    """The sweep's reasoning - 'at startup nothing else is running' - is only
+    true with one worker. A second instance starting would otherwise requeue the
+    first one's live work out from under it."""
+    jobqueue.enqueue(1, "search")
+    jobqueue.claim()
+    monkeypatch.setenv("JH_WORKER_BOOT_SWEEP", "0")
+
+    out = worker.adopt_orphans()
+    assert out.get("skipped") is True
+    assert jobqueue.depth()[jobqueue.RUNNING] == 1, "it requeued another worker's job"
+
+
+def test_a_failed_boot_sweep_does_not_stop_the_worker_starting(wq, monkeypatch):
+    monkeypatch.delenv("JH_WORKER_BOOT_SWEEP", raising=False)
+    monkeypatch.setattr(jobqueue, "requeue_stuck",
+                        lambda **k: (_ for _ in ()).throw(RuntimeError("db gone")))
+    out = worker.adopt_orphans()
+    assert "db gone" in out.get("error", "")
+
+
+def test_start_background_actually_runs_the_boot_sweep(wq, monkeypatch):
+    """adopt_orphans() working proves nothing if start_background never calls
+    it. Removing the call passed every other test in this file."""
+    called = []
+    monkeypatch.setattr(worker, "adopt_orphans",
+                        lambda: called.append(True) or {"requeued": 0, "abandoned": 0})
+    monkeypatch.setattr(worker, "loop", lambda *a, **k: None)
+    worker._thread = None
+    try:
+        worker.start_background()
+    finally:
+        worker.stop_background(timeout=1)
+        worker._thread = None
+    assert called, "start_background did not sweep orphaned claims at boot"
