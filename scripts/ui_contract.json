@@ -1,0 +1,40 @@
+{
+  "_README": [
+    "The user-visible controls of /app, as strings that must appear in the built",
+    "bundle. ONE file, read by two gates:",
+    "  - tests/test_web_bundle.py  -> checks web_bundle/ in this repo (commit time)",
+    "  - scripts/smoke.ps1         -> checks what the DEPLOYED box is serving",
+    "",
+    "WHEN YOU SHIP A USER-VISIBLE CONTROL, ADD A LINE HERE.",
+    "That is the whole maintenance burden, and it is why the list is not buried",
+    "inside the smoke script where nobody editing App.tsx would ever see it.",
+    "",
+    "A needle should be a string a USER would recognise - a button label, a tab",
+    "name, a link target. Not a class name and not an identifier a minifier is",
+    "free to rename: the bundle is minified, so only string literals survive.",
+    "",
+    "This list is the readable gate. The unreadable-but-complete one is the",
+    "asset-hash check in smoke.ps1: Vite names each asset by its content hash,",
+    "so deployed hash == local hash proves the deployed bundle is byte-identical",
+    "to this repo's, whether or not anyone remembered to add a line here.",
+    "",
+    "Dates are when the control shipped, so a stale entry is obvious."
+  ],
+  "controls": [
+    { "since": "2026-09-15", "what": "sign out is reachable from the app",      "needle": "/logout" },
+    { "since": "2026-09-15", "what": "setup can be replayed",                   "needle": "/app?onboarding=1" },
+    { "since": "2026-09-15", "what": "Settings: Run setup again",               "needle": "Run setup again" },
+    { "since": "2026-09-15", "what": "Settings: weekly search day picker",      "needle": "Search day" },
+    { "since": "2026-09-15", "what": "Settings: weekly apply day picker",       "needle": "Apply day" },
+    { "since": "2026-09-15", "what": "Settings: schedule frequency",            "needle": "How often" },
+    { "since": "2026-09-15", "what": "Profile: full name",                      "needle": "Full name" },
+    { "since": "2026-09-15", "what": "Profile: LinkedIn URL",                   "needle": "LinkedIn URL" },
+    { "since": "2026-09-15", "what": "Notifications: multi-channel",            "needle": "Notification channels" },
+    { "since": "2026-09-15", "what": "queue explains why a job fits",           "needle": "Why this fits" },
+    { "since": "2026-09-15", "what": "swipe card explains the two scores",      "needle": "Your Strength" },
+    { "since": "2026-09-15", "what": "onboarding wizard is in the bundle",      "needle": "Set up Job Hunter" },
+    { "since": "2026-09-15", "what": "CV can be scored from Settings",          "needle": "Score my CV" },
+    { "since": "2026-09-15", "what": "CV can fill the profile",                 "needle": "Fill profile from CV" },
+    { "since": "2026-09-15", "what": "queue link checker",                      "needle": "Check links" }
+  ]
+}

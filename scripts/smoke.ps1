@@ -39,6 +39,16 @@ $BaseUrl = $BaseUrl.TrimEnd("/")
 $script:pass = 0
 $script:fail = 0
 
+# Repo-relative files are resolved from THIS SCRIPT's location, never from the
+# caller's working directory. Run from the wrong folder and a Test-Path guard
+# answers false, so the checks below would skip themselves and report green -
+# a gate that disappears when you are not standing in the right place is worse
+# than no gate.
+$script:RepoRoot     = Split-Path -Parent $PSScriptRoot
+$script:LocalIndex   = Join-Path $script:RepoRoot "web_bundle/index.html"
+$script:LocalSw      = Join-Path $script:RepoRoot "web_bundle/sw.js"
+$script:ContractPath = Join-Path $PSScriptRoot "ui_contract.json"
+
 # Fail fast on an unusable -BaseUrl. Without this, a placeholder like
 # https://<staging-url> produces 15 identical "hostname could not be parsed"
 # failures that look like the app is down when nothing was ever requested.
@@ -191,8 +201,13 @@ Check "deployed schema is at the expected migration version" {
     $want = $ExpectedSchema
     if ($want -le 0) {
         # Read the highest version from the local migrations.py so this never
-        # needs editing when a migration is added.
-        $v = (& python -c "import migrations; print(max(v for v,_n,_f in migrations.MIGRATIONS))" 2>&1 | Out-String).Trim()
+        # needs editing when a migration is added. sys.path is pointed at the
+        # repo explicitly: this used to depend on the caller's directory, so
+        # running the smoke from anywhere else reported "could not read the
+        # expected version" - a tooling failure wearing a schema failure's name.
+        $py = "import sys; sys.path.insert(0, r'" + $script:RepoRoot + "'); " +
+              "import migrations; print(max(v for v,_n,_f in migrations.MIGRATIONS))"
+        $v = (& python -c $py 2>&1 | Out-String).Trim()
         if ($v -match '^\d+$') { $want = [int]$v } else { return "could not read the expected version from migrations.py ($v)" }
     }
     $got = [int]$script:health.schema_version
@@ -222,40 +237,93 @@ Check "GET /app/index.html serves the built shell" {
 }
 Write-Host ""
 
-# --- The DEPLOYED bundle carries the features, not just the local one --------
-# web_bundle/ is committed, so a stale or half-copied bundle deploys green:
-# every route answers, the page renders, and the controls are simply absent.
-# That is exactly how "settings still cannot do X" survived two rounds. These
-# read the script the deployed box is actually serving.
+# --- The DEPLOYED /app bundle -------------------------------------------------
+#
+# web_bundle/ is COMMITTED and Railway does not build the frontend, so whatever
+# is in that directory is what users get. A stale or half-copied bundle deploys
+# perfectly green: every route answers, the page renders, and the controls are
+# simply absent. That is how "settings still cannot do X" survived two rounds
+# of review.
+#
+# Two gates, deliberately different in kind:
+#   1. ASSET HASH - complete, and needs no maintenance ever. Vite names each
+#      asset by a hash of its CONTENT, so if the deployed file name equals the
+#      one in this repo, the deployed bundle is byte-identical to this repo's.
+#      That covers every feature, including ones nobody remembered to list.
+#   2. UI CONTRACT - scripts/ui_contract.json, shared with tests/test_web_bundle.py.
+#      Names each control, so a failure reads "Profile: LinkedIn URL is missing"
+#      instead of "hash mismatch". ADD A LINE THERE WHEN YOU SHIP A CONTROL.
 Write-Host "-- deployed /app bundle --" -ForegroundColor Cyan
-$script:appJs = ""
-Check "the deployed shell names a script bundle" {
+$script:appJs   = ""
+$script:appHref = ""
+Check "the deployed shell serves a real script bundle" {
     $r = Get-Status "$BaseUrl/app/index.html"
     if ($r.Code -ne 200) { return "index.html status $($r.Code)" }
     $m = [regex]::Match($r.Body, 'src="[^"]*?(assets/[^"]+\.js)"')
     if (-not $m.Success) { return "index.html loads no script" }
-    $j = Get-Status "$BaseUrl/app/$($m.Groups[1].Value)"
-    if ($j.Code -ne 200) { return "bundle $($m.Groups[1].Value) status $($j.Code)" }
+    $script:appHref = $m.Groups[1].Value
+    $j = Get-Status "$BaseUrl/app/$($script:appHref)"
+    if ($j.Code -ne 200) { return "bundle $($script:appHref) status $($j.Code)" }
     if ($j.Body.Length -lt 100000) { return "bundle is only $($j.Body.Length) bytes - that is not a real build" }
     $script:appJs = $j.Body
+    Write-Host ("      serving " + $script:appHref + "  (" + $script:appJs.Length + " bytes)") -ForegroundColor DarkGray
     $true
 }
-# Each needle is a control a user reported missing. Named individually so a
-# failure says which one, rather than "the bundle is old".
-$bundleNeedles = @(
-    @{ n = "setup can be replayed (?onboarding=1)"; s = "/app?onboarding=1" },
-    @{ n = "weekly schedule day pickers";           s = "Search day" },
-    @{ n = "apply day picker";                      s = "Apply day" },
-    @{ n = "profile carries full name";             s = "Full name" },
-    @{ n = "profile carries LinkedIn URL";          s = "LinkedIn URL" },
-    @{ n = "sign-out is reachable";                 s = "/logout" },
-    @{ n = "queue explains why a job fits";         s = "Why this fits" }
-)
-foreach ($b in $bundleNeedles) {
-    Check "deployed bundle: $($b.n)" {
-        if (-not $script:appJs) { return "no bundle was read" }
-        if ($script:appJs.Contains($b.s)) { $true }
-        else { "the string '$($b.s)' is not in the deployed bundle - web_bundle/ on this deploy is behind the source" }
+# The maintenance-free check. Content-hashed names mean equality is identity.
+Check "the deployed bundle is the one in this repo" {
+    if (-not $script:appHref) { return "no bundle was read" }
+    if (-not (Test-Path $script:LocalIndex)) {
+        return "no local web_bundle/index.html at $($script:LocalIndex) - cannot tell whether the deploy matches this repo"
+    }
+    $localHtml = Get-Content $script:LocalIndex -Raw
+    $lm = [regex]::Match($localHtml, 'src="[^"]*?(assets/[^"]+\.js)"')
+    if (-not $lm.Success) { return "local web_bundle/index.html loads no script" }
+    $local = $lm.Groups[1].Value
+    if ($local -eq $script:appHref) { $true }
+    elseif ($AllowStaleDeploy) {
+        Write-Host "      differs, allowed by -AllowStaleDeploy" -ForegroundColor DarkGray
+        $true
+    }
+    else {
+        "deployed $($script:appHref) but this repo has $local. Vite hashes by content, " +
+        "so these differ only if the deployed bundle is not this one: either the deploy " +
+        "has not finished, or web_bundle/ was not rebuilt and committed " +
+        "(.\scripts\build_web.ps1), or you are smoking a different build."
+    }
+}
+# A PWA caches itself. If VERSION did not move, a returning user keeps serving
+# the OLD bundle out of their service worker cache and sees none of the change
+# - with the server perfectly up to date. That failure is invisible from here
+# unless it is checked explicitly.
+Check "the service worker version moved with the bundle" {
+    $r = Get-Status "$BaseUrl/app/sw.js"
+    if ($r.Code -ne 200) { return "sw.js status $($r.Code)" }
+    $dm = [regex]::Match($r.Body, 'VERSION\s*=\s*"([^"]+)"')
+    if (-not $dm.Success) { return "deployed sw.js declares no VERSION" }
+    $deployed = $dm.Groups[1].Value
+    if (-not (Test-Path $script:LocalSw)) {
+        return "no local web_bundle/sw.js at $($script:LocalSw) - cannot tell whether the cached bundle would update"
+    }
+    $lm = [regex]::Match((Get-Content $script:LocalSw -Raw), 'VERSION\s*=\s*"([^"]+)"')
+    if (-not $lm.Success) { return "local web_bundle/sw.js declares no VERSION" }
+    $local = $lm.Groups[1].Value
+    Write-Host ("      deployed=" + $deployed + "  local=" + $local) -ForegroundColor DarkGray
+    if ($deployed -eq $local) { $true }
+    elseif ($AllowStaleDeploy) { Write-Host "      differs, allowed by -AllowStaleDeploy" -ForegroundColor DarkGray; $true }
+    else { "deployed sw.js is $deployed, this repo says $local - returning users would be served the cached old bundle" }
+}
+# The readable gate. Same JSON the local suite reads, so there is one list.
+if (-not (Test-Path $script:ContractPath)) {
+    Check "the UI contract file exists" { "missing $($script:ContractPath) - the per-feature checks cannot run" }
+} else {
+    $contract = (Get-Content $script:ContractPath -Raw | ConvertFrom-Json).controls
+    Write-Host ("      checking " + $contract.Count + " contracted controls from scripts/ui_contract.json") -ForegroundColor DarkGray
+    foreach ($c in $contract) {
+        Check "deployed bundle: $($c.what)" {
+            if (-not $script:appJs) { return "no bundle was read" }
+            if ($script:appJs.Contains($c.needle)) { $true }
+            else { "'$($c.needle)' (shipped $($c.since)) is not in the deployed bundle" }
+        }
     }
 }
 Check "deployed bundle ships no literal backslash-u to users" {

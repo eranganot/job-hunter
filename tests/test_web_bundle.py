@@ -277,35 +277,50 @@ def _bundle_js() -> str:
     return "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
 
 
-@pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
-def test_setup_can_be_replayed_from_a_url():
-    """Onboarding ran once per account and then became untestable - there was
-    no way to see it again short of editing the database. ?onboarding=1 is what
-    the "Run setup again" button links to, so both die together."""
-    js = _bundle_js()
-    assert '"onboarding"' in js, "the ?onboarding query param is not read in the shipped bundle"
-    assert "/app?onboarding=1" in js, "the 'Run setup again' link is not in the shipped bundle"
+# The UI contract - scripts/ui_contract.json - is the single list of
+# user-visible controls, shared with scripts/smoke.ps1. This test is the
+# commit-time half: it proves each needle is in the bundle IN THIS REPO. The
+# smoke runs the same list against what the deployed box is serving. One file,
+# so shipping a control means adding one line, in a place someone editing the
+# UI will actually find.
+CONTRACT = ROOT / "scripts" / "ui_contract.json"
+
+
+def _contract():
+    import json
+    return json.loads(CONTRACT.read_text(encoding="utf-8"))["controls"]
+
+
+def test_the_ui_contract_is_well_formed():
+    """A contract with a typo'd key is a gate that checks nothing, and it would
+    pass silently on both sides."""
+    rows = _contract()
+    assert rows, "the contract lists no controls"
+    for r in rows:
+        assert set(r) == {"since", "what", "needle"}, "bad contract row: %r" % (r,)
+        assert r["needle"].strip(), "empty needle in %r" % (r,)
+    needles = [r["needle"] for r in rows]
+    assert len(needles) == len(set(needles)), "duplicate needle in the contract"
 
 
 @pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
-def test_the_weekly_schedule_can_be_configured_from_settings():
-    """Frequency and day-of-week were collected once during setup and then only
-    editable in the legacy page. A weekly user who wanted to move their search
-    off Tuesday had nowhere in /app to say so."""
-    js = _bundle_js()
-    for needle in ("Search day", "Apply day", "schedule_frequency",
-                   "search_day_of_week", "apply_day_of_week"):
-        assert needle in js, "%r is missing - the schedule controls did not ship" % needle
+@pytest.mark.parametrize("row", _contract(), ids=[r["what"] for r in _contract()])
+def test_every_contracted_control_is_in_the_bundle(row):
+    assert row["needle"] in _bundle_js(), (
+        "%r (shipped %s) is not in web_bundle/ - either the control was removed "
+        "or the bundle was not rebuilt after the change. Run scripts/build_web.ps1."
+        % (row["needle"], row["since"]))
 
 
 @pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
-def test_the_profile_tab_carries_identity_and_sign_in():
-    """Name and LinkedIn URL are columns the apply engine fills forms from, and
-    neither had an input in /app. Account was merged in rather than left as a
-    fifth tab holding one button."""
+def test_the_wiring_behind_the_contract_shipped_too():
+    """The contract holds what a user SEES. These are the payload keys behind
+    those controls: a label can render perfectly while the field it is meant to
+    save was never wired, and the contract could not tell the difference."""
     js = _bundle_js()
-    for needle in ("Full name", "LinkedIn URL", "linkedin_url", "Sign out"):
-        assert needle in js, "%r is missing from the shipped bundle" % needle
+    for needle in ("linkedin_url", "schedule_frequency",
+                   "search_day_of_week", "apply_day_of_week", "notification_channel"):
+        assert needle in js, "%r is missing - a control ships without its wiring" % needle
 
 
 @pytest.mark.skipif(not BUNDLE.is_dir(), reason="no web_bundle/ checked out")
