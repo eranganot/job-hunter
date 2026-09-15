@@ -23,6 +23,12 @@ import os
 import threading
 import time
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 _LOCK = threading.Lock()
 _HITS = {}                      # (bucket, key) -> [timestamps]
 _LAST_SWEEP = 0.0

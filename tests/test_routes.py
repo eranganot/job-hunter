@@ -799,3 +799,78 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     assert any(k == "apply" for _u, k in seen), \
         "/api/run-apply did not enqueue - it is spawning a thread again"
     assert json.loads(body)["status"] in ("queued", "already_running")
+
+
+# ── Request logging, through the real handler ────────────────────────────────
+#
+# tests/test_log.py proves log.py works. These prove app.py actually USES it -
+# a request context that is never opened, or a status never recorded, would
+# leave every unit test in that file passing and every production log line
+# saying rid=- u=- 0.
+#
+# Read _wait_for_access before adding one of these. The access line is emitted
+# by the SERVER thread after the response has been written, and the client
+# returns as soon as it has the body, so asserting on caplog.records the
+# instant get() returns is a race - one this suite lost on Windows on
+# 2026-09-15 while passing every time on Linux.
+
+def _wait_for_access(caplog, path, expected, timeout=3.0):
+    """Wait for `expected` access lines for `path`, then return them.
+
+    caplog.records is the capture handler's live list. Reading len() on it
+    straight after a request can catch the server mid-emit - which is exactly
+    what happened: the assertion saw one line while pytest's end-of-test
+    report, rendered later from the SAME list, showed two.
+    """
+    marker = "%s ->" % path
+    deadline = time.time() + timeout
+    while True:
+        lines = [r for r in caplog.records if marker in r.getMessage()]
+        if len(lines) >= expected or time.time() >= deadline:
+            # A short settle so "exactly N" means N and not "N so far".
+            time.sleep(0.05)
+            return [r for r in caplog.records if marker in r.getMessage()]
+        time.sleep(0.01)
+
+
+def test_a_real_request_produces_one_access_line_naming_the_user(stack, users, caplog):
+    import logging
+    with caplog.at_level(logging.INFO):
+        status, _loc, _body = users["a"].get("/api/me")
+        assert status == 200
+        lines = _wait_for_access(caplog, "/api/me", 1)
+
+    assert len(lines) == 1, [r.getMessage() for r in lines]
+    assert "GET /api/me -> 200" in lines[0].getMessage()
+    assert lines[0].uid not in (None, "-"), \
+        "the access line does not know who made the request"
+
+
+def test_lines_logged_during_a_request_carry_that_requests_id(stack, users, caplog):
+    """The whole point: a hundred interleaved lines from ten threads, and the
+    ones belonging to one request can be pulled out together."""
+    import logging
+    with caplog.at_level(logging.INFO):
+        users["a"].get("/api/me")
+        access = _wait_for_access(caplog, "/api/me", 1)
+    assert access and access[0].rid and access[0].rid != "-"
+
+
+def test_an_anonymous_request_is_logged_without_inventing_a_user(stack, caplog):
+    import logging
+    c = Client(stack["port"])
+    with caplog.at_level(logging.INFO):
+        c.get("/api/me")
+        lines = _wait_for_access(caplog, "/api/me", 1)
+    assert lines and lines[0].uid == "-"
+
+
+def test_two_requests_get_two_different_ids(stack, users, caplog):
+    import logging
+    with caplog.at_level(logging.INFO):
+        users["a"].get("/api/me")
+        users["b"].get("/api/me")
+        lines = _wait_for_access(caplog, "/api/me", 2)
+    ids = [r.rid for r in lines]
+    assert len(ids) == 2, ids
+    assert ids[0] != ids[1]

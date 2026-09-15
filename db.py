@@ -10,6 +10,12 @@ from urllib.parse import urlparse
 
 import migrations
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 DB_PATH = None  # Injected by app.py at startup
 DATABASE_URL = None  # Injected by app.py when DB_BACKEND=postgres
 

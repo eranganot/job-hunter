@@ -37,6 +37,12 @@ import base64
 import hashlib
 import os
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 PREFIX = "enc:v1:"
 
 # The fields worth protecting. Names, not guesswork: everything here is a

@@ -21,6 +21,12 @@ import time
 import urllib.request
 import urllib.error
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))

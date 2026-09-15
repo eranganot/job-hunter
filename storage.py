@@ -27,6 +27,12 @@ import tempfile
 
 import db as database
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 KIND_CV = "cv"
 
 # A CV is a PDF; production's largest is 387 KB. The cap is not about disk - it

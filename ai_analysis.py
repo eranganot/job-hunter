@@ -10,6 +10,12 @@ import urllib.error
 
 import gemini
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 
 def analyze_cv(pdf_path: str, api_key: str = "", user_id: int | None = None) -> dict:
     """

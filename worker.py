@@ -23,6 +23,12 @@ import traceback
 
 import jobqueue
 
+# Route this module's print() calls through the logging module: timestamps,
+# levels, the module name, and the request id of the request in flight.
+import log as _log
+print = _log.make_print(__name__)  # noqa: A001 - see log.py
+
+
 # kind -> callable(user_id, payload) . Registered by app.py at startup.
 HANDLERS = {}
 

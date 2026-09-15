@@ -114,7 +114,7 @@ def test_the_secret_field_list_matches_real_columns():
         assert field in schema, "%s is not a column in migrations.py" % field
 
 
-def test_decrypt_row_is_tolerant_so_one_bad_value_does_not_break_a_login(keyed, monkeypatch, capsys):
+def test_decrypt_row_is_tolerant_so_one_bad_value_does_not_break_a_login(keyed, monkeypatch, caplog):
     """A page load must not 500 because one credential is unreadable."""
     row = {"user_id": 7, "telegram_token": keyed.encrypt(TOKEN), "telegram_chat_id": "1"}
     monkeypatch.setenv("JH_ENCRYPTION_KEY", "the wrong passphrase")
@@ -123,7 +123,15 @@ def test_decrypt_row_is_tolerant_so_one_bad_value_does_not_break_a_login(keyed, 
     out = crypto.decrypt_row(row)
     assert out["telegram_token"] == ""
     assert out["telegram_chat_id"] == "1", "an unrelated field was damaged"
-    assert "could not be decrypted" in capsys.readouterr().out
+    # caplog, not capsys: crypto's print() now goes through log.py (see its
+    # docstring), so the text is on a log record rather than on stdout.
+    assert "could not be decrypted" in caplog.text
+    # And it is a WARNING, not INFO. The literal here is "[crypto] %s for user
+    # %s: %s" - every failure word lives in the exception, at runtime - so this
+    # message is exactly the case the static level audit could not see, and the
+    # one that proved the inference needed its WARNING tier.
+    levels = [r.levelname for r in caplog.records if "could not be decrypted" in r.getMessage()]
+    assert levels and set(levels) == {"WARNING"}, levels
 
 
 def test_decrypt_row_handles_a_missing_row(keyed):

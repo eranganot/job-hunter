@@ -44,25 +44,16 @@ _TW_CSS = _gz.decompress(_b64.b64decode("H4sIAH8xyGkC/+08aa/kNnJ/RdmBgdcTSaOzDz1
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 
-# -- Structured logging: route module print() calls through the logging module
-#    so production logs get timestamps + levels without editing ~124 call sites. --
-import logging as _logging
-_logging.basicConfig(level=_logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-_LOG = _logging.getLogger("jobhunter")
+# -- Structured logging. The shim that used to live here (route print() through
+#    the logging module, so ~153 call sites get timestamps and levels without
+#    being edited) moved to log.py, where it is shared with the other twelve
+#    modules that were still printing to bare stdout - and where it is tested.
+#    Every record now also carries the request id and user id of the request in
+#    flight; see log.py for why that is the half of this item worth having. --
+import log as _log
+_LOG = _log.setup()
 _builtin_print = print
-def print(*args, **kwargs):  # noqa: A001 - intentional module-level logging shim
-    try:
-        sep = kwargs.get("sep", " ")
-        msg = sep.join(str(a) for a in args)
-    except Exception:
-        msg = " ".join(str(a) for a in args)
-    low = msg.lower()
-    if ("error" in low) or ("fail" in low) or ("traceback" in low) or ("exception" in low):
-        _LOG.error(msg)
-    elif "warn" in low:
-        _LOG.warning(msg)
-    else:
-        _LOG.info(msg)
+print = _log.make_print("app")  # noqa: A001 - intentional module-level logging shim
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
 def load_config():
@@ -5506,9 +5497,22 @@ def _link_status(url: str, timeout: int = 8) -> str:
 
 class Handler(BaseHTTPRequestHandler):
 
+    # BaseHTTPRequestHandler's own access line, superseded by the one log.end()
+    # emits (which knows the user and the duration). Kept at DEBUG rather than
+    # removed: it is the only thing that speaks when a request dies before the
+    # wrapper's finally can run.
     def log_message(self, fmt, *args):
-        ts = datetime.now().strftime("%H:%M:%S")
-        print(f"[{ts}] {fmt % args}")
+        _log.get("http").debug(fmt, *args)
+
+    def log_error(self, fmt, *args):
+        _log.get("http").warning(fmt, *args)
+
+    def send_response(self, code, *a, **kw):
+        # Every reply in this app goes through here (send_json, send_html and
+        # redirect all call it), so it is the one place the access line can
+        # learn what status was actually sent.
+        _log.set_status(code)
+        return BaseHTTPRequestHandler.send_response(self, code, *a, **kw)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -5593,7 +5597,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_user(self):
         token = auth.get_token_from_request(self.headers)
-        return auth.get_session_user(token)
+        user = auth.get_session_user(token)
+        if user:
+            # From here on, every line this request emits names the user. This
+            # is the field that turns "a 500 happened at 14:03" into a question
+            # with an answer.
+            _log.set_user(user.get("id") if hasattr(user, "get") else user["id"])
+        return user
     def client_ip(self) -> str:
         """
         The caller's address as well as it can be known.
@@ -5657,6 +5667,19 @@ class Handler(BaseHTTPRequestHandler):
     # ── GET ───────────────────────────────────────────────────────────────────
 
     def do_GET(self):
+        with _log.request("GET", self.path, self.client_ip()):
+            try:
+                self._do_GET_inner()
+            except Exception as exc:
+                import traceback
+                print(f"[do_GET] Unhandled exception on {self.path}: {exc}\n"
+                      f"{traceback.format_exc()}")
+                try:
+                    self.send_json({"error": f"Server error: {exc}"}, code=500)
+                except Exception:
+                    pass
+
+    def _do_GET_inner(self):
         parsed = urlparse(self.path)
         path   = parsed.path
         qs     = parse_qs(parsed.query)
@@ -6491,6 +6514,10 @@ class Handler(BaseHTTPRequestHandler):
     # ── POST ──────────────────────────────────────────────────────────────────
 
     def do_POST(self):
+        with _log.request("POST", self.path, self.client_ip()):
+            self._do_POST_guarded()
+
+    def _do_POST_guarded(self):
         try:
             self._do_POST_inner()
         except Exception as exc:
