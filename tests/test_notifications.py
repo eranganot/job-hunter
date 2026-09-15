@@ -87,3 +87,25 @@ def test_whitespace_around_a_channel_does_not_silently_drop_it(env, monkeypatch)
     monkeypatch.setattr(app, "send_telegram", lambda t, c, m: tgs.append(t))
     app.deliver_notification(uid, "3 new jobs", "/app")
     assert len(emails) == 1 and tgs == ["tok"]
+
+
+def test_the_real_sender_is_installed_and_not_someone_elses_stub():
+    """An order-independent guard on a fault that was invisible in every
+    per-file run.
+
+    tests/test_routes.py's `stack` fixture stubs app.deliver_notification to
+    keep registration offline. It assigned the stub to the MODULE, and Python
+    caches modules, so the stub outlived the fixture and every later test in
+    the process saw nothing delivered. The four tests above then asserted
+    against a function that had been replaced - they failed while the code they
+    test was perfectly fine, which is the worst way for a suite to be wrong.
+
+    Checked by identity rather than behaviour: a stub that returns None looks
+    exactly like a delivery with no configured channel.
+    """
+    import app
+    assert app.deliver_notification.__module__ == "app", (
+        "app.deliver_notification has been replaced by another test's stub and "
+        "not restored - every notification assertion after this point is void")
+    assert app.deliver_notification.__name__ == "deliver_notification"
+    assert getattr(app.notify_admin_new_user, "__name__", "") == "notify_admin_new_user"

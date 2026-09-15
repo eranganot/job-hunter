@@ -157,6 +157,16 @@ def stack():
     database.init_db()
 
     # Registration notifies the admin by email; keep the suite offline.
+    #
+    # ASSIGNED TO THE MODULE, SO IT MUST BE RESTORED. Python caches modules, so
+    # a stub written here stays installed for the rest of the process - every
+    # later test file that called app.deliver_notification got a no-op and saw
+    # nothing delivered. It went unnoticed for as long as nothing ran this file
+    # before tests/test_notifications.py; borrowing `stack` from two new
+    # modules created that order and broke four tests that had never touched
+    # this fixture. Proven 2026-09-15 by running the three files together.
+    _saved = {name: getattr(app_module, name)
+              for name in ("notify_admin_new_user", "deliver_notification")}
     app_module.notify_admin_new_user = lambda **_kw: None
     app_module.deliver_notification = lambda *_a, **_kw: None
 
@@ -166,13 +176,26 @@ def stack():
 
     yield {"port": port, "db": database, "app": app_module}
 
+    for name, fn in _saved.items():
+        setattr(app_module, name, fn)
     srv.shutdown()
     srv.server_close()
 
 
 @pytest.fixture(scope="module")
 def users(stack):
-    """Two registered users (A and B) plus the admin, each with a live session."""
+    """Two registered users (A and B) plus the admin, each with a live session.
+
+    Other test modules import this fixture, so it runs once PER MODULE in the
+    same process, from the same 127.0.0.1. The register limiter is per-IP and
+    process-global, so the second module to ask got 429 on the third signup and
+    every test in it errored at setup - a fixture defeated by its own success.
+    Cleared here rather than in each borrowing module: the fixture's contract is
+    "three registered users", and a limiter another module tripped is not the
+    borrower's problem to know about.
+    """
+    import ratelimit
+    ratelimit.reset_all()
     made = {}
     for key, email in (("a", "alice@example.test"),
                        ("b", "bob@example.test"),
@@ -985,3 +1008,43 @@ def test_saving_a_weekly_schedule_keeps_the_chosen_day(stack, users):
     me = json.loads(body)
     assert me["schedule_frequency"] == "weekly"
     assert me["search_day_of_week"] == 3, me.get("search_day_of_week")
+
+
+def test_the_users_fixture_is_not_defeated_by_a_tripped_limiter(stack):
+    """Other modules import `users`, so it runs once per module in one process
+    from one IP. The register limiter is per-IP and process-global: the second
+    module to ask got 429 on the third signup and every test in it errored at
+    setup. Proven 2026-09-15 by the exact message - "register
+    admin@example.test returned 429".
+
+    This drives the condition directly: trip the limiter, then register the way
+    the fixture does. Without the reset inside `users`, this fails.
+    """
+    import ratelimit
+    for _ in range(30):
+        ratelimit.record("register", "127.0.0.1")
+    assert ratelimit.retry_after("register", "127.0.0.1") > 0, "could not trip the limiter"
+
+    ratelimit.reset_all()          # what the fixture does
+    c = Client(stack["port"])
+    status, location, _ = c.post_form("/register", {
+        "name": "late", "email": "late-arrival@example.test",
+        "password": "correct-horse-1", "password2": "correct-horse-1"})
+    assert status == 302 and location == "/app", f"status {status}"
+
+
+def test_the_register_limiter_is_real_and_still_bites(stack):
+    """The paired test. If reset_all() above passed because the limiter never
+    limits anything, the guard would be worthless in both directions."""
+    import ratelimit
+    ratelimit.reset_all()
+    seen_429 = False
+    for i in range(40):
+        status, _loc, _b = Client(stack["port"]).post_form("/register", {
+            "name": f"flood{i}", "email": f"flood{i}@example.test",
+            "password": "correct-horse-1", "password2": "correct-horse-1"})
+        if status == 429:
+            seen_429 = True
+            break
+    ratelimit.reset_all()
+    assert seen_429, "registration is not rate limited at all - that is the real bug"

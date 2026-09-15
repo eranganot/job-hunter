@@ -165,17 +165,31 @@ def get(name: str):
 # These grade WARNING, not ERROR - see the module docstring for why the tier is
 # separate and what it was measured against.
 _TROUBLE = re.compile(
-    r"could not|couldn't|cannot|can't|unable to|refused|denied|invalid|"
-    r"timed out|timeout|no such|not found|does not match|doesn't match|"
-    r"unavailable|aborted|is not configured|missing required")
+    r"\bcould not\b|\bcouldn't\b|\bcannot\b|\bcan't\b|\bunable to\b|"
+    r"\brefused\b|\bdenied\b|\binvalid\b|\btimed out\b|\btimeouts?\b|"
+    r"\bno such\b|\bnot found\b|\bdoes not match\b|\bdoesn't match\b|"
+    r"\bunavailable\b|\baborted\b|\bis not configured\b|\bmissing required\b")
+
+# The words that mean a line is actually an error - as WORDS.
+#
+# This was a bare `"error" in msg` substring test, which matched the column
+# name in "[db] baseline: added apply_error to jobs" and logged every schema
+# line of every startup at ERROR. Thirteen of them rendered in red directly
+# above four real failures in a ship run (2026-09-15): a log that cries wolf on
+# every deploy is worse than one tier too quiet, because the reader stops
+# reading it. Python's \b treats "_" as a word character, so "\berror\b" does
+# not match inside apply_error, apply_failure_type or read_timeout - which is
+# exactly the distinction that was missing.
+_BAD = re.compile(r"\berrors?\b|\berrored\b|\bfail(?:s|ed|ing|ure|ures)?\b|"
+                  r"\btracebacks?\b|\bexceptions?\b")
 
 
 def _level_for(msg: str) -> int:
     """Grade a legacy print() by its text. See the module docstring."""
     low = msg.lower()
-    if ("error" in low) or ("fail" in low) or ("traceback" in low) or ("exception" in low):
+    if _BAD.search(low):
         return logging.ERROR
-    if "warn" in low or _TROUBLE.search(low):
+    if re.search(r"\bwarn(?:ing|ings|ed)?\b", low) or _TROUBLE.search(low):
         return logging.WARNING
     return logging.INFO
 

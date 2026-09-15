@@ -29,6 +29,7 @@ import functools
 import auth
 import crypto
 import db as database
+import entitlements
 import gemini
 import jobqueue
 import ratelimit
@@ -1990,6 +1991,7 @@ def run_job_search(user_id: int):
                     if _autoreject and _rst in ("new", "approved"):
                         conn.execute(
                             "UPDATE jobs SET status='rejected', url_verified=0, url_check_date=?, "
+                            "rejected_by='system', "
                             "notes=COALESCE(notes,'') || ' [auto-removed: link dead/closed]' WHERE id=?",
                             (_chk_date, _jid))
                         reval_removed += 1
@@ -2213,10 +2215,15 @@ def run_job_apply(user_id: int) -> int:
                     "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
                     "apply_failure_type=?, apply_failure_detail=?, "
+                    # Provenance, set at the moment of truth. Backfilling this
+                    # from note strings worked once (migration 9) and must
+                    # never be needed again.
+                    "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
                     "apply_attempts=COALESCE(apply_attempts,0)+1 "
                     "WHERE id=? AND user_id=?",
                     (today, notes, apply_status, apply_confirmation,
-                     apply_error, apply_failure_type, apply_failure_detail, j["id"], user_id)
+                     apply_error, apply_failure_type, apply_failure_detail,
+                     job_url, j["id"], user_id)
                 )
             else:
                 # Failed — keep status='approved' so user can retry
@@ -2363,11 +2370,16 @@ def _trigger_apply_bg(user_id: int, job_id: int):
                     "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
                     "apply_status=?, apply_confirmation=?, apply_error=?, "
                     "apply_failure_type=?, apply_failure_detail=?, "
+                    # Provenance, set at the moment of truth. Backfilling this
+                    # from note strings worked once (migration 9) and must
+                    # never be needed again.
+                    "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
                     "apply_attempts=COALESCE(apply_attempts,0)+1 "
                     "WHERE id=? AND user_id=?",
                     (today, f"Applied via Job Hunter — {apply_status}",
                      apply_status, apply_confirmation, apply_error,
-                     apply_failure_type, apply_failure_detail, job_id, user_id)
+                     apply_failure_type, apply_failure_detail,
+                     job["url"] or "", job_id, user_id)
                 )
             else:
                 # Failed / manual_required — keep status='approved' so user can retry
@@ -6915,6 +6927,17 @@ class Handler(BaseHTTPRequestHandler):
                               "apply_day_of_week", "onboarding_complete", "weekdays_only", "auto_apply_enabled"):
                 if int_field in data:
                     kwargs[int_field] = int(data[int_field])
+            # Turning auto-apply ON is an entitlement, so it is checked HERE and
+            # not only in the UI: a disabled button is a hint, and the request
+            # behind it is three lines of curl. Turning it OFF is always allowed
+            # - nobody should need a subscription to stop the robot.
+            if kwargs.get("auto_apply_enabled") and not entitlements.can_auto_apply(user):
+                self.send_json({
+                    "error": "Auto-apply is available on a paid plan.",
+                    "code": "upgrade_required",
+                    "plan": entitlements.plan_of(user),
+                }, 403)
+                return
             if "schedule_frequency" in data:
                 # Admin is always daily regardless of what was sent
                 if user.get("role") == "admin":
@@ -7110,12 +7133,20 @@ class Handler(BaseHTTPRequestHandler):
             reason     = data.get("reason", "") or data.get("notes", "")
 
             if action in ("applied", "failed"):
-                conn.execute("UPDATE jobs SET status=?, applied_date=?, notes=?, apply_status=? WHERE id=?",
-                             (new_status, datetime.now().isoformat(), reason,
-                              "submitted" if action == "applied" else "failed", job_id))
+                conn.execute(
+                    "UPDATE jobs SET status=?, applied_date=?, notes=?, apply_status=?, "
+                    "applied_via=? WHERE id=?",
+                    (new_status, datetime.now().isoformat(), reason,
+                     "submitted" if action == "applied" else "failed",
+                     "manual" if action == "applied" else None, job_id))
             else:
-                conn.execute("UPDATE jobs SET status=?, notes=? WHERE id=?",
-                             (new_status, reason, job_id))
+                # rejected_by separates the user's own passes from the system
+                # auto-rejecting dead, expired and already-attempted jobs. The
+                # approval rate is only meaningful over the ones he saw.
+                conn.execute(
+                    "UPDATE jobs SET status=?, notes=?, rejected_by=? WHERE id=?",
+                    (new_status, reason,
+                     "user" if action == "reject" else None, job_id))
 
             if action == "reject":
                 conn.execute(
@@ -7152,8 +7183,12 @@ class Handler(BaseHTTPRequestHandler):
                     (user_id,)
                 ).fetchone()
                 _aa_conn.close()
-                if _aa_row and _aa_row["auto_apply_enabled"]:
+                if _aa_row and _aa_row["auto_apply_enabled"] and entitlements.can_auto_apply(user):
                     _trigger_apply_bg(user_id, job_id)
+                elif _aa_row and _aa_row["auto_apply_enabled"]:
+                    # Flag set, entitlement gone (downgrade, or a row that
+                    # predates the gate). Shortlist rather than apply.
+                    print(f"[approve] job {job_id} shortlisted (auto-apply flag set but plan does not allow it)")
                 else:
                     print(f"[approve] job {job_id} shortlisted (auto-apply off — not applying)")
 
@@ -7380,7 +7415,7 @@ class Handler(BaseHTTPRequestHandler):
             target_uid = payload.get("user_id") or user["id"]
             conn = database.get_db()
             cur = conn.execute(
-                "UPDATE jobs SET status='rejected', "
+                "UPDATE jobs SET status='rejected', rejected_by='system', "
                 "notes=COALESCE(notes,'') || ' [admin: cleared attempted]' "
                 "WHERE user_id=? AND status='approved' AND COALESCE(apply_attempts,0) >= 1 "
                 "AND COALESCE(apply_status,'') IN ('manual_required','failed')",
@@ -7688,7 +7723,7 @@ class Handler(BaseHTTPRequestHandler):
             for c in clear_list:
                 conn.execute(
                     "UPDATE jobs SET status=?, applied_date=?, notes=?, "
-                    "apply_status='manual' WHERE id=? AND user_id=?",
+                    "apply_status='manual', applied_via='bulk' WHERE id=? AND user_id=?",
                     (mark_status, today, "Marked applied manually (bulk queue cleanup)",
                      c["id"], _uid)
                 )
@@ -7764,7 +7799,7 @@ if __name__ == "__main__":
     # Migrate expired jobs to rejected (expired tab removed)
     try:
         _mconn = database.get_db()
-        _mconn.execute("UPDATE jobs SET status='rejected', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
+        _mconn.execute("UPDATE jobs SET status='rejected', rejected_by='system', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
         _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status='failed' AND COALESCE(apply_attempts,0) < 3")
         # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
         _stuck = _mconn.execute(
@@ -7789,7 +7824,7 @@ if __name__ == "__main__":
         _pdone = _pc.execute("SELECT value FROM app_flags WHERE key='prune_attempted_v1'").fetchone()
         if not _pdone:
             _pn = _pc.execute(
-                "UPDATE jobs SET status='rejected', "
+                "UPDATE jobs SET status='rejected', rejected_by='system', "
                 "notes=COALESCE(notes,'') || ' [auto-removed: already attempted]' "
                 "WHERE status='approved' AND COALESCE(apply_attempts,0) >= 1 "
                 "AND COALESCE(apply_status,'') IN ('manual_required','failed')"
@@ -7862,7 +7897,7 @@ if __name__ == "__main__":
                         continue
                     _qc.execute(
                         "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                        "apply_status='manual', apply_error=NULL, apply_failure_type=NULL, "
+                        "apply_status='manual', applied_via='bulk', apply_error=NULL, apply_failure_type=NULL, "
                         "apply_failure_detail=NULL, apply_next_attempt_at=NULL "
                         "WHERE id=? AND user_id=?",
                         (_today, "Marked applied manually (one-time queue cleanup)",

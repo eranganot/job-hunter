@@ -174,3 +174,48 @@ def test_a_successful_static_asset_does_not_get_its_own_line(caplog):
 
 def test_ending_a_request_that_never_started_is_not_an_error():
     log.end()          # must not raise
+
+
+# ── A log that cries wolf on every deploy stops being read ───────────────────
+
+import logging as _logging
+
+import pytest as _pytest
+
+import log as _log
+
+
+@_pytest.mark.parametrize("msg, level", [
+    # The exact lines from Eran's ship run, 2026-09-15. Thirteen of these
+    # rendered in red directly above four real failures, because the grader
+    # asked `"error" in msg` and the COLUMN is called apply_error.
+    ("[db] baseline: added apply_error to jobs",          _logging.INFO),
+    ("[db] baseline: added apply_failure_type to jobs",   _logging.INFO),
+    ("[db] baseline: added apply_failure_detail to jobs", _logging.INFO),
+    ("[db] migration: added read_timeout to jobs",        _logging.INFO),
+    ("[db] baseline: added applied_via to jobs",          _logging.INFO),
+    ("[worker] claimed job 7",                            _logging.INFO),
+    # Still errors, as words.
+    ("[worker] job 3 failed",                             _logging.ERROR),
+    ("[gemini] request error: 429",                       _logging.ERROR),
+    ("[apply] 2 failures in this run",                    _logging.ERROR),
+    ("Traceback (most recent call last):",                _logging.ERROR),
+    ("[apply] exception while submitting",                _logging.ERROR),
+    # Still warnings.
+    ("[cv] could not read the CV",                        _logging.WARNING),
+    ("[push] endpoint unavailable",                       _logging.WARNING),
+    ("[sched] warning: clock skew",                       _logging.WARNING),
+])
+def test_a_column_name_is_not_an_error(msg, level):
+    assert _log._level_for(msg) == level, (
+        "%r graded %s, expected %s"
+        % (msg, _logging.getLevelName(_log._level_for(msg)), _logging.getLevelName(level)))
+
+
+def test_the_grader_still_grades():
+    """Paired with the test above: if the fix had been "never return ERROR",
+    every case above would pass and the tier would be worthless."""
+    levels = {_log._level_for(m) for m in
+              ("job failed", "added apply_error to jobs", "could not connect")}
+    assert levels == {_logging.ERROR, _logging.INFO, _logging.WARNING}, (
+        "the grader no longer distinguishes the three tiers: %s" % levels)

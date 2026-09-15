@@ -21,20 +21,110 @@
     "Dates are when the control shipped, so a stale entry is obvious."
   ],
   "controls": [
-    { "since": "2026-09-15", "what": "sign out is reachable from the app",      "needle": "/logout" },
-    { "since": "2026-09-15", "what": "setup can be replayed",                   "needle": "/app?onboarding=1" },
-    { "since": "2026-09-15", "what": "Settings: Run setup again",               "needle": "Run setup again" },
-    { "since": "2026-09-15", "what": "Settings: weekly search day picker",      "needle": "Search day" },
-    { "since": "2026-09-15", "what": "Settings: weekly apply day picker",       "needle": "Apply day" },
-    { "since": "2026-09-15", "what": "Settings: schedule frequency",            "needle": "How often" },
-    { "since": "2026-09-15", "what": "Profile: full name",                      "needle": "Full name" },
-    { "since": "2026-09-15", "what": "Profile: LinkedIn URL",                   "needle": "LinkedIn URL" },
-    { "since": "2026-09-15", "what": "Notifications: multi-channel",            "needle": "Notification channels" },
-    { "since": "2026-09-15", "what": "queue explains why a job fits",           "needle": "Why this fits" },
-    { "since": "2026-09-15", "what": "swipe card explains the two scores",      "needle": "Your Strength" },
-    { "since": "2026-09-15", "what": "onboarding wizard is in the bundle",      "needle": "Set up Job Hunter" },
-    { "since": "2026-09-15", "what": "CV can be scored from Settings",          "needle": "Score my CV" },
-    { "since": "2026-09-15", "what": "CV can fill the profile",                 "needle": "Fill profile from CV" },
-    { "since": "2026-09-15", "what": "queue link checker",                      "needle": "Check links" }
+    {
+      "since": "2026-09-15",
+      "what": "sign out is reachable from the app",
+      "needle": "/logout"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "setup can be replayed",
+      "needle": "/app?onboarding=1"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Settings: Run setup again",
+      "needle": "Run setup again"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Settings: weekly search day picker",
+      "needle": "Search day"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Settings: weekly apply day picker",
+      "needle": "Apply day"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Settings: schedule frequency",
+      "needle": "How often"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Profile: full name",
+      "needle": "Full name"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Profile: LinkedIn URL",
+      "needle": "LinkedIn URL"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "Notifications: multi-channel",
+      "needle": "Notification channels"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "queue explains why a job fits",
+      "needle": "Why this fits"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "swipe card explains the two scores",
+      "needle": "Your Strength"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "onboarding wizard is in the bundle",
+      "needle": "Set up Job Hunter"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "CV can be scored from Settings",
+      "needle": "Score my CV"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "CV can fill the profile",
+      "needle": "Fill profile from CV"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "queue link checker",
+      "needle": "Check links"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "auto-apply on/off toggle",
+      "needle": "Apply automatically"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "auto-apply is plan-gated",
+      "needle": "part of a paid plan"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "password fields can be revealed",
+      "needle": "Show password"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "analytics explains the applied count",
+      "needle": "Bulk-marked, not applied"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "analytics separates system filtering",
+      "needle": "Filtered out automatically"
+    },
+    {
+      "since": "2026-09-15",
+      "what": "analytics counts real applications",
+      "needle": "Actually applied"
+    }
   ]
 }

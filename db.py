@@ -275,6 +275,20 @@ def expire_old_jobs(conn: sqlite3.Connection, user_id: int):
         raise
 
 
+def _jobs_has_column(conn, column: str) -> bool:
+    """True if jobs.<column> exists. Asked once per stats call and cheap; the
+    point is that a missing column degrades the answer rather than raising."""
+    try:
+        return any(r[1] == column for r in conn.execute("PRAGMA table_info(jobs)"))
+    except Exception:
+        # Postgres, or any driver without PRAGMA: ask the column directly.
+        try:
+            conn.execute("SELECT %s FROM jobs LIMIT 1" % column).fetchone()
+            return True
+        except Exception:
+            return False
+
+
 def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
     expire_old_jobs(conn, user_id)
     # Historical counter so cleanup of old 'passed' (rejected) rows doesn't shrink
@@ -287,14 +301,57 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         archived_count = archived[0] if archived else 0
     except Exception:
         archived_count = 0
-    return {
-        "new":      conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='new'",      (user_id,)).fetchone()[0],
-        "approved": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='approved'", (user_id,)).fetchone()[0],
-        "applied":  conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='applied'",  (user_id,)).fetchone()[0],
-        "deferred": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='deferred'", (user_id,)).fetchone()[0],
-        "rejected": conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='rejected'", (user_id,)).fetchone()[0] + archived_count,
-        "total":    conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=?",                       (user_id,)).fetchone()[0] + archived_count,
+    def _n(where, params=()):
+        return conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE user_id=? " + where, (user_id, *params)
+        ).fetchone()[0]
+
+    # get_stats runs on every dashboard load, so it must not be the thing that
+    # takes the dashboard down. If migration 9 has not reached this database
+    # yet - mid-deploy, a rollback, a restored backup - the breakdown is simply
+    # absent and the caller shows the old numbers. The alternative is a 500 on
+    # the first screen after every deploy that adds a column here.
+    has_provenance = _jobs_has_column(conn, "applied_via")
+
+    # `applied` stays the count of status='applied' so nothing that reads this
+    # key changes meaning. The breakdown beside it is what the UI now shows,
+    # because that status was four different things: see migration 9.
+    #
+    #   applied_engine  - the apply engine really submitted a form
+    #   applied_manual  - the user pressed "Mark applied"
+    #   applied_bulk    - a bulk cleanup marked the queue applied; never applied to
+    #   applied_no_url  - recorded "submitted" with no URL to submit to
+    #   applied_unknown - pre-migration rows carrying no evidence either way
+    #
+    # Likewise `rejected` keeps its lifetime meaning while passed_by_user /
+    # passed_by_system split the user's own decisions from the dead-link,
+    # expired and already-attempted rows the system retired on its own.
+    # rejected_archived is counted separately and never guessed into either:
+    # those rows were deleted, so their origin is genuinely unknowable.
+    rejected_live = _n("AND status='rejected'")
+    base = {
+        "new":      _n("AND status='new'"),
+        "approved": _n("AND status='approved'"),
+        "applied":  _n("AND status='applied'"),
+        "deferred": _n("AND status='deferred'"),
+        "rejected": rejected_live + archived_count,
+        "total":    _n("") + archived_count,
     }
+    if not has_provenance:
+        return base
+    base.update({
+        "applied_engine":  _n("AND status='applied' AND applied_via='engine'"),
+        "applied_manual":  _n("AND status='applied' AND applied_via='manual'"),
+        "applied_bulk":    _n("AND status='applied' AND applied_via='bulk'"),
+        "applied_no_url":  _n("AND status='applied' AND applied_via='no_url'"),
+        "applied_unknown": _n("AND status='applied' AND applied_via IS NULL"),
+
+        "passed_by_user":    _n("AND status='rejected' AND rejected_by='user'"),
+        "passed_by_system":  _n("AND status='rejected' AND rejected_by='system'"),
+        "passed_unknown":    _n("AND status='rejected' AND rejected_by IS NULL"),
+        "rejected_archived": archived_count,
+    })
+    return base
 
 
 def cleanup_passed_jobs(conn: sqlite3.Connection, user_id: int = None, days: int = 30) -> int:

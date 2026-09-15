@@ -75,6 +75,10 @@ export type Me = {
   keywords?: string | string[] | null;
   locations?: string | string[] | null;
   linkedin_url?: string | null;
+  // 'free' | 'premium' | 'expert'. The UI must ask the server rather than
+  // infer entitlement, or the two disagree about who may do what.
+  plan?: string | null;
+  auto_apply_enabled?: number | null;
   phone?: string | null;
   email_address?: string | null;
   schedule_frequency?: string | null;
@@ -114,6 +118,19 @@ export type Stats = {
   rejected: number;
   deferred?: number;
   total: number;
+  // status='applied' was written by four unrelated things and status='rejected'
+  // by two, so every rate computed from them measured something nobody had
+  // defined. These split them; see migration 9. Optional because a box running
+  // an older build will not send them.
+  applied_engine?: number;
+  applied_manual?: number;
+  applied_bulk?: number;
+  applied_no_url?: number;
+  applied_unknown?: number;
+  passed_by_user?: number;
+  passed_by_system?: number;
+  passed_unknown?: number;
+  rejected_archived?: number;
 };
 
 export type Activity = {

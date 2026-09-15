@@ -5,7 +5,7 @@ import {
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
-  ShieldCheck, Trash2, Users, Send, Wand2, LogOut,
+  ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
 } from "lucide-react";
 import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -516,6 +516,19 @@ function DashboardView(p: any) {
   const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
   const [sortBy, setSortBy] = useState<"match" | "date" | "company">("match");
   const isAdmin = me?.role === "admin" || (me as any)?.is_admin;
+  /* The headline cards told the same untruth the Analytics tab did: "Applied"
+     counted a status written by four different things, and "Passed" counted
+     the system's own rejections as the user's decisions. Both now show what
+     the user did, with what the app did beside it rather than inside it.
+     Older deploys do not send the breakdown, so these fall back to the raw
+     counts rather than rendering a zero. */
+  const appliedReal = typeof stats?.applied_engine === "number"
+    ? stats.applied_engine + (stats.applied_manual || 0) : null;
+  const appliedNotReal = typeof stats?.applied_bulk === "number"
+    ? stats.applied_bulk + (stats.applied_no_url || 0) : 0;
+  const passedByYou = typeof stats?.passed_by_user === "number"
+    ? stats.passed_by_user + (stats.passed_unknown || 0) + (stats.rejected_archived || 0) : null;
+  const filteredOut = typeof stats?.passed_by_system === "number" ? stats.passed_by_system : 0;
   const sortJobs = (arr: UiJob[]) => {
     const a = [...(arr || [])];
     if (sortBy === "company") a.sort((x, y) => (x.company || "").localeCompare(y.company || ""));
@@ -568,9 +581,13 @@ function DashboardView(p: any) {
       <div className={`${SHELL} px-5 lg:px-8 py-5`}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <StatCard label="Queue" value={approvedCount} sub="Ready to apply" icon={<CheckCircle className="w-5 h-5 text-green-500" />} />
-          <StatCard label="Applied" value={appliedJobs.length} sub="Submitted" icon={<Rocket className="w-5 h-5 text-blue-500" />} />
+          <StatCard label="Applied" value={appliedReal ?? appliedJobs.length}
+                    sub={appliedNotReal ? `+${appliedNotReal} marked, not sent` : "Applications sent"}
+                    icon={<Rocket className="w-5 h-5 text-blue-500" />} />
           <StatCard label="Deferred" value={deferredCount} sub="Decide later" icon={<Clock className="w-5 h-5 text-amber-500" />} />
-          <StatCard label="Passed" value={rejectedCount} sub="Not a fit" icon={<XCircle className="w-5 h-5 text-red-500" />} />
+          <StatCard label="Passed" value={passedByYou ?? rejectedCount}
+                    sub={filteredOut ? `+${filteredOut} filtered out` : "You passed"}
+                    icon={<XCircle className="w-5 h-5 text-red-500" />} />
         </div>
         <div className="grid grid-cols-3 gap-2 mb-4 lg:hidden">
           {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
@@ -592,7 +609,7 @@ function DashboardView(p: any) {
           {activeTab === "passed" && <PassedTab />}
           {activeTab === "activity" && <ActivityTab />}
           {activeTab === "admin" && isAdmin && <AdminPanel />}
-          {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={stats?.applied ?? appliedJobs.length} totalSuggested={stats?.total ?? 0} />}
+          {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={stats?.applied ?? appliedJobs.length} totalSuggested={stats?.total ?? 0} stats={stats} />}
         </div>
       </div>
       </div>
@@ -860,23 +877,125 @@ function ActivityTab() {
   );
 }
 
-function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCount, totalSuggested }: any) {
-  const totalReviewed = approvedCount + rejectedCount + deferredCount;
-  const suggested = totalSuggested || 0;
-  // approved (all-time) = jobs that passed the approval gate = still-approved + applied
+/* Every number here used to be computed from two columns that each meant
+   several different things at once.
+
+   "Applied" counted status='applied', which was written by the apply engine
+   really submitting a form, by the user pressing "Mark applied", by a bulk
+   cleanup that marked the whole queue applied without applying to any of it,
+   and by a job with no URL being recorded as "submitted". "Passed" counted
+   status='rejected', which was the user's own decision AND the system retiring
+   dead links, expired postings and already-attempted jobs.
+
+   So "136 applied of 137 approved - 99%" was not a high apply rate. It was a
+   denominator built from the same rows as the numerator (approved + applied),
+   which climbs toward 100% whenever the queue empties, over a numerator that
+   mostly was not an application. Migration 9 records provenance; this screen
+   stops averaging the categories together.
+
+   The honest counts are shown even when they are small. A metric that flatters
+   is worse than no metric: this one is meant to answer "is the robot working",
+   and it can only do that if it is allowed to say no. */
+function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCount, totalSuggested, stats }: any) {
+  const n = (k: string) => (typeof stats?.[k] === "number" ? stats[k] : 0);
+  const hasBreakdown = stats && typeof stats.applied_engine === "number";
+
+  // A real application is one the engine submitted, or one he told us he sent.
+  // Nothing else counts, whatever its status says.
+  const reallyApplied = n("applied_engine") + n("applied_manual");
+  const notApplied    = n("applied_bulk") + n("applied_no_url");
+  const appliedUnknown = n("applied_unknown");
+
+  // Jobs he actually decided on. The system's own rejections are not decisions
+  // and do not belong in the denominator of HIS approval rate.
+  const reviewed  = hasBreakdown
+    ? n("passed_by_user") + n("passed_unknown") + approvedCount + appliedCount + deferredCount
+    : approvedCount + rejectedCount + deferredCount;
+  const filtered  = n("passed_by_system");
+  const archived  = n("rejected_archived");
+
   const approvedAllTime = approvedCount + appliedCount;
-  // Approval rate = approved-of-all-time / total suggested. Apply rate = applied / approved (of the jobs that cleared the gate, how many were applied to).
-  const approvalRate = suggested > 0 ? Math.round((approvedAllTime / suggested) * 100) : 0;
-  const applyRate = approvedAllTime > 0 ? Math.round((appliedCount / approvedAllTime) * 100) : 0;
-  const bar = (label: string, n: number, color: string) => (<div><div className="flex items-center justify-between mb-1"><span className="text-sm text-gray-400">{label}</span><span className="text-sm font-medium text-white">{n}</span></div><div className="h-2 bg-gray-700 rounded-full overflow-hidden"><div className={`h-full ${color}`} style={{ width: `${totalReviewed ? (n / totalReviewed) * 100 : 0}%` }} /></div></div>);
+  const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
+  const approvalRate = pct(approvedAllTime, reviewed);
+  const applyRate    = pct(reallyApplied, approvedAllTime);
+
+  const Row = ({ label, value, sub, tone }: any) => (
+    <div className="flex items-start justify-between gap-3 py-2.5 border-b border-gray-700/60 last:border-0">
+      <div className="min-w-0">
+        <p className={`text-sm ${tone || "text-gray-300"}`}>{label}</p>
+        {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
+      </div>
+      <span className={`text-sm font-semibold shrink-0 ${tone || "text-white"}`}>{value}</span>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-2xl p-5 border border-blue-800/50"><h4 className="text-sm font-medium text-gray-400 mb-1">Approval Rate</h4><div className="text-3xl font-bold text-blue-400 mb-1">{approvalRate}%</div><p className="text-sm text-gray-500">{approvedAllTime} approved of {suggested} suggested</p></div>
-        <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50"><h4 className="text-sm font-medium text-gray-400 mb-1">Applied</h4><div className="text-3xl font-bold text-green-400 mb-1">{applyRate}%</div><p className="text-sm text-gray-500">{appliedCount} applied of {approvedAllTime} approved</p></div>
+        <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-2xl p-5 border border-blue-800/50">
+          <h4 className="text-sm font-medium text-gray-400 mb-1">Approval rate</h4>
+          <div className="text-3xl font-bold text-blue-400 mb-1">{approvalRate}%</div>
+          <p className="text-sm text-gray-500">{approvedAllTime} approved of {reviewed} you reviewed</p>
+          {filtered > 0 && <p className="text-xs text-gray-500 mt-1">{filtered} more were filtered out before you saw them</p>}
+        </div>
+        <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50">
+          <h4 className="text-sm font-medium text-gray-400 mb-1">Actually applied</h4>
+          <div className="text-3xl font-bold text-green-400 mb-1">{applyRate}%</div>
+          <p className="text-sm text-gray-500">{reallyApplied} applied of {approvedAllTime} approved</p>
+          {notApplied > 0 && <p className="text-xs text-amber-400/90 mt-1">{notApplied} more are marked applied but never were</p>}
+        </div>
       </div>
-      <div className="bg-gray-800 rounded-xl p-5 border border-gray-700"><h4 className="font-semibold text-white mb-4">Decision Distribution</h4><div className="space-y-3">{bar("Approved", approvedCount, "bg-green-500")}{bar("Passed", rejectedCount, "bg-red-500")}{bar("Deferred", deferredCount, "bg-amber-500")}</div></div>
-      <div className="bg-gradient-to-br from-indigo-900/20 to-slate-800/40 rounded-2xl p-5 border border-indigo-800/40"><h4 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Insights</h4><ul className="space-y-2 text-sm text-gray-300"><li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>You've reviewed {totalReviewed} job{totalReviewed !== 1 ? "s" : ""} so far.</span></li><li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{approvalRate}% approval rate — {approvalRate > 50 ? "you're casting a wide net" : "you're being selective"}.</span></li></ul></div>
+
+      {hasBreakdown && (
+        <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
+          <h4 className="font-semibold text-white mb-1">What &ldquo;applied&rdquo; is made of</h4>
+          <p className="text-xs text-gray-500 mb-2">{appliedCount} jobs carry the applied status. They did not all get an application.</p>
+          <Row label="Submitted by Job Hunter" sub="The apply engine filled and sent a form" value={n("applied_engine")} tone="text-green-300" />
+          <Row label="You marked it applied" sub="You applied yourself and told the app" value={n("applied_manual")} tone="text-green-300" />
+          <Row label="Bulk-marked, not applied" sub="A one-off cleanup emptied the queue by marking it applied" value={n("applied_bulk")} tone="text-amber-300" />
+          <Row label="No link to apply to" sub="Recorded as submitted with no URL" value={n("applied_no_url")} tone="text-amber-300" />
+          {appliedUnknown > 0 && <Row label="Origin unknown" sub="Recorded before the app tracked this" value={appliedUnknown} tone="text-gray-400" />}
+        </div>
+      )}
+
+      {hasBreakdown && (
+        <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
+          <h4 className="font-semibold text-white mb-1">What &ldquo;passed&rdquo; is made of</h4>
+          <p className="text-xs text-gray-500 mb-2">Only the first line is a decision you made.</p>
+          <Row label="You passed" sub="Swiped left, with or without a reason" value={n("passed_by_user")} tone="text-red-300" />
+          <Row label="Filtered out automatically" sub="Dead link, expired, gone, or already attempted" value={filtered} tone="text-gray-400" />
+          {n("passed_unknown") > 0 && <Row label="Origin unknown" sub="Recorded before the app tracked this" value={n("passed_unknown")} tone="text-gray-400" />}
+          {archived > 0 && <Row label="Archived after 30 days" sub="Rows deleted to save space; origin not recoverable" value={archived} tone="text-gray-400" />}
+        </div>
+      )}
+
+      <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
+        <h4 className="font-semibold text-white mb-4">Your decisions</h4>
+        <div className="space-y-3">
+          {[["Approved", approvedAllTime, "bg-green-500"],
+            ["Passed", hasBreakdown ? n("passed_by_user") + n("passed_unknown") : rejectedCount, "bg-red-500"],
+            ["Deferred", deferredCount, "bg-amber-500"]].map(([label, v, color]: any) => (
+            <div key={label}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm text-gray-400">{label}</span>
+                <span className="text-sm font-medium text-white">{v}</span>
+              </div>
+              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                <div className={`h-full ${color}`} style={{ width: `${reviewed ? (v / reviewed) * 100 : 0}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-gradient-to-br from-indigo-900/20 to-slate-800/40 rounded-2xl p-5 border border-indigo-800/40">
+        <h4 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Insights</h4>
+        <ul className="space-y-2 text-sm text-gray-300">
+          <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>You've reviewed {reviewed} job{reviewed !== 1 ? "s" : ""} out of {totalSuggested || 0} found.</span></li>
+          <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{approvalRate}% approval rate — {approvalRate > 50 ? "you're casting a wide net" : "you're being selective"}.</span></li>
+          {filtered > 0 && <li className="flex items-start gap-2"><Target className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" /><span>{pct(filtered, filtered + reviewed)}% of what the sources returned was filtered out before it reached you.</span></li>}
+        </ul>
+      </div>
     </div>
   );
 }
@@ -1406,6 +1525,26 @@ function NotificationChannels({ me }: { me: any }) {
   );
 }
 
+/* Typing a password you cannot see, three times, is how people end up locked
+   out of an account they were trying to secure. Each field reveals on its own:
+   one shared switch would put the new password on screen while the user is
+   still looking at the old one. */
+function PasswordInput({ value, onChange, placeholder, autoComplete }: { value: string; onChange: (v: string) => void; placeholder: string; autoComplete: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input type={show ? "text" : "password"} autoComplete={autoComplete} value={value}
+             onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+             className="w-full px-4 py-3 pr-12 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
+      <button type="button" onClick={() => setShow((v) => !v)}
+              aria-label={show ? "Hide password" : "Show password"} aria-pressed={show}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-200 rounded-lg">
+        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}
+
 function ChangePassword() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -1438,9 +1577,9 @@ function ChangePassword() {
     <div>
       <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-gray-400" />Change password</h3>
       <div className="space-y-2">
-        <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current password" className={input} />
-        <input type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="New password" className={input} />
-        <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repeat new password" className={input} />
+        <PasswordInput value={current} onChange={setCurrent} placeholder="Current password" autoComplete="current-password" />
+        <PasswordInput value={next} onChange={setNext} placeholder="New password" autoComplete="new-password" />
+        <PasswordInput value={confirm} onChange={setConfirm} placeholder="Repeat new password" autoComplete="new-password" />
       </div>
       <button onClick={submit} disabled={busy || !current || !next} className="w-full mt-3 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium disabled:opacity-60">
         {busy ? "Changing\u2026" : "Change password"}
@@ -1477,6 +1616,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
      straight against datetime.weekday(). */
   const [searchDow, setSearchDow] = useState<number>(me.search_day_of_week ?? 1);
   const [applyDow, setApplyDow] = useState<number>(me.apply_day_of_week ?? 1);
+  const [autoApply, setAutoApply] = useState<boolean>(!!me.auto_apply_enabled);
   const [saving, setSaving] = useState(false); const [saved, setSaved] = useState(false);
   const [cvName, setCvName] = useState<string>(me.cv_filename || (me.cv_path ? String(me.cv_path).split("/").pop() || "" : ""));
   const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
@@ -1489,6 +1629,12 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [analyzeMsg, setAnalyzeMsg] = useState("");
   const [perm, setPerm] = useState(pushState()); const [pushMsg, setPushMsg] = useState("");
   const isAdmin = me.role === "admin" || (me as any).is_admin;
+  /* Entitlement comes from the server, never from a guess here: the same
+     can_auto_apply() the POST is checked against. A disabled switch is a
+     courtesy to an honest user - /api/save-schedule returns 403 either way. */
+  const plan = (me.plan || "free").toLowerCase();
+  const mayAutoApply = isAdmin || plan === "premium" || plan === "expert";
+  const [gateMsg, setGateMsg] = useState("");
 
   useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
   const fmtDate = (iso: string) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); };
@@ -1520,6 +1666,10 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
       await api.saveProfile({ name: fullName, phone, linkedin_url: linkedin, job_titles: titles, keywords, locations });
       await api.saveSchedule({
         schedule_frequency: freq,
+        // Only sent when it is allowed to be on. Sending 1 from an account
+        // without the entitlement makes the whole save 403, which would lose
+        // the schedule edits sitting next to it.
+        ...(mayAutoApply ? { auto_apply_enabled: autoApply ? 1 : 0 } : {}),
         search_hour: parseInt(searchHour, 10),
         apply_hour: parseInt(applyHour, 10),
         // Sent on every save, weekly or not: leaving the columns untouched let
@@ -1623,8 +1773,34 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
               </Field>
               <Field label="Job search" sub="Find and score new jobs"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field>
               {freq === "weekly" && <DayPicker label="Search day" value={searchDow} onChange={setSearchDow} />}
-              <Field label="Auto-apply" sub="Submit approved applications"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field>
+              <Field label="Auto-apply time" sub="When approved applications go out"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field>
               {freq === "weekly" && <DayPicker label="Apply day" value={applyDow} onChange={setApplyDow} />}
+              <div className={`p-3.5 rounded-xl border ${mayAutoApply ? "bg-gray-800 border-gray-700" : "bg-gray-800/50 border-gray-700/60"}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-white text-sm flex items-center gap-1.5">
+                      {!mayAutoApply && <Lock className="w-3.5 h-3.5 text-gray-500" />}Apply automatically
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {autoApply && mayAutoApply
+                        ? "Approving a job sends the application straight away."
+                        : "Approved jobs wait in your queue until you apply."}
+                    </p>
+                  </div>
+                  <Toggle
+                    checked={autoApply && mayAutoApply}
+                    disabled={!mayAutoApply}
+                    onChange={(v: boolean) => {
+                      if (!mayAutoApply) { setGateMsg("Auto-apply is part of a paid plan."); return; }
+                      setAutoApply(v);
+                    }}
+                  />
+                </div>
+                {!mayAutoApply && (
+                  <p className="text-xs text-indigo-300 mt-2">Auto-apply is part of a paid plan — you are on {plan}.</p>
+                )}
+                {gateMsg && mayAutoApply === false && <p className="text-xs text-gray-500 mt-1">{gateMsg}</p>}
+              </div>
             </div>
           </div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
@@ -1659,6 +1835,19 @@ function CvAnalysisPanel({ data, fmtDate }: { data: CvOptimizerResult; fmtDate: 
       )}
       {data.analyzed_date && <p className="text-[11px] text-gray-500 pt-1">Last analyzed {fmtDate(data.analyzed_date)}</p>}
     </div>
+  );
+}
+
+/* A real switch, not a checkbox with a label. Disabled still renders the
+   state it is in rather than looking empty, so a locked toggle reads as "off
+   and locked" instead of "broken". */
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} aria-disabled={!!disabled}
+            onClick={() => onChange(!checked)}
+            className={`relative w-12 h-7 rounded-full shrink-0 transition-colors ${checked ? "bg-indigo-600" : "bg-gray-600"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
+      <span className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${checked ? "translate-x-5" : ""}`} />
+    </button>
   );
 }
 

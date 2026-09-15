@@ -233,7 +233,7 @@ def get_session_user(token: str):
         return None
     conn = _get_db()
     row = conn.execute("""
-        SELECT u.id, u.name, u.email, u.created_date, u.role,
+        SELECT u.id, u.name, u.email, u.created_date, u.role, u.plan,
                p.cv_path, p.cv_analyzed, p.cv_summary,
                p.cv_filename, p.cv_uploaded_date, p.cv_optimizer_date,
                p.job_titles, p.keywords, p.locations,

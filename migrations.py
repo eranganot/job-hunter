@@ -95,6 +95,20 @@ def _dialect(conn):
     return dbdriver.dialect_of(conn)
 
 
+def _has_table(conn, table):
+    """True if the table exists, on either engine."""
+    try:
+        if _dialect(conn) == dbdriver.POSTGRES:
+            row = conn.execute(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema=current_schema() AND table_name=?", (table,)).fetchone()
+            return row is not None
+        return conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+    except Exception:
+        return False
+
+
 def _has_column(conn, table, column):
     """True if table.column exists, on either engine."""
     try:
@@ -503,6 +517,97 @@ def m0008_session_expiry_format(conn):
     conn.commit()
 
 
+def m0009_decision_provenance(conn):
+    """Record WHO put a job in its final state, because the number could not be
+    trusted without it.
+
+    "Applied" was four different things sharing one status:
+      - the apply engine really submitted a form         (notes 'Applied via Job Hunter - <status>')
+      - the user pressed "Mark applied"                  (notes 'Marked applied manually', apply_status 'submitted')
+      - a bulk cleanup marked the whole queue applied    (apply_status 'manual')  <- never reviewed, never applied
+      - a job with no URL was recorded as "submitted"    (notes 'Applied via Job Hunter (no URL)')
+    and "Passed" mixed the user's own decisions with the system auto-rejecting
+    dead links, expired postings and already-attempted jobs. Nothing in the
+    schema could separate them, so every rate computed from these columns was
+    measuring something nobody had defined.
+
+    The backfill reads the only evidence the old rows carry - apply_status and
+    the marker strings each writer appended to notes. ORDER MATTERS: the bulk
+    cleanup's note ("Marked applied manually (one-time queue cleanup)") CONTAINS
+    the user's ("Marked applied manually"), so bulk is claimed first, on
+    apply_status='manual', which only the two bulk writers ever set.
+
+    Rows that match nothing are left NULL rather than guessed into a bucket: an
+    unknown origin is a fact about the data, and inventing one would put the
+    number right back where it started. passed_archived_count is likewise
+    unknowable - those rows were deleted - so it is reported separately rather
+    than folded in.
+    """
+    for col in ("applied_via", "rejected_by"):
+        if not _has_column(conn, "jobs", col):
+            conn.execute("ALTER TABLE jobs ADD COLUMN %s TEXT" % col)
+    conn.commit()
+
+    # Everything below READS columns this migration did not create, so each
+    # read is guarded. A database old enough to predate `notes`, or one whose
+    # jobs table was created by hand, must still upgrade: a migration that
+    # raises leaves the schema half-applied and the app down, and the cost of
+    # skipping a backfill is only that those rows read as "origin unknown" -
+    # which is exactly what they are.
+    if _has_column(conn, "jobs", "apply_status"):
+        conn.execute(
+            "UPDATE jobs SET applied_via='bulk' "
+            "WHERE status='applied' AND applied_via IS NULL AND COALESCE(apply_status,'')='manual'")
+
+    if _has_column(conn, "jobs", "notes"):
+        # Most specific first: the bulk note CONTAINS the hand-marked one.
+        conn.execute(
+            "UPDATE jobs SET applied_via='no_url' "
+            "WHERE status='applied' AND applied_via IS NULL AND notes LIKE 'Applied via Job Hunter (no URL)%'")
+        conn.execute(
+            "UPDATE jobs SET applied_via='engine' "
+            "WHERE status='applied' AND applied_via IS NULL AND notes LIKE 'Applied via Job Hunter%'")
+        conn.execute(
+            "UPDATE jobs SET applied_via='manual' "
+            "WHERE status='applied' AND applied_via IS NULL AND notes LIKE 'Marked applied manually%'")
+        # Every system writer appends its own bracketed marker.
+        conn.execute(
+            "UPDATE jobs SET rejected_by='system' "
+            "WHERE status='rejected' AND rejected_by IS NULL AND ("
+            "notes LIKE '%[auto-removed:%' OR notes LIKE '%[admin:%' OR notes LIKE '%[expired]%')")
+
+    # A pass the user made records a rejected_patterns row - that table has no
+    # other writer - so a rejected job whose company+title is in it was theirs.
+    if _has_table(conn, "rejected_patterns") and _has_column(conn, "jobs", "company"):
+        conn.execute(
+            "UPDATE jobs SET rejected_by='user' "
+            "WHERE status='rejected' AND rejected_by IS NULL AND EXISTS ("
+            "  SELECT 1 FROM rejected_patterns rp WHERE rp.user_id = jobs.user_id"
+            "    AND LOWER(TRIM(rp.company)) = LOWER(TRIM(jobs.company))"
+            "    AND LOWER(TRIM(rp.title))   = LOWER(TRIM(jobs.title)))")
+    conn.commit()
+
+
+def m0010_user_plan(conn):
+    """users.plan - the first entitlement the app has ever had.
+
+    Auto-apply is the feature that costs money to run and the one Eran wants
+    behind the paywall, so it is the one that needs a plan to check against.
+    Everyone starts on 'free', including him: the admin path is a separate
+    check on role, so nothing depends on a hand-edited row being right.
+
+    Deliberately a column and not a table. Plans, prices and billing periods
+    belong to the payments phase; inventing that schema now, before the
+    provider is even chosen, would be guessing at a shape and then living with
+    it. One column is enough to gate a feature, and a column is easy to grow
+    out of.
+    """
+    if not _has_column(conn, "users", "plan"):
+        conn.execute("ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'")
+    conn.execute("UPDATE users SET plan='free' WHERE plan IS NULL OR TRIM(plan)=''")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -512,6 +617,8 @@ MIGRATIONS = [
     (6, "job_runs",                     m0006_job_runs),
     (7, "llm_usage",                    m0007_llm_usage),
     (8, "session_expiry_format",        m0008_session_expiry_format),
+    (9, "decision_provenance",          m0009_decision_provenance),
+    (10, "user_plan",                   m0010_user_plan),
 ]
 
 
