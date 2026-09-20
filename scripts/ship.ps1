@@ -95,8 +95,29 @@ if (-not $Force) {
     if ($answer -ne "y") { Write-Host "Aborted - nothing committed." -ForegroundColor Yellow; exit 0 }
 }
 
-& git add -A 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Fail "git add failed." }
+# A stale .git/index.lock stops every write git does, and the message git gives
+# ("Another git process seems to be running") is the only thing that says so.
+# This used to pipe it to Out-Null and print "git add failed", which names the
+# command that failed and nothing about why - the reader then goes looking for a
+# problem with their changes instead of deleting a 0-byte file. 2026-09-20.
+$lock = Join-Path $repo ".git\index.lock"
+if (Test-Path $lock) {
+    $age = [int]((Get-Date) - (Get-Item $lock).LastWriteTime).TotalMinutes
+    Write-Host ""
+    Write-Host "FAIL: .git\index.lock exists (last written $age minute(s) ago)." -ForegroundColor Red
+    Write-Host "      Git cannot write the index while it is there, so add/commit will fail." -ForegroundColor DarkGray
+    Write-Host "      If no git process is running - no open editor, no other shell mid-commit -" -ForegroundColor DarkGray
+    Write-Host "      it is stale and safe to delete:" -ForegroundColor DarkGray
+    Write-Host "          Remove-Item '$lock'" -ForegroundColor White
+    Write-Host ""
+    exit 1
+}
+
+$addOut = (& git add -A 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0) {
+    Write-Host $addOut.Trim() -ForegroundColor DarkGray
+    Fail "git add failed - git's own message is above."
+}
 & git commit -m $Message 2>&1 | Write-Host
 if ($LASTEXITCODE -ne 0) { Fail "commit failed." }
 & git push origin main 2>&1 | Write-Host

@@ -242,12 +242,16 @@ class TestGetStats:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestExpireOldJobs:
+    """Kept, inverted. This class used to assert that an old job was taken OUT
+    of the review queue after three days. That rule is gone (2026-09-15): it
+    ran on every dashboard load, so opening the app discarded whatever the user
+    had not got to over a long weekend, and nothing said so. These now pin the
+    opposite behaviour so it cannot creep back."""
 
-    def test_old_new_jobs_are_expired(self, mem_db):
+    def test_an_old_job_is_left_alone(self, mem_db):
         from db import expire_old_jobs
         user_id = _get_user_id(mem_db)
 
-        # Insert a job with an old found_date
         mem_db.execute(
             """INSERT INTO jobs (user_id, title, company, url, status, found_date)
                VALUES (?, ?, ?, ?, 'new', datetime('now', '-40 days'))""",
@@ -260,8 +264,10 @@ class TestExpireOldJobs:
         row = mem_db.execute(
             "SELECT status FROM jobs WHERE url='https://old.com/job1'"
         ).fetchone()
-        # Expired jobs should move to 'rejected' or be removed
-        assert row is None or dict(row)["status"] != "new"
+        assert row is not None, "a 40-day-old job was deleted"
+        assert dict(row)["status"] == "new", (
+            "a 40-day-old job was taken out of the review queue - age is not "
+            "evidence a posting is closed, it is evidence nobody looked")
 
     def test_recent_jobs_not_expired(self, mem_db):
         from db import expire_old_jobs

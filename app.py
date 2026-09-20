@@ -30,6 +30,8 @@ import auth
 import crypto
 import db as database
 import entitlements
+import errors
+import schedlock
 import gemini
 import jobqueue
 import ratelimit
@@ -53,6 +55,9 @@ BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 #    flight; see log.py for why that is the half of this item worth having. --
 import log as _log
 _LOG = _log.setup()
+# Error reporting, before anything can throw. A no-op unless JH_SENTRY_DSN is
+# set, so local runs and the suite are unaffected.
+_LOG.info("[errors] %s", errors.init())
 _builtin_print = print
 print = _log.make_print("app")  # noqa: A001 - intentional module-level logging shim
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
@@ -584,6 +589,12 @@ def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
 
 def _check_scheduled_jobs() -> None:
     """Auto-trigger search/apply for each active user when their scheduled hour arrives."""
+    # Only one instance may decide that a scheduled run is due. The queue's
+    # one-run-per-user rule stops a duplicate SEARCH, but the scheduler is what
+    # decides a run happens at all - two instances both seeing the same minute
+    # would double every user's Gemini spend before the queue got a say.
+    if not schedlock.acquire(database.get_db, database.backend()):
+        return
     try:
         now = datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=3)))  # Israel time (GMT+3)
         today = now.strftime('%Y-%m-%d')
@@ -2530,8 +2541,9 @@ _AUTH_HEAD = """
     label { display:block; font-size:.78rem; font-weight:500; color:#9ca3af; margin-bottom:.4rem; }
     .field { margin-bottom:.9rem; }
     input { width:100%; padding:.75rem 1rem; font-size:.9rem; color:#fff;
-            background:#111827; border:1px solid #374151; border-radius:.75rem; outline:none; }
-    input::placeholder { color:#6b7280; }
+            /* the border IS the field boundary here - #374151 on #111827 is 1.29:1 */
+            background:#111827; border:1px solid #6b7280; border-radius:.75rem; outline:none; }
+    input::placeholder { color:#9ca3af; }   /* AA on the field fill; #6b7280 was 3.67:1 */
     input:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.25); }
     .pw { position:relative; }
     .pw input { padding-right:3rem; }
@@ -2549,7 +2561,7 @@ _AUTH_HEAD = """
               background:#111827; border:1px solid #374151; border-radius:.75rem; }
     .google:hover { background:#374151; }
     .or { display:flex; align-items:center; gap:.75rem; margin:1.15rem 0; }
-    .or span { font-size:.72rem; color:#6b7280; font-weight:500; }
+    .or span { font-size:.72rem; color:#9ca3af; font-weight:500; }  /* #6b7280 was 3.69:1 */
     .or i { flex:1; height:1px; background:#374151; }
     .alt { text-align:center; font-size:.85rem; color:#9ca3af; margin:1.4rem 0 0; }
     .alt a { color:#a5b4fc; font-weight:600; text-decoration:none; }
@@ -5781,6 +5793,8 @@ class Handler(BaseHTTPRequestHandler):
                 import traceback
                 print(f"[do_GET] Unhandled exception on {self.path}: {exc}\n"
                       f"{traceback.format_exc()}")
+                errors.capture(exc, where="do_GET", path=self.path,
+                               user_id=_log.current_user_id())
                 try:
                     self.send_json({"error": f"Server error: {exc}"}, code=500)
                 except Exception:
@@ -6075,6 +6089,14 @@ class Handler(BaseHTTPRequestHandler):
                 # Not the key - a hash of it. Lets a migration script prove it
                 # holds the SAME key as the app before it writes anything.
                 "credentials_key": crypto.fingerprint(),
+                # Whether THIS instance is the one running the clock. Without
+                # it, "my daily search stopped" and "another instance holds the
+                # lock" look identical from outside.
+                "scheduler_lock": schedlock.status(),
+                # Whether a crash would actually reach anyone. "The DSN is set"
+                # and "reporting works" are different claims; this reports the
+                # second.
+                "error_reporting": errors.status(),
                 "rate_limit": ratelimit.snapshot(),
                 # Today's Gemini spend against today's ceilings. This is the
                 # number that decides what the ceiling should actually be — it
@@ -6641,6 +6663,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             import traceback
             print(f"[do_POST] ❌ Unhandled exception on {self.path}: {exc}\n{traceback.format_exc()}")
+            errors.capture(exc, where="do_POST", path=self.path,
+                           user_id=_log.current_user_id())
             try:
                 self.send_json({"error": f"Server error: {exc}"}, code=500)
             except Exception:
@@ -7936,7 +7960,8 @@ if __name__ == "__main__":
     # Migrate expired jobs to rejected (expired tab removed)
     try:
         _mconn = database.get_db()
-        _mconn.execute("UPDATE jobs SET status='rejected', rejected_by='system', notes=COALESCE(notes,'') || ' [expired]' WHERE status='expired'")
+        # The expiry rule is gone (db.expire_old_jobs, 2026-09-15), so there is
+        # nothing left to convert. Migration 11 restores the rows it made.
         _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status='failed' AND COALESCE(apply_attempts,0) < 3")
         # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
         _stuck = _mconn.execute(

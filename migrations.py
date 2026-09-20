@@ -608,6 +608,40 @@ def m0010_user_plan(conn):
     conn.commit()
 
 
+def m0011_undo_expiry(conn):
+    """Put back the jobs the 3-day expiry rule threw away.
+
+    expire_old_jobs() moved any un-swiped job to status='expired' once it was
+    three days old, and it ran on every /api/stats and /api/jobs load - so
+    simply opening the app discarded anything the user had not got to over a
+    long weekend. A startup step then turned those into system-passes. Nothing
+    on any screen said so.
+
+    The rule is gone (db.expire_old_jobs, 2026-09-15). These rows were never
+    the user's decision, so they go back to 'new' for a real one. Two shapes:
+
+      status='expired'                     - aged out, not yet converted
+      status='rejected' + ' [expired]'     - aged out and converted at a restart
+
+    The second is matched on rejected_by='system' AND the marker, so a job the
+    user genuinely passed on can never be dragged back: a user pass writes
+    rejected_by='user' (migration 9), and nothing else appends '[expired]'.
+
+    Dead links among them are not a problem - the link checker tests the URL
+    rather than guessing from age, which is the whole argument for removing the
+    rule in the first place.
+    """
+    if not _has_column(conn, "jobs", "status"):
+        return
+    conn.execute("UPDATE jobs SET status='new' WHERE status='expired'")
+    if _has_column(conn, "jobs", "rejected_by") and _has_column(conn, "jobs", "notes"):
+        conn.execute(
+            "UPDATE jobs SET status='new', rejected_by=NULL, "
+            "notes=REPLACE(REPLACE(COALESCE(notes,''), ' [expired]', ''), '[expired]', '') "
+            "WHERE status='rejected' AND rejected_by='system' AND notes LIKE '%[expired]%'")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -619,6 +653,7 @@ MIGRATIONS = [
     (8, "session_expiry_format",        m0008_session_expiry_format),
     (9, "decision_provenance",          m0009_decision_provenance),
     (10, "user_plan",                   m0010_user_plan),
+    (11, "undo_expiry",                 m0011_undo_expiry),
 ]
 
 

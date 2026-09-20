@@ -249,6 +249,13 @@ def set_user(user_id):
         req.user_id = user_id
 
 
+def current_user_id():
+    """Whoever this request resolved to, or None. Lets an error report name the
+    user without every call site having to thread the id down to it."""
+    req = _REQUEST.get()
+    return getattr(req, "user_id", None) if req is not None else None
+
+
 def set_status(code):
     req = _REQUEST.get()
     if req is not None:

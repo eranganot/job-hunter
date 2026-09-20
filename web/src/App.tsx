@@ -350,7 +350,7 @@ export function SwipeFlow() {
         <div className={`${SHELL} px-5 lg:px-8 py-3`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-300">{remainingCount} job{remainingCount !== 1 ? "s" : ""} to review</span>
-            <span className="text-sm text-gray-500">{currentIndex + 1} / {reviewJobs.length}</span>
+            <span className="text-sm text-gray-400">{currentIndex + 1} / {reviewJobs.length}</span>
           </div>
           <div className="h-2 bg-gray-700 rounded-full overflow-hidden"><motion.div className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700" initial={{ width: 0 }} animate={{ width: `${((currentIndex + 1) / reviewJobs.length) * 100}%` }} transition={{ duration: 0.3 }} /></div>
         </div>
@@ -605,7 +605,7 @@ function DashboardView(p: any) {
         </div>
         {["queue", "applied", "deferred"].includes(activeTab) && (
           <div className="flex items-center justify-end gap-2 mb-3">
-            <span className="text-xs text-gray-500">Sort by</span>
+            <span className="text-xs text-gray-400">Sort by</span>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="px-3 py-1.5 border border-gray-700 rounded-lg bg-gray-800 text-gray-200 text-xs">
               <option value="match">Match</option>
               <option value="date">Date</option>
@@ -632,7 +632,7 @@ function DashboardView(p: any) {
 }
 
 function StatCard({ label, value, sub, icon }: any) {
-  return (<div className="bg-gray-800 rounded-xl p-4 border border-gray-700"><div className="flex items-center justify-between mb-1.5"><span className="text-sm font-medium text-gray-400">{label}</span>{icon}</div><div className="text-2xl font-bold text-white">{value}</div><p className="text-xs text-gray-500 mt-0.5">{sub}</p></div>);
+  return (<div className="bg-gray-800 rounded-xl p-4 border border-gray-700"><div className="flex items-center justify-between mb-1.5"><span className="text-sm font-medium text-gray-400">{label}</span>{icon}</div><div className="text-2xl font-bold text-white">{value}</div><p className="text-xs text-gray-400 mt-0.5">{sub}</p></div>);
 }
 
 function FeedbackBadge({ job }: { job: UiJob }) {
@@ -647,7 +647,7 @@ function FeedbackBadge({ job }: { job: UiJob }) {
 
 function ApplyBadge({ job }: { job: UiJob }) {
   const s = job.applyStatus;
-  if (!s || s === "queued") return <span className="text-xs text-gray-500">Queued · ready to apply</span>;
+  if (!s || s === "queued") return <span className="text-xs text-gray-400">Queued · ready to apply</span>;
   if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying…</span>;
   if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
   if (s === "failed") return <span className="inline-flex items-center gap-1 text-xs text-red-300"><XCircle className="w-3 h-3" />Apply failed{job.applyFailureType ? ` (${job.applyFailureType})` : ""}</span>;
@@ -715,7 +715,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
           <div className="flex items-baseline gap-2 flex-wrap">
             <h4 className="font-semibold text-white truncate">{job.title}</h4>
             <span className="text-sm text-gray-400 truncate">{job.company}</span>
-            {job.location && <span className="text-xs text-gray-500 truncate">{job.location}</span>}
+            {job.location && <span className="text-xs text-gray-400 truncate">{job.location}</span>}
           </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap"><ApplyBadge job={job} /><FeedbackBadge job={job} /></div>
           {/* Written by the scorer and shown on the swipe card, then dropped the
@@ -729,7 +729,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
         </div>
         <div className="text-right shrink-0 pl-2">
           <div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div>
-          <div className="text-[10px] text-gray-500">match</div>
+          <div className="text-[10px] text-gray-400">match</div>
         </div>
       </div>
       <div className="flex border-t border-gray-700 divide-x divide-gray-700">
@@ -759,7 +759,7 @@ function StagePicker({ job, onChanged }: { job: UiJob; onChanged: (id: number, s
   return (
     <div className="mt-2">
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[11px] text-gray-500 mr-0.5">Stage</span>
+        <span className="text-[11px] text-gray-400 mr-0.5">Stage</span>
         {STAGES.map(([id, label, active]) => (
           <button key={id} onClick={(e) => { e.stopPropagation(); pick(id); }} disabled={!!busy}
             aria-pressed={job.stage === id}
@@ -843,14 +843,14 @@ function RankedRow({ job, rank, onSelect, right, children, selectable, selected,
           <div className="flex items-baseline gap-2 flex-wrap">
             <h4 className="font-semibold text-white truncate">{job.title}</h4>
             <span className="text-sm text-gray-400 truncate">{job.company}</span>
-            {job.location && <span className="text-xs text-gray-500 truncate">{job.location.split(",")[0]}</span>}
+            {job.location && <span className="text-xs text-gray-400 truncate">{job.location.split(",")[0]}</span>}
           </div>
           {children}
         </div>
         <div className="flex items-center gap-3 shrink-0 pl-2">
           <div className="text-right">
             <div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div>
-            <div className="text-[10px] text-gray-500">match</div>
+            <div className="text-[10px] text-gray-400">match</div>
           </div>
           {right}
         </div>
@@ -920,13 +920,13 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
             </button>
           ))}
           {(counts["none"] || 0) > 0 && (
-            <span className="text-xs text-gray-500 ml-1">{counts["none"]} not tracked yet</span>
+            <span className="text-xs text-gray-400 ml-1">{counts["none"]} not tracked yet</span>
           )}
         </div>
       )}
       {stages && (origins["bulk"] || origins["no_url"] || origins["unknown"]) ? (
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-gray-500 mr-0.5">Origin</span>
+          <span className="text-[11px] text-gray-400 mr-0.5">Origin</span>
           {([["", "All", jobs.length],
              ["engine", "Sent by Job Hunter", origins["engine"] || 0],
              ["manual", "You marked applied", origins["manual"] || 0],
@@ -957,13 +957,13 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
         </div>
       )}
       {restoreMsg && <p className="text-xs text-indigo-300">{restoreMsg}</p>}
-      {!shown.length && <p className="text-sm text-gray-500 py-6 text-center">Nothing at this stage yet.</p>}
+      {!shown.length && <p className="text-sm text-gray-400 py-6 text-center">Nothing at this stage yet.</p>}
       <div className="space-y-2">
         {shown.map((job: UiJob, i: number) => (
           <RankedRow key={job.id} job={{ ...job, stage: stageOf(job) }} rank={i + 1} onSelect={onSelectJob}
                      right={showStatus && job.applyStatus ? <StatusPill s={job.applyStatus} /> : null}>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
-              {job.timeAgo && <span className="text-xs text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
+              {job.timeAgo && <span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
               <FeedbackBadge job={job} />
             </div>
             {job.whyFits && (
@@ -1009,7 +1009,7 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer, onReload }: any) {
                    selectable selected={b.sel.has(job.id)} onToggle={b.toggle}
                    right={<button onClick={(e: any) => { e.stopPropagation(); onUnDefer(job); }} className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0">Move to review</button>}>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
-            {job.timeAgo && <span className="text-xs text-gray-500 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
+            {job.timeAgo && <span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
             <FeedbackBadge job={job} />
           </div>
           {job.whyFits && (
@@ -1025,7 +1025,7 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer, onReload }: any) {
 }
 
 function EmptyTab({ icon: Icon, title, sub }: any) {
-  return (<div className="text-center py-12"><Icon className="w-14 h-14 text-gray-600 mx-auto mb-3" /><p className="text-gray-400">{title}</p><p className="text-sm text-gray-500 mt-1">{sub}</p></div>);
+  return (<div className="text-center py-12"><Icon className="w-14 h-14 text-gray-600 mx-auto mb-3" /><p className="text-gray-400">{title}</p><p className="text-sm text-gray-400 mt-1">{sub}</p></div>);
 }
 
 function PassedTab() {
@@ -1052,18 +1052,18 @@ function PassedTab() {
               </div>
             ))}
           </div>
-        ) : <p className="text-sm text-gray-500">No pass reasons recorded yet.</p>}
+        ) : <p className="text-sm text-gray-400">No pass reasons recorded yet.</p>}
       </div>
 
       <div>
         <h3 className="text-base font-semibold text-white mb-1 flex items-center gap-2"><Ban className="w-4 h-4 text-red-400" />Blocked companies</h3>
-        <p className="text-xs text-gray-500 mb-3">These are skipped automatically in future searches.</p>
+        <p className="text-xs text-gray-400 mb-3">These are skipped automatically in future searches.</p>
         <div className="flex flex-wrap gap-2 mb-2">
           {data.blocklist.length ? data.blocklist.map((c: string) => (
             <span key={c} className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-red-600/15 border border-red-600/40 text-red-200 rounded-full text-sm">
               {c}<button onClick={() => unblock(c)} className="w-4 h-4 flex items-center justify-center rounded-full bg-red-500/40 active:bg-red-500"><X className="w-3 h-3" /></button>
             </span>
-          )) : <span className="text-xs text-gray-500">No blocked companies.</span>}
+          )) : <span className="text-xs text-gray-400">No blocked companies.</span>}
         </div>
         <div className="flex gap-2">
           <input value={block} onChange={(e) => setBlock(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBlock(); } }} placeholder="Block a company…" className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
@@ -1085,7 +1085,7 @@ function PassedTab() {
               </div>
             ))}
           </div>
-        ) : <p className="text-sm text-gray-500">Nothing learned yet. Jobs you pass will train your future matches.</p>}
+        ) : <p className="text-sm text-gray-400">Nothing learned yet. Jobs you pass will train your future matches.</p>}
       </div>
     </div>
   );
@@ -1151,8 +1151,10 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
      unknowable, but almost every pass is his, and excluding them understated
      the denominator by more than including them overstates it. */
   const yourPasses = n("passed_by_user") + n("passed_unknown") + archived;
-  /* Decided = you made a call on it. Still-new and deferred are not decisions
-     yet, so they sit outside the rate rather than dragging it down. */
+  /* Decided = you made a call on it, which INCLUDES everything sitting in the
+     queue: approving a job is a decision, whether or not it has been applied to
+     yet. Only "still in the swipe queue" and "deferred" are undecided, and
+     those sit outside the rate rather than dragging it down. */
   const decided   = hasBreakdown
     ? approvedCount + appliedCount + yourPasses
     : approvedCount + rejectedCount;
@@ -1182,7 +1184,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
     <div className="flex items-start justify-between gap-3 py-2.5 border-b border-gray-700/60 last:border-0">
       <div className="min-w-0">
         <p className={`text-sm ${tone || "text-gray-300"}`}>{label}</p>
-        {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
+        {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
       </div>
       <span className={`text-sm font-semibold shrink-0 ${tone || "text-white"}`}>{value}</span>
     </div>
@@ -1194,13 +1196,13 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
         <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-2xl p-5 border border-blue-800/50">
           <h4 className="text-sm font-medium text-gray-400 mb-1">Approval rate</h4>
           <div className="text-3xl font-bold text-blue-400 mb-1">{approvalRate}%</div>
-          <p className="text-sm text-gray-500">{approvedAllTime} approved of {decided} you decided on</p>
-          {filtered > 0 && <p className="text-xs text-gray-500 mt-1">{filtered} more never reached you and are not counted</p>}
+          <p className="text-sm text-gray-400">{approvedAllTime} approved of {decided} you decided on</p>
+          {filtered > 0 && <p className="text-xs text-gray-400 mt-1">{filtered} more never reached you and are not counted</p>}
         </div>
         <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50">
           <h4 className="text-sm font-medium text-gray-400 mb-1">Actually applied</h4>
           <div className="text-3xl font-bold text-green-400 mb-1">{applyRate}%</div>
-          <p className="text-sm text-gray-500">{reallyApplied} applied of {approvedAllTime} approved</p>
+          <p className="text-sm text-gray-400">{reallyApplied} applied of {approvedAllTime} approved</p>
           {notApplied > 0 && <p className="text-xs text-amber-400/90 mt-1">{notApplied} more are marked applied but never were</p>}
         </div>
       </div>
@@ -1208,7 +1210,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
       {hasBreakdown && (
         <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
           <h4 className="font-semibold text-white mb-1">Where every job went</h4>
-          <p className="text-xs text-gray-500 mb-3">
+          <p className="text-xs text-gray-400 mb-3">
             The two percentages above are measured over different sets, which is why they cannot be
             subtracted from each other. This is the whole sum.
           </p>
@@ -1219,25 +1221,27 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
             <div className="flex justify-between gap-3 text-green-300 pl-4 pt-1"><span>approved</span><span>{approvedAllTime}</span></div>
             <div className="flex justify-between gap-3 text-red-300 pl-4"><span>you passed</span><span>{yourPasses}</span></div>
             <div className="flex justify-between gap-3 text-amber-300 pl-4"><span>deferred</span><span>{deferredCount}</span></div>
-            <div className="flex justify-between gap-3 text-gray-400 pl-4"><span>still waiting for you</span><span>{stillNew}</span></div>
+            <div className="flex justify-between gap-3 text-gray-400 pl-4"><span>still in your swipe queue</span><span>{stillNew}</span></div>
             <div className={`flex justify-between gap-3 border-t border-gray-700 pt-1 mt-1 ${reconciles ? "text-white" : "text-amber-300"}`}>
               <span>{reconciles ? "= same number" : "= does NOT match \u2014 a job is in two places or none"}</span>
               <span className="font-semibold">{parts}</span>
             </div>
           </div>
-          <p className="text-xs text-gray-500 mt-3">
+          <p className="text-xs text-gray-400 mt-3">
             Approval rate = {approvedAllTime} approved ÷ ({approvedAllTime} approved + {yourPasses} passed) = <span className="text-blue-300 font-medium">{approvalRate}%</span>.
-            {deferredCount + stillNew > 0 ? ` The ${deferredCount + stillNew} you have not decided on yet are left out of it.` : ""}
+            {" "}Approved counts everything you said yes to, queued or already applied to — approving is the decision.
+            {deferredCount + stillNew > 0 ? ` The ${stillNew} still in your swipe queue and ${deferredCount} deferred are not decisions yet, so they are outside the rate.` : ""}
           </p>
           {filtered > 0 && (
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-gray-400 mt-2">
               A further <span className="text-gray-300">{filtered}</span> were discarded by the app before
-              they reached you — dead links, expired postings, jobs already attempted. They are not counted
-              anywhere above, including in the total: they were never real candidates.
+              they reached you — dead links and jobs already attempted. They are not counted anywhere above,
+              including in the total: they were never real candidates. (Jobs are no longer discarded for
+              age — that rule is gone.)
             </p>
           )}
           {archived > 0 && (
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-gray-400 mt-2">
               {archived} of your passes are older than 30 days and their rows have been deleted to save
               space, so only the count survives.
             </p>
@@ -1248,7 +1252,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
       {hasBreakdown && (
         <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
           <h4 className="font-semibold text-white mb-1">What &ldquo;applied&rdquo; is made of</h4>
-          <p className="text-xs text-gray-500 mb-2">{appliedCount} jobs carry the applied status. They did not all get an application.</p>
+          <p className="text-xs text-gray-400 mb-2">{appliedCount} jobs carry the applied status. They did not all get an application.</p>
           <Row label="Submitted by Job Hunter" sub="The apply engine filled and sent a form" value={n("applied_engine")} tone="text-green-300" />
           <Row label="You marked it applied" sub="You applied yourself and told the app" value={n("applied_manual")} tone="text-green-300" />
           <Row label="Bulk-marked, not applied" sub="A one-off cleanup emptied the queue by marking it applied — these were never reviewed. Find them under Applied → Origin." value={n("applied_bulk")} tone="text-amber-300" />
@@ -1260,7 +1264,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
       {hasBreakdown && (
         <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
           <h4 className="font-semibold text-white mb-1">What &ldquo;passed&rdquo; is made of</h4>
-          <p className="text-xs text-gray-500 mb-2">Only the first line is a decision you made.</p>
+          <p className="text-xs text-gray-400 mb-2">Only the first line is a decision you made.</p>
           <Row label="You passed" sub="Swiped left, with or without a reason" value={n("passed_by_user")} tone="text-red-300" />
           <Row label="Filtered out automatically" sub="Dead link, expired, gone, or already attempted" value={filtered} tone="text-gray-400" />
           {n("passed_unknown") > 0 && <Row label="Origin unknown" sub="Recorded before the app tracked this" value={n("passed_unknown")} tone="text-gray-400" />}
@@ -1303,8 +1307,8 @@ function JobCard({ job, onSelect, showStatus }: any) {
   return (
     <div className="flex items-center gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700 active:border-indigo-500 cursor-pointer" onClick={() => onSelect(job)}>
       <div className="w-12 h-12 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-xl flex items-center justify-center shrink-0"><Building2 className="w-6 h-6 text-indigo-400" /></div>
-      <div className="flex-1 min-w-0"><h4 className="font-semibold text-white truncate">{job.title}</h4><p className="text-sm text-gray-400 truncate">{job.company}</p><div className="flex items-center gap-3 mt-0.5">{job.location && <div className="flex items-center gap-1 text-xs text-gray-500"><MapPin className="w-3 h-3" /><span>{job.location.split(",")[0]}</span></div>}{job.timeAgo && <div className="flex items-center gap-1 text-xs text-gray-500"><Clock className="w-3 h-3" /><span>{job.timeAgo}</span></div>}</div></div>
-      <div className="flex items-center gap-2 shrink-0"><div className="text-right"><div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div><div className="text-[10px] text-gray-500">match</div></div>{showStatus && job.applyStatus && <StatusPill s={job.applyStatus} />}</div>
+      <div className="flex-1 min-w-0"><h4 className="font-semibold text-white truncate">{job.title}</h4><p className="text-sm text-gray-400 truncate">{job.company}</p><div className="flex items-center gap-3 mt-0.5">{job.location && <div className="flex items-center gap-1 text-xs text-gray-400"><MapPin className="w-3 h-3" /><span>{job.location.split(",")[0]}</span></div>}{job.timeAgo && <div className="flex items-center gap-1 text-xs text-gray-400"><Clock className="w-3 h-3" /><span>{job.timeAgo}</span></div>}</div></div>
+      <div className="flex items-center gap-2 shrink-0"><div className="text-right"><div className="text-base font-bold text-indigo-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div><div className="text-[10px] text-gray-400">match</div></div>{showStatus && job.applyStatus && <StatusPill s={job.applyStatus} />}</div>
     </div>
   );
 }
@@ -1352,10 +1356,10 @@ function TagInput({ value, onChange, noun = "role", example = "VP Product" }:
     <div>
       <div className="flex flex-wrap gap-2 mb-2">
         {value.map((t) => (<span key={t} className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-full text-sm">{t}<button onClick={() => onChange(value.filter((x) => x !== t))} className="w-4 h-4 flex items-center justify-center rounded-full bg-indigo-500/40 active:bg-indigo-500"><X className="w-3 h-3" /></button></span>))}
-        {value.length === 0 && <span className="text-xs text-gray-500">No {noun}s yet — add one below.</span>}
+        {value.length === 0 && <span className="text-xs text-gray-400">No {noun}s yet — add one below.</span>}
       </div>
       <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><button onClick={add} className="px-3.5 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl flex items-center justify-center"><Plus className="w-5 h-5" /></button></div>
-      <p className="text-xs text-gray-500 mt-1.5">Press Enter to add each {noun}.</p>
+      <p className="text-xs text-gray-400 mt-1.5">Press Enter to add each {noun}.</p>
     </div>
   );
 }
@@ -1453,7 +1457,7 @@ function AdminPanel({ me }: any) {
           </div>
           <div>
             <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-400" />Apply diagnostics</h3>
-            <p className="text-xs text-gray-500 mb-3">Read-only. Launches a browser against example.com to prove the runtime can drive it. Submits nothing.</p>
+            <p className="text-xs text-gray-400 mb-3">Read-only. Launches a browser against example.com to prove the runtime can drive it. Submits nothing.</p>
             <button onClick={selftest} disabled={!!busy}
               className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
               {busy === "selftest" ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <Zap className="w-5 h-5 text-gray-300 shrink-0" />}
@@ -1476,7 +1480,7 @@ function AdminPanel({ me }: any) {
             )}
           </div>
           <div>
-            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-500 font-normal">({users.length})</span></h3>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length})</span></h3>
             <div className="space-y-2">
               {users.map((u) => (
                 <div key={u.id} className="bg-gray-800 rounded-xl border border-gray-700 p-3.5">
@@ -1497,19 +1501,19 @@ function AdminPanel({ me }: any) {
                           {busy === `user-${u.id}` ? "\u2026" : u.is_active ? "Disable" : "Enable"}
                         </button>
                       )}
-                      {u.id === myId && <span className="text-[10px] text-gray-500">you</span>}
+                      {u.id === myId && <span className="text-[10px] text-gray-400">you</span>}
                     </div>
                   </div>
                   <div className="grid grid-cols-4 gap-2 mt-2.5 pt-2.5 border-t border-gray-700 text-center">
-                    <div><div className="text-sm font-bold text-white">{u.stats_new || 0}</div><div className="text-[10px] text-gray-500">New</div></div>
-                    <div><div className="text-sm font-bold text-green-400">{u.stats_approved || 0}</div><div className="text-[10px] text-gray-500">Queue</div></div>
-                    <div><div className="text-sm font-bold text-indigo-300">{u.stats_applied || 0}</div><div className="text-[10px] text-gray-500">Applied</div></div>
-                    <div><div className="text-sm font-bold text-gray-300">{u.stats_total || 0}</div><div className="text-[10px] text-gray-500">Total</div></div>
+                    <div><div className="text-sm font-bold text-white">{u.stats_new || 0}</div><div className="text-[10px] text-gray-400">New</div></div>
+                    <div><div className="text-sm font-bold text-green-400">{u.stats_approved || 0}</div><div className="text-[10px] text-gray-400">Queue</div></div>
+                    <div><div className="text-sm font-bold text-indigo-300">{u.stats_applied || 0}</div><div className="text-[10px] text-gray-400">Applied</div></div>
+                    <div><div className="text-sm font-bold text-gray-300">{u.stats_total || 0}</div><div className="text-[10px] text-gray-400">Total</div></div>
                   </div>
                 </div>
               ))}
               {userMsg && <p className="text-xs text-amber-300 pt-1">{userMsg}</p>}
-              {users.length === 0 && <p className="text-sm text-gray-500 text-center py-3">No users.</p>}
+              {users.length === 0 && <p className="text-sm text-gray-400 text-center py-3">No users.</p>}
             </div>
           </div>
     </div>
@@ -1640,7 +1644,7 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
           {OB_STEPS.map((label, i) => (
             <div key={label} className="flex-1">
               <div className={`h-1.5 rounded-full transition-colors ${i <= step ? "bg-indigo-500" : "bg-gray-700"}`} />
-              <p className={`mt-1.5 text-[10px] truncate ${i === step ? "text-indigo-300" : "text-gray-500"}`}>{label}</p>
+              <p className={`mt-1.5 text-[10px] truncate ${i === step ? "text-indigo-300" : "text-gray-400"}`}>{label}</p>
             </div>
           ))}
         </div>
@@ -1675,9 +1679,9 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
             )}
             <label className={`block border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer bg-gray-900/40 hover:border-indigo-500 ${busy ? "opacity-60 pointer-events-none" : ""}`}>
               <input type="file" accept=".pdf" className="hidden" onChange={onPick} />
-              {busy ? <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto mb-2" /> : <FileText className="w-6 h-6 text-gray-500 mx-auto mb-2" />}
+              {busy ? <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto mb-2" /> : <FileText className="w-6 h-6 text-gray-400 mx-auto mb-2" />}
               <p className="text-sm text-gray-300">{cvName ? "Choose a different PDF" : "Choose your CV (PDF)"}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Max 5MB</p>
+              <p className="text-xs text-gray-400 mt-0.5">Max 5MB</p>
             </label>
             {cvMsg && <p className="text-xs text-gray-300 mt-3">{cvMsg}</p>}
             <div className="flex gap-2 mt-5">
@@ -1851,11 +1855,11 @@ function NotificationChannels({ me }: { me: any }) {
     setBusy(false);
   };
 
-  const input = "w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm";
+  const input = "w-full px-4 py-3 border border-gray-500 rounded-xl bg-gray-800 text-white text-sm";
   return (
     <div>
       <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channels</h3>
-      <p className="text-xs text-gray-500 mb-3">Pick any combination — alerts go to all of them.</p>
+      <p className="text-xs text-gray-400 mb-3">Pick any combination — alerts go to all of them.</p>
       <div className="grid grid-cols-3 gap-2 mb-3">
         {CHANNELS.map(([id, label]) => (
           <button key={id} onClick={() => toggle(id)} aria-pressed={has(id)}
@@ -1864,7 +1868,7 @@ function NotificationChannels({ me }: { me: any }) {
           </button>
         ))}
       </div>
-      {!channels.length && <p className="text-xs text-gray-500 mb-3">No channels selected — only in-app and push alerts.</p>}
+      {!channels.length && <p className="text-xs text-gray-400 mb-3">No channels selected — only in-app and push alerts.</p>}
       {has("telegram") && (
         <div className="space-y-2">
           <input value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder="Bot token" className={input} />
@@ -1900,7 +1904,7 @@ function PasswordInput({ value, onChange, placeholder, autoComplete }: { value: 
     <div className="relative">
       <input type={show ? "text" : "password"} autoComplete={autoComplete} value={value}
              onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-             className="w-full px-4 py-3 pr-12 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
+             className="w-full px-4 py-3 pr-12 border border-gray-500 rounded-xl bg-gray-800 text-white text-sm" />
       <button type="button" onClick={() => setShow((v) => !v)}
               aria-label={show ? "Hide password" : "Show password"} aria-pressed={show}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-200 rounded-lg">
@@ -1937,7 +1941,7 @@ function ChangePassword() {
     finally { setBusy(false); }
   };
 
-  const input = "w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm";
+  const input = "w-full px-4 py-3 border border-gray-500 rounded-xl bg-gray-800 text-white text-sm";
   return (
     <div>
       <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-gray-400" />Change password</h3>
@@ -2114,7 +2118,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
                 <a href="/api/cv" target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0 flex items-center gap-1.5"><ExternalLink className="w-3.5 h-3.5" />View</a>
               </div>
             )}
-            <label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">{cvName ? "Tap to replace" : "Tap to upload"}</p><p className="text-xs text-gray-500">PDF, max 5MB</p>{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label>
+            <label className="block border-2 border-dashed border-gray-700 rounded-xl p-6 text-center active:border-indigo-500 cursor-pointer bg-gray-800/50"><input type="file" accept=".pdf" className="hidden" onChange={onCvPick} /><p className="text-gray-400 text-sm mb-1">{cvName ? "Tap to replace" : "Tap to upload"}</p><p className="text-xs text-gray-400">PDF, max 5MB</p>{cvMsg && <p className="text-xs text-gray-400 mt-1">{cvMsg}</p>}</label>
             {cvName && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                 <button onClick={fillFromCv} disabled={extracting} className="py-3 bg-indigo-600/15 border border-indigo-600/40 text-indigo-200 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-60">{extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}{extracting ? "Reading…" : "Fill profile from CV"}</button>
@@ -2131,7 +2135,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic schedule</h3>
             <div className="space-y-3">
               <Field label="How often" sub={freq === "weekly" ? "Runs once a week, on the days you pick" : "Runs every day"}>
-                <select value={freq} onChange={(e) => setFreq(e.target.value)} className="px-3 py-2 border border-gray-700 rounded-lg bg-gray-700 text-white text-sm shrink-0">
+                <select value={freq} onChange={(e) => setFreq(e.target.value)} className="px-3 py-2 border border-gray-500 rounded-lg bg-gray-700 text-white text-sm shrink-0">
                   <option value="daily">Daily</option>
                   <option value="weekly">Weekly</option>
                 </select>
@@ -2144,7 +2148,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-white text-sm flex items-center gap-1.5">
-                      {!mayAutoApply && <Lock className="w-3.5 h-3.5 text-gray-500" />}Apply automatically
+                      {!mayAutoApply && <Lock className="w-3.5 h-3.5 text-gray-400" />}Apply automatically
                     </p>
                     <p className="text-xs text-gray-400">
                       {autoApply && mayAutoApply
@@ -2164,7 +2168,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
                 {!mayAutoApply && (
                   <p className="text-xs text-indigo-300 mt-2">Auto-apply is part of a paid plan — you are on {plan}.</p>
                 )}
-                {gateMsg && mayAutoApply === false && <p className="text-xs text-gray-500 mt-1">{gateMsg}</p>}
+                {gateMsg && mayAutoApply === false && <p className="text-xs text-gray-400 mt-1">{gateMsg}</p>}
               </div>
             </div>
           </div>
@@ -2186,7 +2190,7 @@ function CvAnalysisPanel({ data, fmtDate }: { data: CvOptimizerResult; fmtDate: 
     <div className="mt-3 bg-gray-800 rounded-xl border border-gray-700 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-300" /><span className="text-sm font-semibold text-white">AI CV Review</span></div>
-        {score != null && <div className="text-right"><span className={`text-2xl font-bold ${scoreColor}`}>{score}</span><span className="text-xs text-gray-500">/100</span>{data.score_label && <p className="text-xs text-gray-400">{data.score_label}</p>}</div>}
+        {score != null && <div className="text-right"><span className={`text-2xl font-bold ${scoreColor}`}>{score}</span><span className="text-xs text-gray-400">/100</span>{data.score_label && <p className="text-xs text-gray-400">{data.score_label}</p>}</div>}
       </div>
       {data.summary && <p className="text-sm text-gray-300">{data.summary}</p>}
       {data.strengths && data.strengths.length > 0 && (
@@ -2198,7 +2202,7 @@ function CvAnalysisPanel({ data, fmtDate }: { data: CvOptimizerResult; fmtDate: 
       {data.ats_notes && data.ats_notes.length > 0 && (
         <div><p className="text-xs font-semibold text-indigo-300 mb-1">ATS notes</p><ul className="space-y-1">{data.ats_notes.map((n, i) => <li key={i} className="text-xs text-gray-400 flex gap-2"><AlertCircle className="w-3.5 h-3.5 text-indigo-300 shrink-0 mt-0.5" />{n}</li>)}</ul></div>
       )}
-      {data.analyzed_date && <p className="text-[11px] text-gray-500 pt-1">Last analyzed {fmtDate(data.analyzed_date)}</p>}
+      {data.analyzed_date && <p className="text-[11px] text-gray-400 pt-1">Last analyzed {fmtDate(data.analyzed_date)}</p>}
     </div>
   );
 }
@@ -2221,7 +2225,7 @@ function LabelledInput({ label, value, onChange, placeholder, type }: { label: s
     <label className="block">
       <span className="block text-xs font-medium text-gray-400 mb-1.5">{label}</span>
       <input type={type || "text"} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-             className="w-full px-4 py-3 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" />
+             className="w-full px-4 py-3 border border-gray-500 rounded-xl bg-gray-800 text-white text-sm" />
     </label>
   );
 }
@@ -2243,7 +2247,7 @@ function DayPicker({ label, value, onChange }: { label: string; value: number; o
 }
 
 function Field({ label, sub, children }: any) { return (<div className="flex items-center justify-between gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700"><div className="min-w-0"><p className="font-medium text-white text-sm">{label}</p><p className="text-xs text-gray-400">{sub}</p></div>{children}</div>); }
-function Select({ value, onChange, options, fmt }: { value: string; onChange: (v: string) => void; options: number[]; fmt: (n: number) => string }) { return (<select value={value} onChange={(e) => onChange(e.target.value)} className="px-3 py-2 border border-gray-700 rounded-lg bg-gray-700 text-white text-sm shrink-0">{options.map((o) => <option key={o} value={o}>{fmt(o)}</option>)}</select>); }
+function Select({ value, onChange, options, fmt }: { value: string; onChange: (v: string) => void; options: number[]; fmt: (n: number) => string }) { return (<select value={value} onChange={(e) => onChange(e.target.value)} className="px-3 py-2 border border-gray-500 rounded-lg bg-gray-700 text-white text-sm shrink-0">{options.map((o) => <option key={o} value={o}>{fmt(o)}</option>)}</select>); }
 
 function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty }: any) {
   const [searchMsg, setSearchMsg] = useState("");

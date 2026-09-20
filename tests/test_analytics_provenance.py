@@ -334,12 +334,14 @@ def test_running_it_twice_is_harmless(stack, users):
 # ── Expired jobs were counted as found and shown nowhere ────────────────────
 
 def test_expired_jobs_are_no_longer_invisible(tmp_path, monkeypatch):
-    """expire_old_jobs() ages an un-swiped job out after 3 days. get_stats
-    counted it in `total` and in NO bucket, so the dashboard could report jobs
-    that appeared on no screen - which is exactly what "I have 0 new" plus a
-    non-zero found meant. Proven by reproduction before the fix."""
+    """The 'expired' status is no longer produced at all (the 3-day rule was
+    removed on 2026-09-15) - but get_stats still reports the bucket, because a
+    database restored from before the change can still hold those rows, and a
+    row in `total` and in no bucket is exactly the invisibility this test
+    exists to prevent. Migration 11 converts them; this covers the window in
+    between, and a restore years from now.
+    """
     import sqlite3
-    from datetime import datetime, timedelta
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     conn.executescript("""
@@ -348,17 +350,16 @@ def test_expired_jobs_are_no_longer_invisible(tmp_path, monkeypatch):
                            applied_via TEXT, rejected_by TEXT, found_date TEXT);
         CREATE TABLE user_profiles (user_id INTEGER PRIMARY KEY, passed_archived_count INTEGER DEFAULT 0);
     """)
-    old = (datetime.now() - timedelta(days=9)).isoformat()
-    for i in range(4):
-        conn.execute("INSERT INTO jobs (user_id,status,found_date) VALUES (1,'new',?)", (old,))
-    conn.execute("INSERT INTO jobs (user_id,status,found_date) VALUES (1,'new',datetime('now'))")
+    for _ in range(4):                       # rows a pre-2026-09-15 database holds
+        conn.execute("INSERT INTO jobs (user_id,status) VALUES (1,'expired')")
+    conn.execute("INSERT INTO jobs (user_id,status) VALUES (1,'new')")
     conn.execute("INSERT INTO user_profiles (user_id) VALUES (1)")
     conn.commit()
 
-    stats = database.get_stats(conn, 1)        # calls expire_old_jobs
+    stats = database.get_stats(conn, 1)
     conn.close()
 
-    assert stats["expired"] == 4, "expired jobs are still unaccounted for"
+    assert stats["expired"] == 4, "legacy expired rows are unaccounted for again"
     buckets = (stats["new"] + stats["approved"] + stats["applied"]
                + stats["deferred"] + stats["rejected"] + stats["expired"])
     assert buckets == stats["total"], (

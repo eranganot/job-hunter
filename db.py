@@ -255,11 +255,26 @@ def get_activity(user_id: int, limit: int = 100):
 # ── Job helpers ───────────────────────────────────────────────────────────────
 
 def expire_old_jobs(conn: sqlite3.Connection, user_id: int):
-    """Move stale 'new' jobs to 'expired'. Lock-tolerant: this is called from
-    every /api/stats poll, so if another writer is holding the write lock
-    we silently skip rather than 500-ing the dashboard. The next stats poll
-    will retry the cleanup naturally.
+    """Does nothing. Kept as a no-op so no call site has to care.
+
+    It used to move any 'new' job older than THREE DAYS to status='expired',
+    and it ran on every /api/stats and /api/jobs load - so simply opening the
+    app threw away anything the user had not got to over a long weekend. The
+    rows then became system-passes at the next restart. Nothing on any screen
+    said so, and get_stats counted 'expired' in `total` and in no bucket, so
+    the jobs were invisible while still inflating "found".
+
+    Removed 2026-09-15 on Eran's decision: a job leaves the review queue when
+    the user decides, or when the link checker proves the posting is actually
+    gone. Age is not evidence that a job is closed - it is evidence that
+    nobody looked, which is the opposite of a reason to delete it.
+
+    Migration 11 puts the already-expired rows back.
     """
+    return 0
+
+
+def _expire_old_jobs_disabled(conn, user_id):
     cutoff = (datetime.now() - timedelta(days=3)).isoformat()
     try:
         conn.execute(

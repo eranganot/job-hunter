@@ -30,3 +30,7 @@ rapidfuzz>=3.6
 # Postgres driver (Phase 2b). Only used when DB_BACKEND=postgres;
 # SQLite deployments never import it.
 psycopg[binary,pool]==3.3.5
+# Error reporting. Optional at runtime - errors.py imports it lazily and
+# no-ops when JH_SENTRY_DSN is unset, so a failed install loses reporting,
+# not serving.
+sentry-sdk==2.19.2

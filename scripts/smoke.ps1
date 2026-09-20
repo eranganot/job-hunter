@@ -176,6 +176,30 @@ Check "the box is running the build we think it is" {
         "(wait and re-run) or you are smoking a different build. -AllowStaleDeploy to proceed anyway."
     }
 }
+Check "this box is the one running the scheduler" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $sl = $script:health.scheduler_lock
+    if ($null -eq $sl) { Write-Host "      (box predates the scheduler lock)" -ForegroundColor DarkGray; return $true }
+    Write-Host ("      enabled=" + $sl.enabled + "  holds_lock=" + $sl.holds_lock) -ForegroundColor DarkGray
+    # holds_lock is $null until the first scheduler tick, which is fine - it
+    # only means the minute has not come round yet, not that the clock is dead.
+    if ($sl.holds_lock -eq $false) {
+        return "another instance holds the scheduler lock - this box will never fire a scheduled run"
+    }
+    $true
+}
+Check "a crash would reach someone" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $er = $script:health.error_reporting
+    if ($null -eq $er) { Write-Host "      (box predates error reporting)" -ForegroundColor DarkGray; return $true }
+    Write-Host ("      " + $er.state) -ForegroundColor DarkGray
+    # Not a failure while there are no public signups - but it is printed every
+    # run so "nobody is watching for 500s" is never a surprise on launch day.
+    if (-not $er.reporting) {
+        Write-Host "      NOTE: unhandled exceptions are logged and nothing is alerted." -ForegroundColor DarkGray
+    }
+    $true
+}
 Check "the box is not falling back after refusing its configured database" {
     if ($null -eq $script:health) { return "no health payload" }
     $refused = $script:health.db_backend_refused
