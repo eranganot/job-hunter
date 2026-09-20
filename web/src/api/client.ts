@@ -36,6 +36,9 @@ export type ApiJob = {
   apply_error?: string | null;
   apply_failure_type?: string | null;
   applied_date?: string | null;
+  cover_letter?: string | null;
+  status_check?: string | null;
+  status_checked_date?: string | null;
 };
 
 export type UiJob = {
@@ -65,6 +68,10 @@ export type UiJob = {
   applyError: string;
   applyFailureType: string;
   foundDate: string | null;
+  coverLetter: string;
+  /** 'open' | 'closed' | '' - the last manual "is this still open?" check */
+  statusCheck: string;
+  statusCheckedDate: string;
 };
 
 export type Me = {
@@ -205,6 +212,14 @@ export const api = {
   // origin in SQL, so a real application can never be caught by it.
   restoreBulkMarked: () =>
     request<{ success?: boolean; restored?: number }>("/api/jobs/restore-bulk-marked", "POST", {}),
+  // "Is this posting still open?" Flags the job; never deletes it - only the
+  // overnight sweeper is allowed to retire a dead link.
+  checkStatus: (id: number) =>
+    request<{ open?: boolean; message?: string; error?: string }>(
+      `/api/jobs/${id}/check-status`, "POST", {}),
+  coverLetter: (id: number, action: "generate" | "save", letter?: string) =>
+    request<{ letter?: string; success?: boolean; error?: string }>(
+      `/api/jobs/${id}/cover-letter`, "POST", letter === undefined ? { action } : { action, letter }),
   setStage: (id: number, stage: string) =>
     request<{ ok?: boolean; error?: string }>("/api/set-stage", "POST", { id, stage }),
   bulk: (action: "approve" | "reject", ids: number[]) =>
@@ -288,5 +303,8 @@ export function toUiJob(j: ApiJob): UiJob {
     applyError: j.apply_error || "",
     applyFailureType: j.apply_failure_type || "",
     foundDate: j.found_date ?? null,
+    coverLetter: j.cover_letter || "",
+    statusCheck: j.status_check || "",
+    statusCheckedDate: j.status_checked_date || "",
   };
 }

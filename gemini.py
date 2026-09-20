@@ -180,7 +180,18 @@ def set_sync_source(fn):
     _sync_source = fn
 
 
+def set_history_source(fn):
+    """fn(days) -> [{"day","calls","tokens","users"}, ...]. Set by app.py.
+
+    Same reason as the other three: this module must never import app or db,
+    so the ledger reaches it only through a callback.
+    """
+    global _history_source
+    _history_source = fn
+
+
 _sync_source = None
+_history_source = None
 
 
 def _roll_day_locked(day: str):
@@ -234,6 +245,27 @@ def usage(user_id: int | None = None) -> dict:
         if user_id is not None:
             out["user"] = dict(_PER_USER.get(int(user_id), {"calls": 0, "tokens": 0}))
         return out
+
+
+def history(days: int = 14) -> list:
+    """Per-day global totals for the last `days` days, newest first.
+
+    The ceiling shipped generous on purpose (nothing here had ever been
+    measured), and STATUS has carried "set it from the real number" as an open
+    item ever since. `usage()` only reports TODAY, so the real number was never
+    visible from outside the box - which is why the item kept being restated
+    instead of closed. This is the evidence, in the one place already checked
+    on every deploy.
+
+    Read-only, aggregate and cheap: one grouped scan of an indexed column.
+    """
+    if _history_source is None:
+        return []
+    try:
+        return list(_history_source(int(days)) or [])
+    except Exception as exc:
+        # Never take health down for a statistic.
+        return [{"error": str(exc)[:120]}]
 
 
 def _alert_locked(scope: str, message: str):

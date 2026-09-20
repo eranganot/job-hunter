@@ -450,11 +450,41 @@ Check "at least one ceiling is finite" {
     if ($finite.Count -gt 0) { $true }
     else { "every JH_LLM_* ceiling is 0 - nothing would ever be blocked" }
 }
+Check "health carries the 14-day spend record" {
+    # The ceiling has sat at its placeholder since the ledger shipped, because
+    # usage() reports TODAY and a single day is not a peak - so the open item
+    # could only ever be restated, never closed. llm_history is the evidence.
+    if ($null -eq $script:health) { return "no health payload" }
+    $h = $script:health.llm_history
+    if ($null -eq $h) {
+        return "no 'llm_history' in /api/health - this box predates the ceiling evidence (gemini.set_history_source not wired)"
+    }
+    if ($h.Count -ge 1 -and $null -ne $h[0].error) {
+        return ("the ledger read failed: " + $h[0].error)
+    }
+    if ($h.Count -eq 0) {
+        Write-Host "      no Gemini calls recorded in the last 14 days" -ForegroundColor DarkGray
+        return $true
+    }
+    $peak = ($h | Measure-Object calls -Maximum).Maximum
+    $peakDay = ($h | Sort-Object calls -Descending | Select-Object -First 1).day
+    foreach ($d in ($h | Select-Object -First 5)) {
+        Write-Host ("      " + $d.day + "  " + $d.calls + " calls, " + $d.tokens + " tokens, " + $d.users + " user(s)") -ForegroundColor DarkGray
+    }
+    Write-Host ("      peak:   " + $peak + " calls on " + $peakDay) -ForegroundColor DarkGray
+    $ceiling = [int]$script:health.llm.limits.global_calls
+    if ($peak -gt 0 -and $ceiling -gt 0) {
+        $ratio = [math]::Round($ceiling / $peak)
+        Write-Host ("      the global ceiling is " + $ratio + "x the busiest day - a useful ceiling is nearer 10x") -ForegroundColor DarkGray
+    }
+    $true
+}
 Write-Host ""
-Write-Host "      NOTE: the ceilings above shipped generous on purpose - no Gemini" -ForegroundColor DarkGray
-Write-Host "      call in this app had ever been counted before the llm_usage ledger." -ForegroundColor DarkGray
-Write-Host "      Re-run this after a week and set JH_LLM_GLOBAL_CALLS from the real" -ForegroundColor DarkGray
-Write-Host "      number; it is a Railway variable, no deploy needed." -ForegroundColor DarkGray
+Write-Host "      NOTE: the ceilings shipped generous on purpose - no Gemini call in" -ForegroundColor DarkGray
+Write-Host "      this app had ever been counted before the llm_usage ledger. The peak" -ForegroundColor DarkGray
+Write-Host "      printed above is the number to set JH_LLM_GLOBAL_CALLS from (about" -ForegroundColor DarkGray
+Write-Host "      10x it). It is a Railway variable - no deploy needed." -ForegroundColor DarkGray
+Write-Host "      RAILWAY_RUNBOOK.md, Part 1." -ForegroundColor DarkGray
 Write-Host ""
 
 # --- Apply engine must stay off (parked) --------------------------------------

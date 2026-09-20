@@ -33,6 +33,7 @@ TAILWIND = {
     "amber-300": "#fcd34d", "amber-400": "#fbbf24",
     "red-300": "#fca5a5", "red-400": "#f87171",
     "blue-300": "#93c5fd", "blue-400": "#60a5fa",
+    "blue-500": "#3b82f6", "blue-600": "#2563eb", "blue-700": "#1d4ed8",
     "white": "#ffffff",
 }
 
@@ -68,6 +69,11 @@ PAIRS = [
     # Primary button
     ("white", "indigo-600", "body"),
     ("white", "indigo-700", "body"),
+    # "Apply to queue" in the Queue tab (2026-09-20). Its first draft was
+    # bg-blue-600 hover:bg-blue-500, and adding the pair here caught that the
+    # HOVER state is 3.68:1 - a button that meets AA at rest and fails while the
+    # pointer is on it is still a failure, and hover is when it is being read.
+    # Moved onto the documented primary (indigo-600/700), already asserted above.
     # indigo-500 is only a :hover fill under an indigo-600 rest state, and it
     # lands at 4.47:1 - three hundredths under. Recorded here, not asserted.
     # Component boundaries. A card border is decorative - the gray-800 card is

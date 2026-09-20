@@ -614,7 +614,7 @@ function DashboardView(p: any) {
           </div>
         )}
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
-          {activeTab === "queue" && <QueueTab jobs={sortJobs(approvedJobs)} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} onReload={onReload} />}
+          {activeTab === "queue" && <QueueTab me={me} jobs={sortJobs(approvedJobs)} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} onReload={onReload} />}
           {activeTab === "applied" && <ListTab jobs={sortJobs(appliedJobs)} onSelectJob={setSelectedJob} showStatus stages onReload={onReload} emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
           {activeTab === "deferred" && <DeferredTab jobs={sortJobs(deferredJobs)} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} onReload={onReload} />}
           {activeTab === "passed" && <PassedTab />}
@@ -624,7 +624,7 @@ function DashboardView(p: any) {
         </div>
       </div>
       </div>
-      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} />}
+      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} isAdmin={isAdmin} />}
       <AnimatePresence>{removeTarget && <RejectReasonSheet job={removeTarget} onPick={(k) => { onRemoveQueued(removeTarget, k ? (REJECT_REASONS[k] || k) : "Removed from queue"); setRemoveTarget(null); }} onUndo={() => setRemoveTarget(null)} />}</AnimatePresence>
       <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={onCloseSettings} />}</AnimatePresence>
     </div>
@@ -656,10 +656,40 @@ function ApplyBadge({ job }: { job: UiJob }) {
   return <span className="text-xs text-gray-400">{s}</span>;
 }
 
-function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any) {
+/* Mirrors entitlements.can_auto_apply() on the server, in ONE place.
+   Two copies of this rule is how a screen ends up offering a feature the API
+   refuses, or hiding one it would allow. The server is still the authority -
+   every gated POST answers 403 - this only decides what to draw. */
+export function mayAutoApply(me: any): boolean {
+  if (!me) return false;
+  if (me.role === "admin" || me.is_admin) return true;
+  return ["premium", "expert"].includes(String(me.plan || "free").toLowerCase());
+}
+
+function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any) {
   const bulk = useBulk(jobs, onReload);
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState("");
+  // api.runApply existed in client.ts and was called from nowhere - a shipped
+  // feature to anyone reading the client, and dead weight to everyone else.
+  // This is the button. It is shown only to accounts whose plan allows it, and
+  // the server refuses it anyway (403 not_entitled): the screen decides what to
+  // show, the server decides what happens.
+  const canAutoApply = mayAutoApply(me);
+  const [applying, setApplying] = useState(false);
+  const [applyMsg, setApplyMsg] = useState("");
+  const runApply = async () => {
+    setApplying(true); setApplyMsg("Starting a run over your queue…");
+    try {
+      const r = await api.runApply();
+      setApplyMsg(r.status === "already_running"
+        ? "A run is already going — this one was not queued twice."
+        : "Queued. Applications go out in the background; the queue empties as they land.");
+      if (onReload) await onReload();
+    } catch (e: any) {
+      setApplyMsg(e?.message || "Could not start a run right now.");
+    } finally { setApplying(false); }
+  };
   const checkLinks = async () => {
     setChecking(true); setCheckMsg("Checking every link…");
     try {
@@ -678,8 +708,16 @@ function QueueTab({ jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any)
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-white">{jobs.length} in queue</h3>
         <button onClick={checkLinks} disabled={checking} className="px-3 py-2 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">{checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}{checking ? "Checking…" : "Check links"}</button>
+        {canAutoApply && jobs.length > 0 && (
+          <button onClick={runApply} disabled={applying || checking}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">
+            {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            {applying ? "Starting…" : "Apply to queue"}
+          </button>
+        )}
       </div>
       {checkMsg && <p className="text-xs text-gray-400 -mt-1">{checkMsg}</p>}
+      {applyMsg && <p className="text-xs text-gray-400 -mt-1">{applyMsg}</p>}
       {!jobs.length
         ? <EmptyTab icon={CheckCircle} title="No jobs in queue" sub="Approved jobs appear here" />
         : <>
@@ -1320,7 +1358,39 @@ function StatusPill({ s }: { s: string }) {
   return <span className="px-2.5 py-1 bg-gray-700 text-gray-300 text-xs font-medium rounded-full">{s}</span>;
 }
 
-function JobDetailModal({ job, onClose, onRetry }: { job: UiJob; onClose: () => void; onRetry?: (j: UiJob) => void }) {
+/* "Is this posting still open?" and the cover letter both lived only in the
+   legacy dashboard. check-status turned out to have no implementation at all
+   (it answered a bare 404), so this is its first working home. */
+function JobDetailModal({ job, onClose, onRetry, isAdmin }: { job: UiJob; onClose: () => void; onRetry?: (j: UiJob) => void; isAdmin?: boolean }) {
+  const [checking, setChecking] = useState(false);
+  const [checkMsg, setCheckMsg] = useState("");
+  const [checkOpen, setCheckOpen] = useState<boolean | null>(
+    job.statusCheck === "open" ? true : job.statusCheck === "closed" ? false : null);
+  const check = async () => {
+    setChecking(true); setCheckMsg("");
+    try {
+      const r = await api.checkStatus(job.id);
+      if (r?.error) { setCheckMsg(r.error); return; }
+      setCheckOpen(!!r.open);
+      setCheckMsg(r.message || (r.open ? "Still open" : "Could not confirm it is open"));
+    } catch (e: any) { setCheckMsg(e?.message || "Could not reach the posting"); }
+    finally { setChecking(false); }
+  };
+
+  const [letter, setLetter] = useState(job.coverLetter);
+  const [clBusy, setClBusy] = useState("");
+  const [clMsg, setClMsg] = useState("");
+  const clRun = async (action: "generate" | "save") => {
+    setClBusy(action); setClMsg("");
+    try {
+      const r = await api.coverLetter(job.id, action, action === "save" ? letter : undefined);
+      if (r?.error) { setClMsg(r.error); return; }
+      if (action === "generate" && r.letter) { setLetter(r.letter); setClMsg("Generated \u2014 edit before you send it."); }
+      if (action === "save") setClMsg("Saved");
+    } catch (e: any) { setClMsg(e?.message || "That did not work"); }
+    finally { setClBusy(""); }
+  };
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
       <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
@@ -1339,6 +1409,49 @@ function JobDetailModal({ job, onClose, onRetry }: { job: UiJob; onClose: () => 
               {(job.applyStatus === "failed" || job.applyStatus === "manual_required") && onRetry && (
                 <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />Retry application</button>
               )}
+            </div>
+          )}
+          {job.url && (
+            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <h4 className="font-semibold text-white text-sm">Is this still open?</h4>
+                  <p className="text-xs text-gray-400">
+                    {job.statusCheckedDate && checkOpen === null
+                      ? `Last checked ${job.statusCheckedDate}`
+                      : "Fetches the posting and reads it. Never removes the job."}
+                  </p>
+                </div>
+                <button onClick={check} disabled={checking}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-60 shrink-0">
+                  {checking ? "Checking\u2026" : "Check now"}
+                </button>
+              </div>
+              {checkMsg && (
+                <p className={`text-xs mt-2 ${checkOpen === true ? "text-green-300" : checkOpen === false ? "text-amber-300" : "text-gray-400"}`}>
+                  {checkMsg}
+                </p>
+              )}
+            </div>
+          )}
+          {isAdmin && (
+            <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+              <h4 className="font-semibold text-white text-sm mb-1">Cover letter</h4>
+              <p className="text-xs text-gray-400 mb-2">Written by the model from your CV and this posting. Read it before it goes anywhere.</p>
+              <textarea value={letter} onChange={(e) => setLetter(e.target.value)} rows={8}
+                        placeholder="Nothing yet — generate a draft, or write your own."
+                        className="w-full px-3 py-2 border border-gray-500 rounded-xl bg-gray-900 text-white text-sm leading-relaxed" />
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => clRun("generate")} disabled={!!clBusy}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">
+                  {clBusy === "generate" ? "Writing\u2026" : letter ? "Rewrite" : "Generate"}
+                </button>
+                <button onClick={() => clRun("save")} disabled={!!clBusy || !letter.trim()}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-40">
+                  {clBusy === "save" ? "Saving\u2026" : "Save"}
+                </button>
+                {clMsg && <span className="text-xs text-gray-400 self-center">{clMsg}</span>}
+              </div>
             </div>
           )}
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-indigo-400 text-sm font-medium">Open job posting <ExternalLink className="w-3.5 h-3.5" /></a>}
@@ -2002,7 +2115,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
      can_auto_apply() the POST is checked against. A disabled switch is a
      courtesy to an honest user - /api/save-schedule returns 403 either way. */
   const plan = (me.plan || "free").toLowerCase();
-  const mayAutoApply = isAdmin || plan === "premium" || plan === "expert";
+  const canAutoApply = mayAutoApply(me);
   const [gateMsg, setGateMsg] = useState("");
 
   useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
@@ -2038,7 +2151,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
         // Only sent when it is allowed to be on. Sending 1 from an account
         // without the entitlement makes the whole save 403, which would lose
         // the schedule edits sitting next to it.
-        ...(mayAutoApply ? { auto_apply_enabled: autoApply ? 1 : 0 } : {}),
+        ...(canAutoApply ? { auto_apply_enabled: autoApply ? 1 : 0 } : {}),
         search_hour: parseInt(searchHour, 10),
         apply_hour: parseInt(applyHour, 10),
         // Sent on every save, weekly or not: leaving the columns untouched let
@@ -2144,31 +2257,31 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
               {freq === "weekly" && <DayPicker label="Search day" value={searchDow} onChange={setSearchDow} />}
               <Field label="Auto-apply time" sub="When approved applications go out"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field>
               {freq === "weekly" && <DayPicker label="Apply day" value={applyDow} onChange={setApplyDow} />}
-              <div className={`p-3.5 rounded-xl border ${mayAutoApply ? "bg-gray-800 border-gray-700" : "bg-gray-800/50 border-gray-700/60"}`}>
+              <div className={`p-3.5 rounded-xl border ${canAutoApply ? "bg-gray-800 border-gray-700" : "bg-gray-800/50 border-gray-700/60"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-white text-sm flex items-center gap-1.5">
-                      {!mayAutoApply && <Lock className="w-3.5 h-3.5 text-gray-400" />}Apply automatically
+                      {!canAutoApply && <Lock className="w-3.5 h-3.5 text-gray-400" />}Apply automatically
                     </p>
                     <p className="text-xs text-gray-400">
-                      {autoApply && mayAutoApply
+                      {autoApply && canAutoApply
                         ? "Approving a job sends the application straight away."
                         : "Approved jobs wait in your queue until you apply."}
                     </p>
                   </div>
                   <Toggle
-                    checked={autoApply && mayAutoApply}
-                    disabled={!mayAutoApply}
+                    checked={autoApply && canAutoApply}
+                    disabled={!canAutoApply}
                     onChange={(v: boolean) => {
-                      if (!mayAutoApply) { setGateMsg("Auto-apply is part of a paid plan."); return; }
+                      if (!canAutoApply) { setGateMsg("Auto-apply is part of a paid plan."); return; }
                       setAutoApply(v);
                     }}
                   />
                 </div>
-                {!mayAutoApply && (
+                {!canAutoApply && (
                   <p className="text-xs text-indigo-300 mt-2">Auto-apply is part of a paid plan — you are on {plan}.</p>
                 )}
-                {gateMsg && mayAutoApply === false && <p className="text-xs text-gray-400 mt-1">{gateMsg}</p>}
+                {gateMsg && canAutoApply === false && <p className="text-xs text-gray-400 mt-1">{gateMsg}</p>}
               </div>
             </div>
           </div>

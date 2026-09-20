@@ -110,3 +110,28 @@ Design language is settled and not up for redesign: the dark palette already in
 `xl:grid-cols-2 2xl:grid-cols-3`. "Align with the new design" means match that.
 
 **Nothing is deleted until (6)**, and (6) keeps an escape hatch for one release.
+
+---
+
+## Closed, 2026-09-20
+
+Everything in the sequence above is shipped. The three endpoints listed as "still
+zero references" on 2026-09-15 are wired:
+
+| Item | Where it landed |
+|---|---|
+| `/api/jobs/<id>/cover-letter` | `JobDetailModal` — generate / regenerate / copy |
+| `/api/jobs/<id>/check-status` | `JobDetailModal` — and the endpoint **had no implementation**; it has one now |
+| `/api/admin/users/<id>/toggle` | Admin panel, with a refusal to disable yourself |
+| Admin apply probes | `apply-selftest` wired as "Run apply self-test". **`apply-test?mode=live` deliberately not wired** — it submits a real application to a real company and bypasses the global kill switch. It stays curl-only. |
+| `api.runApply` (the loose end) | Queue tab → **"Apply to queue"**, behind the paid gate. Wiring it surfaced that the gate was not at the chokepoint (STATUS, 2026-09-20). |
+
+**Two items remain, and neither is code I can write:**
+
+1. **Delete the legacy blob** (`DASHBOARD_HTML`, `SETTINGS_HTML`, `ONBOARDING_HTML`,
+   `ADMIN_HTML`, the base64 Tailwind blob — ~2,900 lines). Recommended **after one
+   release in production**, because deleting `DASHBOARD_HTML` makes the `LEGACY_UI=1`
+   escape hatch a dead switch, and the point of the escape hatch is the release that
+   has not happened yet. Eran's call.
+2. **The Android pass.** Install the PWA, run swipe → queue → apply → settings →
+   onboarding replay on a real phone. Only Eran can do this one.

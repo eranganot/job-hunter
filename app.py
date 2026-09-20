@@ -243,21 +243,51 @@ RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 RESEND_VERIFIED_EMAIL = os.environ.get("RESEND_VERIFIED_EMAIL", "eran.ganot@gmail.com")
 
 
+# Resend's shared sandbox sender. It can only deliver to the Resend account's
+# own verified address, which is why the override below ever existed.
+RESEND_SANDBOX_FROM = "onboarding@resend.dev"
+RESEND_FROM = os.environ.get("RESEND_FROM", "Job Hunter <%s>" % RESEND_SANDBOX_FROM)
+
+
 def send_email(to_addr: str, subject: str, body: str, **_kwargs):
-    """Send an email notification via Resend SDK.
-    Uses onboarding@resend.dev sender which only delivers to the verified account email.
+    """Send an email notification via the Resend SDK.
+
+    This function used to set `actual_to = RESEND_VERIFIED_EMAIL` and DISCARD
+    the address it was given. Every user's email notification went to the admin.
+    Proven 2026-09-20 by driving deliver_notification for a user whose address is
+    dana@somewhere-else.test: Resend was handed to=['eran.ganot@gmail.com'], and
+    both the caller and the notification log recorded "Sent OK".
+
+    It was a leftover from the unverified-domain sandbox, where only the account's
+    own address can receive mail - true, and the wrong response to it. With nine
+    users who know each other it was an annoyance; with a public signup it is one
+    tenant's job alerts in another tenant's inbox, and the log says delivered.
+
+    So: while the sender is still the shared sandbox address, refuse anything
+    addressed elsewhere instead of redirecting it. The callers already catch and
+    log a failure, so a refusal shows up as "FAILED" where a redirect showed up as
+    "Sent OK" - loud instead of wrong. Set RESEND_FROM to an address on a domain
+    verified in Resend and this sends to the real recipient with no code change.
     """
     if not RESEND_API_KEY:
         raise RuntimeError("RESEND_API_KEY not configured")
+    if not to_addr:
+        raise RuntimeError("no recipient address")
     try:
         import resend
     except ImportError:
         raise RuntimeError("resend package not installed")
-    # onboarding@resend.dev can only send to the Resend account's verified email
-    actual_to = RESEND_VERIFIED_EMAIL
+    if RESEND_SANDBOX_FROM in RESEND_FROM and \
+            to_addr.strip().lower() != (RESEND_VERIFIED_EMAIL or "").strip().lower():
+        raise RuntimeError(
+            "email is still on Resend's shared sandbox sender (%s), which can only "
+            "deliver to %s. Refusing to send %s's notification to someone else. "
+            "Verify a domain in Resend and set RESEND_FROM."
+            % (RESEND_SANDBOX_FROM, RESEND_VERIFIED_EMAIL or "<unset>", to_addr))
+    actual_to = to_addr
     resend.api_key = RESEND_API_KEY
     result = resend.Emails.send({
-        "from": "Job Hunter <onboarding@resend.dev>",
+        "from": RESEND_FROM,
         "to": [actual_to],
         "subject": subject,
         "text": body,
@@ -457,6 +487,26 @@ def _llm_usage_today(day):
         conn.close()
 
 
+def _llm_usage_history(days: int = 14):
+    """Per-day ledger totals, newest first. Read-only; feeds the ceiling call.
+
+    Column note: the ledger stores prompt_tokens/output_tokens (m0007), and
+    total_tokens is already the sum, so this reads total_tokens rather than
+    re-adding the two halves.
+    """
+    conn = database.get_db()
+    try:
+        rows = conn.execute(
+            "SELECT day, COALESCE(SUM(calls),0), COALESCE(SUM(total_tokens),0), "
+            "COUNT(DISTINCT user_id) FROM llm_usage GROUP BY day "
+            "ORDER BY day DESC LIMIT ?", (int(days),)).fetchall()
+        return [{"day": r[0], "calls": int(r[1] or 0),
+                 "tokens": int(r[2] or 0), "users": int(r[3] or 0)}
+                for r in rows]
+    finally:
+        conn.close()
+
+
 def _llm_breach_alert(message: str):
     """Tell the admin a Gemini ceiling was crossed — on every channel they have.
 
@@ -486,6 +536,7 @@ def _llm_breach_alert(message: str):
 gemini.set_ledger_writer(_llm_ledger_write)
 gemini.set_sync_source(_llm_usage_today)
 gemini.set_alert_sender(_llm_breach_alert)
+gemini.set_history_source(_llm_usage_history)
 
 
 def db_check():
@@ -2134,13 +2185,29 @@ def run_job_apply(user_id: int) -> int:
         "SELECT auto_apply_enabled, applications_sent_today, applications_reset_date "
         "FROM user_profiles WHERE user_id=?", (user_id,)
     ).fetchone()
-    _urow = _rc.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+    _urow = _rc.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
     _is_admin = (_urow and _urow["email"] and _urow["email"].lower() == (ADMIN_EMAIL or "").lower())
 
     # SILENT MODE: auto-apply off => return immediately, no notification
     if not _prof or not _prof["auto_apply_enabled"]:
         _rc.close()
         return {"applied": 0, "error": "", "skipped": "auto_apply_disabled"}
+
+    # The paid gate, AT THE CHOKEPOINT. It used to live only at the two call
+    # sites a developer exercises by hand - saving the toggle (/api/save-profile)
+    # and the apply triggered by approving a job - and this function, which every
+    # scheduled run and every /api/run-apply goes through, checked the FLAG and
+    # not the PLAN. The flag and the plan come apart on their own: m0010 gave
+    # every existing row plan='free' while leaving auto_apply_enabled as it was,
+    # and a downgrade does the same thing later. Proven 2026-09-20 against a
+    # plan='free' user with the flag set: can_auto_apply False, run_job_apply
+    # returned applied=1. Invisible until now only because APPLY_ENGINE_ENABLED
+    # is off in production - i.e. exactly until the thing we are launching.
+    if not entitlements.can_auto_apply(_urow):
+        _rc.close()
+        print(f"[apply] user {user_id}: auto-apply flag set but plan "
+              f"'{entitlements.plan_of(_urow)}' does not include it - not applying")
+        return {"applied": 0, "error": "", "skipped": "not_entitled"}
 
     # Daily reset at 00:00 UTC
     if _prof["applications_reset_date"] != today_utc:
@@ -6103,6 +6170,10 @@ class Handler(BaseHTTPRequestHandler):
                 # ships generous on purpose, because nothing here had ever been
                 # measured before the ledger existed.
                 "llm": gemini.usage(),
+                # The 14-day record behind that ceiling. usage() reports only
+                # TODAY, so until this existed the real peak was invisible from
+                # outside the box and the ceiling stayed at its placeholder.
+                "llm_history": gemini.history(14),
                 # Queue depth and the age of the oldest running job: a wedged
                 # worker looks exactly like a healthy one from outside without
                 # this. Guarded because a box that predates migration 6 has no
@@ -7318,6 +7389,53 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 self.send_json({"error": "No URL for this job"}, 400)
                 return
+            conn.close()
+
+            # This endpoint had NO IMPLEMENTATION. It validated the job and the
+            # URL and then fell out of the branch: no response, no return, and
+            # the connection above left open. A caller got a bare 404 with an
+            # empty body on a perfectly valid job - proven by driving it,
+            # 2026-09-20. The legacy dashboard's "verify if still open" button
+            # has therefore never worked.
+            #
+            # Built on check_url_alive rather than an AI call (which is what the
+            # route comment promised): it already handles a 200-OK page that
+            # says the posting is closed, and a parked domain, and it is the
+            # same check the link sweeper uses - so one job re-checked by hand
+            # and the same job swept overnight cannot disagree.
+            today = datetime.now().strftime("%Y-%m-%d")
+            try:
+                import apply_engine as _ae
+                alive = bool(_ae.check_url_alive(job["url"]))
+            except Exception as _cse:
+                self.send_json({"error": "Could not reach the posting: %s" % str(_cse)[:160]}, 502)
+                return
+
+            c2 = database.get_db()
+            if alive:
+                c2.execute(
+                    "UPDATE jobs SET url_verified=1, url_check_date=?, "
+                    "status_check='open', status_checked_date=? WHERE id=? AND user_id=?",
+                    (today, today, job_id, user["id"]))
+            else:
+                # Flagged, NOT auto-rejected. A one-off manual check is the user
+                # asking a question, not asking for the job to be thrown away;
+                # the sweeper is the thing allowed to retire a dead link.
+                c2.execute(
+                    "UPDATE jobs SET url_verified=0, url_check_date=?, "
+                    "status_check='closed', status_checked_date=? WHERE id=? AND user_id=?",
+                    (today, today, job_id, user["id"]))
+            c2.commit()
+            c2.close()
+            database.log_activity(
+                user["id"], "job_status_checked",
+                "%s still open: %s at %s" % ("Confirmed" if alive else "Could not confirm",
+                                             job["title"], job["company"]))
+            self.send_json({"success": True, "open": alive,
+                            "checked_date": today,
+                            "message": "Still open" if alive else
+                                       "The posting did not respond, or reads as closed"})
+            return
 
         # ── Cover Letter (admin only) ──
         m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
@@ -7548,6 +7666,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/run-apply":
             if not user:
                 self.send_json({"error": "Unauthorized"}, 401)
+                return
+            # Same gate as the chokepoint in run_job_apply, repeated here for
+            # ONE reason: to give the user an answer. Without it the enqueue
+            # succeeds, the UI says "queued", and the worker quietly returns
+            # not_entitled minutes later - a button that lies. The gate in
+            # run_job_apply is still the one that protects the engine; this one
+            # only exists so the screen can say why.
+            if not entitlements.can_auto_apply(user):
+                self.send_json({"error": "Applying to your whole queue at once is "
+                                         "part of a paid plan.",
+                                "status": "not_entitled",
+                                "plan": entitlements.plan_of(user)}, 403)
                 return
             # Queued, not spawned. This was the last raw thread left: the
             # scheduler's apply already went through the queue, so a manual

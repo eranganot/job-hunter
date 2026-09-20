@@ -175,6 +175,21 @@
       "since": "2026-09-15",
       "what": "all bulk-marked jobs can go back at once",
       "needle": "back to review"
+    },
+    {
+      "since": "2026-09-20",
+      "what": "check a posting is still open",
+      "needle": "Is this still open?"
+    },
+    {
+      "since": "2026-09-20",
+      "what": "cover letter in the job detail",
+      "needle": "Cover letter"
+    },
+    {
+      "since": "2026-09-20",
+      "what": "Queue: apply to the whole approved queue (the button api.runApply never had)",
+      "needle": "Apply to queue"
     }
   ]
 }

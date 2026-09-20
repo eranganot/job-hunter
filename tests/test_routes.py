@@ -232,6 +232,15 @@ def _new_job(database, user_id, title="VP of Product", company="Acme"):
     return job_id
 
 
+def _set_plan(database, email, plan):
+    """Set a user's plan. Entitlement gates read users.plan (m0010), which
+    defaults to 'free' - so any test of a paid path has to say so out loud."""
+    conn = database.get_db()
+    conn.execute("UPDATE users SET plan=? WHERE lower(email)=lower(?)", (plan, email))
+    conn.commit()
+    conn.close()
+
+
 def _job_row(database, job_id):
     conn = database.get_db()
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -826,6 +835,10 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     to close - so the route is asserted to go through the queue, not to start
     a thread."""
     import jobqueue
+    # Applying to the whole queue at once is a paid feature (2026-09-20). Alice
+    # is on the 'free' default, so without this the route answers 403 and the
+    # assertions below would be testing the price, not the plumbing.
+    _set_plan(stack["db"], "alice@example.test", "premium")
     seen = []
     real = jobqueue.enqueue
     monkeypatch.setattr(jobqueue, "enqueue",
@@ -837,6 +850,24 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     assert any(k == "apply" for _u, k in seen), \
         "/api/run-apply did not enqueue - it is spawning a thread again"
     assert json.loads(body)["status"] in ("queued", "already_running")
+
+
+def test_run_apply_refuses_a_free_plan_with_an_answer(stack, users):
+    """A 403 the screen can read, not a queued run that quietly does nothing.
+
+    The engine is protected at the chokepoint inside run_job_apply. Without this
+    second check the enqueue succeeds, the button says "queued", and the worker
+    returns not_entitled some minutes later with nobody watching - a button that
+    lies. So the route answers, and it answers with the reason.
+    """
+    _set_plan(stack["db"], "bob@example.test", "free")
+    status, _loc, body = users["b"].post_json("/api/run-apply", {},
+                                              {"Sec-Fetch-Site": "same-origin"})
+    assert status == 403, "a free plan started a queue-wide apply run"
+    payload = json.loads(body)
+    assert payload["status"] == "not_entitled"
+    assert payload["plan"] == "free"
+    assert payload.get("error"), "refused without telling the user why"
 
 
 # ── Request logging, through the real handler ────────────────────────────────
