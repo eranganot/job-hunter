@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 encrypt_credentials.py - convert the credentials already in the database.
 
 Phase 3. crypto.py encrypts on write, so rows convert as users re-save their
@@ -13,11 +13,25 @@ row that cannot be proved to round-trip is reported and the run exits 1.
 Safe to run repeatedly: an already-encrypted value is left alone.
 
 Usage
-    # rehearse - reports what would change, writes nothing
-    python scripts/encrypt_credentials.py --dry-run
+    Do not run this directly from a laptop. It needs JH_ENCRYPTION_KEY (which
+    lives on the `web` service) AND a reachable database URL (DATABASE_PUBLIC_URL,
+    which lives on `Postgres`), so no single `railway run --service X` supplies
+    both - every such attempt fails with "JH_ENCRYPTION_KEY is not set", which
+    is true of that service and misleading about the system.
 
-    # against staging's Postgres
-    railway run --service Postgres python scripts/encrypt_credentials.py --database jobhunter_staging
+    Use the wrapper, which reads both and runs this in one process:
+
+        .\scripts\run_encrypt_credentials.ps1                 # dry run
+        .\scripts\run_encrypt_credentials.ps1 -Apply          # writes
+        .\scripts\run_encrypt_credentials.ps1 -Apply -Env Staging -Database jobhunter_staging
+
+    Or run it from the `web` service's Console in the Railway dashboard, where
+    every variable is present and postgres.railway.internal resolves:
+
+        python scripts/encrypt_credentials.py --dry-run
+
+    Direct invocation, if you are supplying both yourself:
+        python scripts/encrypt_credentials.py --dry-run --url <url> --database <name>
 """
 import argparse
 import os
