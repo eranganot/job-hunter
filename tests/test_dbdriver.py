@@ -306,3 +306,47 @@ def test_pooling_is_decided_by_the_environment_not_hardcoded():
     """connect_postgres must default to 'ask', so JH_PG_POOL actually reaches it."""
     import inspect
     assert inspect.signature(dbdriver.connect_postgres).parameters["pooled"].default is None
+
+
+# ── Duplicate column names (2026-09-21) ──────────────────────────────────────
+#
+# Postgres names an unaliased expression after its function, so a query with
+# two COALESCE(...) columns returns two columns both called "coalesce". Row
+# used to answer positional access from list(self.values()) - and a dict holds
+# one value per key, so the duplicate overwrote the first, the row shrank, and
+# every index after it shifted by one. On staging that made /api/health's
+# llm_history fail with "list index out of range", and made the LLM ledger's
+# restart re-sync fail the same way (so a Postgres restart handed the day a
+# fresh budget). SQLite names these columns by full expression text, so the
+# identical query was right there, and every SQLite-backed test passed.
+# The rows below are shaped exactly like the one psycopg produced.
+
+def _dup_row():
+    return Row([("day", "2026-09-20"), ("coalesce", 5), ("coalesce", 180), ("count", 2)])
+
+
+def test_positional_access_survives_duplicate_column_names():
+    r = _dup_row()
+    assert (r[0], r[1], r[2], r[3]) == ("2026-09-20", 5, 180, 2), \
+        "a duplicate column name shifted the positions - calls read as tokens"
+
+
+def test_unpacking_and_len_survive_duplicate_column_names():
+    r = _dup_row()
+    day, calls, tokens, users = r
+    assert (calls, tokens, users) == (5, 180, 2)
+    assert len(r) == 4
+
+
+def test_the_real_query_shape_on_sqlite_and_pg_agree(sqlite_row):
+    """The same four-column aggregate, positionally, must read the same on both."""
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE u (day TEXT, user_id INT, calls INT, total_tokens INT)")
+    conn.executemany("INSERT INTO u VALUES (?,?,?,?)",
+                     [("2026-09-20", 1, 3, 120), ("2026-09-20", 2, 2, 60)])
+    lite = conn.execute(
+        "SELECT day, COALESCE(SUM(calls),0), COALESCE(SUM(total_tokens),0), "
+        "COUNT(DISTINCT user_id) FROM u GROUP BY day").fetchone()
+    assert tuple(lite) == tuple(_dup_row())

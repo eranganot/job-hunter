@@ -155,15 +155,37 @@ class Row(dict):
     (not keys) so `a, b = cur.fetchone()` behaves as it does on SQLite.
     """
 
-    __slots__ = ()
+    # Positional values are kept SEPARATELY from the dict, and positional access
+    # reads them - never self.values().
+    #
+    # It used to be list(self.values())[key], which is only right while every
+    # column name is unique. Postgres names an unaliased expression after its
+    # function, so `SELECT day, COALESCE(SUM(calls),0), COALESCE(SUM(tokens),0),
+    # COUNT(*)` comes back as day / coalesce / coalesce / count: the second
+    # "coalesce" overwrote the first in the dict, the row shrank to three
+    # values, and every index after the duplicate shifted by one. r[1] returned
+    # the TOKENS, r[2] the COUNT, r[3] raised "list index out of range". SQLite
+    # names the same columns by their full expression text, so the identical
+    # query was correct there and every test on SQLite passed. Proven
+    # 2026-09-21 by running that query through this driver on Postgres 16;
+    # found because /api/health's llm_history failed on staging only.
+    __slots__ = ("_vals",)
+
+    def __init__(self, pairs=()):
+        pairs = list(pairs)
+        dict.__init__(self, pairs)
+        self._vals = [v for _k, v in pairs]
 
     def __getitem__(self, key):
         if isinstance(key, int):
-            return list(self.values())[key]
+            return self._vals[key]
         return dict.__getitem__(self, key)
 
     def __iter__(self):
-        return iter(self.values())
+        return iter(self._vals)
+
+    def __len__(self):
+        return len(self._vals)
 
 
 def _normalise(value):
