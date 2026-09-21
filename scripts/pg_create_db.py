@@ -49,7 +49,12 @@ def main():
     except ImportError:
         sys.exit("[FAIL] psycopg is not installed: pip install \"psycopg[binary]\"")
 
-    print("server : %s" % host)
+    # Host AND port: every Railway environment's public proxy is the same host
+    # (junction.proxy.rlwy.net) on a different port, so the host alone cannot
+    # tell production's server from staging's. On 2026-09-21 this created
+    # jobhunter_prod on the STAGING server because the CLI was linked there,
+    # and the output looked identical to a correct run.
+    print("server : %s:%s" % (host, urlparse(url).port))
     # autocommit: CREATE DATABASE refuses to run inside a transaction block.
     with psycopg.connect(url, autocommit=True, connect_timeout=15) as conn:
         exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s",
@@ -62,6 +67,9 @@ def main():
         names = [r[0] for r in conn.execute(
             "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname")]
     print("databases on this server: %s" % ", ".join(names))
+    if name.endswith("_prod") and "jobhunter_staging" in names:
+        print("[WARN] jobhunter_staging is on this server too. If production has its own "
+              "Postgres service, this is the STAGING server - check `railway status`.")
 
 
 if __name__ == "__main__":

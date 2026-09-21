@@ -55,6 +55,14 @@ TABLE_ORDER = [
     "push_subscriptions",
     "career_url_cache",
     "app_flags",
+    # Added 2026-09-21. Both tables arrived after this list was written
+    # (m0006 job_runs, m0007 llm_usage) and the staging rehearsal predates
+    # them, so the production dry run was the first run to meet them - and
+    # refused, as it should. Neither has a foreign key; they only need to come
+    # after users. tests/test_migration_table_order.py now fails the build when
+    # a migration adds a table this list does not name.
+    "job_runs",
+    "llm_usage",
 ]
 
 BATCH = 500
@@ -89,14 +97,27 @@ def row_digest(cols, row) -> str:
 
 
 def table_checksum(fetch_rows, cols):
-    """md5 over every row, plus a {pk: digest} map for pinpointing differences."""
-    h = hashlib.md5()
+    """md5 over every row, plus a {pk: digest} map for pinpointing differences.
+
+    ORDER-INDEPENDENT: the row digests are sorted before hashing. It used to
+    hash rows in the order each database returned them for ORDER BY <key>, and
+    the two databases do not agree on that order for text keys. SQLite sorts
+    TEXT by bytes; Railway's Postgres sorts by a linguistic collation, where
+    '_' and '-' come before letters and case is compared last. `sessions` is
+    keyed by secrets.token_urlsafe() - exactly that alphabet - so on the
+    2026-09-21 production copy its three rows came back in a different order,
+    every row matched its counterpart value for value, and the table still
+    FAILED ("checksum differs" with no differing key listed, which is the tell).
+    Reproduced on Postgres 16 with an ICU en-US database. The identity of a
+    table is the set of its rows, not the order a collation lists them in.
+    """
     per_row = {}
     for row in fetch_rows:
-        d = row_digest(cols, row)
+        per_row[row[0]] = row_digest(cols, row)   # row[0] is the key column
+    h = hashlib.md5()
+    for d in sorted(per_row.values()):
         h.update(d.encode("utf-8"))
         h.update(b"\n")
-        per_row[row[0]] = d          # row[0] is the first ordered column (the key)
     return h.hexdigest(), per_row
 
 
@@ -153,8 +174,12 @@ def main():
     log("=== sqlite -> postgres ===")
     log("  source : %s" % args.sqlite_path)
     log("  target : %s on %s" % (target_db, urlparse(url).hostname))
-    mode = "DRY RUN (no writes)" if args.dry_run else (
-        "VERIFY ONLY (no writes)" if args.verify_only else "copy")
+    # Honest label: every mode runs migrations.run() on the target first, so
+    # a dry run against an empty database DOES create the schema (tables, no
+    # rows). Harmless - it is what the copy would do first - but "no writes"
+    # was untrue, and the 2026-09-21 production dry run showed it.
+    mode = "DRY RUN (creates the schema if missing; copies no rows)" if args.dry_run else (
+        "VERIFY ONLY (copies no rows)" if args.verify_only else "copy")
     log("  mode   : %s" % mode)
     log()
 
@@ -282,6 +307,10 @@ def main():
             continue
 
         diffs = [k for k in s_map if s_map.get(k) != d_map.get(k)][:3]
+        if not diffs and len(s_map) != len(src_rows):
+            # Keys are not unique, so the per-key map collapsed rows and cannot
+            # point at the difference. Say so instead of printing nothing.
+            log("       (key %r is not unique in %s - cannot pinpoint rows)" % (key, t))
         failures.append("%s: checksum mismatch (%d rows)" % (t, len(src_rows)))
         log("  FAIL %-20s checksum differs" % t)
         for k in diffs:

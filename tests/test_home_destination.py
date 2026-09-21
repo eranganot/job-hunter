@@ -75,9 +75,14 @@ def test_a_non_admin_bounced_off_admin_lands_on_the_app(stack, users):
     assert status == 302 and location == "/app", location
 
 
-def test_the_legacy_pages_are_still_reachable(stack, users):
-    """Nothing is deleted yet. Someone who has bookmarked /dashboard, or needs a
-    feature that has not been ported, can still get there by typing the URL."""
+def test_the_legacy_pages_are_still_reachable(stack, users, monkeypatch):
+    """Nothing is deleted yet - but since 2026-09-21 /dashboard is reachable only
+    behind LEGACY_UI=1. This test used to require /dashboard to serve the old
+    page to anyone who typed it, for "someone who needs a feature that has not
+    been ported". Phase 4 then ported all of them, and the same rule meant the
+    bare domain, every bookmark and every notification link opened the legacy
+    design (tests/test_root_lands_on_app.py). The escape hatch is the switch."""
+    monkeypatch.setenv("LEGACY_UI", "1")
     for path in ("/dashboard", "/settings"):
         status, _loc, body = users["a"].get(path)
         assert status == 200, "%s is gone, and item 6 said nothing would be deleted yet" % path

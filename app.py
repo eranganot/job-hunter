@@ -432,7 +432,7 @@ def notify_admin_new_user(new_user_email: str, new_user_name: str):
     display = new_user_name or new_user_email
     message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter."
     try:
-        deliver_notification(admin_id, message, url_suffix="/dashboard")
+        deliver_notification(admin_id, message, url_suffix=home_url())
     except Exception as e:
         print(f"[admin-notify] failed (non-fatal): {e}")
 
@@ -536,7 +536,7 @@ def _llm_breach_alert(message: str):
         print(f"[llm-alert] log failed: {e}")
     if admin_id:
         try:
-            deliver_notification(admin_id, message, url_suffix="/dashboard")
+            deliver_notification(admin_id, message, url_suffix=home_url())
         except Exception as e:
             print(f"[llm-alert] notify failed (non-fatal): {e}")
 
@@ -1922,7 +1922,7 @@ def run_job_search(user_id: int):
         if not all_jobs_data:
             database.log_activity(user_id, "jobs_searched", "Search returned no new results")
             try:
-                deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix="/dashboard#new")
+                deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix=home_url() + "#new")
             except Exception as _dn_err:
                 print(f"[run-search] deliver_notification error: {_dn_err}")
             return
@@ -2109,7 +2109,7 @@ def run_job_search(user_id: int):
                 _rmsg += f" — {reval_removed} auto-removed from review"
             notif_lines.append(_rmsg)
         try:
-            deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#new")
+            deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#new")
         except Exception as _dn_err:
             print(f"[run-search] deliver_notification error: {_dn_err}")
         print(f"[run-search] user {user_id}: inserted={inserted} hist_checked={hist_alive+hist_dead}")
@@ -2121,7 +2121,7 @@ def run_job_search(user_id: int):
         err_summary = f"{type(e).__name__}: {str(e)[:120]}"
         database.log_activity(user_id, "jobs_searched", f"Job search failed — {err_summary}")
         try:
-            deliver_notification(user_id, f"\u274c Job search failed\n\n{err_summary}\n\nWill retry at next scheduled time.", url_suffix="/dashboard")
+            deliver_notification(user_id, f"\u274c Job search failed\n\n{err_summary}\n\nWill retry at next scheduled time.", url_suffix=home_url())
         except Exception as _ne:
             print(f"[run-search] Notification also failed: {_ne}")
     finally:
@@ -2391,7 +2391,7 @@ def run_job_apply(user_id: int) -> int:
                 notif_lines.append(f"  • {j['title']} @ {j['company']}")
             if len(failed_list) > 5:
                 notif_lines.append(f"  … +{len(failed_list)-5} more")
-        deliver_notification(user_id, "\n".join(notif_lines), url_suffix="/dashboard#applied")
+        deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#applied")
         print(f"[run-apply] user {user_id}: {count} — confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed={len(failed_list)}")
         return {"applied": count, "error": ""}
 
@@ -6061,13 +6061,22 @@ class Handler(BaseHTTPRequestHandler):
         # Root redirect
         if path in ("/", ""):
             user = self.get_user()
-            self.redirect("/dashboard" if user else "/login")
+            # home_url(), not "/dashboard": this was the one redirect Phase 4's
+            # flip missed, and it is the bare domain - the link people click.
+            self.redirect(home_url() if user else "/login")
             return
 
         # Auth-required routes
         if path in ("/dashboard", "/dashboard/"):
             user = self.require_auth()
             if not user:
+                return
+            # Old bookmarks, installed home-screen icons and every notification
+            # sent before 2026-09-21 point here. Send them to the new UI; the
+            # browser carries a #new / #applied fragment across the redirect,
+            # and /app reads it. LEGACY_UI=1 still serves the old page below.
+            if home_url() != "/dashboard":
+                self.redirect(home_url())
                 return
             # A logged-in user is never trapped on onboarding. Mark them onboarded
             # so the flag reflects reality; brand-new users still see the wizard

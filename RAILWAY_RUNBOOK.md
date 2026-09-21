@@ -108,16 +108,10 @@ variables together.*
       mid-run means the run finishes against SQLite and the next one starts
       against Postgres. Not fatal, but avoidable.
 
-### Step 2.1 — Back up production, and verify the backup opens
+### Step 2.1 — Backup
 
-```powershell
-.\scripts\railway_phase0.ps1 -Backup
-```
-
-It pulls `jobs.db` off the production volume into `C:\dev\_backups\job-hunter\`
-and verifies it opens and counts rows, because a backup nobody has opened is a
-file, not a backup. **Do not continue until it reports a user count you
-recognise (9).**
+Now part of `cutover_migrate.ps1` (below), so the backup is always fresh and
+always the file that gets migrated. Nothing to do separately.
 
 ### Step 2.2 — Create the target database
 
@@ -139,43 +133,29 @@ it the command exits straight back to PowerShell, which then tries to run the SQ
 as a PowerShell command. `pg_create_db.py` uses psycopg, which the migration
 script in 2.3 already needs, so nothing new has to be installed.)_
 
-### Step 2.3 — Migrate the data
-
-From your machine, with the backup you just verified:
+### Steps 2.3–2.4 — Backup, migrate, verify: one script
 
 ```powershell
-# 1. dry run — reads everything, writes nothing, reports what it would copy
-railway run --service Postgres python scripts/sqlite_to_pg.py `
-    C:\dev\_backups\job-hunter\jobs.db --database jobhunter_prod --dry-run --allow-prod
-
-# 2. the real copy
-railway run --service Postgres python scripts/sqlite_to_pg.py `
-    C:\dev\_backups\job-hunter\jobs.db --database jobhunter_prod --allow-prod
+.\scripts\cutover_migrate.ps1
 ```
 
-`--allow-prod` is required because the script refuses a target whose name
-contains *prod* unless you say you mean it. That refusal exists for the same
-reason everything else here does.
+It does, in order: checks the Railway CLI is linked to **production** (the backup
+*and* the Postgres server are both taken from the linked environment) → takes a
+fresh backup with `railway_phase0.ps1 -Backup` → finds the file itself → refuses a
+backup older than 60 minutes (anything written after it would be lost at the
+flip) → dry run → **waits for you to type `COPY`** → copies → verifies row counts
+and value-by-value checksums.
 
-The script renders the schema through `migrations.ddl_for()`, so the Postgres
-side gets the same schema version the app expects (**11**), then copies
-table-by-table and resets the sequences. Sequences matter: without the reset the
-first insert collides with an existing id.
+Before typing COPY, check: the backup said **MATCHES the live app**, the dry run
+says `target : jobhunter_prod`, 9 users, ~2,600 jobs, and every table `target has 0`.
 
-### Step 2.4 — Verify before you point anything at it
+If it stops anywhere, production is untouched — it keeps serving SQLite. Paste
+the output back.
 
-```powershell
-railway run --service Postgres python scripts/sqlite_to_pg.py `
-    C:\dev\_backups\job-hunter\jobs.db --database jobhunter_prod --verify-only --allow-prod
-```
-
-This skips the copy and runs row counts **and value-by-value checksums**. Row
-counts alone will happily agree about a table whose contents got mangled in the
-type conversion.
-
-**Expect: 9 users, ~2,600 jobs, all tables matching.** If anything disagrees,
-stop — the SQLite volume is still what production is serving, so nothing is lost
-and there is nothing to roll back.
+_(These steps first had you type `sqlite_to_pg.py C:\dev\_backups\job-hunter\jobs.db`.
+That path never existed: the backup script writes to
+`<date>_production\web-volume-jobs.db`. Found 2026-09-21 when both commands failed
+with "no such SQLite file". Nothing was written.)_
 
 ### Step 2.5 — Set the three variables TOGETHER
 
@@ -310,7 +290,7 @@ strictly better than the alternative it replaced.
 2. Read `llm_history`, set `JH_LLM_GLOBAL_CALLS` / `JH_LLM_USER_CALLS`. (Part 1)
 3. Verify a Resend domain and set `RESEND_FROM`. (3.2 — blocks public signup, not the cutover)
 4. Rotate staging's encryption key. (3.1)
-5. Backup → create db → migrate → **verify** → three variables together → smoke
+5. `pg_create_db.py` → `cutover_migrate.ps1` → three variables together → smoke
    pinned to postgres. (Part 2)
 
 Steps 2–4 are independent of 5 and of each other. Step 5 is the only one with a
