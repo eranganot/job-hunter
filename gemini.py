@@ -264,8 +264,15 @@ def history(days: int = 14) -> list:
     try:
         return list(_history_source(int(days)) or [])
     except Exception as exc:
-        # Never take health down for a statistic.
-        return [{"error": str(exc)[:120]}]
+        # Never take health down for a statistic - but never swallow it either.
+        # On 2026-09-20 one smoke run got {"error": "list index out of range"}
+        # back from here and every later read was clean; the exception had
+        # been reduced to its message, so there was no traceback anywhere to
+        # say which line raised it. The traceback now goes to the log.
+        import traceback
+        print("[gemini] history read failed (non-fatal): %r\n%s"
+              % (exc, traceback.format_exc()))
+        return [{"error": ("%s: %s" % (type(exc).__name__, exc))[:160]}]
 
 
 def _alert_locked(scope: str, message: str):

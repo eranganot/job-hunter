@@ -50,6 +50,9 @@ def test_history_returns_real_ledger_rows_through_the_app_wiring(stack):
     assert by_day["2026-09-18"]["calls"] == 5
     assert by_day["2026-09-18"]["tokens"] == 180
     assert by_day["2026-09-18"]["users"] == 2, "distinct users, not rows"
+    # The per-user ceiling is set from the busiest ACCOUNT, not the average:
+    # user 1 made 3 of the day's 5 calls.
+    assert by_day["2026-09-18"]["max_user_calls"] == 3
     assert by_day["2026-09-19"]["calls"] == 1
     days = [r["day"] for r in rows]
     assert days == sorted(days, reverse=True), "newest first"
@@ -73,6 +76,9 @@ def test_a_broken_ledger_does_not_take_health_down(monkeypatch):
     monkeypatch.setattr(gemini, "_history_source", boom)
     out = gemini.history(14)
     assert len(out) == 1 and "relation llm_usage" in out[0]["error"]
+    # The type goes with the message: "list index out of range" alone, with
+    # no traceback anywhere, is what left a 2026-09-20 smoke failure unexplained.
+    assert out[0]["error"].startswith("RuntimeError")
 
 
 def test_the_days_argument_bounds_the_scan(stack):

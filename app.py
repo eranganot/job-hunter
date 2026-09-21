@@ -500,8 +500,16 @@ def _llm_usage_history(days: int = 14):
             "SELECT day, COALESCE(SUM(calls),0), COALESCE(SUM(total_tokens),0), "
             "COUNT(DISTINCT user_id) FROM llm_usage GROUP BY day "
             "ORDER BY day DESC LIMIT ?", (int(days),)).fetchall()
+        # The busiest single account per day. JH_LLM_USER_CALLS has to be set
+        # from THIS, not from the global total divided by users - one heavy
+        # account on an onboarding day is exactly what that average hides.
+        peak = {r[0]: int(r[1] or 0) for r in conn.execute(
+            "SELECT day, MAX(c) FROM (SELECT day, user_id, SUM(calls) AS c "
+            "FROM llm_usage WHERE user_id IS NOT NULL GROUP BY day, user_id) per_user "
+            "GROUP BY day").fetchall()}
         return [{"day": r[0], "calls": int(r[1] or 0),
-                 "tokens": int(r[2] or 0), "users": int(r[3] or 0)}
+                 "tokens": int(r[2] or 0), "users": int(r[3] or 0),
+                 "max_user_calls": peak.get(r[0], 0)}
                 for r in rows]
     finally:
         conn.close()

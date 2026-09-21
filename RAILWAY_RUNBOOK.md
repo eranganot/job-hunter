@@ -35,7 +35,7 @@ The history does not exist on the box until this build is on it. So:
 
 ```powershell
 $h = Invoke-RestMethod https://web-production-192b7.up.railway.app/api/health
-$h.llm_history | Format-Table day, calls, tokens, users
+$h.llm_history | Format-Table day, calls, tokens, users, max_user_calls
 $peak = ($h.llm_history | Measure-Object calls -Maximum).Maximum
 "peak day: $peak calls"
 ```
@@ -53,7 +53,7 @@ Railway → project **Job-Hunter** → environment **production** → service **
 | Variable | Set it to | Why that number |
 |---|---|---|
 | `JH_LLM_GLOBAL_CALLS` | **10× the peak day**, rounded up to something memorable | Headroom for a bad day and for the users you are about to add, while still being a ceiling a runaway loop hits in minutes instead of never. 50,000 is not a ceiling at 9 users; it is a decoration. |
-| `JH_LLM_USER_CALLS` | **10× the busiest single user's day** | Bounds one account's blast radius. `llm_history` gives you `users` per day; if you want per-user detail, `/api/health`'s `llm.user` block reports the caller's own. |
+| `JH_LLM_USER_CALLS` | **10× the busiest single account's day** | Bounds one account's blast radius. Each `llm_history` row carries `max_user_calls` — the busiest account that day — and `smoke.ps1` prints it and fails if the ceiling is at or below a real observed day. |
 
 Leave `JH_LLM_ENFORCE=1`. Setting it to `0` counts and alerts without blocking —
 useful if you ever want a week of observation before a ceiling bites, but you
@@ -122,16 +122,22 @@ recognise (9).**
 ### Step 2.2 — Create the target database
 
 The production database must be a **different name** from staging's. Staging is
-`jobhunter_staging`; production is `jobhunter_prod`.
-
-Railway → **Postgres** service → **Data** tab, or:
+`jobhunter_staging`; production is `jobhunter_prod`. From the repo root, in
+PowerShell:
 
 ```powershell
-railway connect Postgres
-# then, at the psql prompt:
-CREATE DATABASE jobhunter_prod;
-\q
+railway run --service Postgres python scripts/pg_create_db.py jobhunter_prod
 ```
+
+Expect `[OK] created database jobhunter_prod` and a list of the databases on the
+server that includes it. Running it twice is harmless — the second run says the
+database already exists and leaves it alone. It only ever creates.
+
+_(This step first said `railway connect Postgres` and then to type SQL "at the
+psql prompt". `railway connect` needs the psql client installed locally; without
+it the command exits straight back to PowerShell, which then tries to run the SQL
+as a PowerShell command. `pg_create_db.py` uses psycopg, which the migration
+script in 2.3 already needs, so nothing new has to be installed.)_
 
 ### Step 2.3 — Migrate the data
 

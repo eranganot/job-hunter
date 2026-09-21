@@ -469,13 +469,23 @@ Check "health carries the 14-day spend record" {
     $peak = ($h | Measure-Object calls -Maximum).Maximum
     $peakDay = ($h | Sort-Object calls -Descending | Select-Object -First 1).day
     foreach ($d in ($h | Select-Object -First 5)) {
-        Write-Host ("      " + $d.day + "  " + $d.calls + " calls, " + $d.tokens + " tokens, " + $d.users + " user(s)") -ForegroundColor DarkGray
+        Write-Host ("      " + $d.day + "  " + $d.calls + " calls, " + $d.tokens + " tokens, " + $d.users + " user(s), busiest user " + $d.max_user_calls) -ForegroundColor DarkGray
     }
     Write-Host ("      peak:   " + $peak + " calls on " + $peakDay) -ForegroundColor DarkGray
     $ceiling = [int]$script:health.llm.limits.global_calls
     if ($peak -gt 0 -and $ceiling -gt 0) {
         $ratio = [math]::Round($ceiling / $peak)
         Write-Host ("      the global ceiling is " + $ratio + "x the busiest day - a useful ceiling is nearer 10x") -ForegroundColor DarkGray
+    }
+    $userPeak = ($h | Measure-Object max_user_calls -Maximum).Maximum
+    $userCeiling = [int]$script:health.llm.limits.user_calls
+    if ($userPeak -gt 0 -and $userCeiling -gt 0) {
+        Write-Host ("      busiest single account: " + $userPeak + " calls/day against a per-user ceiling of " + $userCeiling) -ForegroundColor DarkGray
+        # A per-user ceiling BELOW an observed real day would already have
+        # degraded someone's scoring to the keyword fallback on that day.
+        if ($userPeak -ge $userCeiling) {
+            return ("JH_LLM_USER_CALLS=" + $userCeiling + " is at or below a real observed day (" + $userPeak + ") - a normal user would hit it")
+        }
     }
     $true
 }
