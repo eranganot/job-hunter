@@ -107,8 +107,11 @@ def main():
 
     try:
         conn = database.get_db()
-        applied = migrations.run(conn)
-        conn.close()
+        try:
+            applied = migrations.run(conn)
+            conn.close()
+        finally:
+            conn.close()
     except Exception as exc:
         import dbdriver
         log("")

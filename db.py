@@ -200,10 +200,13 @@ def _sqlite_connect() -> sqlite3.Connection:
 def init_db():
     """Create/upgrade the schema. Delegates to migrations.run() - see migrations.py."""
     conn = get_db()
-    migrations.run(conn)
-    count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    conn.close()
-    print(f"[db] Schema ready \u2014 {count} user(s) registered.")
+    try:
+        migrations.run(conn)
+        count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        conn.close()
+        print(f"[db] Schema ready \u2014 {count} user(s) registered.")
+    finally:
+        conn.close()
 
 
 # ── Activity log ──────────────────────────────────────────────────────────────
@@ -244,12 +247,15 @@ def log_activity(user_id: int, event_type: str, details: str = ""):
 def get_activity(user_id: int, limit: int = 100):
     """Return recent activity entries for a user, newest first."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM activity_log WHERE user_id=? ORDER BY created_date DESC LIMIT ?",
-        (user_id, limit)
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        rows = conn.execute(
+            "SELECT * FROM activity_log WHERE user_id=? ORDER BY created_date DESC LIMIT ?",
+            (user_id, limit)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 # ── Job helpers ───────────────────────────────────────────────────────────────
@@ -437,11 +443,14 @@ def cleanup_passed_jobs(conn: sqlite3.Connection, user_id: int = None, days: int
 def write_approved_jobs(base_dir: str):
     """Write approved_jobs.json so the apply scheduled task can pick them up."""
     conn = get_db()
-    rows = conn.execute("SELECT * FROM jobs WHERE status='approved'").fetchall()
-    conn.close()
-    path = os.path.join(base_dir, "approved_jobs.json")
-    with open(path, "w") as f:
-        json.dump([dict(r) for r in rows], f, indent=2, default=str)
+    try:
+        rows = conn.execute("SELECT * FROM jobs WHERE status='approved'").fetchall()
+        conn.close()
+        path = os.path.join(base_dir, "approved_jobs.json")
+        with open(path, "w") as f:
+            json.dump([dict(r) for r in rows], f, indent=2, default=str)
+    finally:
+        conn.close()
 
 
 def import_pending_jobs(base_dir: str):
@@ -452,31 +461,34 @@ def import_pending_jobs(base_dir: str):
         with open(path) as f:
             jobs = json.load(f)
         conn = get_db()
-        inserted = 0
-        for j in jobs:
-            user_id = j.get("user_id", 1)  # default to first user if not specified
-            conn.execute("""
+        try:
+            inserted = 0
+            for j in jobs:
+                user_id = j.get("user_id", 1)  # default to first user if not specified
+                conn.execute("""
                 INSERT OR IGNORE INTO jobs
                   (user_id,title,company,location,url,description,
                    why_relevant,company_info,source,found_date,status)
                 VALUES (?,?,?,?,?,?,?,?,?,?,'new')
             """, (
-                user_id, j.get("title",""), j.get("company",""),
-                j.get("location","Tel Aviv"), j.get("url",""),
-                j.get("description",""), j.get("why_relevant",""),
-                j.get("company_info",""), j.get("source",""),
-                j.get("found_date", datetime.now().isoformat())
-            ))
-            if conn.execute("SELECT changes()").fetchone()[0] > 0:
-                inserted += 1
-        conn.commit()
-        conn.close()
-        os.remove(path)
-        if inserted > 0:
-            for uid in set(j.get("user_id", 1) for j in jobs):
-                cnt = sum(1 for j in jobs if j.get("user_id", 1) == uid)
-                log_activity(uid, "jobs_searched", f"Found {cnt} new job(s)")
-        print(f"[import] {inserted} new jobs imported from pending_jobs.json")
+                    user_id, j.get("title",""), j.get("company",""),
+                    j.get("location","Tel Aviv"), j.get("url",""),
+                    j.get("description",""), j.get("why_relevant",""),
+                    j.get("company_info",""), j.get("source",""),
+                    j.get("found_date", datetime.now().isoformat())
+                ))
+                if conn.execute("SELECT changes()").fetchone()[0] > 0:
+                    inserted += 1
+            conn.commit()
+            conn.close()
+            os.remove(path)
+            if inserted > 0:
+                for uid in set(j.get("user_id", 1) for j in jobs):
+                    cnt = sum(1 for j in jobs if j.get("user_id", 1) == uid)
+                    log_activity(uid, "jobs_searched", f"Found {cnt} new job(s)")
+            print(f"[import] {inserted} new jobs imported from pending_jobs.json")
+        finally:
+            conn.close()
     except Exception as e:
         print(f"[import] Error: {e}")
 
@@ -489,16 +501,19 @@ def import_applied_updates(base_dir: str):
         with open(path) as f:
             updates = json.load(f)
         conn = get_db()
-        for u in updates:
-            conn.execute(
-                "UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
-                (u.get("status","applied"), u.get("applied_date"),
-                 u.get("notes",""), u["id"])
-            )
-        conn.commit()
-        conn.close()
-        os.remove(path)
-        print(f"[import] {len(updates)} job statuses updated")
+        try:
+            for u in updates:
+                conn.execute(
+                    "UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
+                    (u.get("status","applied"), u.get("applied_date"),
+                     u.get("notes",""), u["id"])
+                )
+            conn.commit()
+            conn.close()
+            os.remove(path)
+            print(f"[import] {len(updates)} job statuses updated")
+        finally:
+            conn.close()
     except Exception as e:
         print(f"[import] Error applied updates: {e}")
 
@@ -506,7 +521,8 @@ def import_applied_updates(base_dir: str):
 def write_users_config(base_dir: str):
     """Write users_config.json so scheduled tasks can read per-user preferences."""
     conn = get_db()
-    rows = conn.execute("""
+    try:
+        rows = conn.execute("""
         SELECT u.id, u.name, u.email,
                p.job_titles, p.keywords, p.locations,
                p.salary_min, p.linkedin_url, p.phone,
@@ -518,19 +534,21 @@ def write_users_config(base_dir: str):
         JOIN user_profiles p ON p.user_id = u.id
         WHERE u.is_active=1 AND p.onboarding_complete=1
     """).fetchall()
-    conn.close()
-    users = []
-    for r in rows:
-        d = dict(r)
-        for key in ("job_titles", "keywords", "locations"):
-            try:
-                d[key] = json.loads(d[key] or "[]")
-            except Exception:
-                d[key] = []
-        users.append(d)
-    path = os.path.join(base_dir, "users_config.json")
-    with open(path, "w") as f:
-        json.dump(users, f, indent=2, default=str)
+        conn.close()
+        users = []
+        for r in rows:
+            d = dict(r)
+            for key in ("job_titles", "keywords", "locations"):
+                try:
+                    d[key] = json.loads(d[key] or "[]")
+                except Exception:
+                    d[key] = []
+            users.append(d)
+        path = os.path.join(base_dir, "users_config.json")
+        with open(path, "w") as f:
+            json.dump(users, f, indent=2, default=str)
+    finally:
+        conn.close()
 
 # ── Pass-reason feedback loop (improvement #2) ──────────────────────────────
 

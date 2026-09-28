@@ -105,88 +105,91 @@ def main():
 
     conn = database.get_db()
     try:
-        rows = conn.execute("SELECT user_id, %s FROM user_profiles ORDER BY user_id" % cols).fetchall()
-    except Exception as exc:
-        conn.close()
-        sys.exit("[FAIL] could not read user_profiles: %s" % exc)
+        try:
+            rows = conn.execute("SELECT user_id, %s FROM user_profiles ORDER BY user_id" % cols).fetchall()
+        except Exception as exc:
+            conn.close()
+            sys.exit("[FAIL] could not read user_profiles: %s" % exc)
 
-    # Positive proof where it is available: if anything is already encrypted,
-    # this key must be able to read it. Presence of a key is not evidence that
-    # it is the right key.
-    for row in rows:
-        for field in crypto.SECRET_FIELDS:
-            if crypto.is_encrypted(row[field]):
-                try:
-                    crypto.decrypt(row[field])
-                except crypto.DecryptionError:
-                    conn.close()
-                    sys.exit(
-                        "[FAIL] this key cannot decrypt the credentials already stored "
-                        "(user %s, %s).\n"
-                        "       It is NOT the key the app used. Nothing was written.\n"
-                        "       Fingerprint here: %s - compare with /api/health."
-                        % (row["user_id"], field, crypto.fingerprint()))
-                log("[OK] key verified against an existing encrypted value")
-                break
+        # Positive proof where it is available: if anything is already encrypted,
+        # this key must be able to read it. Presence of a key is not evidence that
+        # it is the right key.
+        for row in rows:
+            for field in crypto.SECRET_FIELDS:
+                if crypto.is_encrypted(row[field]):
+                    try:
+                        crypto.decrypt(row[field])
+                    except crypto.DecryptionError:
+                        conn.close()
+                        sys.exit(
+                            "[FAIL] this key cannot decrypt the credentials already stored "
+                            "(user %s, %s).\n"
+                            "       It is NOT the key the app used. Nothing was written.\n"
+                            "       Fingerprint here: %s - compare with /api/health."
+                            % (row["user_id"], field, crypto.fingerprint()))
+                    log("[OK] key verified against an existing encrypted value")
+                    break
+            else:
+                continue
+            break
         else:
-            continue
-        break
-    else:
-        log("[note] nothing is encrypted yet, so the key could not be verified against")
-        log("       stored data - check the fingerprint against /api/health before the real run.")
+            log("[note] nothing is encrypted yet, so the key could not be verified against")
+            log("       stored data - check the fingerprint against /api/health before the real run.")
 
-    changed = skipped = 0
-    failures = []
-    for row in rows:
-        uid = row["user_id"]
-        updates = {}
-        for field in crypto.SECRET_FIELDS:
-            value = row[field]
-            if not value:
+        changed = skipped = 0
+        failures = []
+        for row in rows:
+            uid = row["user_id"]
+            updates = {}
+            for field in crypto.SECRET_FIELDS:
+                value = row[field]
+                if not value:
+                    continue
+                if crypto.is_encrypted(value):
+                    skipped += 1
+                    continue
+                updates[field] = value
+
+            if not updates:
                 continue
-            if crypto.is_encrypted(value):
-                skipped += 1
+
+            names = ", ".join(updates)
+            if args.dry_run:
+                log("  would encrypt  user %-3s %s" % (uid, names))
+                changed += len(updates)
                 continue
-            updates[field] = value
 
-        if not updates:
-            continue
+            sets = ", ".join("%s=?" % f for f in updates)
+            conn.execute("UPDATE user_profiles SET %s WHERE user_id=?" % sets,
+                         [crypto.encrypt(v) for v in updates.values()] + [uid])
+            conn.commit()
 
-        names = ", ".join(updates)
-        if args.dry_run:
-            log("  would encrypt  user %-3s %s" % (uid, names))
+            # Read it back and prove it decrypts to what was there before. Anything
+            # less is checking our own bookkeeping rather than the data.
+            check = conn.execute("SELECT %s FROM user_profiles WHERE user_id=?" % cols, (uid,)).fetchone()
+            bad = [f for f, original in updates.items()
+                   if not crypto.is_encrypted(check[f]) or crypto.decrypt(check[f]) != original]
+            if bad:
+                failures.append("user %s: %s did not round-trip" % (uid, ", ".join(bad)))
+                log("  FAIL user %-3s %s" % (uid, ", ".join(bad)))
+                continue
+
             changed += len(updates)
-            continue
+            log("  ok   user %-3s encrypted %s" % (uid, names))
 
-        sets = ", ".join("%s=?" % f for f in updates)
-        conn.execute("UPDATE user_profiles SET %s WHERE user_id=?" % sets,
-                     [crypto.encrypt(v) for v in updates.values()] + [uid])
-        conn.commit()
-
-        # Read it back and prove it decrypts to what was there before. Anything
-        # less is checking our own bookkeeping rather than the data.
-        check = conn.execute("SELECT %s FROM user_profiles WHERE user_id=?" % cols, (uid,)).fetchone()
-        bad = [f for f, original in updates.items()
-               if not crypto.is_encrypted(check[f]) or crypto.decrypt(check[f]) != original]
-        if bad:
-            failures.append("user %s: %s did not round-trip" % (uid, ", ".join(bad)))
-            log("  FAIL user %-3s %s" % (uid, ", ".join(bad)))
-            continue
-
-        changed += len(updates)
-        log("  ok   user %-3s encrypted %s" % (uid, names))
-
-    conn.close()
-    log()
-    if failures:
-        log("[FAIL] not every credential could be proved to round-trip:")
-        for f in failures:
-            log("   - " + f)
-        sys.exit(1)
-    if args.dry_run:
-        log("[DONE] dry run - %d value(s) would be encrypted, %d already were." % (changed, skipped))
-        return
-    log("[DONE] %d value(s) encrypted and verified; %d already encrypted." % (changed, skipped))
+        conn.close()
+        log()
+        if failures:
+            log("[FAIL] not every credential could be proved to round-trip:")
+            for f in failures:
+                log("   - " + f)
+            sys.exit(1)
+        if args.dry_run:
+            log("[DONE] dry run - %d value(s) would be encrypted, %d already were." % (changed, skipped))
+            return
+        log("[DONE] %d value(s) encrypted and verified; %d already encrypted." % (changed, skipped))
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

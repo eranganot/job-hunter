@@ -191,6 +191,26 @@ _SCRIPT = textwrap.dedent(r'''
             t = time.time()
             s = c.post_json("/api/jobs/%d/reject" % j, {"reason": "Wrong location"})[0]
             out["rejects"].append([s, round(time.time() - t, 2)])
+        # The route closes its own connection in a finally (2026-09-28), so
+        # the safety net should have had nothing to do.
+        out["reclaimed_after_rejects"] = dbdriver.reclaimed_stats()["count"]
+        # Now a route that DOES leak - the next one somebody writes without a
+        # try/finally. Held in a list so garbage collection cannot return it
+        # and hide whether the end-of-request release did.
+        _keep = []
+        _orig = A.Handler._do_GET_inner
+        def _leaky(self):
+            if self.path == "/__leak":
+                _keep.append(database.get_db())
+                raise RuntimeError("simulated route that never closes")
+            return _orig(self)
+        A.Handler._do_GET_inner = _leaky
+        out["leaky"] = []
+        for _ in range(6):
+            t = time.time()
+            s = c.get("/__leak")[0]
+            out["leaky"].append([s, round(time.time() - t, 2)])
+        out["reclaimed_after_leaky"] = dbdriver.reclaimed_stats()["count"]
         t = time.time()
         s, _, body = c.get("/api/health")
         out["health"] = [s, round(time.time() - t, 2), json.loads(body)]
@@ -248,9 +268,13 @@ def test_failing_route_cannot_exhaust_the_pool():
     out, log = _run("leak", "jh_leak_%s" % uuid.uuid4().hex[:6])
     # Each reject fails (the simulated error) - but fast, every time.
     assert all(s == 500 and secs < 1.5 for s, secs in out["rejects"]), out["rejects"]
+    # ...and the route returned its own connection: nothing for the net to catch.
+    assert out["reclaimed_after_rejects"] == 0, out
+    # A route that never closes is still contained by the end-of-request release.
+    assert all(s == 500 and secs < 1.5 for s, secs in out["leaky"]), out["leaky"]
+    assert out["reclaimed_after_leaky"] >= len(out["leaky"]), out
     status, secs, body = out["health"]
     assert status == 200 and secs < 1.5, out["health"]
-    assert body["db_leaks_reclaimed"]["count"] >= len(out["rejects"]), body
     assert "reclaimed" in log and "WARNING" in log   # and it said so
 
 

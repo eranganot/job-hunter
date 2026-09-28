@@ -314,50 +314,53 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
     """Look up user notification settings and deliver accordingly."""
     message = repair_mojibake(message)
     conn = database.get_db()
-    p = conn.execute(
-        "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
-    ).fetchone()
-    conn.close()
-    if not p:
-        print(f"[notify] No profile found for user {user_id}")
-        return
-    # Web push is the primary channel: it fires on EVERY notification, before
-    # (and independent of) the email/Telegram/WhatsApp channels, which remain as
-    # an optional fallback. So a user with no other channel still gets pushed.
     try:
-        send_web_push_to_user(user_id, message, url_suffix)
-    except Exception as _pe:
-        print(f"[push] deliver error: {_pe}")
-    # Read straight from user_profiles, so it needs decrypting here too.
-    p = crypto.decrypt_row(p)
-    channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",")]
-    if not channels or channels == ["none"]:
-        print(f"[notify] No notification channels configured for user {user_id}")
-        return
-    dashboard_url = f"{MOBILE_URL}{url_suffix}"
-    msg_with_link = message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
-    for channel in channels:
+        p = conn.execute(
+            "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        conn.close()
+        if not p:
+            print(f"[notify] No profile found for user {user_id}")
+            return
+        # Web push is the primary channel: it fires on EVERY notification, before
+        # (and independent of) the email/Telegram/WhatsApp channels, which remain as
+        # an optional fallback. So a user with no other channel still gets pushed.
         try:
-            if channel == "telegram" and p["telegram_token"] and p["telegram_chat_id"]:
-                send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
-                _log_notification(user_id, "telegram", "Sent OK")
-                print(f"[notify] Telegram sent to user {user_id}")
-            elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
-                send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
-                              p["whatsapp_number"], msg_with_link)
-                _log_notification(user_id, "whatsapp", "Sent OK")
-                print(f"[notify] WhatsApp sent to user {user_id}")
-            elif channel == "email" and p["email_address"]:
-                send_email(
-                    to_addr=p["email_address"],
-                    subject="Job Hunter Notification",
-                    body=msg_with_link,
-                )
-                _log_notification(user_id, "email", "Sent OK")
-                print(f"[notify] Email sent to user {user_id}")
-        except Exception as _notif_err:
-            _log_notification(user_id, channel, "FAILED", str(_notif_err))
-            print(f"[notify] Error on {channel}: {_notif_err}")
+            send_web_push_to_user(user_id, message, url_suffix)
+        except Exception as _pe:
+            print(f"[push] deliver error: {_pe}")
+        # Read straight from user_profiles, so it needs decrypting here too.
+        p = crypto.decrypt_row(p)
+        channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",")]
+        if not channels or channels == ["none"]:
+            print(f"[notify] No notification channels configured for user {user_id}")
+            return
+        dashboard_url = f"{MOBILE_URL}{url_suffix}"
+        msg_with_link = message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
+        for channel in channels:
+            try:
+                if channel == "telegram" and p["telegram_token"] and p["telegram_chat_id"]:
+                    send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
+                    _log_notification(user_id, "telegram", "Sent OK")
+                    print(f"[notify] Telegram sent to user {user_id}")
+                elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
+                    send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
+                                  p["whatsapp_number"], msg_with_link)
+                    _log_notification(user_id, "whatsapp", "Sent OK")
+                    print(f"[notify] WhatsApp sent to user {user_id}")
+                elif channel == "email" and p["email_address"]:
+                    send_email(
+                        to_addr=p["email_address"],
+                        subject="Job Hunter Notification",
+                        body=msg_with_link,
+                    )
+                    _log_notification(user_id, "email", "Sent OK")
+                    print(f"[notify] Email sent to user {user_id}")
+            except Exception as _notif_err:
+                _log_notification(user_id, channel, "FAILED", str(_notif_err))
+                print(f"[notify] Error on {channel}: {_notif_err}")
+    finally:
+        conn.close()
 
 
 def _push_payload_url():
@@ -391,29 +394,35 @@ def send_web_push_to_user(user_id, message, url_suffix=""):
         print(f"[push] bad VAPID private key: {_pe}")
         return
     conn = database.get_db()
-    rows = conn.execute(
-        "SELECT id, subscription FROM push_subscriptions WHERE user_id=?", (user_id,)
-    ).fetchall()
-    conn.close()
-    if not rows:
-        return
-    body = (message or "").strip().split("\n")[0][:160]
-    payload = json.dumps({"title": "Job Hunter", "body": body, "url": _push_link(url_suffix)})
-    for r in rows:
-        try:
-            sub = json.loads(r["subscription"])
-            webpush(subscription_info=sub, data=payload,
-                    vapid_private_key=key_path, vapid_claims={"sub": VAPID_SUBJECT})
-        except Exception as _se:
-            emsg = str(_se)
-            if "410" in emsg or "404" in emsg:
-                try:
-                    c2 = database.get_db()
-                    c2.execute("DELETE FROM push_subscriptions WHERE id=?", (r["id"],))
-                    c2.commit(); c2.close()
-                except Exception:
-                    pass
-            print(f"[push] send failed: {emsg}")
+    try:
+        rows = conn.execute(
+            "SELECT id, subscription FROM push_subscriptions WHERE user_id=?", (user_id,)
+        ).fetchall()
+        conn.close()
+        if not rows:
+            return
+        body = (message or "").strip().split("\n")[0][:160]
+        payload = json.dumps({"title": "Job Hunter", "body": body, "url": _push_link(url_suffix)})
+        for r in rows:
+            try:
+                sub = json.loads(r["subscription"])
+                webpush(subscription_info=sub, data=payload,
+                        vapid_private_key=key_path, vapid_claims={"sub": VAPID_SUBJECT})
+            except Exception as _se:
+                emsg = str(_se)
+                if "410" in emsg or "404" in emsg:
+                    try:
+                        c2 = database.get_db()
+                        try:
+                            c2.execute("DELETE FROM push_subscriptions WHERE id=?", (r["id"],))
+                            c2.commit(); c2.close()
+                        finally:
+                            c2.close()
+                    except Exception:
+                        pass
+                print(f"[push] send failed: {emsg}")
+    finally:
+        conn.close()
 
 
 def notify_admin_new_user(new_user_email: str, new_user_name: str):
@@ -421,21 +430,24 @@ def notify_admin_new_user(new_user_email: str, new_user_name: str):
     if not ADMIN_EMAIL:
         return
     conn = database.get_db()
-    admin_row = conn.execute(
-        "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
-    ).fetchone()
-    if not admin_row:
-        conn.close()
-        print(f"[admin-notify] No admin user row for {ADMIN_EMAIL}")
-        return
-    admin_id = admin_row["id"]
-    conn.close()
-    display = new_user_name or new_user_email
-    message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter."
     try:
-        deliver_notification(admin_id, message, url_suffix=home_url())
-    except Exception as e:
-        print(f"[admin-notify] failed (non-fatal): {e}")
+        admin_row = conn.execute(
+            "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
+        ).fetchone()
+        if not admin_row:
+            conn.close()
+            print(f"[admin-notify] No admin user row for {ADMIN_EMAIL}")
+            return
+        admin_id = admin_row["id"]
+        conn.close()
+        display = new_user_name or new_user_email
+        message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter."
+        try:
+            deliver_notification(admin_id, message, url_suffix=home_url())
+        except Exception as e:
+            print(f"[admin-notify] failed (non-fatal): {e}")
+    finally:
+        conn.close()
 
 
 _LLM_PRUNED_ON = [""]
@@ -525,10 +537,13 @@ def _llm_breach_alert(message: str):
     admin_id = None
     try:
         conn = database.get_db()
-        row = conn.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
-                           (ADMIN_EMAIL or "",)).fetchone()
-        conn.close()
-        admin_id = row["id"] if row else None
+        try:
+            row = conn.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
+                               (ADMIN_EMAIL or "",)).fetchone()
+            conn.close()
+            admin_id = row["id"] if row else None
+        finally:
+            conn.close()
     except Exception as e:
         print(f"[llm-alert] admin lookup failed: {e}")
     try:
@@ -580,23 +595,26 @@ def bump_onboarding(user_id: int, key: str):
     """Set a single onboarding milestone to true (idempotent)."""
     try:
         conn = database.get_db()
-        row = conn.execute(
-            "SELECT onboarding_progress FROM user_profiles WHERE user_id=?", (user_id,)
-        ).fetchone()
-        if not row:
+        try:
+            row = conn.execute(
+                "SELECT onboarding_progress FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if not row:
+                conn.close()
+                return
+            progress = json.loads(row["onboarding_progress"] or "{}")
+            if progress.get(key):
+                conn.close()
+                return  # already set
+            progress[key] = True
+            conn.execute(
+                "UPDATE user_profiles SET onboarding_progress=? WHERE user_id=?",
+                (json.dumps(progress), user_id)
+            )
+            conn.commit()
             conn.close()
-            return
-        progress = json.loads(row["onboarding_progress"] or "{}")
-        if progress.get(key):
+        finally:
             conn.close()
-            return  # already set
-        progress[key] = True
-        conn.execute(
-            "UPDATE user_profiles SET onboarding_progress=? WHERE user_id=?",
-            (json.dumps(progress), user_id)
-        )
-        conn.commit()
-        conn.close()
     except Exception as e:
         print(f"[onboarding] bump {key} for user {user_id}: {e}")
 
@@ -636,13 +654,16 @@ def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
     """
     try:
         conn = database.get_db()
-        row = conn.execute(
-            "SELECT 1 FROM activity_log "
-            "WHERE user_id=? AND event_type=? AND created_date >= ? LIMIT 1",
-            (user_id, event_type, today)
-        ).fetchone()
-        conn.close()
-        return row is not None
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM activity_log "
+                "WHERE user_id=? AND event_type=? AND created_date >= ? LIMIT 1",
+                (user_id, event_type, today)
+            ).fetchone()
+            conn.close()
+            return row is not None
+        finally:
+            conn.close()
     except Exception:
         return False
 
@@ -660,60 +681,63 @@ def _check_scheduled_jobs() -> None:
         today = now.strftime('%Y-%m-%d')
         current_hour = now.hour
         conn = database.get_db()
-        rows = conn.execute(
-            "SELECT u.id, p.search_hour, p.apply_hour, "
-            "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only, p.auto_apply_enabled "
-            "FROM users u JOIN user_profiles p ON p.user_id = u.id "
-            "WHERE u.is_active = 1"
-        ).fetchall()
-        conn.close()
-        for row in rows:
-            uid, sh, ah = row[0], row[1], row[2]
-            freq = row[3] or 'daily'
-            s_dow = row[4]
-            a_dow = row[5]
-            wo = row[6]
-            auto_apply = row[7]
-            cur_dow = now.weekday()  # 0=Mon ... 6=Sun
-            # Skip weekends if weekdays_only
-            if wo and cur_dow >= 5:
-                continue
-            # Search: check hour + frequency/day
-            if current_hour == sh and not _scheduler_already_ran(uid, 'jobs_searched', today):
-                run_search = True
-                if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
-                    run_search = False
-                if run_search:
-                    # Enqueued, not spawned: the queue's one-run-per-user rule
-                    # is what stops a second instance double-firing the same
-                    # user's daily search, and an unfinished run survives a
-                    # redeploy instead of vanishing with the process.
-                    try:
-                        if jobqueue.enqueue(uid, "search"):
-                            print(f'[scheduler] Queued search for user {uid} at hour {sh}')
-                        else:
-                            print(f'[scheduler] Search already in flight for user {uid}; skipped')
-                    except jobqueue.DailyCapReached as _cap:
-                        print(f'[scheduler] {_cap} (user {uid}); skipped')
-            # Apply: check hour + frequency/day
-            if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
-                run_apply = True
-                if freq == 'weekly' and a_dow is not None and cur_dow != a_dow:
-                    run_apply = False
-                if not auto_apply:
-                    run_apply = False
-                if run_apply:
-                    # Routed through the queue too, so un-parking auto-apply is
-                    # a kill-switch change rather than a rewrite. The engine
-                    # itself stays off: apply_engine no-ops without
-                    # APPLY_ENGINE_ENABLED.
-                    try:
-                        if jobqueue.enqueue(uid, "apply"):
-                            print(f'[scheduler] Queued apply for user {uid} at hour {ah}')
-                        else:
-                            print(f'[scheduler] Apply already in flight for user {uid}; skipped')
-                    except jobqueue.DailyCapReached as _cap:
-                        print(f'[scheduler] {_cap} (user {uid}); skipped')
+        try:
+            rows = conn.execute(
+                "SELECT u.id, p.search_hour, p.apply_hour, "
+                "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only, p.auto_apply_enabled "
+                "FROM users u JOIN user_profiles p ON p.user_id = u.id "
+                "WHERE u.is_active = 1"
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                uid, sh, ah = row[0], row[1], row[2]
+                freq = row[3] or 'daily'
+                s_dow = row[4]
+                a_dow = row[5]
+                wo = row[6]
+                auto_apply = row[7]
+                cur_dow = now.weekday()  # 0=Mon ... 6=Sun
+                # Skip weekends if weekdays_only
+                if wo and cur_dow >= 5:
+                    continue
+                # Search: check hour + frequency/day
+                if current_hour == sh and not _scheduler_already_ran(uid, 'jobs_searched', today):
+                    run_search = True
+                    if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
+                        run_search = False
+                    if run_search:
+                        # Enqueued, not spawned: the queue's one-run-per-user rule
+                        # is what stops a second instance double-firing the same
+                        # user's daily search, and an unfinished run survives a
+                        # redeploy instead of vanishing with the process.
+                        try:
+                            if jobqueue.enqueue(uid, "search"):
+                                print(f'[scheduler] Queued search for user {uid} at hour {sh}')
+                            else:
+                                print(f'[scheduler] Search already in flight for user {uid}; skipped')
+                        except jobqueue.DailyCapReached as _cap:
+                            print(f'[scheduler] {_cap} (user {uid}); skipped')
+                # Apply: check hour + frequency/day
+                if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
+                    run_apply = True
+                    if freq == 'weekly' and a_dow is not None and cur_dow != a_dow:
+                        run_apply = False
+                    if not auto_apply:
+                        run_apply = False
+                    if run_apply:
+                        # Routed through the queue too, so un-parking auto-apply is
+                        # a kill-switch change rather than a rewrite. The engine
+                        # itself stays off: apply_engine no-ops without
+                        # APPLY_ENGINE_ENABLED.
+                        try:
+                            if jobqueue.enqueue(uid, "apply"):
+                                print(f'[scheduler] Queued apply for user {uid} at hour {ah}')
+                            else:
+                                print(f'[scheduler] Apply already in flight for user {uid}; skipped')
+                        except jobqueue.DailyCapReached as _cap:
+                            print(f'[scheduler] {_cap} (user {uid}); skipped')
+        finally:
+            conn.close()
     except Exception as e:
         print(f'[scheduler] Error: {e}')
 
@@ -766,1358 +790,1389 @@ def run_job_search(user_id: int):
     _search_running.add(user_id)
     try:
         conn = database.get_db()
-        profile = conn.execute(
-            "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
-        ).fetchone()
-        conn.close()
-        if not profile:
-            print(f"[run-search] No profile for user {user_id}")
-            return
-        import urllib.request as _ur
-        import urllib.error  as _ue
         try:
-            titles    = json.loads(profile["job_titles"] or "[]")
-            keywords  = json.loads(profile["keywords"]   or "[]")
-            locations = json.loads(profile["locations"]  or "[]")
-        except Exception:
-            titles, keywords, locations = [], [], ["Tel Aviv"]
-        if not locations: locations = ["Tel Aviv"]
-        # NOTE: no hardcoded title default. If the user has no target titles,
-        # leave the list empty so the title filter does not restrict to a single
-        # role (previously this forced everyone into "Senior Product Manager").
-        # Collection runs unfiltered and the CV-aware AI scoring decides fit.
-        if not titles:
-            print(f"[run-search] user {user_id} has no target titles — running without title filter (CV-driven scoring)")
-        today = datetime.now().strftime("%Y-%m-%d")
-
-        # ── Load all existing URLs to dedup against full history ─────────
-        conn = database.get_db()
-        # Dedup against EVERY job URL we've ever stored for this user (any status,
-        # any age). This guarantees a job the user already swiped — approved,
-        # passed/rejected, deferred, applied, or expired — is never re-added as
-        # "new" by a later search.
-        existing_urls = {r[0] for r in conn.execute(
-            "SELECT url FROM jobs WHERE user_id=? AND url!=''", (user_id,)
-        ).fetchall()}
-        conn.close()
-
-        def _search_jobs_with_claude_websearch(titles_: list, locs_: list, kws_: list) -> list:
-            """Search Israeli jobs via Greenhouse/Lever APIs, filter by preferences, score against CV."""
-            import threading as _thr, urllib.request as _ur2, json as _js2
-            all_raw = []
-            _lk = _thr.Lock()
-
-            # -- Israeli company slugs (Greenhouse) --
-            _GH_COMPANIES = {
-                'similarweb': 'SimilarWeb', 'taboola': 'Taboola', 'payoneer': 'Payoneer',
-                'forter': 'Forter', 'riskified': 'Riskified', 'appsflyer': 'AppsFlyer',
-                'fireblocks': 'Fireblocks', 'cybereason': 'Cybereason', 'jfrog': 'JFrog',
-                'wizinc': 'Wiz', 'honeybook': 'HoneyBook', 'optimove': 'Optimove',
-                'transmitsecurity': 'Transmit Security', 'via': 'Via', 'nice': 'NICE',
-                'yotpo': 'Yotpo', 'bringg': 'Bringg', 'bigid': 'BigID',
-                'axonius': 'Axonius', 'lightricks': 'Lightricks', 'catonetworks': 'Cato Networks',
-                'snyk': 'Snyk', 'sentinelone': 'SentinelOne',
-                'fiverr': 'Fiverr', 'tipalti': 'Tipalti',
-                'checkmarx': 'Checkmarx', 'rapyd': 'Rapyd', 'lemonade': 'Lemonade',
-                'papayaglobal': 'Papaya Global', 'deel': 'Deel', 'drata': 'Drata',
-                'hibob': 'HiBob', 'ironclad': 'Ironclad', 'nextinsurance': 'Next Insurance',
-                'playtika': 'Playtika', 'gett': 'Gett', 'outbrain': 'Outbrain',
-                'guardicore': 'Guardicore', 'earnix': 'Earnix', 'pentera': 'Pentera',
-                'drivenets': 'DriveNets', 'orcasecurity': 'Orca Security',
-                'aquasecurity': 'Aqua Security', 'seekingalpha': 'Seeking Alpha',
-                'fundbox': 'Fundbox', 'ironsource': 'ironSource',
-                'torq': 'Torq', 'augury': 'Augury',
-                # Global tech companies with Israeli offices (Greenhouse)
-                'zscaler': 'Zscaler', 'sisense': 'Sisense',
-                'gongio': 'Gong', 'armissecurity': 'Armis',
-                'safebreach': 'SafeBreach', 'datarails': 'DataRails',
-                'couchbaseinc': 'Couchbase', 'dremio': 'Dremio',
-                'tenableinc': 'Tenable', 'solarwinds': 'SolarWinds',
-                'recordedfuture': 'Recorded Future', 'rubrik': 'Rubrik',
-                'elastic': 'Elastic', 'mongodb': 'MongoDB',
-                'datadog': 'Datadog', 'cloudflare': 'Cloudflare',
-                'commvault': 'Commvault',
-                # ── Extended Israeli tech list (previously missing) ──────────────
-                'walkme': 'WalkMe', 'monday': 'monday.com', 'wix': 'Wix',
-                'imperva': 'Imperva', 'perion': 'Perion', 'amdocs': 'Amdocs',
-                'allot': 'Allot', 'cellebrite': 'Cellebrite', 'varonis': 'Varonis',
-                'cyvera': 'Cyvera', 'cyberark': 'CyberArk', 'checkpoint': 'Check Point',
-                'radware': 'Radware', 'gilat': 'Gilat', 'elbit': 'Elbit Systems',
-                'verint': 'Verint', 'atera': 'Atera', 'salto': 'Salto',
-                'gloat': 'Gloat', 'dynamic-yield': 'Dynamic Yield',
-                'overwolf': 'Overwolf', 'buildots': 'Buildots',
-                'elementor': 'Elementor', 'syte': 'Syte', 'trigo': 'Trigo',
-                'apolicy': 'Apolicy', 'cyolo': 'Cyolo', 'sealights': 'SeaLights',
-                'regotechnology': 'Rego', 'memphis': 'Memphis.dev',
-                'finout': 'Finout', 'cloudinary': 'Cloudinary',
-                'zerto': 'Zerto', 'protai': 'Protai', 'otterly': 'Otterly',
-                'glassbox': 'Glassbox', 'lusha': 'Lusha', 'demostack': 'Demostack',
-                'reef': 'Reef', 'wilco': 'Wilco', 'guesty': 'Guesty',
-                'healthy-io': 'Healthy.io', 'panorays': 'Panorays',
-                'silverfort': 'Silverfort', 'hunters': 'Hunters',
-                'sygnia': 'Sygnia', 'cymulate': 'Cymulate',
-                'morphisec': 'Morphisec', 'veriti': 'Veriti',
-                'also': 'ALSO', 'granulate': 'Granulate',
-                'coralogix': 'Coralogix', 'logz': 'Logz.io',
-                'anodot': 'Anodot', 'spot': 'Spot by NetApp',
-                'env0': 'env0', 'cyclops': 'Cyclops',
-                'orca': 'Orca Security', 'laminar': 'Laminar',
-                'normalyze': 'Normalyze', 'dig-security': 'Dig Security',
-            }
-
-            # ── Role-aware TechMap category selection ─────────────────────────
-            # Pick which TechMap job-category CSV(s) to pull based on the user's
-            # target titles + keywords. Previously hardcoded to 'product.csv',
-            # which forced product roles on every user regardless of their CV.
-            _TM_ALL_CATEGORIES = {
-                'admin', 'business', 'data-science', 'design', 'devops', 'finance',
-                'frontend', 'hardware', 'hr', 'legal', 'marketing',
-                'procurement-operations', 'product', 'project-management', 'qa',
-                'sales', 'security', 'software', 'support',
-            }
-
-            def _pick_techmap_categories(titles_list, keywords_list):
-                _txt = ' '.join((titles_list or []) + (keywords_list or [])).lower()
-                _cats: set = set()
-                _rules = [
-                    (('product owner', 'product manager', 'product lead', 'head of product', 'cpo', 'product'), ['product', 'project-management']),
-                    (('project manager', 'program manager', 'scrum', 'delivery manager', 'pmo'), ['project-management']),
-                    (('frontend', 'front-end', 'front end', 'react', 'angular', 'vue'), ['frontend']),
-                    (('devops', 'sre', 'platform engineer', 'infrastructure', 'site reliability'), ['devops']),
-                    (('software', 'developer', 'engineer', 'backend', 'full stack', 'fullstack', 'sde', 'programmer'), ['software', 'frontend', 'devops']),
-                    (('data scientist', 'data analyst', 'machine learning', 'analytics', 'data engineer', 'ml engineer'), ['data-science']),
-                    (('designer', 'ux', 'ui designer', 'product design'), ['design']),
-                    (('marketing', 'growth', 'seo', 'content', 'brand', 'demand gen'), ['marketing']),
-                    (('sales', 'account executive', 'sdr', 'bdr', 'account manager', 'business development'), ['sales', 'business']),
-                    (('security', 'infosec', 'soc analyst', 'ciso', 'appsec'), ['security']),
-                    (('finance', 'accountant', 'controller', 'fp&a', 'cfo'), ['finance']),
-                    (('recruiter', 'people', 'talent', 'human resources'), ['hr']),
-                    (('legal', 'counsel', 'compliance'), ['legal']),
-                    (('qa', 'quality assurance', 'test engineer', 'automation engineer'), ['qa']),
-                    (('support', 'customer success', 'csm', 'customer experience'), ['support']),
-                    (('operations', 'procurement', 'supply chain'), ['procurement-operations', 'business']),
-                    (('hardware', 'firmware', 'electrical', 'embedded'), ['hardware']),
-                    (('business', 'strategy', 'bizdev', 'general manager', 'chief of staff'), ['business']),
-                ]
-                for _kw_tuple, _cat_list in _rules:
-                    if any(_k in _txt for _k in _kw_tuple):
-                        _cats.update(_cat_list)
-                _cats &= _TM_ALL_CATEGORIES
-                if not _cats:
-                    # No recognizable role family — pull a broad default set so the
-                    # candidate pool isn't empty (CV-aware scoring filters later).
-                    _cats = {'product', 'software', 'business', 'data-science', 'project-management'}
-                return sorted(_cats)[:4]  # cap to limit fetch latency
-
-            _tm_categories = _pick_techmap_categories(titles_, kws_)
-            print(f"[search] TechMap categories for this user: {_tm_categories}")
-
-            # -- Israeli company slugs (Lever) --
-            _LV_COMPANIES = {
-                'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
-                # Global tech with Israeli offices (Lever)
-                'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
-                'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
-            }
-
-            # ── Dynamic Greenhouse discovery from TechMap CSV(s) ──────────────
-            # Fetch TechMap now (before ATS threads launch) to discover additional
-            # Greenhouse board slugs from job URLs. This keeps coverage self-updating.
+            profile = conn.execute(
+                "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            conn.close()
+            if not profile:
+                print(f"[run-search] No profile for user {user_id}")
+                return
+            import urllib.request as _ur
+            import urllib.error  as _ue
             try:
-                import csv as _csv_pre, io as _io_pre, re as _re_gh
-                _tm_disc_rows = []
-                for _cat in _tm_categories:
+                titles    = json.loads(profile["job_titles"] or "[]")
+                keywords  = json.loads(profile["keywords"]   or "[]")
+                locations = json.loads(profile["locations"]  or "[]")
+            except Exception:
+                titles, keywords, locations = [], [], ["Tel Aviv"]
+            if not locations: locations = ["Tel Aviv"]
+            # NOTE: no hardcoded title default. If the user has no target titles,
+            # leave the list empty so the title filter does not restrict to a single
+            # role (previously this forced everyone into "Senior Product Manager").
+            # Collection runs unfiltered and the CV-aware AI scoring decides fit.
+            if not titles:
+                print(f"[run-search] user {user_id} has no target titles — running without title filter (CV-driven scoring)")
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            # ── Load all existing URLs to dedup against full history ─────────
+            conn = database.get_db()
+            try:
+                # Dedup against EVERY job URL we've ever stored for this user (any status,
+                # any age). This guarantees a job the user already swiped — approved,
+                # passed/rejected, deferred, applied, or expired — is never re-added as
+                # "new" by a later search.
+                existing_urls = {r[0] for r in conn.execute(
+                    "SELECT url FROM jobs WHERE user_id=? AND url!=''", (user_id,)
+                ).fetchall()}
+                conn.close()
+
+                def _search_jobs_with_claude_websearch(titles_: list, locs_: list, kws_: list) -> list:
+                    """Search Israeli jobs via Greenhouse/Lever APIs, filter by preferences, score against CV."""
+                    import threading as _thr, urllib.request as _ur2, json as _js2
+                    all_raw = []
+                    _lk = _thr.Lock()
+
+                    # -- Israeli company slugs (Greenhouse) --
+                    _GH_COMPANIES = {
+                        'similarweb': 'SimilarWeb', 'taboola': 'Taboola', 'payoneer': 'Payoneer',
+                        'forter': 'Forter', 'riskified': 'Riskified', 'appsflyer': 'AppsFlyer',
+                        'fireblocks': 'Fireblocks', 'cybereason': 'Cybereason', 'jfrog': 'JFrog',
+                        'wizinc': 'Wiz', 'honeybook': 'HoneyBook', 'optimove': 'Optimove',
+                        'transmitsecurity': 'Transmit Security', 'via': 'Via', 'nice': 'NICE',
+                        'yotpo': 'Yotpo', 'bringg': 'Bringg', 'bigid': 'BigID',
+                        'axonius': 'Axonius', 'lightricks': 'Lightricks', 'catonetworks': 'Cato Networks',
+                        'snyk': 'Snyk', 'sentinelone': 'SentinelOne',
+                        'fiverr': 'Fiverr', 'tipalti': 'Tipalti',
+                        'checkmarx': 'Checkmarx', 'rapyd': 'Rapyd', 'lemonade': 'Lemonade',
+                        'papayaglobal': 'Papaya Global', 'deel': 'Deel', 'drata': 'Drata',
+                        'hibob': 'HiBob', 'ironclad': 'Ironclad', 'nextinsurance': 'Next Insurance',
+                        'playtika': 'Playtika', 'gett': 'Gett', 'outbrain': 'Outbrain',
+                        'guardicore': 'Guardicore', 'earnix': 'Earnix', 'pentera': 'Pentera',
+                        'drivenets': 'DriveNets', 'orcasecurity': 'Orca Security',
+                        'aquasecurity': 'Aqua Security', 'seekingalpha': 'Seeking Alpha',
+                        'fundbox': 'Fundbox', 'ironsource': 'ironSource',
+                        'torq': 'Torq', 'augury': 'Augury',
+                        # Global tech companies with Israeli offices (Greenhouse)
+                        'zscaler': 'Zscaler', 'sisense': 'Sisense',
+                        'gongio': 'Gong', 'armissecurity': 'Armis',
+                        'safebreach': 'SafeBreach', 'datarails': 'DataRails',
+                        'couchbaseinc': 'Couchbase', 'dremio': 'Dremio',
+                        'tenableinc': 'Tenable', 'solarwinds': 'SolarWinds',
+                        'recordedfuture': 'Recorded Future', 'rubrik': 'Rubrik',
+                        'elastic': 'Elastic', 'mongodb': 'MongoDB',
+                        'datadog': 'Datadog', 'cloudflare': 'Cloudflare',
+                        'commvault': 'Commvault',
+                        # ── Extended Israeli tech list (previously missing) ──────────────
+                        'walkme': 'WalkMe', 'monday': 'monday.com', 'wix': 'Wix',
+                        'imperva': 'Imperva', 'perion': 'Perion', 'amdocs': 'Amdocs',
+                        'allot': 'Allot', 'cellebrite': 'Cellebrite', 'varonis': 'Varonis',
+                        'cyvera': 'Cyvera', 'cyberark': 'CyberArk', 'checkpoint': 'Check Point',
+                        'radware': 'Radware', 'gilat': 'Gilat', 'elbit': 'Elbit Systems',
+                        'verint': 'Verint', 'atera': 'Atera', 'salto': 'Salto',
+                        'gloat': 'Gloat', 'dynamic-yield': 'Dynamic Yield',
+                        'overwolf': 'Overwolf', 'buildots': 'Buildots',
+                        'elementor': 'Elementor', 'syte': 'Syte', 'trigo': 'Trigo',
+                        'apolicy': 'Apolicy', 'cyolo': 'Cyolo', 'sealights': 'SeaLights',
+                        'regotechnology': 'Rego', 'memphis': 'Memphis.dev',
+                        'finout': 'Finout', 'cloudinary': 'Cloudinary',
+                        'zerto': 'Zerto', 'protai': 'Protai', 'otterly': 'Otterly',
+                        'glassbox': 'Glassbox', 'lusha': 'Lusha', 'demostack': 'Demostack',
+                        'reef': 'Reef', 'wilco': 'Wilco', 'guesty': 'Guesty',
+                        'healthy-io': 'Healthy.io', 'panorays': 'Panorays',
+                        'silverfort': 'Silverfort', 'hunters': 'Hunters',
+                        'sygnia': 'Sygnia', 'cymulate': 'Cymulate',
+                        'morphisec': 'Morphisec', 'veriti': 'Veriti',
+                        'also': 'ALSO', 'granulate': 'Granulate',
+                        'coralogix': 'Coralogix', 'logz': 'Logz.io',
+                        'anodot': 'Anodot', 'spot': 'Spot by NetApp',
+                        'env0': 'env0', 'cyclops': 'Cyclops',
+                        'orca': 'Orca Security', 'laminar': 'Laminar',
+                        'normalyze': 'Normalyze', 'dig-security': 'Dig Security',
+                    }
+
+                    # ── Role-aware TechMap category selection ─────────────────────────
+                    # Pick which TechMap job-category CSV(s) to pull based on the user's
+                    # target titles + keywords. Previously hardcoded to 'product.csv',
+                    # which forced product roles on every user regardless of their CV.
+                    _TM_ALL_CATEGORIES = {
+                        'admin', 'business', 'data-science', 'design', 'devops', 'finance',
+                        'frontend', 'hardware', 'hr', 'legal', 'marketing',
+                        'procurement-operations', 'product', 'project-management', 'qa',
+                        'sales', 'security', 'software', 'support',
+                    }
+
+                    def _pick_techmap_categories(titles_list, keywords_list):
+                        _txt = ' '.join((titles_list or []) + (keywords_list or [])).lower()
+                        _cats: set = set()
+                        _rules = [
+                            (('product owner', 'product manager', 'product lead', 'head of product', 'cpo', 'product'), ['product', 'project-management']),
+                            (('project manager', 'program manager', 'scrum', 'delivery manager', 'pmo'), ['project-management']),
+                            (('frontend', 'front-end', 'front end', 'react', 'angular', 'vue'), ['frontend']),
+                            (('devops', 'sre', 'platform engineer', 'infrastructure', 'site reliability'), ['devops']),
+                            (('software', 'developer', 'engineer', 'backend', 'full stack', 'fullstack', 'sde', 'programmer'), ['software', 'frontend', 'devops']),
+                            (('data scientist', 'data analyst', 'machine learning', 'analytics', 'data engineer', 'ml engineer'), ['data-science']),
+                            (('designer', 'ux', 'ui designer', 'product design'), ['design']),
+                            (('marketing', 'growth', 'seo', 'content', 'brand', 'demand gen'), ['marketing']),
+                            (('sales', 'account executive', 'sdr', 'bdr', 'account manager', 'business development'), ['sales', 'business']),
+                            (('security', 'infosec', 'soc analyst', 'ciso', 'appsec'), ['security']),
+                            (('finance', 'accountant', 'controller', 'fp&a', 'cfo'), ['finance']),
+                            (('recruiter', 'people', 'talent', 'human resources'), ['hr']),
+                            (('legal', 'counsel', 'compliance'), ['legal']),
+                            (('qa', 'quality assurance', 'test engineer', 'automation engineer'), ['qa']),
+                            (('support', 'customer success', 'csm', 'customer experience'), ['support']),
+                            (('operations', 'procurement', 'supply chain'), ['procurement-operations', 'business']),
+                            (('hardware', 'firmware', 'electrical', 'embedded'), ['hardware']),
+                            (('business', 'strategy', 'bizdev', 'general manager', 'chief of staff'), ['business']),
+                        ]
+                        for _kw_tuple, _cat_list in _rules:
+                            if any(_k in _txt for _k in _kw_tuple):
+                                _cats.update(_cat_list)
+                        _cats &= _TM_ALL_CATEGORIES
+                        if not _cats:
+                            # No recognizable role family — pull a broad default set so the
+                            # candidate pool isn't empty (CV-aware scoring filters later).
+                            _cats = {'product', 'software', 'business', 'data-science', 'project-management'}
+                        return sorted(_cats)[:4]  # cap to limit fetch latency
+
+                    _tm_categories = _pick_techmap_categories(titles_, kws_)
+                    print(f"[search] TechMap categories for this user: {_tm_categories}")
+
+                    # -- Israeli company slugs (Lever) --
+                    _LV_COMPANIES = {
+                        'walkme': 'WalkMe', 'cloudinary': 'Cloudinary',
+                        # Global tech with Israeli offices (Lever)
+                        'kaltura': 'Kaltura', 'namogoo': 'Namogoo', 'guesty': 'Guesty',
+                        'skai': 'Skai', 'nexthink': 'Nexthink', 'bringg': 'Bringg',
+                    }
+
+                    # ── Dynamic Greenhouse discovery from TechMap CSV(s) ──────────────
+                    # Fetch TechMap now (before ATS threads launch) to discover additional
+                    # Greenhouse board slugs from job URLs. This keeps coverage self-updating.
                     try:
-                        _tm_disc_url  = f'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/{_cat}.csv'
-                        _tm_disc_req  = _ur2.Request(_tm_disc_url, headers={"User-Agent": "JobHunter/1.0"})
-                        with _ur2.urlopen(_tm_disc_req, timeout=15) as _tm_disc_resp:
-                            _tm_disc_text = _tm_disc_resp.read().decode('utf-8', errors='replace')
-                        _tm_disc_rows.extend(list(_csv_pre.DictReader(_io_pre.StringIO(_tm_disc_text))))
-                    except Exception as _cat_err:
-                        print(f"[search] TechMap category '{_cat}' fetch error: {_cat_err}")
-                _gh_slug_re = _re_gh.compile(r'boards\.greenhouse\.io/([a-zA-Z0-9_-]+)/')
-                _lv_slug_re = _re_gh.compile(r'jobs\.lever\.co/([a-zA-Z0-9_-]+)/')
-                _new_gh = 0
-                _new_lv = 0
-                for _dr in _tm_disc_rows:
-                    _durl = (_dr.get('url') or '').strip()
-                    _dco  = (_dr.get('company') or '').strip()
-                    _gm = _gh_slug_re.search(_durl)
-                    if _gm:
-                        _slug = _gm.group(1).lower()
-                        if _slug not in _GH_COMPANIES:
-                            _GH_COMPANIES[_slug] = _dco or _slug
-                            _new_gh += 1
-                    _lm = _lv_slug_re.search(_durl)
-                    if _lm:
-                        _slug = _lm.group(1).lower()
-                        if _slug not in _LV_COMPANIES:
-                            _LV_COMPANIES[_slug] = _dco or _slug
-                            _new_lv += 1
-                print(f"[search] TechMap discovery: +{_new_gh} Greenhouse, +{_new_lv} Lever boards "
-                      f"(total: {len(_GH_COMPANIES)} GH, {len(_LV_COMPANIES)} LV)")
-                # Cache the rows so the later TechMap block can reuse them
-                _tm_prefetched_rows = _tm_disc_rows
-            except Exception as _tm_disc_err:
-                print(f"[search] TechMap discovery error (non-fatal): {_tm_disc_err}")
-                _tm_prefetched_rows = None
-            # -- SmartRecruiters public boards --
-            _SR_COMPANIES = {
-                'servicenow': 'ServiceNow',
-            }
-            # Build title match phrases from user preferences
-            def _expand_title_variants(title):
-                """Expand a job title into structural variants (VP<->VP of<->Vice President<->Head of<->Director, Senior<->Sr.<->Lead).
+                        import csv as _csv_pre, io as _io_pre, re as _re_gh
+                        _tm_disc_rows = []
+                        for _cat in _tm_categories:
+                            try:
+                                _tm_disc_url  = f'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/{_cat}.csv'
+                                _tm_disc_req  = _ur2.Request(_tm_disc_url, headers={"User-Agent": "JobHunter/1.0"})
+                                with _ur2.urlopen(_tm_disc_req, timeout=15) as _tm_disc_resp:
+                                    _tm_disc_text = _tm_disc_resp.read().decode('utf-8', errors='replace')
+                                _tm_disc_rows.extend(list(_csv_pre.DictReader(_io_pre.StringIO(_tm_disc_text))))
+                            except Exception as _cat_err:
+                                print(f"[search] TechMap category '{_cat}' fetch error: {_cat_err}")
+                        _gh_slug_re = _re_gh.compile(r'boards\.greenhouse\.io/([a-zA-Z0-9_-]+)/')
+                        _lv_slug_re = _re_gh.compile(r'jobs\.lever\.co/([a-zA-Z0-9_-]+)/')
+                        _new_gh = 0
+                        _new_lv = 0
+                        for _dr in _tm_disc_rows:
+                            _durl = (_dr.get('url') or '').strip()
+                            _dco  = (_dr.get('company') or '').strip()
+                            _gm = _gh_slug_re.search(_durl)
+                            if _gm:
+                                _slug = _gm.group(1).lower()
+                                if _slug not in _GH_COMPANIES:
+                                    _GH_COMPANIES[_slug] = _dco or _slug
+                                    _new_gh += 1
+                            _lm = _lv_slug_re.search(_durl)
+                            if _lm:
+                                _slug = _lm.group(1).lower()
+                                if _slug not in _LV_COMPANIES:
+                                    _LV_COMPANIES[_slug] = _dco or _slug
+                                    _new_lv += 1
+                        print(f"[search] TechMap discovery: +{_new_gh} Greenhouse, +{_new_lv} Lever boards "
+                              f"(total: {len(_GH_COMPANIES)} GH, {len(_LV_COMPANIES)} LV)")
+                        # Cache the rows so the later TechMap block can reuse them
+                        _tm_prefetched_rows = _tm_disc_rows
+                    except Exception as _tm_disc_err:
+                        print(f"[search] TechMap discovery error (non-fatal): {_tm_disc_err}")
+                        _tm_prefetched_rows = None
+                    # -- SmartRecruiters public boards --
+                    _SR_COMPANIES = {
+                        'servicenow': 'ServiceNow',
+                    }
+                    # Build title match phrases from user preferences
+                    def _expand_title_variants(title):
+                        """Expand a job title into structural variants (VP<->VP of<->Vice President<->Head of<->Director, Senior<->Sr.<->Lead).
                 Pure linguistic rules — works for any domain the user enters."""
-                t = title.lower().strip()
-                variants = {t}
-                level_rules = [
-                    ('vp of ',            ['vice president of ', 'head of ', 'director of ']),
-                    ('vp ',               ['vice president ', 'head of ', 'director of ']),
-                    ('vice president of ', ['vp of ', 'head of ', 'director of ']),
-                    ('vice president ',   ['vp ', 'head of ', 'director of ']),
-                    ('head of ',          ['director of ', 'vp of ', 'vp ']),
-                    ('director of ',      ['head of ', 'vp of ', 'vp ']),
-                    ('director ',         ['head of ', 'vp ']),
-                    ('chief ',            ['vp of ', 'head of ']),
-                ]
-                seniority_rules = [
-                    ('senior ',  ['sr. ', 'sr ', 'lead ']),
-                    ('sr. ',     ['senior ', 'sr ', 'lead ']),
-                    ('sr ',      ['senior ', 'sr. ', 'lead ']),
-                    ('lead ',    ['senior ', 'sr. ']),
-                    ('principal ', ['senior ', 'lead ', 'staff ']),
-                    ('staff ',   ['principal ', 'senior ']),
-                ]
-                for pattern, replacements in level_rules + seniority_rules:
-                    if t.startswith(pattern):
-                        rest = t[len(pattern):]
-                        for r in replacements:
-                            variants.add(r + rest)
-                return list(variants)
+                        t = title.lower().strip()
+                        variants = {t}
+                        level_rules = [
+                            ('vp of ',            ['vice president of ', 'head of ', 'director of ']),
+                            ('vp ',               ['vice president ', 'head of ', 'director of ']),
+                            ('vice president of ', ['vp of ', 'head of ', 'director of ']),
+                            ('vice president ',   ['vp ', 'head of ', 'director of ']),
+                            ('head of ',          ['director of ', 'vp of ', 'vp ']),
+                            ('director of ',      ['head of ', 'vp of ', 'vp ']),
+                            ('director ',         ['head of ', 'vp ']),
+                            ('chief ',            ['vp of ', 'head of ']),
+                        ]
+                        seniority_rules = [
+                            ('senior ',  ['sr. ', 'sr ', 'lead ']),
+                            ('sr. ',     ['senior ', 'sr ', 'lead ']),
+                            ('sr ',      ['senior ', 'sr. ', 'lead ']),
+                            ('lead ',    ['senior ', 'sr. ']),
+                            ('principal ', ['senior ', 'lead ', 'staff ']),
+                            ('staff ',   ['principal ', 'senior ']),
+                        ]
+                        for pattern, replacements in level_rules + seniority_rules:
+                            if t.startswith(pattern):
+                                rest = t[len(pattern):]
+                                for r in replacements:
+                                    variants.add(r + rest)
+                        return list(variants)
 
-            _phrases = []
-            for _t in titles_:
-                if _t.strip():
-                    _phrases.extend(_expand_title_variants(_t))
-            _phrases = list(set(_phrases))
-            # Also build 2-word combos from each title for partial matching
-            _bigrams = set()
-            for _t in titles_:
-                words = [w for w in _t.lower().split() if len(w) > 2]
-                for i in range(len(words)):
-                    for j in range(i+1, len(words)):
-                        _bigrams.add((words[i], words[j]))
+                    _phrases = []
+                    for _t in titles_:
+                        if _t.strip():
+                            _phrases.extend(_expand_title_variants(_t))
+                    _phrases = list(set(_phrases))
+                    # Also build 2-word combos from each title for partial matching
+                    _bigrams = set()
+                    for _t in titles_:
+                        words = [w for w in _t.lower().split() if len(w) > 2]
+                        for i in range(len(words)):
+                            for j in range(i+1, len(words)):
+                                _bigrams.add((words[i], words[j]))
 
-            # ── Synonym map (pass 3) ──────────────────────────────────────────
-            # Maps canonical form → list of synonyms (bidirectional at match time)
-            _SYNONYM_MAP = {
-                "product manager":          ["pm", "product owner", "po", "product lead"],
-                "senior product manager":   ["senior pm", "sr pm", "sr. pm", "spm"],
-                "group product manager":    ["group pm", "gpm"],
-                "principal product manager":["principal pm", "staff pm"],
-                "vp product":               ["vp of product", "chief product officer", "cpo",
-                                             "head of product", "gm product", "gm of product"],
-                "vp r&d":                   ["head of r&d", "r&d director", "director of r&d",
-                                             "vp engineering", "vp of engineering"],
-                "director of product":      ["product director", "head of product", "gm product"],
-                "head of product":          ["product lead", "director of product", "vp product",
-                                             "product group lead"],
-                "chief product officer":    ["cpo", "vp product", "head of product"],
-                "general manager":          ["gm", "business unit manager", "bu manager",
-                                             "country manager"],
-                "product lead":             ["lead pm", "product manager lead", "head of product"],
-                "growth":                   ["growth lead", "head of growth", "vp growth",
-                                             "growth manager", "growth product manager"],
-            }
-            # Build synonym phrase set from user titles
-            _synonym_phrases = set()
-            for _p in _phrases:
-                # Forward lookup
-                for _key, _syns in _SYNONYM_MAP.items():
-                    if _key in _p or _p in _key:
-                        _synonym_phrases.update(_syns)
-                        _synonym_phrases.add(_key)
-                if _p in _SYNONYM_MAP:
-                    _synonym_phrases.update(_SYNONYM_MAP[_p])
-                # Reverse lookup
-                for _key, _syns in _SYNONYM_MAP.items():
-                    if _p in _syns:
-                        _synonym_phrases.add(_key)
-                        _synonym_phrases.update(_syns)
-            _synonym_phrases -= set(_phrases)  # don't duplicate what's already in _phrases
+                    # ── Synonym map (pass 3) ──────────────────────────────────────────
+                    # Maps canonical form → list of synonyms (bidirectional at match time)
+                    _SYNONYM_MAP = {
+                        "product manager":          ["pm", "product owner", "po", "product lead"],
+                        "senior product manager":   ["senior pm", "sr pm", "sr. pm", "spm"],
+                        "group product manager":    ["group pm", "gpm"],
+                        "principal product manager":["principal pm", "staff pm"],
+                        "vp product":               ["vp of product", "chief product officer", "cpo",
+                                                     "head of product", "gm product", "gm of product"],
+                        "vp r&d":                   ["head of r&d", "r&d director", "director of r&d",
+                                                     "vp engineering", "vp of engineering"],
+                        "director of product":      ["product director", "head of product", "gm product"],
+                        "head of product":          ["product lead", "director of product", "vp product",
+                                                     "product group lead"],
+                        "chief product officer":    ["cpo", "vp product", "head of product"],
+                        "general manager":          ["gm", "business unit manager", "bu manager",
+                                                     "country manager"],
+                        "product lead":             ["lead pm", "product manager lead", "head of product"],
+                        "growth":                   ["growth lead", "head of growth", "vp growth",
+                                                     "growth manager", "growth product manager"],
+                    }
+                    # Build synonym phrase set from user titles
+                    _synonym_phrases = set()
+                    for _p in _phrases:
+                        # Forward lookup
+                        for _key, _syns in _SYNONYM_MAP.items():
+                            if _key in _p or _p in _key:
+                                _synonym_phrases.update(_syns)
+                                _synonym_phrases.add(_key)
+                        if _p in _SYNONYM_MAP:
+                            _synonym_phrases.update(_SYNONYM_MAP[_p])
+                        # Reverse lookup
+                        for _key, _syns in _SYNONYM_MAP.items():
+                            if _p in _syns:
+                                _synonym_phrases.add(_key)
+                                _synonym_phrases.update(_syns)
+                    _synonym_phrases -= set(_phrases)  # don't duplicate what's already in _phrases
 
-            print(f"[search] Phrases: {len(_phrases)} | bigrams: {len(_bigrams)} | synonyms: {len(_synonym_phrases)}")
+                    print(f"[search] Phrases: {len(_phrases)} | bigrams: {len(_bigrams)} | synonyms: {len(_synonym_phrases)}")
 
-            def _title_match(title):
-                import difflib as _dl
-                import re as _re_tm
-                # No target titles configured → don't filter by title at all.
-                # Let every collected job through and rely on CV-aware AI scoring.
-                if not _phrases:
-                    return True
-                tl = _re_tm.sub(r"[,/&|]", " ", title.lower()).strip()
+                    def _title_match(title):
+                        import difflib as _dl
+                        import re as _re_tm
+                        # No target titles configured → don't filter by title at all.
+                        # Let every collected job through and rely on CV-aware AI scoring.
+                        if not _phrases:
+                            return True
+                        tl = _re_tm.sub(r"[,/&|]", " ", title.lower()).strip()
 
-                # Pass 1 — exact phrase match (original)
-                if any(phrase in tl for phrase in _phrases):
-                    return True
-
-                # Pass 2 — bigram match (original)
-                for w1, w2 in _bigrams:
-                    if w1 in tl and w2 in tl:
-                        return True
-
-                # Pass 3 — synonym match
-                if any(syn in tl for syn in _synonym_phrases):
-                    return True
-
-                # Pass 4 — fuzzy match via difflib (catches abbreviations & minor variants)
-                # Compare each user phrase against a sliding window in the job title
-                for _phrase in _phrases:
-                    if len(_phrase) < 4:
-                        continue  # skip very short phrases to avoid false positives
-                    _ph_len = len(_phrase)
-                    # Try the whole title first (works for short titles)
-                    if _dl.SequenceMatcher(None, _phrase, tl).ratio() >= 0.80:
-                        return True
-                    # Sliding window for longer titles
-                    for _start in range(0, max(1, len(tl) - _ph_len + 6), 3):
-                        _window = tl[_start: _start + _ph_len + 6]
-                        if _dl.SequenceMatcher(None, _phrase, _window).ratio() >= 0.82:
+                        # Pass 1 — exact phrase match (original)
+                        if any(phrase in tl for phrase in _phrases):
                             return True
 
-                return False
+                        # Pass 2 — bigram match (original)
+                        for w1, w2 in _bigrams:
+                            if w1 in tl and w2 in tl:
+                                return True
 
-            def _get_json(url, timeout=20):
-                try:
-                    rq = _ur2.Request(url, headers={"User-Agent": "JobHunter/1.0"})
-                    with _ur2.urlopen(rq, timeout=timeout) as r:
-                        return _js2.loads(r.read().decode("utf-8", errors="replace"))
-                except Exception as e:
-                    return None
+                        # Pass 3 — synonym match
+                        if any(syn in tl for syn in _synonym_phrases):
+                            return True
 
-            # -- Query Greenhouse boards --
-            def _query_gh(slug, company_name):
-                data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
-                if not data: return
-                for j in data.get("jobs", []):
-                    t = j.get("title", "")
-                    loc = j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else ""
-                    jurl = f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id', '')}"
-                    _gh_content = re.sub(r'<[^>]+>', ' ', j.get("content", "")).strip()[:5000] if j.get("content") else ""
-                    with _lk:
-                        all_raw.append({"job_title": t, "company": company_name,
-                                        "location": loc, "url": jurl,
-                                        "description": (_gh_content[:300] if _gh_content else t),
-                                        "full_description": _gh_content or t, "source": "greenhouse"})
+                        # Pass 4 — fuzzy match via difflib (catches abbreviations & minor variants)
+                        # Compare each user phrase against a sliding window in the job title
+                        for _phrase in _phrases:
+                            if len(_phrase) < 4:
+                                continue  # skip very short phrases to avoid false positives
+                            _ph_len = len(_phrase)
+                            # Try the whole title first (works for short titles)
+                            if _dl.SequenceMatcher(None, _phrase, tl).ratio() >= 0.80:
+                                return True
+                            # Sliding window for longer titles
+                            for _start in range(0, max(1, len(tl) - _ph_len + 6), 3):
+                                _window = tl[_start: _start + _ph_len + 6]
+                                if _dl.SequenceMatcher(None, _phrase, _window).ratio() >= 0.82:
+                                    return True
 
-            # -- Query Lever boards --
-            def _query_lv(slug, company_name):
-                data = _get_json(f"https://api.lever.co/v0/postings/{slug}?mode=json")
-                if not isinstance(data, list): return
-                for j in data:
-                    t = j.get("text", "")
-                    cats = j.get("categories") or {}
-                    loc = cats.get("location", "")
-                    if not loc:
-                        al = cats.get("allLocations") or []
-                        loc = al[0] if al else ""
-                    jurl = j.get("hostedUrl") or f"https://jobs.lever.co/{slug}/{j.get('id', '')}"
-                    desc = (j.get("descriptionPlain") or t)[:300]
-                    full_desc = j.get("descriptionPlain") or t
-                    with _lk:
-                        all_raw.append({"job_title": t, "company": company_name,
-                                        "location": loc, "url": jurl,
-                                        "description": desc, "full_description": full_desc, "source": "lever"})
-            # -- Query SmartRecruiters boards --
-            def _query_sr(slug, company_name):
-                data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
-                if not data: return
-                for j in data.get("content", []):
-                    t = j.get("name", "")
-                    if not t: continue
-                    loc_obj = j.get("location") or {}
-                    city = loc_obj.get("city", "")
-                    country = loc_obj.get("country", "")
-                    loc = f"{city}, {country}".strip(", ") if city or country else ""
-                    jurl = f"https://jobs.smartrecruiters.com/{slug}/{j.get('id', '')}"
-                    with _lk:
-                        all_raw.append({"job_title": t, "company": company_name,
-                                        "location": loc, "url": jurl,
-                                        "description": t, "full_description": t,
-                                        "source": "smartrecruiters"})
-            # -- Run all API queries in parallel --
-            print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever + {len(_SR_COMPANIES)} SmartRecruiters boards...")
-            threads = []
-            for slug, name in _GH_COMPANIES.items():
-                threads.append(_thr.Thread(target=_query_gh, args=(slug, name), daemon=True))
-            for slug, name in _LV_COMPANIES.items():
-                threads.append(_thr.Thread(target=_query_lv, args=(slug, name), daemon=True))
-            for slug, name in _SR_COMPANIES.items():
-                threads.append(_thr.Thread(target=_query_sr, args=(slug, name), daemon=True))
+                        return False
 
-            # Launch in batches of 30
-            for i in range(0, len(threads), 30):
-                batch = threads[i:i+30]
-                for t in batch: t.start()
-                for t in batch: t.join(timeout=25)
-
-            # -- TechMap CSV(s) (reuse prefetched rows from discovery step) --
-            try:
-                import csv as _csv, io as _io
-                _tm_rows_src = _tm_prefetched_rows
-                if _tm_rows_src is None:
-                    # Fallback: fetch again (role-aware categories) if discovery failed
-                    _tm_rows_src = []
-                    for _cat in _tm_categories:
+                    def _get_json(url, timeout=20):
                         try:
-                            _tm_url = f'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/{_cat}.csv'
-                            _tm_req = _ur2.Request(_tm_url, headers={"User-Agent": "JobHunter/1.0"})
-                            with _ur2.urlopen(_tm_req, timeout=15) as _tm_resp:
-                                _tm_text = _tm_resp.read().decode('utf-8', errors='replace')
-                            _tm_rows_src.extend(list(_csv.DictReader(_io.StringIO(_tm_text))))
-                        except Exception as _cat_err2:
-                            print(f"[search] TechMap fallback category '{_cat}' error: {_cat_err2}")
-                _tm_count = 0
-                for _row in _tm_rows_src:
-                    _tm_title = (_row.get('title') or '').strip()
-                    if _title_match(_tm_title):
-                        _tm_url_j = (_row.get('url') or '').strip()
-                        if _tm_url_j:
-                            all_raw.append({"job_title": _tm_title, "company": _row.get('company',''),
-                                            "location": _row.get('city',''), "url": _tm_url_j,
-                                            "description": _tm_title, "source": "techmap"})
-                            _tm_count += 1
-                print(f"[search] TechMap CSV ({','.join(_tm_categories)}): {_tm_count} jobs matched")
-            except Exception as _tme:
-                print(f"[search] TechMap CSV error: {_tme}")
+                            rq = _ur2.Request(url, headers={"User-Agent": "JobHunter/1.0"})
+                            with _ur2.urlopen(rq, timeout=timeout) as r:
+                                return _js2.loads(r.read().decode("utf-8", errors="replace"))
+                        except Exception as e:
+                            return None
 
-            # -- Comeet boards for Israeli companies --
-            _comeet_slugs = {'monday': 'monday.com', 'ironsource': 'ironSource', 'gong': 'Gong',
-                             'yotpo2': 'Yotpo', 'lightricks2': 'Lightricks'}
-            for _cm_slug, _cm_name in _comeet_slugs.items():
-                try:
-                    _cm_url = f'https://www.comeet.co/careers/api/{_cm_slug}/positions'
-                    _cm_data = _get_json(_cm_url, timeout=12)
-                    if isinstance(_cm_data, list):
-                        for _cm_j in _cm_data:
-                            _cm_t = _cm_j.get('name', '')
-                            if _title_match(_cm_t):
-                                _cm_loc = ''
-                                if _cm_j.get('location'):
-                                    _cm_loc = _cm_j['location'].get('name', '') if isinstance(_cm_j['location'], dict) else str(_cm_j['location'])
-                                all_raw.append({"job_title": _cm_t, "company": _cm_name,
-                                                "location": _cm_loc, "url": _cm_j.get('url',''),
-                                                "description": _cm_t, "source": "comeet"})
-                except Exception:
-                    pass
-            print(f"[search] Comeet + SpeakNow queries done")
+                    # -- Query Greenhouse boards --
+                    def _query_gh(slug, company_name):
+                        data = _get_json(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true")
+                        if not data: return
+                        for j in data.get("jobs", []):
+                            t = j.get("title", "")
+                            loc = j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else ""
+                            jurl = f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id', '')}"
+                            _gh_content = re.sub(r'<[^>]+>', ' ', j.get("content", "")).strip()[:5000] if j.get("content") else ""
+                            with _lk:
+                                all_raw.append({"job_title": t, "company": company_name,
+                                                "location": loc, "url": jurl,
+                                                "description": (_gh_content[:300] if _gh_content else t),
+                                                "full_description": _gh_content or t, "source": "greenhouse"})
 
-            # -- SpeakNow careers --
-            try:
-                _sn_req = _ur2.Request('https://speaknow.co/careers/', headers={"User-Agent": "JobHunter/1.0"})
-                with _ur2.urlopen(_sn_req, timeout=12) as _sn_resp:
-                    _sn_html = _sn_resp.read().decode('utf-8', errors='replace')
-                import re as _re_sn
-                # Find job links on the careers page
-                _sn_links = _re_sn.findall(r'href=["\'](https?://[^"\'>]*(?:career|job|position|apply)[^"\'>]*)["\'\s>]', _sn_html, _re_sn.IGNORECASE)
-                for _sn_url in set(_sn_links[:10]):
-                    all_raw.append({"job_title": "SpeakNow Career Opportunity", "company": "SpeakNow",
-                                    "location": "Israel", "url": _sn_url,
-                                    "description": "Career opportunity at SpeakNow", "source": "speaknow"})
-            except Exception as _sne:
-                print(f"[search] SpeakNow error: {_sne}")
+                    # -- Query Lever boards --
+                    def _query_lv(slug, company_name):
+                        data = _get_json(f"https://api.lever.co/v0/postings/{slug}?mode=json")
+                        if not isinstance(data, list): return
+                        for j in data:
+                            t = j.get("text", "")
+                            cats = j.get("categories") or {}
+                            loc = cats.get("location", "")
+                            if not loc:
+                                al = cats.get("allLocations") or []
+                                loc = al[0] if al else ""
+                            jurl = j.get("hostedUrl") or f"https://jobs.lever.co/{slug}/{j.get('id', '')}"
+                            desc = (j.get("descriptionPlain") or t)[:300]
+                            full_desc = j.get("descriptionPlain") or t
+                            with _lk:
+                                all_raw.append({"job_title": t, "company": company_name,
+                                                "location": loc, "url": jurl,
+                                                "description": desc, "full_description": full_desc, "source": "lever"})
+                    # -- Query SmartRecruiters boards --
+                    def _query_sr(slug, company_name):
+                        data = _get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+                        if not data: return
+                        for j in data.get("content", []):
+                            t = j.get("name", "")
+                            if not t: continue
+                            loc_obj = j.get("location") or {}
+                            city = loc_obj.get("city", "")
+                            country = loc_obj.get("country", "")
+                            loc = f"{city}, {country}".strip(", ") if city or country else ""
+                            jurl = f"https://jobs.smartrecruiters.com/{slug}/{j.get('id', '')}"
+                            with _lk:
+                                all_raw.append({"job_title": t, "company": company_name,
+                                                "location": loc, "url": jurl,
+                                                "description": t, "full_description": t,
+                                                "source": "smartrecruiters"})
+                    # -- Run all API queries in parallel --
+                    print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever + {len(_SR_COMPANIES)} SmartRecruiters boards...")
+                    threads = []
+                    for slug, name in _GH_COMPANIES.items():
+                        threads.append(_thr.Thread(target=_query_gh, args=(slug, name), daemon=True))
+                    for slug, name in _LV_COMPANIES.items():
+                        threads.append(_thr.Thread(target=_query_lv, args=(slug, name), daemon=True))
+                    for slug, name in _SR_COMPANIES.items():
+                        threads.append(_thr.Thread(target=_query_sr, args=(slug, name), daemon=True))
 
-            # -- Sparkhire careers (best-effort) --
-            _SPARKHIRE_COMPANIES = [
-                ('hibob', 'HiBob'), ('monday', 'monday.com'), ('fiverr', 'Fiverr'),
-                ('rapyd', 'Rapyd'), ('gong', 'Gong'), ('lemonade', 'Lemonade'),
-            ]
-            _sparkhire_count = 0
-            for _sh_slug, _sh_name in _SPARKHIRE_COMPANIES:
-                try:
-                    _sh_req = _ur2.Request(f"https://candidate.sparkhire.com/users/{_sh_slug}/jobs", headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
-                    with _ur2.urlopen(_sh_req, timeout=10) as _sh_resp:
-                        _sh_html = _sh_resp.read().decode('utf-8', errors='replace')
-                    import re as _re_sh
-                    _sh_jobs = _re_sh.findall(r'<a[^>]+href="([^"]+)"[^>]*>\s*<[^>]+>([^<]{5,120})</[^>]+>\s*</a>', _sh_html)
-                    for _sh_href, _sh_title in _sh_jobs[:15]:
-                        _t = _sh_title.strip()
-                        if _title_match(_t):
-                            _u = _sh_href if _sh_href.startswith('http') else f"https://candidate.sparkhire.com{_sh_href}"
-                            all_raw.append({"title": _t, "company": _sh_name, "location": "", "url": _u, "description": "", "source": "sparkhire"})
-                            _sparkhire_count += 1
-                except Exception:
-                    pass
-            print(f"[search] Sparkhire: {_sparkhire_count} jobs matched")
+                    # Launch in batches of 30
+                    for i in range(0, len(threads), 30):
+                        batch = threads[i:i+30]
+                        for t in batch: t.start()
+                        for t in batch: t.join(timeout=25)
 
-            # -- Workday tenants (public JSON search API) --
-            _WORKDAY_TENANTS = [
-                ("nvidia", "wd5", "nvidiaexternal", "NVIDIA"),
-                ("ibm", "wd1", "IBM", "IBM"),
-                ("ebay", "wd1", "ebay", "eBay"),
-                ("paypal", "wd1", "paypal", "PayPal"),
-                ("intel", "wd1", "External", "Intel"),
-                ("hpe", "wd1", "Jobsatyou", "HPE"),
-                ("vmware", "wd1", "VMware", "VMware"),
-                ("accenture", "wd3", "AccentureCareers", "Accenture"),
-                ("salesforce", "wd12", "External_Career_Site", "Salesforce"),
-                ("dell", "wd1", "External", "Dell"),
-            ]
-            _workday_count = 0
-            for _wd_t, _wd_s, _wd_st, _wd_n in _WORKDAY_TENANTS:
-                try:
-                    _wd_url = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com/wday/cxs/{_wd_t}/{_wd_st}/jobs"
-                    _wd_body = _js2.dumps({"limit": 20, "offset": 0, "searchText": ""}).encode('utf-8')
-                    _wd_req = _ur2.Request(_wd_url, data=_wd_body, headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0 JobHunter/1.0"})
-                    with _ur2.urlopen(_wd_req, timeout=12) as _wd_resp:
-                        _wd_data = _js2.loads(_wd_resp.read().decode('utf-8', errors='replace'))
-                    for _wd_j in (_wd_data.get("jobPostings") or [])[:20]:
-                        _wd_tt = (_wd_j.get("title") or "").strip()
-                        if _title_match(_wd_tt):
-                            _wd_p = _wd_j.get("externalPath") or ""
-                            _wd_full = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com{_wd_p}" if _wd_p else ""
-                            all_raw.append({"title": _wd_tt, "company": _wd_n, "location": _wd_j.get("locationsText","") or "", "url": _wd_full, "description": "", "source": "workday"})
-                            _workday_count += 1
-                except Exception:
-                    pass
-            print(f"[search] Workday: {_workday_count} jobs matched")
-
-            # -- LinkedIn public guest endpoint --
-            _linkedin_count = 0
-            import urllib.parse as _urp2
-            for _li_kw in titles_[:5]:
-                try:
-                    _li_q = _urp2.quote(_li_kw)
-                    _li_l = _urp2.quote("Israel")
-                    _li_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={_li_q}&location={_li_l}&start=0"
-                    _li_req = _ur2.Request(_li_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-                    with _ur2.urlopen(_li_req, timeout=12) as _li_resp:
-                        _li_html = _li_resp.read().decode('utf-8', errors='replace')
-                    import re as _re_li
-                    _li_cards = _re_li.findall(r'<a[^>]+class="base-card__full-link[^"]*"[^>]+href="([^"?]+)', _li_html)
-                    _li_titles = _re_li.findall(r'<h3[^>]+class="base-search-card__title"[^>]*>\s*([^<]+?)\s*</h3>', _li_html)
-                    _li_comps = _re_li.findall(r'<h4[^>]+class="base-search-card__subtitle"[^>]*>\s*<a[^>]*>\s*([^<]+?)\s*</a>', _li_html)
-                    _li_locs = _re_li.findall(r'<span[^>]+class="job-search-card__location"[^>]*>\s*([^<]+?)\s*</span>', _li_html)
-                    for _li_i in range(min(20, len(_li_cards), len(_li_titles))):
-                        _li_t = _li_titles[_li_i].strip()
-                        if _title_match(_li_t):
-                            _li_c = _li_comps[_li_i].strip() if _li_i < len(_li_comps) else ""
-                            _li_lc = _li_locs[_li_i].strip() if _li_i < len(_li_locs) else ""
-                            all_raw.append({"title": _li_t, "company": _li_c, "location": _li_lc, "url": _li_cards[_li_i], "description": "", "source": "linkedin"})
-                            _linkedin_count += 1
-                except Exception:
-                    pass
-            print(f"[search] LinkedIn guest: {_linkedin_count} jobs matched")
-
-            # -- Indeed (best-effort) --
-            _indeed_count = 0
-            for _in_kw in titles_[:3]:
-                try:
-                    _in_q = _urp2.quote(_in_kw)
-                    _in_url = f"https://il.indeed.com/jobs?q={_in_q}&l=Israel&fromage=7&sort=date"
-                    _in_req = _ur2.Request(_in_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
-                    with _ur2.urlopen(_in_req, timeout=12) as _in_resp:
-                        _in_html = _in_resp.read().decode('utf-8', errors='replace')
-                    import re as _re_in
-                    _in_items = _re_in.findall(r'data-jk="([a-z0-9]+)"[^>]*>[\s\S]{0,2000}?title="([^"]{5,200})"', _in_html)
-                    for _in_jk, _in_tt in _in_items[:15]:
-                        _in_t = _in_tt.strip()
-                        if _title_match(_in_t):
-                            all_raw.append({"title": _in_t, "company": "", "location": "", "url": f"https://il.indeed.com/viewjob?jk={_in_jk}", "description": "", "source": "indeed"})
-                            _indeed_count += 1
-                except Exception:
-                    pass
-            print(f"[search] Indeed: {_indeed_count} jobs matched")
-
-            # ── Multi-source ingestion + cross-platform fuzzy dedup ──────────
-            # New pipeline (ingestion/): pulls Big-Tech internal endpoints (free,
-            # everyone) + paid aggregators/scrapers (admin only), then fuzzy-merges
-            # the WHOLE union so a role mirrored across a career page + LinkedIn +
-            # an aggregator reaches the AI scorer ONCE. Falls back to the legacy
-            # exact-fingerprint dedup if the package is unavailable (never fatal).
-            _ingest_ok = False
-            try:
-                import ingestion as _ingestion
-                # role gates the paid sources (admin-only)
-                _role = "user"
-                try:
-                    _conn_r = database.get_db()
-                    _rr = _conn_r.execute(
-                        "SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
-                    _conn_r.close()
-                    _role = (_rr["role"] if _rr and _rr["role"] else "user")
-                except Exception:
-                    _role = "user"
-                _ext = _ingestion.collect_external_sources(
-                    role=_role, titles=titles_, locations=locs_,
-                    keywords=kws_, existing_urls=existing_urls)
-                all_raw.extend(_ext)
-                _before = len(all_raw)
-                all_raw = _ingestion.deduplicate_raw(all_raw)
-                print(f"[search] Multi-source fuzzy dedup: {_before} -> {len(all_raw)} "
-                      f"canonical jobs (role={_role})")
-                _ingest_ok = True
-            except Exception as _ing_err:
-                print(f"[search] ingestion module unavailable ({_ing_err}); legacy dedup")
-
-            if not _ingest_ok:
-                # -- legacy exact company+title fingerprint dedup (fallback) --
-                def _norm_fp(_r):
-                    import re as _re_fp
-                    _tt = (_r.get("title") or "").lower()
-                    _cc = (_r.get("company") or "").lower()
-                    _tt = _re_fp.sub(r'[\(\[].*?[\)\]]', '', _tt)
-                    _tt = _re_fp.sub(r'[^a-z0-9 ]', ' ', _tt)
-                    _tt = _re_fp.sub(r'\s+', ' ', _tt).strip()
-                    _cc = _re_fp.sub(r'[^a-z0-9 ]', ' ', _cc)
-                    _cc = _re_fp.sub(r'\s+', ' ', _cc).strip()
-                    return f"{_cc}|{_tt}"
-                _seen_fps = set()
-                _deduped = []
-                for _r in all_raw:
-                    _fp = _norm_fp(_r)
-                    if _fp and _fp != "|" and _fp not in _seen_fps:
-                        _seen_fps.add(_fp)
-                        _deduped.append(_r)
-                print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
-                all_raw = _deduped
-            print(f"[search] Pre-filter: {len(all_raw)} jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} ATS boards + external sources")
-
-            if not all_raw:
-                return []
-
-            # -- Score against user CV + preferences --
-            # Cascading fallback: Gemini Flash (free) → Anthropic Haiku → rule-based heuristic
-
-            # Fetch CV summary + path from DB for richer scoring context
-            _cv_text = ""
-            _cv_path = ""
-            try:
-                _conn2 = database.get_db()
-                _prof2 = _conn2.execute(
-                    "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?",
-                    (user_id,)
-                ).fetchone()
-                _conn2.close()
-                _cv_text = (_prof2["cv_summary"] or "") if _prof2 else ""
-                _cv_path = _cv_file(user_id, (_prof2["cv_path"] or "") if _prof2 else "")
-            except Exception:
-                _cv_text = ""
-                _cv_path = ""
-
-            profile_text = (
-                f"Target roles: {', '.join(titles_[:4])}\n"
-                f"Key skills: {', '.join(kws_[:10])}\n"
-                f"Locations: {', '.join(locs_)} or Remote\n"
-                f"Seniority: Senior / Director / VP / Head-of"
-            )
-            if _cv_text:
-                profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
-
-            def _parse_scored_response(text_):
-                """Extract a valid JSON array of scored jobs from an AI response string."""
-                t = text_.strip()
-                if "```" in t:
-                    t = t.split("```")[1]
-                    if t.startswith("json"): t = t[4:]
-                si = t.find("[")
-                if si < 0:
-                    print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
-                    return []
-                ei = t.rfind("]")
-                parsed = None
-                if ei > si:
+                    # -- TechMap CSV(s) (reuse prefetched rows from discovery step) --
                     try:
-                        parsed = _js2.loads(t[si:ei+1])
-                    except Exception:
-                        parsed = None
-                if parsed is None:
-                    # Robust salvage: read complete objects one-by-one with
-                    # raw_decode. Handles truncation (output cut off), a missing
-                    # comma between objects, and trailing junk — we keep every
-                    # object that parses and stop at the first broken one, instead
-                    # of throwing away the whole batch.
-                    _frag = t[si:]
-                    _dec = _js2.JSONDecoder()
-                    parsed = []
-                    _k = _frag.find("{")
-                    while _k != -1:
+                        import csv as _csv, io as _io
+                        _tm_rows_src = _tm_prefetched_rows
+                        if _tm_rows_src is None:
+                            # Fallback: fetch again (role-aware categories) if discovery failed
+                            _tm_rows_src = []
+                            for _cat in _tm_categories:
+                                try:
+                                    _tm_url = f'https://raw.githubusercontent.com/mluggy/techmap/main/jobs/{_cat}.csv'
+                                    _tm_req = _ur2.Request(_tm_url, headers={"User-Agent": "JobHunter/1.0"})
+                                    with _ur2.urlopen(_tm_req, timeout=15) as _tm_resp:
+                                        _tm_text = _tm_resp.read().decode('utf-8', errors='replace')
+                                    _tm_rows_src.extend(list(_csv.DictReader(_io.StringIO(_tm_text))))
+                                except Exception as _cat_err2:
+                                    print(f"[search] TechMap fallback category '{_cat}' error: {_cat_err2}")
+                        _tm_count = 0
+                        for _row in _tm_rows_src:
+                            _tm_title = (_row.get('title') or '').strip()
+                            if _title_match(_tm_title):
+                                _tm_url_j = (_row.get('url') or '').strip()
+                                if _tm_url_j:
+                                    all_raw.append({"job_title": _tm_title, "company": _row.get('company',''),
+                                                    "location": _row.get('city',''), "url": _tm_url_j,
+                                                    "description": _tm_title, "source": "techmap"})
+                                    _tm_count += 1
+                        print(f"[search] TechMap CSV ({','.join(_tm_categories)}): {_tm_count} jobs matched")
+                    except Exception as _tme:
+                        print(f"[search] TechMap CSV error: {_tme}")
+
+                    # -- Comeet boards for Israeli companies --
+                    _comeet_slugs = {'monday': 'monday.com', 'ironsource': 'ironSource', 'gong': 'Gong',
+                                     'yotpo2': 'Yotpo', 'lightricks2': 'Lightricks'}
+                    for _cm_slug, _cm_name in _comeet_slugs.items():
                         try:
-                            _obj, _end = _dec.raw_decode(_frag, _k)
+                            _cm_url = f'https://www.comeet.co/careers/api/{_cm_slug}/positions'
+                            _cm_data = _get_json(_cm_url, timeout=12)
+                            if isinstance(_cm_data, list):
+                                for _cm_j in _cm_data:
+                                    _cm_t = _cm_j.get('name', '')
+                                    if _title_match(_cm_t):
+                                        _cm_loc = ''
+                                        if _cm_j.get('location'):
+                                            _cm_loc = _cm_j['location'].get('name', '') if isinstance(_cm_j['location'], dict) else str(_cm_j['location'])
+                                        all_raw.append({"job_title": _cm_t, "company": _cm_name,
+                                                        "location": _cm_loc, "url": _cm_j.get('url',''),
+                                                        "description": _cm_t, "source": "comeet"})
                         except Exception:
-                            break
-                        if isinstance(_obj, dict):
-                            parsed.append(_obj)
-                        _k = _frag.find("{", _end)
-                    if parsed:
-                        print(f"[search] ⚠️  Recovered {len(parsed)} job(s) from a malformed/truncated AI response")
-                    else:
-                        print(f"[search] ⚠️  AI response had no parseable JSON — skipping batch")
-                        return []
-                out = []
-                for j in parsed:
-                    if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 30:
-                        j.setdefault("match_score", j.get("candidate_score", 0))
-                        j.setdefault("found_date", today)
-                        j.setdefault("source", "greenhouse/lever")
-                        out.append(j)
-                return out
+                            pass
+                    print(f"[search] Comeet + SpeakNow queries done")
 
-            def _score_batch(batch_, profile_text_):
-                """Score a batch of jobs via Gemini → Anthropic → heuristic fallback."""
-                import os as _os_sb
-                _GEMINI_KEY = _os_sb.environ.get('GEMINI_API_KEY', '')
-
-                jobs_json_ = _js2.dumps(
-                    [{"job_title": j.get("job_title",""), "company": j.get("company",""),
-                      "location": j.get("location",""), "url": j.get("url",""),
-                      "description": (j.get("description") or ""),
-                      "full_description": (j.get("full_description") or j.get("description") or "")[:2000]}
-                     for j in batch_], ensure_ascii=False)
-
-                # Build a lean candidate context — CV PDF carries the full detail
-                _titles_str = profile_text_.split('\n')[0] if profile_text_ else ''
-                _locs_str_sc = next((line.replace('Locations: ','') for line in profile_text_.split('\n') if line.startswith('Locations:')), 'Israel')
-                _seniority_str = next((line.replace('Seniority: ','') for line in profile_text_.split('\n') if line.startswith('Seniority:')), 'Senior / Director')
-                # Include the CV text directly in the prompt so the non-Gemini
-                # paths (Anthropic / heuristic) actually see the candidate's
-                # background. Only the Gemini branch attaches the full PDF.
-                _cv_block = ""
-                if _cv_text:
-                    _cv_block = f"\nCandidate CV (summary / extracted text):\n{_cv_text[:4000]}\n"
-                _roles_hint = _titles_str.replace('Target roles: ', '').strip() or "(not specified — infer the candidate's field and role family from the CV below)"
-                prompt_ = (
-                    "You are a precise, role-agnostic job matching assistant. Your job is to match "
-                    "openings to THIS candidate based on their actual CV and stated target roles — "
-                    "regardless of profession. Do not assume any particular field.\n\n"
-                    "If the candidate's full CV is attached as a PDF, read it carefully. "
-                    "Otherwise use the CV text provided below.\n\n"
-                    f"Candidate target roles: {_roles_hint}\n"
-                    f"Target locations: {_locs_str_sc}\n"
-                    f"Seniority level: {_seniority_str}\n"
-                    f"{_cv_block}\n"
-                    f"Job listings (JSON):\n{jobs_json_}\n\n"
-                    "Score each job 0-100 using EXACTLY these four dimensions:\n\n"
-                    "TITLE / FUNCTION MATCH (0-30 pts):\n"
-                    "  27-30: Title matches the candidate's target roles, or their actual role/profession from the CV, exactly or near-exactly\n"
-                    "  15-26: Same field, adjacent or variant title (different specialization within the candidate's profession)\n"
-                    "   5-14: Related field where the candidate's experience is transferable\n"
-                    "   0-4:  Clearly a different profession from the candidate's background — EXCLUDE this job (do not return it)\n\n"
-                    "SENIORITY MATCH (0-20 pts):\n"
-                    "  17-20: Exact seniority level match\n"
-                    "  10-16: One level off (e.g. Senior vs Lead/Director)\n"
-                    "   0-9:  Major mismatch (junior/IC for a senior candidate, or executive for mid-level)\n\n"
-                    "LOCATION (0-20 pts):\n"
-                    "  17-20: Matches the candidate's target locations / Hybrid / explicitly Remote-friendly\n"
-                    "  10-16: Remote with no location restriction specified\n"
-                    "   0-9:  Requires relocation away from target locations, or on-site elsewhere\n\n"
-                    "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important dimension:\n"
-                    "  Read the job's required skills, years of experience, and responsibilities from full_description.\n"
-                    "  Cross-reference against the candidate's ACTUAL experience in the CV.\n"
-                    "  27-30: Candidate's background directly covers most stated requirements\n"
-                    "  15-26: Strong overlap with minor gaps\n"
-                    "   5-14: Moderate overlap — candidate could do the role but has notable experience gaps\n"
-                    "   0-4:  Fundamentally mismatched requirements (completely different background needed)\n\n"
-                    "EXCLUDE (score 0, omit from output entirely):\n"
-                    "  Any role in a profession or function clearly unrelated to the candidate's CV and "
-                    "  target roles. Determine the candidate's actual field FROM THE CV — do NOT assume "
-                    "  product management or any other specific field.\n\n"
-                    "Total score = Title + Seniority + Location + CV-Requirements. "
-                    "Include jobs scoring >= 30. "
-                    "For fit_reason: one sentence citing which dimensions scored highest and why. "
-                    "Return ONLY a valid JSON array with fields: "
-                    "job_title, company, location, url, publish_date (null if unknown), "
-                    "full_description (copy from input), description (2-3 sentences), "
-                    "candidate_score (0-100), fit_reason. No markdown."
-                )
-
-                # --- Try Gemini Flash first (free tier: 1500 req/day) ---
-                if _GEMINI_KEY:
+                    # -- SpeakNow careers --
                     try:
-                        import base64 as _b64_sc, os as _os_sc
-                        _parts = []
-                        # Attach full CV PDF if available — much richer context than text summary
-                        _cv_path_sc = _cv_path  # closure from outer scope
-                        if _cv_path_sc and _os_sc.path.exists(_cv_path_sc) and _cv_path_sc.lower().endswith('.pdf'):
-                            with open(_cv_path_sc, 'rb') as _cvf:
-                                _cv_b64 = _b64_sc.b64encode(_cvf.read()).decode()
-                            _parts.append({'inlineData': {'mimeType': 'application/pdf', 'data': _cv_b64}})
-                            print(f"[search] Scoring with CV PDF ({len(_cv_b64)//1024}KB b64)")
-                        else:
-                            print(f"[search] Scoring with CV text (no PDF at '{_cv_path_sc}')")
-                        _parts.append({'text': prompt_})
-                        _g_body = _js2.dumps({
-                            'contents': [{'parts': _parts}],
-                            'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 12288, 'thinkingConfig': {'thinkingBudget': 0}}
-                        }).encode('utf-8')
-                        _g_data = _js2.loads(_gemini_generate(
-                            _g_body, timeout=90, purpose="search_scoring", user_id=user_id))
-                        _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
-                        result_ = _parse_scored_response(_g_text)
-                        print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
-                        return result_
-                    except Exception as _ge:
-                        print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
-                        database.log_activity(user_id, "scoring_warning",
-                            f"Gemini scoring failed: {_ge}. Falling back to Anthropic.")
+                        _sn_req = _ur2.Request('https://speaknow.co/careers/', headers={"User-Agent": "JobHunter/1.0"})
+                        with _ur2.urlopen(_sn_req, timeout=12) as _sn_resp:
+                            _sn_html = _sn_resp.read().decode('utf-8', errors='replace')
+                        import re as _re_sn
+                        # Find job links on the careers page
+                        _sn_links = _re_sn.findall(r'href=["\'](https?://[^"\'>]*(?:career|job|position|apply)[^"\'>]*)["\'\s>]', _sn_html, _re_sn.IGNORECASE)
+                        for _sn_url in set(_sn_links[:10]):
+                            all_raw.append({"job_title": "SpeakNow Career Opportunity", "company": "SpeakNow",
+                                            "location": "Israel", "url": _sn_url,
+                                            "description": "Career opportunity at SpeakNow", "source": "speaknow"})
+                    except Exception as _sne:
+                        print(f"[search] SpeakNow error: {_sne}")
 
-                # --- Try Anthropic Claude Haiku (secondary; off unless SEARCH_USE_ANTHROPIC) ---
-                if ANTHROPIC_KEY and SEARCH_USE_ANTHROPIC:
-                    try:
-                        _a_body = _js2.dumps({"model": "claude-haiku-4-5", "max_tokens": 4096,
-                            "messages": [{"role": "user", "content": prompt_}]}).encode()
-                        _a_req = _ur2.Request("https://api.anthropic.com/v1/messages", data=_a_body, method="POST",
-                            headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
-                                     "content-type": "application/json"})
-                        with _ur2.urlopen(_a_req, timeout=60) as _a_resp:
-                            _a_result = _js2.loads(_a_resp.read())
-                        _a_text = ""
-                        for blk in _a_result.get("content", []):
-                            if blk.get("type") == "text": _a_text += blk["text"]
-                        result_ = _parse_scored_response(_a_text)
-                        print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
-                        return result_
-                    except Exception as _ae:
-                        import urllib.error as _ue
-                        _ae_body = ""
-                        if isinstance(_ae, _ue.HTTPError):
-                            try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:200]
-                            except Exception: pass
-                        print(f"[search] Anthropic scoring error: {_ae}{_ae_body} — falling back to heuristic")
-                        database.log_activity(user_id, "scoring_warning",
-                            f"Anthropic scoring failed: {_ae}. Falling back to keyword heuristic.")
-
-                # --- Rule-based heuristic (no API needed) ---
-                print(f"[search] ⚠️  HEURISTIC scoring {len(batch_)} jobs — AI keys missing or failed.")
-                print(f"[search]    To enable AI scoring, set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway.")
-                database.log_activity(user_id, "scoring_warning",
-                    "Using keyword heuristic scoring — results may be limited. "
-                    "Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway to enable AI scoring.")
-                out_ = []
-                for j in batch_:
-                    _t = (j.get("job_title") or "").lower()
-                    _desc = (j.get("full_description") or j.get("description") or "").lower()
-                    _loc = (j.get("location") or "").lower()
-                    _score = 0
-                    # Title match — use same 4-pass logic as collection filter
-                    if _title_match(j.get("job_title", "")):
-                        _score += 50
-                    # Keyword match in description (up to +20)
-                    for _kw in kws_:
-                        if _kw.lower() in _desc:
-                            _score += 5
-                        if _score >= 70:
-                            break
-                    # Location match
-                    for _lp in locs_:
-                        if _lp.lower() in _loc or "remote" in _loc or "israel" in _loc:
-                            _score += 10
-                            break
-                    if _score >= 30:
-                        _jc = dict(j)
-                        _jc["candidate_score"] = min(_score, 95)
-                        _jc["match_score"] = _jc["candidate_score"]
-                        _jc.setdefault("found_date", today)
-                        _jc.setdefault("source", j.get("source", "greenhouse/lever"))
-                        _jc.setdefault("fit_reason", "Matched by title and skills")
-                        _jc.setdefault("description", j.get("description") or j.get("job_title", ""))
-                        _jc.setdefault("publish_date", None)
-                        out_.append(_jc)
-                print(f"[search] Heuristic: {len(batch_)} -> {len(out_)} passed")
-                return out_
-
-            # Score all collected jobs in batches of 50
-            # Cap ATS jobs at 300 to avoid excessive API calls; supplemental sources are uncapped
-            _ats_sources = {'greenhouse', 'lever', 'smartrecruiters'}
-            _ats_jobs = [j for j in all_raw if j.get('source','') in _ats_sources]
-            _other_jobs = [j for j in all_raw if j.get('source','') not in _ats_sources]
-            ATS_CAP = 300
-            if len(_ats_jobs) > ATS_CAP:
-                print(f"[search] Capping ATS jobs {len(_ats_jobs)} -> {ATS_CAP} (keeping all {len(_other_jobs)} from other sources)")
-                _ats_jobs = _ats_jobs[:ATS_CAP]
-            _jobs_to_score = _ats_jobs + _other_jobs
-            print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other)")
-            scored_jobs = []
-            for batch_i in range(0, len(_jobs_to_score), 20):
-                batch = _jobs_to_score[batch_i:batch_i+20]
-                scored_jobs.extend(_score_batch(batch, profile_text))
-
-            # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
-            import os as _os_ws
-            _GEMINI_KEY_WS = _os_ws.environ.get('GEMINI_API_KEY', '')
-            if _GEMINI_KEY_WS:
-                # Build a rich candidate context for the search prompt
-                _seniority_hint = "VP / Director / Head-of / Senior" if any(
-                    w in " ".join(titles_).lower() for w in ("vp", "director", "head", "senior", "lead", "principal")
-                ) else "Senior / Lead"
-                _cv_snippet = _cv_text[:600].replace('\n', ' ') if _cv_text else ""
-                _locs_str = ", ".join(locs_[:2]) or "Israel"
-
-                def _ws_one_search(query_hint_):
-                    """Run one Gemini Google Search and return raw job dicts."""
-                    _ws_prompt = (
-                        f'Search for current job openings matching this query: "{query_hint_}". '
-                        f'STRONGLY PREFER direct application URLs on company career pages and applicant-tracking systems '
-                        f'(boards.greenhouse.io, jobs.lever.co, *.myworkdayjobs.com, comeet.com, smartrecruiters.com, '
-                        f'ashbyhq.com, and company "/careers" pages). These let the candidate apply directly. '
-                        f'AVOID job-board aggregator links (linkedin.com/jobs, indeed.com, glassdoor.com) unless no direct URL exists, '
-                        f'because those require manual application. Return the direct apply URL whenever possible. '
-                        f'Candidate context — seniority: {_seniority_hint}; location: {_locs_str}. '
-                        + (f'Background: {_cv_snippet} ' if _cv_snippet else '')
-                        + 'Return ONLY a JSON array of up to 8 results. '
-                        'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"2-3 sentences about the role"}'
-                    )
-                    try:
-                        _ws_body = _js2.dumps({
-                            'contents': [{'parts': [{'text': _ws_prompt}]}],
-                            'tools': [{'google_search': {}}],
-                            'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048, 'thinkingConfig': {'thinkingBudget': 0}}
-                        }).encode('utf-8')
-                        _ws_data = _js2.loads(_gemini_generate(
-                            _ws_body, timeout=60, purpose="web_search", user_id=user_id))
-                        _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
-                        _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
-                        if _ws_si >= 0 and _ws_ei > _ws_si:
-                            return [j for j in _js2.loads(_ws_text[_ws_si:_ws_ei+1])
-                                    if isinstance(j, dict) and j.get('url')]
-                    except Exception as _wse:
-                        print(f"[search] Web search error for '{query_hint_}': {_wse}")
-                    return []
-
-                # Build search queries: one per title + one broad seniority+location query
-                _ws_queries = [f'{t} jobs in {_locs_str}' for t in titles_[:4]]
-                # Strip seniority prefixes from titles to avoid "Senior Senior PM" duplication
-                _level_words = {'senior', 'sr', 'sr.', 'lead', 'principal', 'staff', 'vp', 'director', 'head', 'vice', 'president', 'chief'}
-                _clean_titles = [
-                    ' '.join(w for w in t.split() if w.lower() not in _level_words)
-                    for t in titles_[:2]
-                ]
-                _clean_titles = [t for t in _clean_titles if t.strip()]
-                if _clean_titles:
-                    _ws_queries.append(
-                        f'{_seniority_hint} {" OR ".join(_clean_titles)} '
-                        f'startup Israel site:greenhouse.io OR site:lever.co OR site:comeet.com OR site:myworkdayjobs.com'
-                    )
-
-                # Run all queries in parallel
-                _ws_raw = []
-                _ws_lock = _thr.Lock()
-                def _ws_worker(q_):
-                    results_ = _ws_one_search(q_)
-                    with _ws_lock:
-                        _ws_raw.extend(results_)
-
-                _ws_threads = [_thr.Thread(target=_ws_worker, args=(q,), daemon=True) for q in _ws_queries]
-                for _wt in _ws_threads: _wt.start()
-                for _wt in _ws_threads: _wt.join(timeout=70)
-
-                print(f"[search] Web search: {len(_ws_queries)} queries → {len(_ws_raw)} raw results")
-
-                # Pass web search results through the same AI scorer (not just blindly add them)
-                if _ws_raw:
-                    # Normalise field names to match what _score_batch expects
-                    for _wsj in _ws_raw:
-                        _wsj.setdefault('job_title', _wsj.get('title', ''))
-                        _wsj.setdefault('full_description', _wsj.get('description', ''))
-                        _wsj['source'] = 'web_search'
-                    _ws_scored = _score_batch(_ws_raw, profile_text)
-                    for _wsj in _ws_scored:
-                        _wsj.setdefault('fit_reason', 'Found via Google Search')
-                        _wsj.setdefault('found_date', today)
-                    scored_jobs.extend(_ws_scored)
-                    print(f"[search] Web search: {len(_ws_raw)} raw → {len(_ws_scored)} passed scoring")
-            else:
-                print("[search] Gemini web search skipped — no GEMINI_API_KEY")
-
-
-            # ── Track B: Description-first scoring (activates when Track A < 5 results) ──
-            if len(scored_jobs) < 5:
-                print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
-                import os as _os_tb
-                _TB_GEMINI = _os_tb.environ.get('GEMINI_API_KEY', '')
-                _TB_ANTH   = (_os_tb.environ.get('ANTHROPIC_API_KEY', '') if SEARCH_USE_ANTHROPIC else '')
-                if _TB_GEMINI or _TB_ANTH:
-                    # Collect jobs with meaningful descriptions that Track A didn't already return
-                    _scored_urls = {j.get('url','') for j in scored_jobs}
-                    _trackb_pool = [
-                        j for j in all_raw
-                        if len(j.get('full_description') or j.get('description','')) > 100
-                        and j.get('url','') not in _scored_urls
+                    # -- Sparkhire careers (best-effort) --
+                    _SPARKHIRE_COMPANIES = [
+                        ('hibob', 'HiBob'), ('monday', 'monday.com'), ('fiverr', 'Fiverr'),
+                        ('rapyd', 'Rapyd'), ('gong', 'Gong'), ('lemonade', 'Lemonade'),
                     ]
-                    _trackb_pool = _trackb_pool[:150]  # cap to control API cost
-                    print(f"[search] Track B pool: {len(_trackb_pool)} jobs with descriptions")
+                    _sparkhire_count = 0
+                    for _sh_slug, _sh_name in _SPARKHIRE_COMPANIES:
+                        try:
+                            _sh_req = _ur2.Request(f"https://candidate.sparkhire.com/users/{_sh_slug}/jobs", headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
+                            with _ur2.urlopen(_sh_req, timeout=10) as _sh_resp:
+                                _sh_html = _sh_resp.read().decode('utf-8', errors='replace')
+                            import re as _re_sh
+                            _sh_jobs = _re_sh.findall(r'<a[^>]+href="([^"]+)"[^>]*>\s*<[^>]+>([^<]{5,120})</[^>]+>\s*</a>', _sh_html)
+                            for _sh_href, _sh_title in _sh_jobs[:15]:
+                                _t = _sh_title.strip()
+                                if _title_match(_t):
+                                    _u = _sh_href if _sh_href.startswith('http') else f"https://candidate.sparkhire.com{_sh_href}"
+                                    all_raw.append({"title": _t, "company": _sh_name, "location": "", "url": _u, "description": "", "source": "sparkhire"})
+                                    _sparkhire_count += 1
+                        except Exception:
+                            pass
+                    print(f"[search] Sparkhire: {_sparkhire_count} jobs matched")
 
-                    if _trackb_pool:
-                        def _score_batch_desc(batch_d_, profile_text_d_):
-                            """Score jobs primarily on description content vs CV."""
-                            _batch_indexed = [
-                                {"id": _bi, "title": _bj.get("job_title",""),
-                                 "company": _bj.get("company",""),
-                                 "location": _bj.get("location",""),
-                                 "description": (_bj.get("full_description") or _bj.get("description",""))[:2500]}
-                                for _bi, _bj in enumerate(batch_d_)
-                            ]
-                            _batch_json_d = _js2.dumps(_batch_indexed, ensure_ascii=False)
-                            _titles_d = profile_text_d_.split('\n')[0] if profile_text_d_ else ''
-                            _locs_d   = next((ln.replace('Locations: ','') for ln in profile_text_d_.split('\n') if ln.startswith('Locations:')), 'Israel')
-                            _prompt_d = (
-                                "You are evaluating job openings for a senior product candidate.\n"
-                                "The candidate's CV text is provided below — use it as the primary signal.\n\n"
-                                f"Candidate profile:\n{profile_text_d_}\n\n"
-                                "Score each job 0-100 on these FOUR dimensions (description is the main signal):\n\n"
-                                "TITLE/ROLE FIT (0-10 pts — loose gate):\n"
-                                "  8-10: Direct match to target role or clear leadership adjacent\n"
-                                "   4-7: Adjacent role worth exploring based on description\n"
-                                "   0-3: Clearly wrong function (exclude)\n\n"
-                                "SENIORITY MATCH (0-20 pts):\n"
-                                "  17-20: Exact seniority match\n"
-                                "  10-16: One level off\n"
-                                "   0-9:  Major mismatch\n\n"
-                                "LOCATION (0-20 pts):\n"
-                                "  17-20: Israel / Tel Aviv / Hybrid / Remote-friendly\n"
-                                "  10-16: Remote, no restriction\n"
-                                "   0-9:  Requires relocation outside Israel\n\n"
-                                "DESCRIPTION vs CV MATCH (0-50 pts — PRIMARY SIGNAL):\n"
-                                "  Read the job description carefully. Compare required skills,\n"
-                                "  responsibilities, and experience to the candidate's background.\n"
-                                "  45-50: Near-perfect match — candidate's background directly fits most requirements\n"
-                                "  30-44: Strong overlap with minor gaps\n"
-                                "  15-29: Moderate overlap — candidate could stretch into this role\n"
-                                "   0-14: Significant mismatch in required background\n\n"
-                                "EXCLUDE only clearly wrong roles: pure engineering IC, quota-sales, finance/legal/HR. Product-adjacent leadership is OK.\n\n"
-                                "Include jobs scoring >= 25 (permissive — this is a last-resort fallback). "
-                                "Return ONLY a JSON array. Each item: "
-                                "{id (from input), score (0-100), reason (one sentence why)}\n\n"
-                                f"Jobs:\n{_batch_json_d}"
+                    # -- Workday tenants (public JSON search API) --
+                    _WORKDAY_TENANTS = [
+                        ("nvidia", "wd5", "nvidiaexternal", "NVIDIA"),
+                        ("ibm", "wd1", "IBM", "IBM"),
+                        ("ebay", "wd1", "ebay", "eBay"),
+                        ("paypal", "wd1", "paypal", "PayPal"),
+                        ("intel", "wd1", "External", "Intel"),
+                        ("hpe", "wd1", "Jobsatyou", "HPE"),
+                        ("vmware", "wd1", "VMware", "VMware"),
+                        ("accenture", "wd3", "AccentureCareers", "Accenture"),
+                        ("salesforce", "wd12", "External_Career_Site", "Salesforce"),
+                        ("dell", "wd1", "External", "Dell"),
+                    ]
+                    _workday_count = 0
+                    for _wd_t, _wd_s, _wd_st, _wd_n in _WORKDAY_TENANTS:
+                        try:
+                            _wd_url = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com/wday/cxs/{_wd_t}/{_wd_st}/jobs"
+                            _wd_body = _js2.dumps({"limit": 20, "offset": 0, "searchText": ""}).encode('utf-8')
+                            _wd_req = _ur2.Request(_wd_url, data=_wd_body, headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0 JobHunter/1.0"})
+                            with _ur2.urlopen(_wd_req, timeout=12) as _wd_resp:
+                                _wd_data = _js2.loads(_wd_resp.read().decode('utf-8', errors='replace'))
+                            for _wd_j in (_wd_data.get("jobPostings") or [])[:20]:
+                                _wd_tt = (_wd_j.get("title") or "").strip()
+                                if _title_match(_wd_tt):
+                                    _wd_p = _wd_j.get("externalPath") or ""
+                                    _wd_full = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com{_wd_p}" if _wd_p else ""
+                                    all_raw.append({"title": _wd_tt, "company": _wd_n, "location": _wd_j.get("locationsText","") or "", "url": _wd_full, "description": "", "source": "workday"})
+                                    _workday_count += 1
+                        except Exception:
+                            pass
+                    print(f"[search] Workday: {_workday_count} jobs matched")
+
+                    # -- LinkedIn public guest endpoint --
+                    _linkedin_count = 0
+                    import urllib.parse as _urp2
+                    for _li_kw in titles_[:5]:
+                        try:
+                            _li_q = _urp2.quote(_li_kw)
+                            _li_l = _urp2.quote("Israel")
+                            _li_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={_li_q}&location={_li_l}&start=0"
+                            _li_req = _ur2.Request(_li_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+                            with _ur2.urlopen(_li_req, timeout=12) as _li_resp:
+                                _li_html = _li_resp.read().decode('utf-8', errors='replace')
+                            import re as _re_li
+                            _li_cards = _re_li.findall(r'<a[^>]+class="base-card__full-link[^"]*"[^>]+href="([^"?]+)', _li_html)
+                            _li_titles = _re_li.findall(r'<h3[^>]+class="base-search-card__title"[^>]*>\s*([^<]+?)\s*</h3>', _li_html)
+                            _li_comps = _re_li.findall(r'<h4[^>]+class="base-search-card__subtitle"[^>]*>\s*<a[^>]*>\s*([^<]+?)\s*</a>', _li_html)
+                            _li_locs = _re_li.findall(r'<span[^>]+class="job-search-card__location"[^>]*>\s*([^<]+?)\s*</span>', _li_html)
+                            for _li_i in range(min(20, len(_li_cards), len(_li_titles))):
+                                _li_t = _li_titles[_li_i].strip()
+                                if _title_match(_li_t):
+                                    _li_c = _li_comps[_li_i].strip() if _li_i < len(_li_comps) else ""
+                                    _li_lc = _li_locs[_li_i].strip() if _li_i < len(_li_locs) else ""
+                                    all_raw.append({"title": _li_t, "company": _li_c, "location": _li_lc, "url": _li_cards[_li_i], "description": "", "source": "linkedin"})
+                                    _linkedin_count += 1
+                        except Exception:
+                            pass
+                    print(f"[search] LinkedIn guest: {_linkedin_count} jobs matched")
+
+                    # -- Indeed (best-effort) --
+                    _indeed_count = 0
+                    for _in_kw in titles_[:3]:
+                        try:
+                            _in_q = _urp2.quote(_in_kw)
+                            _in_url = f"https://il.indeed.com/jobs?q={_in_q}&l=Israel&fromage=7&sort=date"
+                            _in_req = _ur2.Request(_in_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+                            with _ur2.urlopen(_in_req, timeout=12) as _in_resp:
+                                _in_html = _in_resp.read().decode('utf-8', errors='replace')
+                            import re as _re_in
+                            _in_items = _re_in.findall(r'data-jk="([a-z0-9]+)"[^>]*>[\s\S]{0,2000}?title="([^"]{5,200})"', _in_html)
+                            for _in_jk, _in_tt in _in_items[:15]:
+                                _in_t = _in_tt.strip()
+                                if _title_match(_in_t):
+                                    all_raw.append({"title": _in_t, "company": "", "location": "", "url": f"https://il.indeed.com/viewjob?jk={_in_jk}", "description": "", "source": "indeed"})
+                                    _indeed_count += 1
+                        except Exception:
+                            pass
+                    print(f"[search] Indeed: {_indeed_count} jobs matched")
+
+                    # ── Multi-source ingestion + cross-platform fuzzy dedup ──────────
+                    # New pipeline (ingestion/): pulls Big-Tech internal endpoints (free,
+                    # everyone) + paid aggregators/scrapers (admin only), then fuzzy-merges
+                    # the WHOLE union so a role mirrored across a career page + LinkedIn +
+                    # an aggregator reaches the AI scorer ONCE. Falls back to the legacy
+                    # exact-fingerprint dedup if the package is unavailable (never fatal).
+                    _ingest_ok = False
+                    try:
+                        import ingestion as _ingestion
+                        # role gates the paid sources (admin-only)
+                        _role = "user"
+                        try:
+                            _conn_r = database.get_db()
+                            try:
+                                _rr = _conn_r.execute(
+                                    "SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+                                _conn_r.close()
+                                _role = (_rr["role"] if _rr and _rr["role"] else "user")
+                            finally:
+                                _conn_r.close()
+                        except Exception:
+                            _role = "user"
+                        _ext = _ingestion.collect_external_sources(
+                            role=_role, titles=titles_, locations=locs_,
+                            keywords=kws_, existing_urls=existing_urls)
+                        all_raw.extend(_ext)
+                        _before = len(all_raw)
+                        all_raw = _ingestion.deduplicate_raw(all_raw)
+                        print(f"[search] Multi-source fuzzy dedup: {_before} -> {len(all_raw)} "
+                              f"canonical jobs (role={_role})")
+                        _ingest_ok = True
+                    except Exception as _ing_err:
+                        print(f"[search] ingestion module unavailable ({_ing_err}); legacy dedup")
+
+                    if not _ingest_ok:
+                        # -- legacy exact company+title fingerprint dedup (fallback) --
+                        def _norm_fp(_r):
+                            import re as _re_fp
+                            _tt = (_r.get("title") or "").lower()
+                            _cc = (_r.get("company") or "").lower()
+                            _tt = _re_fp.sub(r'[\(\[].*?[\)\]]', '', _tt)
+                            _tt = _re_fp.sub(r'[^a-z0-9 ]', ' ', _tt)
+                            _tt = _re_fp.sub(r'\s+', ' ', _tt).strip()
+                            _cc = _re_fp.sub(r'[^a-z0-9 ]', ' ', _cc)
+                            _cc = _re_fp.sub(r'\s+', ' ', _cc).strip()
+                            return f"{_cc}|{_tt}"
+                        _seen_fps = set()
+                        _deduped = []
+                        for _r in all_raw:
+                            _fp = _norm_fp(_r)
+                            if _fp and _fp != "|" and _fp not in _seen_fps:
+                                _seen_fps.add(_fp)
+                                _deduped.append(_r)
+                        print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
+                        all_raw = _deduped
+                    print(f"[search] Pre-filter: {len(all_raw)} jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} ATS boards + external sources")
+
+                    if not all_raw:
+                        return []
+
+                    # -- Score against user CV + preferences --
+                    # Cascading fallback: Gemini Flash (free) → Anthropic Haiku → rule-based heuristic
+
+                    # Fetch CV summary + path from DB for richer scoring context
+                    _cv_text = ""
+                    _cv_path = ""
+                    try:
+                        _conn2 = database.get_db()
+                        try:
+                            _prof2 = _conn2.execute(
+                                "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?",
+                                (user_id,)
+                            ).fetchone()
+                            _conn2.close()
+                            _cv_text = (_prof2["cv_summary"] or "") if _prof2 else ""
+                            _cv_path = _cv_file(user_id, (_prof2["cv_path"] or "") if _prof2 else "")
+                        finally:
+                            _conn2.close()
+                    except Exception:
+                        _cv_text = ""
+                        _cv_path = ""
+
+                    profile_text = (
+                        f"Target roles: {', '.join(titles_[:4])}\n"
+                        f"Key skills: {', '.join(kws_[:10])}\n"
+                        f"Locations: {', '.join(locs_)} or Remote\n"
+                        f"Seniority: Senior / Director / VP / Head-of"
+                    )
+                    if _cv_text:
+                        profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
+
+                    def _parse_scored_response(text_):
+                        """Extract a valid JSON array of scored jobs from an AI response string."""
+                        t = text_.strip()
+                        if "```" in t:
+                            t = t.split("```")[1]
+                            if t.startswith("json"): t = t[4:]
+                        si = t.find("[")
+                        if si < 0:
+                            print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
+                            return []
+                        ei = t.rfind("]")
+                        parsed = None
+                        if ei > si:
+                            try:
+                                parsed = _js2.loads(t[si:ei+1])
+                            except Exception:
+                                parsed = None
+                        if parsed is None:
+                            # Robust salvage: read complete objects one-by-one with
+                            # raw_decode. Handles truncation (output cut off), a missing
+                            # comma between objects, and trailing junk — we keep every
+                            # object that parses and stop at the first broken one, instead
+                            # of throwing away the whole batch.
+                            _frag = t[si:]
+                            _dec = _js2.JSONDecoder()
+                            parsed = []
+                            _k = _frag.find("{")
+                            while _k != -1:
+                                try:
+                                    _obj, _end = _dec.raw_decode(_frag, _k)
+                                except Exception:
+                                    break
+                                if isinstance(_obj, dict):
+                                    parsed.append(_obj)
+                                _k = _frag.find("{", _end)
+                            if parsed:
+                                print(f"[search] ⚠️  Recovered {len(parsed)} job(s) from a malformed/truncated AI response")
+                            else:
+                                print(f"[search] ⚠️  AI response had no parseable JSON — skipping batch")
+                                return []
+                        out = []
+                        for j in parsed:
+                            if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 30:
+                                j.setdefault("match_score", j.get("candidate_score", 0))
+                                j.setdefault("found_date", today)
+                                j.setdefault("source", "greenhouse/lever")
+                                out.append(j)
+                        return out
+
+                    def _score_batch(batch_, profile_text_):
+                        """Score a batch of jobs via Gemini → Anthropic → heuristic fallback."""
+                        import os as _os_sb
+                        _GEMINI_KEY = _os_sb.environ.get('GEMINI_API_KEY', '')
+
+                        jobs_json_ = _js2.dumps(
+                            [{"job_title": j.get("job_title",""), "company": j.get("company",""),
+                              "location": j.get("location",""), "url": j.get("url",""),
+                              "description": (j.get("description") or ""),
+                              "full_description": (j.get("full_description") or j.get("description") or "")[:2000]}
+                             for j in batch_], ensure_ascii=False)
+
+                        # Build a lean candidate context — CV PDF carries the full detail
+                        _titles_str = profile_text_.split('\n')[0] if profile_text_ else ''
+                        _locs_str_sc = next((line.replace('Locations: ','') for line in profile_text_.split('\n') if line.startswith('Locations:')), 'Israel')
+                        _seniority_str = next((line.replace('Seniority: ','') for line in profile_text_.split('\n') if line.startswith('Seniority:')), 'Senior / Director')
+                        # Include the CV text directly in the prompt so the non-Gemini
+                        # paths (Anthropic / heuristic) actually see the candidate's
+                        # background. Only the Gemini branch attaches the full PDF.
+                        _cv_block = ""
+                        if _cv_text:
+                            _cv_block = f"\nCandidate CV (summary / extracted text):\n{_cv_text[:4000]}\n"
+                        _roles_hint = _titles_str.replace('Target roles: ', '').strip() or "(not specified — infer the candidate's field and role family from the CV below)"
+                        prompt_ = (
+                            "You are a precise, role-agnostic job matching assistant. Your job is to match "
+                            "openings to THIS candidate based on their actual CV and stated target roles — "
+                            "regardless of profession. Do not assume any particular field.\n\n"
+                            "If the candidate's full CV is attached as a PDF, read it carefully. "
+                            "Otherwise use the CV text provided below.\n\n"
+                            f"Candidate target roles: {_roles_hint}\n"
+                            f"Target locations: {_locs_str_sc}\n"
+                            f"Seniority level: {_seniority_str}\n"
+                            f"{_cv_block}\n"
+                            f"Job listings (JSON):\n{jobs_json_}\n\n"
+                            "Score each job 0-100 using EXACTLY these four dimensions:\n\n"
+                            "TITLE / FUNCTION MATCH (0-30 pts):\n"
+                            "  27-30: Title matches the candidate's target roles, or their actual role/profession from the CV, exactly or near-exactly\n"
+                            "  15-26: Same field, adjacent or variant title (different specialization within the candidate's profession)\n"
+                            "   5-14: Related field where the candidate's experience is transferable\n"
+                            "   0-4:  Clearly a different profession from the candidate's background — EXCLUDE this job (do not return it)\n\n"
+                            "SENIORITY MATCH (0-20 pts):\n"
+                            "  17-20: Exact seniority level match\n"
+                            "  10-16: One level off (e.g. Senior vs Lead/Director)\n"
+                            "   0-9:  Major mismatch (junior/IC for a senior candidate, or executive for mid-level)\n\n"
+                            "LOCATION (0-20 pts):\n"
+                            "  17-20: Matches the candidate's target locations / Hybrid / explicitly Remote-friendly\n"
+                            "  10-16: Remote with no location restriction specified\n"
+                            "   0-9:  Requires relocation away from target locations, or on-site elsewhere\n\n"
+                            "CV vs JOB REQUIREMENTS MATCH (0-30 pts) — most important dimension:\n"
+                            "  Read the job's required skills, years of experience, and responsibilities from full_description.\n"
+                            "  Cross-reference against the candidate's ACTUAL experience in the CV.\n"
+                            "  27-30: Candidate's background directly covers most stated requirements\n"
+                            "  15-26: Strong overlap with minor gaps\n"
+                            "   5-14: Moderate overlap — candidate could do the role but has notable experience gaps\n"
+                            "   0-4:  Fundamentally mismatched requirements (completely different background needed)\n\n"
+                            "EXCLUDE (score 0, omit from output entirely):\n"
+                            "  Any role in a profession or function clearly unrelated to the candidate's CV and "
+                            "  target roles. Determine the candidate's actual field FROM THE CV — do NOT assume "
+                            "  product management or any other specific field.\n\n"
+                            "Total score = Title + Seniority + Location + CV-Requirements. "
+                            "Include jobs scoring >= 30. "
+                            "For fit_reason: one sentence citing which dimensions scored highest and why. "
+                            "Return ONLY a valid JSON array with fields: "
+                            "job_title, company, location, url, publish_date (null if unknown), "
+                            "full_description (copy from input), description (2-3 sentences), "
+                            "candidate_score (0-100), fit_reason. No markdown."
+                        )
+
+                        # --- Try Gemini Flash first (free tier: 1500 req/day) ---
+                        if _GEMINI_KEY:
+                            try:
+                                import base64 as _b64_sc, os as _os_sc
+                                _parts = []
+                                # Attach full CV PDF if available — much richer context than text summary
+                                _cv_path_sc = _cv_path  # closure from outer scope
+                                if _cv_path_sc and _os_sc.path.exists(_cv_path_sc) and _cv_path_sc.lower().endswith('.pdf'):
+                                    with open(_cv_path_sc, 'rb') as _cvf:
+                                        _cv_b64 = _b64_sc.b64encode(_cvf.read()).decode()
+                                    _parts.append({'inlineData': {'mimeType': 'application/pdf', 'data': _cv_b64}})
+                                    print(f"[search] Scoring with CV PDF ({len(_cv_b64)//1024}KB b64)")
+                                else:
+                                    print(f"[search] Scoring with CV text (no PDF at '{_cv_path_sc}')")
+                                _parts.append({'text': prompt_})
+                                _g_body = _js2.dumps({
+                                    'contents': [{'parts': _parts}],
+                                    'generationConfig': {'temperature': 0.2, 'maxOutputTokens': 12288, 'thinkingConfig': {'thinkingBudget': 0}}
+                                }).encode('utf-8')
+                                _g_data = _js2.loads(_gemini_generate(
+                                    _g_body, timeout=90, purpose="search_scoring", user_id=user_id))
+                                _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
+                                result_ = _parse_scored_response(_g_text)
+                                print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
+                                return result_
+                            except Exception as _ge:
+                                print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
+                                database.log_activity(user_id, "scoring_warning",
+                                    f"Gemini scoring failed: {_ge}. Falling back to Anthropic.")
+
+                        # --- Try Anthropic Claude Haiku (secondary; off unless SEARCH_USE_ANTHROPIC) ---
+                        if ANTHROPIC_KEY and SEARCH_USE_ANTHROPIC:
+                            try:
+                                _a_body = _js2.dumps({"model": "claude-haiku-4-5", "max_tokens": 4096,
+                                    "messages": [{"role": "user", "content": prompt_}]}).encode()
+                                _a_req = _ur2.Request("https://api.anthropic.com/v1/messages", data=_a_body, method="POST",
+                                    headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
+                                             "content-type": "application/json"})
+                                with _ur2.urlopen(_a_req, timeout=60) as _a_resp:
+                                    _a_result = _js2.loads(_a_resp.read())
+                                _a_text = ""
+                                for blk in _a_result.get("content", []):
+                                    if blk.get("type") == "text": _a_text += blk["text"]
+                                result_ = _parse_scored_response(_a_text)
+                                print(f"[search] Anthropic scored {len(batch_)} -> {len(result_)} passed")
+                                return result_
+                            except Exception as _ae:
+                                import urllib.error as _ue
+                                _ae_body = ""
+                                if isinstance(_ae, _ue.HTTPError):
+                                    try: _ae_body = " | " + _ae.read().decode("utf-8", errors="replace")[:200]
+                                    except Exception: pass
+                                print(f"[search] Anthropic scoring error: {_ae}{_ae_body} — falling back to heuristic")
+                                database.log_activity(user_id, "scoring_warning",
+                                    f"Anthropic scoring failed: {_ae}. Falling back to keyword heuristic.")
+
+                        # --- Rule-based heuristic (no API needed) ---
+                        print(f"[search] ⚠️  HEURISTIC scoring {len(batch_)} jobs — AI keys missing or failed.")
+                        print(f"[search]    To enable AI scoring, set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway.")
+                        database.log_activity(user_id, "scoring_warning",
+                            "Using keyword heuristic scoring — results may be limited. "
+                            "Set GEMINI_API_KEY or ANTHROPIC_API_KEY in Railway to enable AI scoring.")
+                        out_ = []
+                        for j in batch_:
+                            _t = (j.get("job_title") or "").lower()
+                            _desc = (j.get("full_description") or j.get("description") or "").lower()
+                            _loc = (j.get("location") or "").lower()
+                            _score = 0
+                            # Title match — use same 4-pass logic as collection filter
+                            if _title_match(j.get("job_title", "")):
+                                _score += 50
+                            # Keyword match in description (up to +20)
+                            for _kw in kws_:
+                                if _kw.lower() in _desc:
+                                    _score += 5
+                                if _score >= 70:
+                                    break
+                            # Location match
+                            for _lp in locs_:
+                                if _lp.lower() in _loc or "remote" in _loc or "israel" in _loc:
+                                    _score += 10
+                                    break
+                            if _score >= 30:
+                                _jc = dict(j)
+                                _jc["candidate_score"] = min(_score, 95)
+                                _jc["match_score"] = _jc["candidate_score"]
+                                _jc.setdefault("found_date", today)
+                                _jc.setdefault("source", j.get("source", "greenhouse/lever"))
+                                _jc.setdefault("fit_reason", "Matched by title and skills")
+                                _jc.setdefault("description", j.get("description") or j.get("job_title", ""))
+                                _jc.setdefault("publish_date", None)
+                                out_.append(_jc)
+                        print(f"[search] Heuristic: {len(batch_)} -> {len(out_)} passed")
+                        return out_
+
+                    # Score all collected jobs in batches of 50
+                    # Cap ATS jobs at 300 to avoid excessive API calls; supplemental sources are uncapped
+                    _ats_sources = {'greenhouse', 'lever', 'smartrecruiters'}
+                    _ats_jobs = [j for j in all_raw if j.get('source','') in _ats_sources]
+                    _other_jobs = [j for j in all_raw if j.get('source','') not in _ats_sources]
+                    ATS_CAP = 300
+                    if len(_ats_jobs) > ATS_CAP:
+                        print(f"[search] Capping ATS jobs {len(_ats_jobs)} -> {ATS_CAP} (keeping all {len(_other_jobs)} from other sources)")
+                        _ats_jobs = _ats_jobs[:ATS_CAP]
+                    _jobs_to_score = _ats_jobs + _other_jobs
+                    print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other)")
+                    scored_jobs = []
+                    for batch_i in range(0, len(_jobs_to_score), 20):
+                        batch = _jobs_to_score[batch_i:batch_i+20]
+                        scored_jobs.extend(_score_batch(batch, profile_text))
+
+                    # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
+                    import os as _os_ws
+                    _GEMINI_KEY_WS = _os_ws.environ.get('GEMINI_API_KEY', '')
+                    if _GEMINI_KEY_WS:
+                        # Build a rich candidate context for the search prompt
+                        _seniority_hint = "VP / Director / Head-of / Senior" if any(
+                            w in " ".join(titles_).lower() for w in ("vp", "director", "head", "senior", "lead", "principal")
+                        ) else "Senior / Lead"
+                        _cv_snippet = _cv_text[:600].replace('\n', ' ') if _cv_text else ""
+                        _locs_str = ", ".join(locs_[:2]) or "Israel"
+
+                        def _ws_one_search(query_hint_):
+                            """Run one Gemini Google Search and return raw job dicts."""
+                            _ws_prompt = (
+                                f'Search for current job openings matching this query: "{query_hint_}". '
+                                f'STRONGLY PREFER direct application URLs on company career pages and applicant-tracking systems '
+                                f'(boards.greenhouse.io, jobs.lever.co, *.myworkdayjobs.com, comeet.com, smartrecruiters.com, '
+                                f'ashbyhq.com, and company "/careers" pages). These let the candidate apply directly. '
+                                f'AVOID job-board aggregator links (linkedin.com/jobs, indeed.com, glassdoor.com) unless no direct URL exists, '
+                                f'because those require manual application. Return the direct apply URL whenever possible. '
+                                f'Candidate context — seniority: {_seniority_hint}; location: {_locs_str}. '
+                                + (f'Background: {_cv_snippet} ' if _cv_snippet else '')
+                                + 'Return ONLY a JSON array of up to 8 results. '
+                                'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"2-3 sentences about the role"}'
+                            )
+                            try:
+                                _ws_body = _js2.dumps({
+                                    'contents': [{'parts': [{'text': _ws_prompt}]}],
+                                    'tools': [{'google_search': {}}],
+                                    'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 2048, 'thinkingConfig': {'thinkingBudget': 0}}
+                                }).encode('utf-8')
+                                _ws_data = _js2.loads(_gemini_generate(
+                                    _ws_body, timeout=60, purpose="web_search", user_id=user_id))
+                                _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                                _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
+                                if _ws_si >= 0 and _ws_ei > _ws_si:
+                                    return [j for j in _js2.loads(_ws_text[_ws_si:_ws_ei+1])
+                                            if isinstance(j, dict) and j.get('url')]
+                            except Exception as _wse:
+                                print(f"[search] Web search error for '{query_hint_}': {_wse}")
+                            return []
+
+                        # Build search queries: one per title + one broad seniority+location query
+                        _ws_queries = [f'{t} jobs in {_locs_str}' for t in titles_[:4]]
+                        # Strip seniority prefixes from titles to avoid "Senior Senior PM" duplication
+                        _level_words = {'senior', 'sr', 'sr.', 'lead', 'principal', 'staff', 'vp', 'director', 'head', 'vice', 'president', 'chief'}
+                        _clean_titles = [
+                            ' '.join(w for w in t.split() if w.lower() not in _level_words)
+                            for t in titles_[:2]
+                        ]
+                        _clean_titles = [t for t in _clean_titles if t.strip()]
+                        if _clean_titles:
+                            _ws_queries.append(
+                                f'{_seniority_hint} {" OR ".join(_clean_titles)} '
+                                f'startup Israel site:greenhouse.io OR site:lever.co OR site:comeet.com OR site:myworkdayjobs.com'
                             )
 
-                            def _parse_desc_resp(txt_):
-                                t = txt_.strip()
-                                if "```" in t:
-                                    t = t.split("```")[1]
-                                    if t.startswith("json"): t = t[4:]
-                                si = t.find("[");  ei = t.rfind("]")
-                                if si < 0 or ei <= si: return []
-                                try:
-                                    return _js2.loads(t[si:ei+1])
-                                except Exception:
-                                    return []
+                        # Run all queries in parallel
+                        _ws_raw = []
+                        _ws_lock = _thr.Lock()
+                        def _ws_worker(q_):
+                            results_ = _ws_one_search(q_)
+                            with _ws_lock:
+                                _ws_raw.extend(results_)
 
-                            def _apply_desc_scores(scored_ids_, batch_d2_, reason_default="Matched by description"):
-                                # coerce IDs to int — AI often returns string "0" not integer 0
-                                _id_map_d = {}
-                                for _item_d in scored_ids_:
-                                    if isinstance(_item_d, dict) and "score" in _item_d:
-                                        try: _id_map_d[int(_item_d["id"])] = _item_d
-                                        except (KeyError, ValueError, TypeError): pass
-                                out_d_ = []
-                                for _di, _dj in enumerate(batch_d2_):
-                                    _ds = _id_map_d.get(_di)
-                                    # threshold 25 — permissive, Track B is last-resort fallback
-                                    if _ds and _ds.get("score", 0) >= 25:
-                                        _jc_d = dict(_dj)
-                                        _jc_d["candidate_score"] = min(_ds["score"], 95)
-                                        _jc_d["match_score"]     = _jc_d["candidate_score"]
-                                        _jc_d["fit_reason"]      = _ds.get("reason", reason_default)
-                                        _jc_d["source"]          = "description_match"
-                                        _jc_d.setdefault("found_date", today)
-                                        _jc_d.setdefault("publish_date", None)
-                                        _jc_d.setdefault("description", _dj.get("description") or _dj.get("job_title",""))
-                                        out_d_.append(_jc_d)
-                                return out_d_
+                        _ws_threads = [_thr.Thread(target=_ws_worker, args=(q,), daemon=True) for q in _ws_queries]
+                        for _wt in _ws_threads: _wt.start()
+                        for _wt in _ws_threads: _wt.join(timeout=70)
 
-                            _out_d = []
-                            _ai_d_used = False
+                        print(f"[search] Web search: {len(_ws_queries)} queries → {len(_ws_raw)} raw results")
 
-                            if _TB_GEMINI:
-                                try:
-                                    import base64 as _b64_d, os as _os_d2
-                                    _parts_d = [{"text": _prompt_d}]
-                                    if _cv_path:
-                                        try:
-                                            with open(_cv_path, "rb") as _cvf_d:
-                                                _parts_d.insert(0, {
-                                                    "inline_data": {
-                                                        "mime_type": "application/pdf",
-                                                        "data": _b64_d.b64encode(_cvf_d.read()).decode()
-                                                    }
-                                                })
-                                        except Exception:
-                                            pass
-                                    _body_d = _js2.dumps({
-                                        "contents": [{"parts": _parts_d}],
-                                        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}}
-                                    }).encode()
-                                    _resp_d = _js2.loads(_gemini_generate(
-                                        _body_d, timeout=90, purpose="search_scoring_desc",
-                                        user_id=user_id))
-                                    _text_d = _resp_d["candidates"][0]["content"]["parts"][0]["text"]
-                                    _scored_d = _parse_desc_resp(_text_d)
-                                    _out_d = _apply_desc_scores(_scored_d, batch_d_)
-                                    _ai_d_used = True
-                                    print(f"[search] Track B Gemini: {len(batch_d_)} -> {len(_out_d)} passed")
-                                except Exception as _de:
-                                    print(f"[search] Track B Gemini error: {_de}")
-
-                            if not _ai_d_used and _TB_ANTH:
-                                try:
-                                    _body_d2 = _js2.dumps({
-                                        "model": "claude-haiku-4-5-20251001",
-                                        "max_tokens": 4096,
-                                        "messages": [{"role": "user", "content": _prompt_d}]
-                                    }).encode()
-                                    _req_d2 = _ur2.Request(
-                                        "https://api.anthropic.com/v1/messages",
-                                        data=_body_d2,
-                                        headers={"Content-Type": "application/json",
-                                                 "x-api-key": _TB_ANTH,
-                                                 "anthropic-version": "2023-06-01"},
-                                        method="POST"
-                                    )
-                                    with _ur2.urlopen(_req_d2, timeout=90) as _rd2:
-                                        _resp_d2 = _js2.loads(_rd2.read().decode())
-                                    _text_d2 = _resp_d2["content"][0]["text"]
-                                    _scored_d2 = _parse_desc_resp(_text_d2)
-                                    _out_d = _apply_desc_scores(_scored_d2, batch_d_)
-                                    _ai_d_used = True
-                                    print(f"[search] Track B Anthropic: {len(batch_d_)} -> {len(_out_d)} passed")
-                                except Exception as _de2:
-                                    print(f"[search] Track B Anthropic error: {_de2}")
-
-                            if not _ai_d_used:
-                                print("[search] Track B: AI call failed — no description scores added")
-                                database.log_activity(user_id, "track_b_search",
-                                    "Track B AI call failed. Check GEMINI_API_KEY / ANTHROPIC_API_KEY in Railway.")
-
-                            return _out_d
-
-                        _tb_scored = []
-                        for _tb_i in range(0, len(_trackb_pool), 50):
-                            _tb_batch = _trackb_pool[_tb_i:_tb_i+50]
-                            _tb_scored.extend(_score_batch_desc(_tb_batch, profile_text))
-
-                        print(f"[search] Track B: {len(_trackb_pool)} -> {len(_tb_scored)} passed description matching")
-                        database.log_activity(user_id, "track_b_search",
-                            f"Track B description matching: {len(_trackb_pool)} candidates -> {len(_tb_scored)} passed")
-                        scored_jobs.extend(_tb_scored)
-                else:
-                    print("[search] Track B: no AI keys — skipping")
-
-            print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
-            return scored_jobs
-
-        all_jobs_data = []
-        seen_urls     = set(existing_urls)
-        seen_key      = set()
-
-        # Discover jobs via company APIs (Greenhouse/Lever) + Gemini search/scoring.
-        jobs_data = _search_jobs_with_claude_websearch(titles, locations, keywords)
-        print(f"[run-search] Found {len(jobs_data)} jobs via AI search (Gemini)")
-
-        for j in jobs_data:
-            jurl = (j.get("url") or "").strip()
-            jkey = (j.get("job_title","").lower().strip(), j.get("company","").lower().strip())
-            if jurl and jurl in seen_urls: continue
-            if not jurl and jkey in seen_key: continue
-            if jurl: seen_urls.add(jurl)
-            if jkey: seen_key.add(jkey)
-            all_jobs_data.append(j)
-
-        if not all_jobs_data:
-            database.log_activity(user_id, "jobs_searched", "Search returned no new results")
-            try:
-                deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix=home_url() + "#new")
-            except Exception as _dn_err:
-                print(f"[run-search] deliver_notification error: {_dn_err}")
-            return
-
-        # ── URL check for new jobs ───────────────────────────────────────
-        import apply_engine as _ae
-        from concurrent.futures import ThreadPoolExecutor as _TPE
-        _new_urls = {j.get("url","").strip() for j in all_jobs_data if j.get("url")}
-        _url_ok   = {}
-        with _TPE(max_workers=8) as _ex:
-            _futs = {_ex.submit(_ae.check_url_alive, u): u for u in _new_urls}
-            for _f, _u in _futs.items():
-                try:    _url_ok[_u] = 1 if _f.result(timeout=12) else 0
-                except Exception: _url_ok[_u] = 0
-        _chk_date = datetime.now().isoformat()
-
-        # ── Load rejected patterns to filter out ────────────────────────
-        conn = database.get_db()
-        _rej_patterns = conn.execute(
-            "SELECT LOWER(TRIM(company)) as c, LOWER(TRIM(title)) as t FROM rejected_patterns WHERE user_id=?",
-            (user_id,)
-        ).fetchall()
-        _rej_set = {(r["c"], r["t"]) for r in _rej_patterns}
-        _rej_companies = {r["c"] for r in _rej_patterns if r["c"]}
-        _block_set = {(c or "").strip().lower() for c in database.get_blocklist(conn, user_id)}
-        # ── Feedback learning signals (for pre-scoring new jobs) ─────────
-        _fb_signals = database.get_feedback_signals(conn, user_id)
-        _fb_prof_row = conn.execute(
-            "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
-        ).fetchone()
-        _fb_prof = dict(_fb_prof_row) if _fb_prof_row else {}
-        conn.close()
-        from ai_analysis import compute_feedback_penalty as _compute_fb_penalty
-
-        # ── Insert new jobs (skip rejected patterns) ─────────────────────
-        conn = database.get_db(); inserted = 0; new_jobs_info = []; skipped_rej = 0
-        for j in all_jobs_data:
-            _jc = j.get("company","").strip().lower()
-            _jt = j.get("job_title","").strip().lower()
-            if (_jc, _jt) in _rej_set:
-                skipped_rej += 1
-                continue
-            if _jc in _block_set:
-                skipped_rej += 1
-                continue
-            if j.get("match_score", 0) <= 0:
-                continue
-            # ── Relevance gate: only insert/notify jobs aligned with the user's
-            #    titles + locations, so off-target roles never reach the queue. ──
-            try:
-                from ingestion.relevance import passes as _rel_passes, gate_enabled as _rel_gate
-                if _rel_gate() and not _rel_passes(
-                        j.get("job_title") or j.get("title") or "",
-                        j.get("location") or "", titles, locations, keywords):
-                    skipped_rej += 1
-                    continue
-            except Exception:
-                pass
-            try:
-                _jurl = (j.get("url") or "").strip()
-                if _jurl and _url_ok.get(_jurl) == 0:
-                    continue  # skip dead links
-                # Dedup: skip if same company+title already exists for this user
-                _jtitle = j.get("job_title", "").strip().lower()
-                _jcomp = j.get("company", "").strip().lower()
-                if _jtitle and _jcomp:
-                    dup = conn.execute(
-                        "SELECT id FROM jobs WHERE user_id=? AND LOWER(TRIM(title))=? AND LOWER(TRIM(company))=?",
-                        (user_id, _jtitle, _jcomp)
-                    ).fetchone()
-                    if dup:
-                        continue  # duplicate job from different source
-                # ── Learned feedback penalty (deterministic; demotes, never hides) ──
-                _fb_pen, _fb_rsn = _compute_fb_penalty(
-                    {"company": j.get("company",""), "title": j.get("job_title","")},
-                    _fb_signals, _fb_prof
-                )
-                conn.execute(
-                    "INSERT OR IGNORE INTO jobs "
-                    "(user_id,title,company,location,url,description,why_relevant,source,"
-                    "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date,full_description,"
-                    "feedback_penalty,feedback_reason) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?,?,?)",
-                    (user_id, j.get("job_title",""), j.get("company",""), j.get("location",""),
-                     _jurl, j.get("description",""), j.get("fit_reason",""), j.get("source",""),
-                     j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
-                     _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None,
-                     j.get("publish_date"), (j.get("full_description") or "")[:5000],
-                     _fb_pen, _fb_rsn))
-                inserted += 1
-                new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
-            except Exception as e: print(f"[run-search] insert error: {e}")
-        conn.commit(); conn.close()
-
-        # ── URL check ALL historical unverified jobs ─────────────────────
-        conn = database.get_db()
-        unverified = conn.execute(
-            "SELECT id, url FROM jobs WHERE user_id=? AND url_verified IS NULL AND url!=''", (user_id,)
-        ).fetchall()
-        conn.close()
-        hist_alive = hist_dead = 0
-        if unverified:
-            with _TPE(max_workers=8) as _ex2:
-                _futs2 = {_ex2.submit(_ae.check_url_alive, r["url"]): r for r in unverified}
-                hist_results = {}
-                for _f2, _r2 in _futs2.items():
-                    try:    hist_results[_r2["id"]] = 1 if _f2.result(timeout=12) else 0
-                    except Exception: hist_results[_r2["id"]] = 0
-            conn = database.get_db()
-            for job_id, ok in hist_results.items():
-                conn.execute("UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",(ok,_chk_date,job_id))
-                if ok: hist_alive += 1
-                else:  hist_dead  += 1
-            conn.commit(); conn.close()
-
-        # ── Re-validate already-"Verified" rows (catch parked/expired domains) ──
-        # Conservative: only DEMOTE a verified row to dead when _link_status proves
-        # it is definitively gone (404/410/dead-DNS/parked). Alive/unknown stay 1,
-        # so a transient bot-block never nukes a good posting.
-        conn = database.get_db()
-        prev_ok = conn.execute(
-            "SELECT id, url, status FROM jobs WHERE user_id=? AND url_verified=1 AND url!=''", (user_id,)
-        ).fetchall()
-        conn.close()
-        reval_dead = 0
-        reval_removed = 0
-        if prev_ok:
-            _autoreject = os.environ.get("LINK_AUTOREJECT_DEAD", "1").strip().lower() not in ("0", "false", "no", "off")
-            with _TPE(max_workers=8) as _ex3:
-                _futs3 = {_ex3.submit(_link_status, r["url"]): r for r in prev_ok}
-                _demote = []
-                for _f3, _r3 in _futs3.items():
-                    try:    _st = _f3.result(timeout=12)
-                    except Exception: _st = "unknown"
-                    if _st == "dead":
-                        _demote.append(_r3)
-            if _demote:
-                conn = database.get_db()
-                for _r in _demote:
-                    _jid = _r["id"]; _rst = (_r["status"] or "")
-                    # A definitively-dead link in the REVIEW queue is useless — move it
-                    # out so Eran stops seeing expired postings. Applied/rejected rows
-                    # are only re-flagged (url_verified=0), never re-statused.
-                    if _autoreject and _rst in ("new", "approved"):
-                        conn.execute(
-                            "UPDATE jobs SET status='rejected', url_verified=0, url_check_date=?, "
-                            "rejected_by='system', "
-                            "notes=COALESCE(notes,'') || ' [auto-removed: link dead/closed]' WHERE id=?",
-                            (_chk_date, _jid))
-                        reval_removed += 1
+                        # Pass web search results through the same AI scorer (not just blindly add them)
+                        if _ws_raw:
+                            # Normalise field names to match what _score_batch expects
+                            for _wsj in _ws_raw:
+                                _wsj.setdefault('job_title', _wsj.get('title', ''))
+                                _wsj.setdefault('full_description', _wsj.get('description', ''))
+                                _wsj['source'] = 'web_search'
+                            _ws_scored = _score_batch(_ws_raw, profile_text)
+                            for _wsj in _ws_scored:
+                                _wsj.setdefault('fit_reason', 'Found via Google Search')
+                                _wsj.setdefault('found_date', today)
+                            scored_jobs.extend(_ws_scored)
+                            print(f"[search] Web search: {len(_ws_raw)} raw → {len(_ws_scored)} passed scoring")
                     else:
-                        conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, _jid))
-                conn.commit(); conn.close()
-                reval_dead = len(_demote)
+                        print("[search] Gemini web search skipped — no GEMINI_API_KEY")
 
-        database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")
 
-        # ── Consolidated search notification ─────────────────────────────
-        # The FIRST line is what the phone push banner shows, so summarize the
-        # result there (count + top companies) instead of just "Search Complete".
-        if inserted > 0:
-            _uniq_co = []
-            for _ci in new_jobs_info:
-                _cco = (_ci.get("company") or "").strip()
-                if _cco and _cco not in _uniq_co:
-                    _uniq_co.append(_cco)
-            _co_str = ", ".join(_uniq_co[:4]) + ("…" if len(_uniq_co) > 4 else "")
-            _headline = f"🎯 {inserted} new role(s) for review"
-            if _co_str:
-                _headline += f" — {_co_str}"
-            notif_lines = [_headline, ""]
-            for info in new_jobs_info[:10]:
-                icon = "🔗" if info["url_ok"]==1 else ("⚠️" if info["url_ok"]==0 else "")
-                notif_lines.append(f"  • {info['title']} @ {info['company']} {icon}".rstrip())
-            if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
-        else:
-            notif_lines = [f"🔍 Search done — no new matches today ({today})"]
-        if (hist_alive+hist_dead)>0:
-            notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
-            notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
-        if reval_dead>0:
-            _rmsg = f"⚠️ {reval_dead} previously-'Verified' link(s) now dead (parked/closed/expired)"
-            if reval_removed>0:
-                _rmsg += f" — {reval_removed} auto-removed from review"
-            notif_lines.append(_rmsg)
-        try:
-            deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#new")
-        except Exception as _dn_err:
-            print(f"[run-search] deliver_notification error: {_dn_err}")
-        print(f"[run-search] user {user_id}: inserted={inserted} hist_checked={hist_alive+hist_dead}")
+                    # ── Track B: Description-first scoring (activates when Track A < 5 results) ──
+                    if len(scored_jobs) < 5:
+                        print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
+                        import os as _os_tb
+                        _TB_GEMINI = _os_tb.environ.get('GEMINI_API_KEY', '')
+                        _TB_ANTH   = (_os_tb.environ.get('ANTHROPIC_API_KEY', '') if SEARCH_USE_ANTHROPIC else '')
+                        if _TB_GEMINI or _TB_ANTH:
+                            # Collect jobs with meaningful descriptions that Track A didn't already return
+                            _scored_urls = {j.get('url','') for j in scored_jobs}
+                            _trackb_pool = [
+                                j for j in all_raw
+                                if len(j.get('full_description') or j.get('description','')) > 100
+                                and j.get('url','') not in _scored_urls
+                            ]
+                            _trackb_pool = _trackb_pool[:150]  # cap to control API cost
+                            print(f"[search] Track B pool: {len(_trackb_pool)} jobs with descriptions")
+
+                            if _trackb_pool:
+                                def _score_batch_desc(batch_d_, profile_text_d_):
+                                    """Score jobs primarily on description content vs CV."""
+                                    _batch_indexed = [
+                                        {"id": _bi, "title": _bj.get("job_title",""),
+                                         "company": _bj.get("company",""),
+                                         "location": _bj.get("location",""),
+                                         "description": (_bj.get("full_description") or _bj.get("description",""))[:2500]}
+                                        for _bi, _bj in enumerate(batch_d_)
+                                    ]
+                                    _batch_json_d = _js2.dumps(_batch_indexed, ensure_ascii=False)
+                                    _titles_d = profile_text_d_.split('\n')[0] if profile_text_d_ else ''
+                                    _locs_d   = next((ln.replace('Locations: ','') for ln in profile_text_d_.split('\n') if ln.startswith('Locations:')), 'Israel')
+                                    _prompt_d = (
+                                        "You are evaluating job openings for a senior product candidate.\n"
+                                        "The candidate's CV text is provided below — use it as the primary signal.\n\n"
+                                        f"Candidate profile:\n{profile_text_d_}\n\n"
+                                        "Score each job 0-100 on these FOUR dimensions (description is the main signal):\n\n"
+                                        "TITLE/ROLE FIT (0-10 pts — loose gate):\n"
+                                        "  8-10: Direct match to target role or clear leadership adjacent\n"
+                                        "   4-7: Adjacent role worth exploring based on description\n"
+                                        "   0-3: Clearly wrong function (exclude)\n\n"
+                                        "SENIORITY MATCH (0-20 pts):\n"
+                                        "  17-20: Exact seniority match\n"
+                                        "  10-16: One level off\n"
+                                        "   0-9:  Major mismatch\n\n"
+                                        "LOCATION (0-20 pts):\n"
+                                        "  17-20: Israel / Tel Aviv / Hybrid / Remote-friendly\n"
+                                        "  10-16: Remote, no restriction\n"
+                                        "   0-9:  Requires relocation outside Israel\n\n"
+                                        "DESCRIPTION vs CV MATCH (0-50 pts — PRIMARY SIGNAL):\n"
+                                        "  Read the job description carefully. Compare required skills,\n"
+                                        "  responsibilities, and experience to the candidate's background.\n"
+                                        "  45-50: Near-perfect match — candidate's background directly fits most requirements\n"
+                                        "  30-44: Strong overlap with minor gaps\n"
+                                        "  15-29: Moderate overlap — candidate could stretch into this role\n"
+                                        "   0-14: Significant mismatch in required background\n\n"
+                                        "EXCLUDE only clearly wrong roles: pure engineering IC, quota-sales, finance/legal/HR. Product-adjacent leadership is OK.\n\n"
+                                        "Include jobs scoring >= 25 (permissive — this is a last-resort fallback). "
+                                        "Return ONLY a JSON array. Each item: "
+                                        "{id (from input), score (0-100), reason (one sentence why)}\n\n"
+                                        f"Jobs:\n{_batch_json_d}"
+                                    )
+
+                                    def _parse_desc_resp(txt_):
+                                        t = txt_.strip()
+                                        if "```" in t:
+                                            t = t.split("```")[1]
+                                            if t.startswith("json"): t = t[4:]
+                                        si = t.find("[");  ei = t.rfind("]")
+                                        if si < 0 or ei <= si: return []
+                                        try:
+                                            return _js2.loads(t[si:ei+1])
+                                        except Exception:
+                                            return []
+
+                                    def _apply_desc_scores(scored_ids_, batch_d2_, reason_default="Matched by description"):
+                                        # coerce IDs to int — AI often returns string "0" not integer 0
+                                        _id_map_d = {}
+                                        for _item_d in scored_ids_:
+                                            if isinstance(_item_d, dict) and "score" in _item_d:
+                                                try: _id_map_d[int(_item_d["id"])] = _item_d
+                                                except (KeyError, ValueError, TypeError): pass
+                                        out_d_ = []
+                                        for _di, _dj in enumerate(batch_d2_):
+                                            _ds = _id_map_d.get(_di)
+                                            # threshold 25 — permissive, Track B is last-resort fallback
+                                            if _ds and _ds.get("score", 0) >= 25:
+                                                _jc_d = dict(_dj)
+                                                _jc_d["candidate_score"] = min(_ds["score"], 95)
+                                                _jc_d["match_score"]     = _jc_d["candidate_score"]
+                                                _jc_d["fit_reason"]      = _ds.get("reason", reason_default)
+                                                _jc_d["source"]          = "description_match"
+                                                _jc_d.setdefault("found_date", today)
+                                                _jc_d.setdefault("publish_date", None)
+                                                _jc_d.setdefault("description", _dj.get("description") or _dj.get("job_title",""))
+                                                out_d_.append(_jc_d)
+                                        return out_d_
+
+                                    _out_d = []
+                                    _ai_d_used = False
+
+                                    if _TB_GEMINI:
+                                        try:
+                                            import base64 as _b64_d, os as _os_d2
+                                            _parts_d = [{"text": _prompt_d}]
+                                            if _cv_path:
+                                                try:
+                                                    with open(_cv_path, "rb") as _cvf_d:
+                                                        _parts_d.insert(0, {
+                                                            "inline_data": {
+                                                                "mime_type": "application/pdf",
+                                                                "data": _b64_d.b64encode(_cvf_d.read()).decode()
+                                                            }
+                                                        })
+                                                except Exception:
+                                                    pass
+                                            _body_d = _js2.dumps({
+                                                "contents": [{"parts": _parts_d}],
+                                                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192, "thinkingConfig": {"thinkingBudget": 0}}
+                                            }).encode()
+                                            _resp_d = _js2.loads(_gemini_generate(
+                                                _body_d, timeout=90, purpose="search_scoring_desc",
+                                                user_id=user_id))
+                                            _text_d = _resp_d["candidates"][0]["content"]["parts"][0]["text"]
+                                            _scored_d = _parse_desc_resp(_text_d)
+                                            _out_d = _apply_desc_scores(_scored_d, batch_d_)
+                                            _ai_d_used = True
+                                            print(f"[search] Track B Gemini: {len(batch_d_)} -> {len(_out_d)} passed")
+                                        except Exception as _de:
+                                            print(f"[search] Track B Gemini error: {_de}")
+
+                                    if not _ai_d_used and _TB_ANTH:
+                                        try:
+                                            _body_d2 = _js2.dumps({
+                                                "model": "claude-haiku-4-5-20251001",
+                                                "max_tokens": 4096,
+                                                "messages": [{"role": "user", "content": _prompt_d}]
+                                            }).encode()
+                                            _req_d2 = _ur2.Request(
+                                                "https://api.anthropic.com/v1/messages",
+                                                data=_body_d2,
+                                                headers={"Content-Type": "application/json",
+                                                         "x-api-key": _TB_ANTH,
+                                                         "anthropic-version": "2023-06-01"},
+                                                method="POST"
+                                            )
+                                            with _ur2.urlopen(_req_d2, timeout=90) as _rd2:
+                                                _resp_d2 = _js2.loads(_rd2.read().decode())
+                                            _text_d2 = _resp_d2["content"][0]["text"]
+                                            _scored_d2 = _parse_desc_resp(_text_d2)
+                                            _out_d = _apply_desc_scores(_scored_d2, batch_d_)
+                                            _ai_d_used = True
+                                            print(f"[search] Track B Anthropic: {len(batch_d_)} -> {len(_out_d)} passed")
+                                        except Exception as _de2:
+                                            print(f"[search] Track B Anthropic error: {_de2}")
+
+                                    if not _ai_d_used:
+                                        print("[search] Track B: AI call failed — no description scores added")
+                                        database.log_activity(user_id, "track_b_search",
+                                            "Track B AI call failed. Check GEMINI_API_KEY / ANTHROPIC_API_KEY in Railway.")
+
+                                    return _out_d
+
+                                _tb_scored = []
+                                for _tb_i in range(0, len(_trackb_pool), 50):
+                                    _tb_batch = _trackb_pool[_tb_i:_tb_i+50]
+                                    _tb_scored.extend(_score_batch_desc(_tb_batch, profile_text))
+
+                                print(f"[search] Track B: {len(_trackb_pool)} -> {len(_tb_scored)} passed description matching")
+                                database.log_activity(user_id, "track_b_search",
+                                    f"Track B description matching: {len(_trackb_pool)} candidates -> {len(_tb_scored)} passed")
+                                scored_jobs.extend(_tb_scored)
+                        else:
+                            print("[search] Track B: no AI keys — skipping")
+
+                    print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
+                    return scored_jobs
+
+                all_jobs_data = []
+                seen_urls     = set(existing_urls)
+                seen_key      = set()
+
+                # Discover jobs via company APIs (Greenhouse/Lever) + Gemini search/scoring.
+                jobs_data = _search_jobs_with_claude_websearch(titles, locations, keywords)
+                print(f"[run-search] Found {len(jobs_data)} jobs via AI search (Gemini)")
+
+                for j in jobs_data:
+                    jurl = (j.get("url") or "").strip()
+                    jkey = (j.get("job_title","").lower().strip(), j.get("company","").lower().strip())
+                    if jurl and jurl in seen_urls: continue
+                    if not jurl and jkey in seen_key: continue
+                    if jurl: seen_urls.add(jurl)
+                    if jkey: seen_key.add(jkey)
+                    all_jobs_data.append(j)
+
+                if not all_jobs_data:
+                    database.log_activity(user_id, "jobs_searched", "Search returned no new results")
+                    try:
+                        deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix=home_url() + "#new")
+                    except Exception as _dn_err:
+                        print(f"[run-search] deliver_notification error: {_dn_err}")
+                    return
+
+                # ── URL check for new jobs ───────────────────────────────────────
+                import apply_engine as _ae
+                from concurrent.futures import ThreadPoolExecutor as _TPE
+                _new_urls = {j.get("url","").strip() for j in all_jobs_data if j.get("url")}
+                _url_ok   = {}
+                with _TPE(max_workers=8) as _ex:
+                    _futs = {_ex.submit(_ae.check_url_alive, u): u for u in _new_urls}
+                    for _f, _u in _futs.items():
+                        try:    _url_ok[_u] = 1 if _f.result(timeout=12) else 0
+                        except Exception: _url_ok[_u] = 0
+                _chk_date = datetime.now().isoformat()
+
+                # ── Load rejected patterns to filter out ────────────────────────
+                conn = database.get_db()
+                try:
+                    _rej_patterns = conn.execute(
+                        "SELECT LOWER(TRIM(company)) as c, LOWER(TRIM(title)) as t FROM rejected_patterns WHERE user_id=?",
+                        (user_id,)
+                    ).fetchall()
+                    _rej_set = {(r["c"], r["t"]) for r in _rej_patterns}
+                    _rej_companies = {r["c"] for r in _rej_patterns if r["c"]}
+                    _block_set = {(c or "").strip().lower() for c in database.get_blocklist(conn, user_id)}
+                    # ── Feedback learning signals (for pre-scoring new jobs) ─────────
+                    _fb_signals = database.get_feedback_signals(conn, user_id)
+                    _fb_prof_row = conn.execute(
+                        "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+                    ).fetchone()
+                    _fb_prof = dict(_fb_prof_row) if _fb_prof_row else {}
+                    conn.close()
+                    from ai_analysis import compute_feedback_penalty as _compute_fb_penalty
+
+                    # ── Insert new jobs (skip rejected patterns) ─────────────────────
+                    conn = database.get_db()
+                    try:
+                        inserted = 0; new_jobs_info = []; skipped_rej = 0
+                        for j in all_jobs_data:
+                            _jc = j.get("company","").strip().lower()
+                            _jt = j.get("job_title","").strip().lower()
+                            if (_jc, _jt) in _rej_set:
+                                skipped_rej += 1
+                                continue
+                            if _jc in _block_set:
+                                skipped_rej += 1
+                                continue
+                            if j.get("match_score", 0) <= 0:
+                                continue
+                            # ── Relevance gate: only insert/notify jobs aligned with the user's
+                            #    titles + locations, so off-target roles never reach the queue. ──
+                            try:
+                                from ingestion.relevance import passes as _rel_passes, gate_enabled as _rel_gate
+                                if _rel_gate() and not _rel_passes(
+                                        j.get("job_title") or j.get("title") or "",
+                                        j.get("location") or "", titles, locations, keywords):
+                                    skipped_rej += 1
+                                    continue
+                            except Exception:
+                                pass
+                            try:
+                                _jurl = (j.get("url") or "").strip()
+                                if _jurl and _url_ok.get(_jurl) == 0:
+                                    continue  # skip dead links
+                                # Dedup: skip if same company+title already exists for this user
+                                _jtitle = j.get("job_title", "").strip().lower()
+                                _jcomp = j.get("company", "").strip().lower()
+                                if _jtitle and _jcomp:
+                                    dup = conn.execute(
+                                        "SELECT id FROM jobs WHERE user_id=? AND LOWER(TRIM(title))=? AND LOWER(TRIM(company))=?",
+                                        (user_id, _jtitle, _jcomp)
+                                    ).fetchone()
+                                    if dup:
+                                        continue  # duplicate job from different source
+                                # ── Learned feedback penalty (deterministic; demotes, never hides) ──
+                                _fb_pen, _fb_rsn = _compute_fb_penalty(
+                                    {"company": j.get("company",""), "title": j.get("job_title","")},
+                                    _fb_signals, _fb_prof
+                                )
+                                conn.execute(
+                                    "INSERT OR IGNORE INTO jobs "
+                                    "(user_id,title,company,location,url,description,why_relevant,source,"
+                                    "found_date,match_score,candidate_score,status,url_verified,url_check_date,publish_date,full_description,"
+                                    "feedback_penalty,feedback_reason) "
+                                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?,?,?)",
+                                    (user_id, j.get("job_title",""), j.get("company",""), j.get("location",""),
+                                     _jurl, j.get("description",""), j.get("fit_reason",""), j.get("source",""),
+                                     j.get("found_date",today), j.get("match_score",0), j.get("candidate_score",0),
+                                     _url_ok.get(_jurl) if _jurl else None, _chk_date if _jurl else None,
+                                     j.get("publish_date"), (j.get("full_description") or "")[:5000],
+                                     _fb_pen, _fb_rsn))
+                                inserted += 1
+                                new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
+                            except Exception as e: print(f"[run-search] insert error: {e}")
+                        conn.commit(); conn.close()
+
+                        # ── URL check ALL historical unverified jobs ─────────────────────
+                        conn = database.get_db()
+                        try:
+                            unverified = conn.execute(
+                                "SELECT id, url FROM jobs WHERE user_id=? AND url_verified IS NULL AND url!=''", (user_id,)
+                            ).fetchall()
+                            conn.close()
+                            hist_alive = hist_dead = 0
+                            if unverified:
+                                with _TPE(max_workers=8) as _ex2:
+                                    _futs2 = {_ex2.submit(_ae.check_url_alive, r["url"]): r for r in unverified}
+                                    hist_results = {}
+                                    for _f2, _r2 in _futs2.items():
+                                        try:    hist_results[_r2["id"]] = 1 if _f2.result(timeout=12) else 0
+                                        except Exception: hist_results[_r2["id"]] = 0
+                                conn = database.get_db()
+                                try:
+                                    for job_id, ok in hist_results.items():
+                                        conn.execute("UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",(ok,_chk_date,job_id))
+                                        if ok: hist_alive += 1
+                                        else:  hist_dead  += 1
+                                    conn.commit(); conn.close()
+                                finally:
+                                    conn.close()
+
+                            # ── Re-validate already-"Verified" rows (catch parked/expired domains) ──
+                            # Conservative: only DEMOTE a verified row to dead when _link_status proves
+                            # it is definitively gone (404/410/dead-DNS/parked). Alive/unknown stay 1,
+                            # so a transient bot-block never nukes a good posting.
+                            conn = database.get_db()
+                            try:
+                                prev_ok = conn.execute(
+                                    "SELECT id, url, status FROM jobs WHERE user_id=? AND url_verified=1 AND url!=''", (user_id,)
+                                ).fetchall()
+                                conn.close()
+                                reval_dead = 0
+                                reval_removed = 0
+                                if prev_ok:
+                                    _autoreject = os.environ.get("LINK_AUTOREJECT_DEAD", "1").strip().lower() not in ("0", "false", "no", "off")
+                                    with _TPE(max_workers=8) as _ex3:
+                                        _futs3 = {_ex3.submit(_link_status, r["url"]): r for r in prev_ok}
+                                        _demote = []
+                                        for _f3, _r3 in _futs3.items():
+                                            try:    _st = _f3.result(timeout=12)
+                                            except Exception: _st = "unknown"
+                                            if _st == "dead":
+                                                _demote.append(_r3)
+                                    if _demote:
+                                        conn = database.get_db()
+                                        try:
+                                            for _r in _demote:
+                                                _jid = _r["id"]; _rst = (_r["status"] or "")
+                                                # A definitively-dead link in the REVIEW queue is useless — move it
+                                                # out so Eran stops seeing expired postings. Applied/rejected rows
+                                                # are only re-flagged (url_verified=0), never re-statused.
+                                                if _autoreject and _rst in ("new", "approved"):
+                                                    conn.execute(
+                                                        "UPDATE jobs SET status='rejected', url_verified=0, url_check_date=?, "
+                                                        "rejected_by='system', "
+                                                        "notes=COALESCE(notes,'') || ' [auto-removed: link dead/closed]' WHERE id=?",
+                                                        (_chk_date, _jid))
+                                                    reval_removed += 1
+                                                else:
+                                                    conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, _jid))
+                                            conn.commit(); conn.close()
+                                            reval_dead = len(_demote)
+                                        finally:
+                                            conn.close()
+
+                                database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")
+
+                                # ── Consolidated search notification ─────────────────────────────
+                                # The FIRST line is what the phone push banner shows, so summarize the
+                                # result there (count + top companies) instead of just "Search Complete".
+                                if inserted > 0:
+                                    _uniq_co = []
+                                    for _ci in new_jobs_info:
+                                        _cco = (_ci.get("company") or "").strip()
+                                        if _cco and _cco not in _uniq_co:
+                                            _uniq_co.append(_cco)
+                                    _co_str = ", ".join(_uniq_co[:4]) + ("…" if len(_uniq_co) > 4 else "")
+                                    _headline = f"🎯 {inserted} new role(s) for review"
+                                    if _co_str:
+                                        _headline += f" — {_co_str}"
+                                    notif_lines = [_headline, ""]
+                                    for info in new_jobs_info[:10]:
+                                        icon = "🔗" if info["url_ok"]==1 else ("⚠️" if info["url_ok"]==0 else "")
+                                        notif_lines.append(f"  • {info['title']} @ {info['company']} {icon}".rstrip())
+                                    if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
+                                else:
+                                    notif_lines = [f"🔍 Search done — no new matches today ({today})"]
+                                if (hist_alive+hist_dead)>0:
+                                    notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
+                                    notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
+                                if reval_dead>0:
+                                    _rmsg = f"⚠️ {reval_dead} previously-'Verified' link(s) now dead (parked/closed/expired)"
+                                    if reval_removed>0:
+                                        _rmsg += f" — {reval_removed} auto-removed from review"
+                                    notif_lines.append(_rmsg)
+                                try:
+                                    deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#new")
+                                except Exception as _dn_err:
+                                    print(f"[run-search] deliver_notification error: {_dn_err}")
+                                print(f"[run-search] user {user_id}: inserted={inserted} hist_checked={hist_alive+hist_dead}")
+                            finally:
+                                conn.close()
+                        finally:
+                            conn.close()
+                    finally:
+                        conn.close()
+                finally:
+                    conn.close()
+            finally:
+                conn.close()
+        finally:
+            conn.close()
 
     except Exception as e:
         import traceback as _tb
@@ -2194,216 +2249,228 @@ def run_job_apply(user_id: int) -> int:
     from datetime import timezone as _tz
     today_utc = datetime.now(_tz.utc).strftime("%Y-%m-%d")
     _rc = database.get_db()
-    _prof = _rc.execute(
-        "SELECT auto_apply_enabled, applications_sent_today, applications_reset_date "
-        "FROM user_profiles WHERE user_id=?", (user_id,)
-    ).fetchone()
-    _urow = _rc.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    _is_admin = (_urow and _urow["email"] and _urow["email"].lower() == (ADMIN_EMAIL or "").lower())
-
-    # SILENT MODE: auto-apply off => return immediately, no notification
-    if not _prof or not _prof["auto_apply_enabled"]:
-        _rc.close()
-        return {"applied": 0, "error": "", "skipped": "auto_apply_disabled"}
-
-    # The paid gate, AT THE CHOKEPOINT. It used to live only at the two call
-    # sites a developer exercises by hand - saving the toggle (/api/save-profile)
-    # and the apply triggered by approving a job - and this function, which every
-    # scheduled run and every /api/run-apply goes through, checked the FLAG and
-    # not the PLAN. The flag and the plan come apart on their own: m0010 gave
-    # every existing row plan='free' while leaving auto_apply_enabled as it was,
-    # and a downgrade does the same thing later. Proven 2026-09-20 against a
-    # plan='free' user with the flag set: can_auto_apply False, run_job_apply
-    # returned applied=1. Invisible until now only because APPLY_ENGINE_ENABLED
-    # is off in production - i.e. exactly until the thing we are launching.
-    if not entitlements.can_auto_apply(_urow):
-        _rc.close()
-        print(f"[apply] user {user_id}: auto-apply flag set but plan "
-              f"'{entitlements.plan_of(_urow)}' does not include it - not applying")
-        return {"applied": 0, "error": "", "skipped": "not_entitled"}
-
-    # Daily reset at 00:00 UTC
-    if _prof["applications_reset_date"] != today_utc:
-        _rc.execute(
-            "UPDATE user_profiles SET applications_sent_today=0, applications_reset_date=? "
-            "WHERE user_id=?", (today_utc, user_id))
-        _rc.commit()
-        _sent_today = 0
-    else:
-        _sent_today = _prof["applications_sent_today"] or 0
-
-    DAILY_CAP = 3
-    _remaining = None if _is_admin else max(0, DAILY_CAP - _sent_today)
-    _rc.close()
-
-    if _remaining is not None and _remaining <= 0:
-        return {"applied": 0, "error": "", "skipped": "daily_limit_reached"}
-
     try:
-        import apply_engine
-        conn = database.get_db()
-        jobs = conn.execute(
-            "SELECT id, title, company, url, COALESCE(apply_attempts,0) AS attempts "
-            "FROM jobs WHERE user_id=? AND status='approved' "
-            "AND COALESCE(apply_status,'') != 'manual_required' "
-            "AND COALESCE(apply_attempts,0) < ? "
-            "AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?)",
-            (user_id, apply_engine.MAX_APPLY_ATTEMPTS, datetime.now().isoformat())
-        ).fetchall()
-
-        # Cap jobs to daily remaining quota (non-admin only)
-        if _remaining is not None:
-            jobs = jobs[:_remaining]
-
-        # First-live-run safety valve: bound applies per RUN even for admin, so a
-        # freshly re-enabled engine can't fire dozens of real submits at once.
-        # Raise/disable with Railway env APPLY_MAX_PER_RUN (0 = unlimited).
-        try:
-            _per_run = int(os.environ.get("APPLY_MAX_PER_RUN", "5") or "5")
-        except ValueError:
-            _per_run = 5
-        if _per_run > 0:
-            jobs = jobs[:_per_run]
-
-        if not jobs:
-            conn.close()
-            return {"applied": 0, "error": ""}
-
-        # Gather user + CV data for form filling
-        user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        profile = conn.execute(
-            "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
+        _prof = _rc.execute(
+            "SELECT auto_apply_enabled, applications_sent_today, applications_reset_date "
+            "FROM user_profiles WHERE user_id=?", (user_id,)
         ).fetchone()
-        conn.close()
+        _urow = _rc.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        _is_admin = (_urow and _urow["email"] and _urow["email"].lower() == (ADMIN_EMAIL or "").lower())
 
-        cv_text   = (profile["cv_summary"] or "") if profile else ""
-        email     = user["email"] if user else ""
-        applicant = apply_engine.extract_applicant_data(cv_text, email)
+        # SILENT MODE: auto-apply off => return immediately, no notification
+        if not _prof or not _prof["auto_apply_enabled"]:
+            _rc.close()
+            return {"applied": 0, "error": "", "skipped": "auto_apply_disabled"}
 
-        # The apply engine hands this path to a browser file input, so the file
-        # has to exist on disk - rebuilt from the database if the volume is cold.
-        cv_path = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
+        # The paid gate, AT THE CHOKEPOINT. It used to live only at the two call
+        # sites a developer exercises by hand - saving the toggle (/api/save-profile)
+        # and the apply triggered by approving a job - and this function, which every
+        # scheduled run and every /api/run-apply goes through, checked the FLAG and
+        # not the PLAN. The flag and the plan come apart on their own: m0010 gave
+        # every existing row plan='free' while leaving auto_apply_enabled as it was,
+        # and a downgrade does the same thing later. Proven 2026-09-20 against a
+        # plan='free' user with the flag set: can_auto_apply False, run_job_apply
+        # returned applied=1. Invisible until now only because APPLY_ENGINE_ENABLED
+        # is off in production - i.e. exactly until the thing we are launching.
+        if not entitlements.can_auto_apply(_urow):
+            _rc.close()
+            print(f"[apply] user {user_id}: auto-apply flag set but plan "
+                  f"'{entitlements.plan_of(_urow)}' does not include it - not applying")
+            return {"applied": 0, "error": "", "skipped": "not_entitled"}
 
-        today = datetime.now().strftime("%Y-%m-%d")
-        count = 0
-        confirmed_list, submitted_list, manual_list, failed_list = [], [], [], []
-
-        for j in jobs:
-            job_url = j["url"] or ""
-            if job_url:
-                res = _submit_application_guarded(
-                    job_url, j["title"], j["company"],
-                    applicant, cv_path, GEMINI_KEY,
-                    (j["location"] if "location" in j.keys() else ""),
-                )
-                apply_status       = res["status"]
-                apply_confirmation = res.get("confirmation_text", "")[:1000]
-                apply_error        = res.get("error", "")[:500]
-                apply_failure_type   = res.get("apply_failure_type")
-                apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
-                notes = f"Applied via Job Hunter — {apply_status}"
-            else:
-                apply_status       = "submitted"
-                apply_confirmation = ""
-                apply_error        = "No URL available"
-                notes = "Applied via Job Hunter (no URL)"
-
-            c2 = database.get_db()
-            if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
-                c2.execute(
-                    "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                    "apply_status=?, apply_confirmation=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    # Provenance, set at the moment of truth. Backfilling this
-                    # from note strings worked once (migration 9) and must
-                    # never be needed again.
-                    "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                    "WHERE id=? AND user_id=?",
-                    (today, notes, apply_status, apply_confirmation,
-                     apply_error, apply_failure_type, apply_failure_detail,
-                     job_url, j["id"], user_id)
-                )
-            else:
-                # Failed — keep status='approved' so user can retry
-                _attempts_after = (j["attempts"] or 0) + 1
-                _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
-                c2.execute(
-                    "UPDATE jobs SET notes=?, "
-                    "apply_status=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
-                    "WHERE id=? AND user_id=?",
-                    (notes, _fstatus, apply_error, apply_failure_type, apply_failure_detail, _next_at, j["id"], user_id)
-                )
-            c2.commit()
-            c2.close()
-
-            database.log_activity(
-                user_id, "job_applied",
-                f"{j['title']} @ {j['company']} — {apply_status}"
-            )
-            count += 1
-            # Increment daily application counter
-            try:
-                _uc = database.get_db()
-                _uc.execute("UPDATE user_profiles SET applications_sent_today = applications_sent_today + 1 WHERE user_id=?", (user_id,))
-                _uc.commit()
-                _uc.close()
-            except Exception:
-                pass
-            if apply_status == "confirmed":
-                confirmed_list.append(j)
-            elif apply_status == "submitted":
-                submitted_list.append(j)
-            elif apply_status == "manual_required":
-                manual_list.append(j)
-            else:
-                failed_list.append(j)
-
-        # ── Notifications ────────────────────────────────────────────────────────────────────────────────
-        # ── Single consolidated apply notification ──────────────────────────────
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        _real_submits = len(confirmed_list) + len(submitted_list)
-        if _real_submits > 0:
-            _headline = f"📊 {_real_submits} auto-submitted · {len(manual_list)} need manual · {len(failed_list)} failed\n"
-        elif manual_list:
-            _headline = f"📊 0 auto-submitted — {len(manual_list)} job(s) need manual apply (job-board listings)\n"
+        # Daily reset at 00:00 UTC
+        if _prof["applications_reset_date"] != today_utc:
+            _rc.execute(
+                "UPDATE user_profiles SET applications_sent_today=0, applications_reset_date=? "
+                "WHERE user_id=?", (today_utc, user_id))
+            _rc.commit()
+            _sent_today = 0
         else:
-            _headline = f"📊 {count} job(s) processed\n"
-        notif_lines = [f"🚀 Apply Run Complete — {today_str}", _headline]
-        if confirmed_list:
-            notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
-            for j in confirmed_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(confirmed_list) > 5:
-                notif_lines.append(f"  … +{len(confirmed_list)-5} more")
-        if submitted_list:
-            notif_lines.append(f"\n📤 {len(submitted_list)} Submitted (awaiting confirmation):")
-            for j in submitted_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(submitted_list) > 5:
-                notif_lines.append(f"  … +{len(submitted_list)-5} more")
-        if manual_list:
-            notif_lines.append(f"\n👤 {len(manual_list)} Need Manual Apply:")
-            for j in manual_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(manual_list) > 5:
-                notif_lines.append(f"  … +{len(manual_list)-5} more")
-        if failed_list:
-            notif_lines.append(f"\n❌ {len(failed_list)} Failed:")
-            for j in failed_list[:5]:
-                notif_lines.append(f"  • {j['title']} @ {j['company']}")
-            if len(failed_list) > 5:
-                notif_lines.append(f"  … +{len(failed_list)-5} more")
-        deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#applied")
-        print(f"[run-apply] user {user_id}: {count} — confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed={len(failed_list)}")
-        return {"applied": count, "error": ""}
+            _sent_today = _prof["applications_sent_today"] or 0
 
-    except Exception as e:
-        print(f"[run-apply] Error: {e}")
-        import traceback; traceback.print_exc()
-        return {"applied": 0, "error": str(e)}
+        DAILY_CAP = 3
+        _remaining = None if _is_admin else max(0, DAILY_CAP - _sent_today)
+        _rc.close()
+
+        if _remaining is not None and _remaining <= 0:
+            return {"applied": 0, "error": "", "skipped": "daily_limit_reached"}
+
+        try:
+            import apply_engine
+            conn = database.get_db()
+            try:
+                jobs = conn.execute(
+                    "SELECT id, title, company, url, COALESCE(apply_attempts,0) AS attempts "
+                    "FROM jobs WHERE user_id=? AND status='approved' "
+                    "AND COALESCE(apply_status,'') != 'manual_required' "
+                    "AND COALESCE(apply_attempts,0) < ? "
+                    "AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?)",
+                    (user_id, apply_engine.MAX_APPLY_ATTEMPTS, datetime.now().isoformat())
+                ).fetchall()
+
+                # Cap jobs to daily remaining quota (non-admin only)
+                if _remaining is not None:
+                    jobs = jobs[:_remaining]
+
+                # First-live-run safety valve: bound applies per RUN even for admin, so a
+                # freshly re-enabled engine can't fire dozens of real submits at once.
+                # Raise/disable with Railway env APPLY_MAX_PER_RUN (0 = unlimited).
+                try:
+                    _per_run = int(os.environ.get("APPLY_MAX_PER_RUN", "5") or "5")
+                except ValueError:
+                    _per_run = 5
+                if _per_run > 0:
+                    jobs = jobs[:_per_run]
+
+                if not jobs:
+                    conn.close()
+                    return {"applied": 0, "error": ""}
+
+                # Gather user + CV data for form filling
+                user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                profile = conn.execute(
+                    "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
+                ).fetchone()
+                conn.close()
+
+                cv_text   = (profile["cv_summary"] or "") if profile else ""
+                email     = user["email"] if user else ""
+                applicant = apply_engine.extract_applicant_data(cv_text, email)
+
+                # The apply engine hands this path to a browser file input, so the file
+                # has to exist on disk - rebuilt from the database if the volume is cold.
+                cv_path = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
+
+                today = datetime.now().strftime("%Y-%m-%d")
+                count = 0
+                confirmed_list, submitted_list, manual_list, failed_list = [], [], [], []
+
+                for j in jobs:
+                    job_url = j["url"] or ""
+                    if job_url:
+                        res = _submit_application_guarded(
+                            job_url, j["title"], j["company"],
+                            applicant, cv_path, GEMINI_KEY,
+                            (j["location"] if "location" in j.keys() else ""),
+                        )
+                        apply_status       = res["status"]
+                        apply_confirmation = res.get("confirmation_text", "")[:1000]
+                        apply_error        = res.get("error", "")[:500]
+                        apply_failure_type   = res.get("apply_failure_type")
+                        apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
+                        notes = f"Applied via Job Hunter — {apply_status}"
+                    else:
+                        apply_status       = "submitted"
+                        apply_confirmation = ""
+                        apply_error        = "No URL available"
+                        notes = "Applied via Job Hunter (no URL)"
+
+                    c2 = database.get_db()
+                    try:
+                        if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
+                            c2.execute(
+                                "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                                "apply_status=?, apply_confirmation=?, apply_error=?, "
+                                "apply_failure_type=?, apply_failure_detail=?, "
+                                # Provenance, set at the moment of truth. Backfilling this
+                                # from note strings worked once (migration 9) and must
+                                # never be needed again.
+                                "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
+                                "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                                "WHERE id=? AND user_id=?",
+                                (today, notes, apply_status, apply_confirmation,
+                                 apply_error, apply_failure_type, apply_failure_detail,
+                                 job_url, j["id"], user_id)
+                            )
+                        else:
+                            # Failed — keep status='approved' so user can retry
+                            _attempts_after = (j["attempts"] or 0) + 1
+                            _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
+                            c2.execute(
+                                "UPDATE jobs SET notes=?, "
+                                "apply_status=?, apply_error=?, "
+                                "apply_failure_type=?, apply_failure_detail=?, "
+                                "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
+                                "WHERE id=? AND user_id=?",
+                                (notes, _fstatus, apply_error, apply_failure_type, apply_failure_detail, _next_at, j["id"], user_id)
+                            )
+                        c2.commit()
+                        c2.close()
+
+                        database.log_activity(
+                            user_id, "job_applied",
+                            f"{j['title']} @ {j['company']} — {apply_status}"
+                        )
+                        count += 1
+                        # Increment daily application counter
+                        try:
+                            _uc = database.get_db()
+                            try:
+                                _uc.execute("UPDATE user_profiles SET applications_sent_today = applications_sent_today + 1 WHERE user_id=?", (user_id,))
+                                _uc.commit()
+                                _uc.close()
+                            finally:
+                                _uc.close()
+                        except Exception:
+                            pass
+                        if apply_status == "confirmed":
+                            confirmed_list.append(j)
+                        elif apply_status == "submitted":
+                            submitted_list.append(j)
+                        elif apply_status == "manual_required":
+                            manual_list.append(j)
+                        else:
+                            failed_list.append(j)
+                    finally:
+                        c2.close()
+
+                # ── Notifications ────────────────────────────────────────────────────────────────────────────────
+                # ── Single consolidated apply notification ──────────────────────────────
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                _real_submits = len(confirmed_list) + len(submitted_list)
+                if _real_submits > 0:
+                    _headline = f"📊 {_real_submits} auto-submitted · {len(manual_list)} need manual · {len(failed_list)} failed\n"
+                elif manual_list:
+                    _headline = f"📊 0 auto-submitted — {len(manual_list)} job(s) need manual apply (job-board listings)\n"
+                else:
+                    _headline = f"📊 {count} job(s) processed\n"
+                notif_lines = [f"🚀 Apply Run Complete — {today_str}", _headline]
+                if confirmed_list:
+                    notif_lines.append(f"✅ {len(confirmed_list)} Confirmed:")
+                    for j in confirmed_list[:5]:
+                        notif_lines.append(f"  • {j['title']} @ {j['company']}")
+                    if len(confirmed_list) > 5:
+                        notif_lines.append(f"  … +{len(confirmed_list)-5} more")
+                if submitted_list:
+                    notif_lines.append(f"\n📤 {len(submitted_list)} Submitted (awaiting confirmation):")
+                    for j in submitted_list[:5]:
+                        notif_lines.append(f"  • {j['title']} @ {j['company']}")
+                    if len(submitted_list) > 5:
+                        notif_lines.append(f"  … +{len(submitted_list)-5} more")
+                if manual_list:
+                    notif_lines.append(f"\n👤 {len(manual_list)} Need Manual Apply:")
+                    for j in manual_list[:5]:
+                        notif_lines.append(f"  • {j['title']} @ {j['company']}")
+                    if len(manual_list) > 5:
+                        notif_lines.append(f"  … +{len(manual_list)-5} more")
+                if failed_list:
+                    notif_lines.append(f"\n❌ {len(failed_list)} Failed:")
+                    for j in failed_list[:5]:
+                        notif_lines.append(f"  • {j['title']} @ {j['company']}")
+                    if len(failed_list) > 5:
+                        notif_lines.append(f"  … +{len(failed_list)-5} more")
+                deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#applied")
+                print(f"[run-apply] user {user_id}: {count} — confirmed={len(confirmed_list)} submitted={len(submitted_list)} manual={len(manual_list)} failed={len(failed_list)}")
+                return {"applied": count, "error": ""}
+            finally:
+                conn.close()
+
+        except Exception as e:
+            print(f"[run-apply] Error: {e}")
+            import traceback; traceback.print_exc()
+            return {"applied": 0, "error": str(e)}
+    finally:
+        _rc.close()
 
 
 # ── Immediate single-job apply (triggered on approval) ───────────────────────
@@ -2419,88 +2486,94 @@ def _trigger_apply_bg(user_id: int, job_id: int):
             if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
                 return  # apply engine disabled (2026-07-20)
             conn = database.get_db()
-            job  = conn.execute(
-                "SELECT id, title, company, url, apply_status, COALESCE(apply_attempts,0) AS apply_attempts FROM jobs "
-                "WHERE id=? AND user_id=?", (job_id, user_id)
-            ).fetchone()
-            if not job:
-                conn.close()
-                return
-            # Guard: already applied or currently in flight
-            if job["apply_status"] in ("applying", "confirmed", "submitted"):
-                conn.close()
-                return
+            try:
+                job  = conn.execute(
+                    "SELECT id, title, company, url, apply_status, COALESCE(apply_attempts,0) AS apply_attempts FROM jobs "
+                    "WHERE id=? AND user_id=?", (job_id, user_id)
+                ).fetchone()
+                if not job:
+                    conn.close()
+                    return
+                # Guard: already applied or currently in flight
+                if job["apply_status"] in ("applying", "confirmed", "submitted"):
+                    conn.close()
+                    return
 
-            # Mark as 'applying' so the UI shows a spinner
-            conn.execute(
-                "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
-                (job_id, user_id)
-            )
-            conn.commit()
-
-            user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-            profile = conn.execute(
-                "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
-            ).fetchone()
-            conn.close()
-
-            cv_text   = (profile["cv_summary"] or "") if profile else ""
-            email     = user["email"] if user else ""
-            applicant = apply_engine.extract_applicant_data(cv_text, email)
-            cv_path   = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
-
-            res = _submit_application_guarded(
-                job["url"], job["title"], job["company"],
-                applicant, cv_path, GEMINI_KEY,
-                (job["location"] if "location" in job.keys() else ""),
-            )
-
-            apply_status         = res["status"]
-            apply_confirmation   = res.get("confirmation_text", "")[:1000]
-            apply_error          = res.get("error", "")[:500]
-            apply_failure_type   = res.get("apply_failure_type")
-            apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
-            resolved_url         = res.get("resolved_url", job["url"])
-            today                = datetime.now().strftime("%Y-%m-%d")
-
-            c2 = database.get_db()
-            if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
-                c2.execute(
-                    "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                    "apply_status=?, apply_confirmation=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    # Provenance, set at the moment of truth. Backfilling this
-                    # from note strings worked once (migration 9) and must
-                    # never be needed again.
-                    "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                    "WHERE id=? AND user_id=?",
-                    (today, f"Applied via Job Hunter — {apply_status}",
-                     apply_status, apply_confirmation, apply_error,
-                     apply_failure_type, apply_failure_detail,
-                     job["url"] or "", job_id, user_id)
+                # Mark as 'applying' so the UI shows a spinner
+                conn.execute(
+                    "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
+                    (job_id, user_id)
                 )
-            else:
-                # Failed / manual_required — keep status='approved' so user can retry
-                _attempts_after = (job["apply_attempts"] or 0) + 1
-                _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
-                c2.execute(
-                    "UPDATE jobs SET apply_status=?, apply_error=?, "
-                    "apply_failure_type=?, apply_failure_detail=?, "
-                    "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
-                    "WHERE id=? AND user_id=?",
-                    (_fstatus, apply_error, apply_failure_type,
-                     apply_failure_detail, _next_at, job_id, user_id)
-                )
-            c2.commit()
-            c2.close()
+                conn.commit()
 
-            database.log_activity(
-                user_id, "job_applied",
-                f"{job['title']} @ {job['company']} — {apply_status}"
-                + (f" (via {resolved_url})" if resolved_url != job['url'] else "")
-            )
-            print(f"[apply-bg] job {job_id}: {apply_status}")
+                user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                profile = conn.execute(
+                    "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
+                ).fetchone()
+                conn.close()
+
+                cv_text   = (profile["cv_summary"] or "") if profile else ""
+                email     = user["email"] if user else ""
+                applicant = apply_engine.extract_applicant_data(cv_text, email)
+                cv_path   = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
+
+                res = _submit_application_guarded(
+                    job["url"], job["title"], job["company"],
+                    applicant, cv_path, GEMINI_KEY,
+                    (job["location"] if "location" in job.keys() else ""),
+                )
+
+                apply_status         = res["status"]
+                apply_confirmation   = res.get("confirmation_text", "")[:1000]
+                apply_error          = res.get("error", "")[:500]
+                apply_failure_type   = res.get("apply_failure_type")
+                apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
+                resolved_url         = res.get("resolved_url", job["url"])
+                today                = datetime.now().strftime("%Y-%m-%d")
+
+                c2 = database.get_db()
+                try:
+                    if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
+                        c2.execute(
+                            "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                            "apply_status=?, apply_confirmation=?, apply_error=?, "
+                            "apply_failure_type=?, apply_failure_detail=?, "
+                            # Provenance, set at the moment of truth. Backfilling this
+                            # from note strings worked once (migration 9) and must
+                            # never be needed again.
+                            "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
+                            "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                            "WHERE id=? AND user_id=?",
+                            (today, f"Applied via Job Hunter — {apply_status}",
+                             apply_status, apply_confirmation, apply_error,
+                             apply_failure_type, apply_failure_detail,
+                             job["url"] or "", job_id, user_id)
+                        )
+                    else:
+                        # Failed / manual_required — keep status='approved' so user can retry
+                        _attempts_after = (job["apply_attempts"] or 0) + 1
+                        _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
+                        c2.execute(
+                            "UPDATE jobs SET apply_status=?, apply_error=?, "
+                            "apply_failure_type=?, apply_failure_detail=?, "
+                            "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
+                            "WHERE id=? AND user_id=?",
+                            (_fstatus, apply_error, apply_failure_type,
+                             apply_failure_detail, _next_at, job_id, user_id)
+                        )
+                    c2.commit()
+                    c2.close()
+
+                    database.log_activity(
+                        user_id, "job_applied",
+                        f"{job['title']} @ {job['company']} — {apply_status}"
+                        + (f" (via {resolved_url})" if resolved_url != job['url'] else "")
+                    )
+                    print(f"[apply-bg] job {job_id}: {apply_status}")
+                finally:
+                    c2.close()
+            finally:
+                conn.close()
 
         except Exception as e:
             import traceback
@@ -2509,13 +2582,16 @@ def _trigger_apply_bg(user_id: int, job_id: int):
             # Make sure we don't leave the job stuck in 'applying'
             try:
                 c3 = database.get_db()
-                c3.execute(
-                    "UPDATE jobs SET apply_status='failed', apply_error=? "
-                    "WHERE id=? AND user_id=? AND apply_status='applying'",
-                    (str(e)[:500], job_id, user_id)
-                )
-                c3.commit()
-                c3.close()
+                try:
+                    c3.execute(
+                        "UPDATE jobs SET apply_status='failed', apply_error=? "
+                        "WHERE id=? AND user_id=? AND apply_status='applying'",
+                        (str(e)[:500], job_id, user_id)
+                    )
+                    c3.commit()
+                    c3.close()
+                finally:
+                    c3.close()
             except Exception:
                 pass
 
@@ -6168,22 +6244,24 @@ class Handler(BaseHTTPRequestHandler):
                     "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7],
                 }, 503)
                 return
-            user_count = conn.execute("SELECT COUNT(*) FROM users WHERE is_active=1").fetchone()[0]
-            job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-            last_search = conn.execute(
-                "SELECT details, created_date FROM activity_log "
-                "WHERE event_type='jobs_searched' ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            last_apply = conn.execute(
-                "SELECT details, created_date FROM activity_log "
-                "WHERE event_type='job_applied' ORDER BY id DESC LIMIT 1"
-            ).fetchone()
             try:
-                _schema_version = conn.execute(
-                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
-            except Exception:
-                _schema_version = 0
-            conn.close()
+                user_count = conn.execute("SELECT COUNT(*) FROM users WHERE is_active=1").fetchone()[0]
+                job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                last_search = conn.execute(
+                    "SELECT details, created_date FROM activity_log "
+                    "WHERE event_type='jobs_searched' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                last_apply = conn.execute(
+                    "SELECT details, created_date FROM activity_log "
+                    "WHERE event_type='job_applied' ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                try:
+                    _schema_version = conn.execute(
+                        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
+                except Exception:
+                    _schema_version = 0
+            finally:
+                conn.close()
             self.send_json({
                 "status": "ok",
                 "uptime_info": "server running",
@@ -6274,10 +6352,13 @@ class Handler(BaseHTTPRequestHandler):
             _fname = "cv.pdf"
             try:
                 _conn = database.get_db()
-                _r = _conn.execute("SELECT cv_filename FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
-                _conn.close()
-                if _r and _r["cv_filename"]:
-                    _fname = _r["cv_filename"]
+                try:
+                    _r = _conn.execute("SELECT cv_filename FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
+                    _conn.close()
+                    if _r and _r["cv_filename"]:
+                        _fname = _r["cv_filename"]
+                finally:
+                    _conn.close()
             except Exception:
                 pass
             _disp = "attachment" if qs.get("download", ["0"])[0] == "1" else "inline"
@@ -6302,9 +6383,12 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             conn = database.get_db()
-            self.send_json(database.get_stats(conn, user["id"]))
-            conn.close()
-            return
+            try:
+                self.send_json(database.get_stats(conn, user["id"]))
+                conn.close()
+                return
+            finally:
+                conn.close()
 
         if path == "/api/jobs":
             user = self.require_auth()
@@ -6319,102 +6403,108 @@ class Handler(BaseHTTPRequestHandler):
             }
             order = order_map.get(sort_by, "found_date DESC")
             conn  = database.get_db()
-            database.expire_old_jobs(conn, user["id"])
-            if status == "all":
-                rows = conn.execute(
-                    f"SELECT * FROM jobs WHERE user_id=? ORDER BY {order}",
-                    (user["id"],)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    f"SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY {order}",
-                    (user["id"], status)
-                ).fetchall()
-            jobs_list = [dict(r) for r in rows]
-
-            # ── Live feedback learning: recompute deterministic penalties so the
-            #    New/Approved tabs reflect the user's latest pass feedback on every
-            #    load (no API calls - cheap and immediate). Demotes, never hides. ──
             try:
-                from ai_analysis import compute_feedback_penalty as _live_fb_penalty
-                _live_sig = database.get_feedback_signals(conn, user["id"])
-                _live_prof_row = conn.execute(
-                    "SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)
-                ).fetchone()
-                _live_prof = dict(_live_prof_row) if _live_prof_row else {}
-                _fb_dirty = False
-                for _j in jobs_list:
-                    if _j.get("status") not in ("new", "approved"):
-                        continue
-                    _pen, _rsn = _live_fb_penalty(_j, _live_sig, _live_prof)
-                    if _pen != (_j.get("feedback_penalty") or 0) or (_rsn or "") != (_j.get("feedback_reason") or ""):
-                        conn.execute(
-                            "UPDATE jobs SET feedback_penalty=?, feedback_reason=? WHERE id=?",
-                            (_pen, _rsn, _j["id"])
+                database.expire_old_jobs(conn, user["id"])
+                if status == "all":
+                    rows = conn.execute(
+                        f"SELECT * FROM jobs WHERE user_id=? ORDER BY {order}",
+                        (user["id"],)
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        f"SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY {order}",
+                        (user["id"], status)
+                    ).fetchall()
+                jobs_list = [dict(r) for r in rows]
+
+                # ── Live feedback learning: recompute deterministic penalties so the
+                #    New/Approved tabs reflect the user's latest pass feedback on every
+                #    load (no API calls - cheap and immediate). Demotes, never hides. ──
+                try:
+                    from ai_analysis import compute_feedback_penalty as _live_fb_penalty
+                    _live_sig = database.get_feedback_signals(conn, user["id"])
+                    _live_prof_row = conn.execute(
+                        "SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)
+                    ).fetchone()
+                    _live_prof = dict(_live_prof_row) if _live_prof_row else {}
+                    _fb_dirty = False
+                    for _j in jobs_list:
+                        if _j.get("status") not in ("new", "approved"):
+                            continue
+                        _pen, _rsn = _live_fb_penalty(_j, _live_sig, _live_prof)
+                        if _pen != (_j.get("feedback_penalty") or 0) or (_rsn or "") != (_j.get("feedback_reason") or ""):
+                            conn.execute(
+                                "UPDATE jobs SET feedback_penalty=?, feedback_reason=? WHERE id=?",
+                                (_pen, _rsn, _j["id"])
+                            )
+                            _j["feedback_penalty"] = _pen
+                            _j["feedback_reason"]  = _rsn
+                            _fb_dirty = True
+                    if _fb_dirty:
+                        conn.commit()
+                    if sort_by == "match":
+                        jobs_list.sort(
+                            key=lambda x: (x.get("match_score") or -1) - (x.get("feedback_penalty") or 0),
+                            reverse=True
                         )
-                        _j["feedback_penalty"] = _pen
-                        _j["feedback_reason"]  = _rsn
-                        _fb_dirty = True
-                if _fb_dirty:
-                    conn.commit()
-                if sort_by == "match":
-                    jobs_list.sort(
-                        key=lambda x: (x.get("match_score") or -1) - (x.get("feedback_penalty") or 0),
-                        reverse=True
-                    )
-            except Exception as _fbe:
-                print(f"[feedback-live] {_fbe}")
+                except Exception as _fbe:
+                    print(f"[feedback-live] {_fbe}")
 
-            # Auto-compute match/candidate scores for any unscored jobs (async)
-            try:
-                from ai_analysis import compute_match_score, compute_candidate_score
-                profile = conn.execute(
-                    "SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)
-                ).fetchone()
-                if profile and profile["cv_analyzed"]:
-                    profile_dict = dict(profile)
-                    unscored_ids = [j["id"] for j in jobs_list if j.get("match_score") is None]
-                    if unscored_ids:
-                        def _bg_score(job_ids, uid, pd):
-                            try:
-                                from ai_analysis import compute_feedback_penalty as _bg_fb_penalty
-                                c2 = database.get_db()
-                                sig = database.get_feedback_signals(c2, uid)
-                                for jid in job_ids:
-                                    row = c2.execute(
-                                        "SELECT * FROM jobs WHERE id=? AND user_id=?",
-                                        (jid, uid)
-                                    ).fetchone()
-                                    if not row:
-                                        continue
-                                    jd = dict(row)
-                                    if jd.get("match_score") is not None:
-                                        continue
+                # Auto-compute match/candidate scores for any unscored jobs (async)
+                try:
+                    from ai_analysis import compute_match_score, compute_candidate_score
+                    profile = conn.execute(
+                        "SELECT * FROM user_profiles WHERE user_id=?", (user["id"],)
+                    ).fetchone()
+                    if profile and profile["cv_analyzed"]:
+                        profile_dict = dict(profile)
+                        unscored_ids = [j["id"] for j in jobs_list if j.get("match_score") is None]
+                        if unscored_ids:
+                            def _bg_score(job_ids, uid, pd):
+                                try:
+                                    from ai_analysis import compute_feedback_penalty as _bg_fb_penalty
+                                    c2 = database.get_db()
                                     try:
-                                        ms = compute_match_score(jd, pd, signals=sig, user_id=uid)
-                                        cs = compute_candidate_score(jd, pd)
-                                        pen, rsn = _bg_fb_penalty(jd, sig, pd)
-                                        c2.execute(
-                                            "UPDATE jobs SET match_score=?, candidate_score=?, feedback_penalty=?, feedback_reason=? WHERE id=?",
-                                            (ms, cs, pen, rsn, jid)
-                                        )
-                                        c2.commit()
-                                    except Exception as ie:
-                                        print(f"[score-bg] job {jid}: {ie}")
-                                c2.close()
-                            except Exception as be:
-                                print(f"[score-bg] fatal: {be}")
-                        threading.Thread(
-                            target=_bg_score,
-                            args=(unscored_ids, user["id"], profile_dict),
-                            daemon=True
-                        ).start()
-            except Exception as e:
-                print(f"[score] Error spawning score thread: {e}")
+                                        sig = database.get_feedback_signals(c2, uid)
+                                        for jid in job_ids:
+                                            row = c2.execute(
+                                                "SELECT * FROM jobs WHERE id=? AND user_id=?",
+                                                (jid, uid)
+                                            ).fetchone()
+                                            if not row:
+                                                continue
+                                            jd = dict(row)
+                                            if jd.get("match_score") is not None:
+                                                continue
+                                            try:
+                                                ms = compute_match_score(jd, pd, signals=sig, user_id=uid)
+                                                cs = compute_candidate_score(jd, pd)
+                                                pen, rsn = _bg_fb_penalty(jd, sig, pd)
+                                                c2.execute(
+                                                    "UPDATE jobs SET match_score=?, candidate_score=?, feedback_penalty=?, feedback_reason=? WHERE id=?",
+                                                    (ms, cs, pen, rsn, jid)
+                                                )
+                                                c2.commit()
+                                            except Exception as ie:
+                                                print(f"[score-bg] job {jid}: {ie}")
+                                        c2.close()
+                                    finally:
+                                        c2.close()
+                                except Exception as be:
+                                    print(f"[score-bg] fatal: {be}")
+                            threading.Thread(
+                                target=_bg_score,
+                                args=(unscored_ids, user["id"], profile_dict),
+                                daemon=True
+                            ).start()
+                except Exception as e:
+                    print(f"[score] Error spawning score thread: {e}")
 
-            conn.close()
-            self.send_json(jobs_list)
-            return
+                conn.close()
+                self.send_json(jobs_list)
+                return
+            finally:
+                conn.close()
 
         if path == "/api/activity":
             user = self.require_auth()
@@ -6446,92 +6536,101 @@ class Handler(BaseHTTPRequestHandler):
             if not _jid.isdigit():
                 # No job_id → list candidate jobs (with their IDs) to pick from.
                 _lc = database.get_db()
-                _lrows = _lc.execute(
-                    "SELECT id, status, title, company, url FROM jobs "
-                    "WHERE user_id=? AND status IN ('new','approved') "
-                    "ORDER BY status, id DESC LIMIT 50", (user["id"],)).fetchall()
-                _lc.close()
-                self.send_json({
-                    "note": "Pick a job_id, then open ?job_id=<id> for a DRY RUN, "
-                            "and ?job_id=<id>&mode=live to actually submit that one job.",
-                    "jobs": [{"id": r["id"], "status": r["status"], "title": r["title"],
-                              "company": r["company"], "url": r["url"]} for r in _lrows],
-                })
-                return
-            conn = database.get_db()
-            job = conn.execute(
-                "SELECT id, title, company, url, location, COALESCE(apply_status,'') AS aps "
-                "FROM jobs WHERE id=? AND user_id=?", (int(_jid), user["id"])).fetchone()
-            prof = conn.execute("SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?",
-                                (user["id"],)).fetchone() if job else None
-            conn.close()
-            if not job:
-                self.send_json({"error": f"job {_jid} not found for this user"}, 404)
-                return
-            _cv_text = (prof["cv_summary"] or "") if prof else ""
-            _cv_path = (prof["cv_path"] or None) if prof else None
-            applicant = _ae.extract_applicant_data(_cv_text, user.get("email", ""))
-            _jloc = (job["location"] if "location" in job.keys() else "") or ""
-
-            resolved = None
-            if not _ae._is_direct_ats(job["url"] or ""):
                 try:
-                    resolved = _ae.resolve_ats_application(job["company"], job["title"], location=_jloc)
-                except Exception as _e:
-                    resolved = {"error": str(_e)[:200]}
-            _target = (resolved or {}).get("url") if isinstance(resolved, dict) else None
-            _target = _target or (job["url"] or "")
+                    _lrows = _lc.execute(
+                        "SELECT id, status, title, company, url FROM jobs "
+                        "WHERE user_id=? AND status IN ('new','approved') "
+                        "ORDER BY status, id DESC LIMIT 50", (user["id"],)).fetchall()
+                    _lc.close()
+                    self.send_json({
+                        "note": "Pick a job_id, then open ?job_id=<id> for a DRY RUN, "
+                                "and ?job_id=<id>&mode=live to actually submit that one job.",
+                        "jobs": [{"id": r["id"], "status": r["status"], "title": r["title"],
+                                  "company": r["company"], "url": r["url"]} for r in _lrows],
+                    })
+                    return
+                finally:
+                    _lc.close()
+            conn = database.get_db()
+            try:
+                job = conn.execute(
+                    "SELECT id, title, company, url, location, COALESCE(apply_status,'') AS aps "
+                    "FROM jobs WHERE id=? AND user_id=?", (int(_jid), user["id"])).fetchone()
+                prof = conn.execute("SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?",
+                                    (user["id"],)).fetchone() if job else None
+                conn.close()
+                if not job:
+                    self.send_json({"error": f"job {_jid} not found for this user"}, 404)
+                    return
+                _cv_text = (prof["cv_summary"] or "") if prof else ""
+                _cv_path = (prof["cv_path"] or None) if prof else None
+                applicant = _ae.extract_applicant_data(_cv_text, user.get("email", ""))
+                _jloc = (job["location"] if "location" in job.keys() else "") or ""
 
-            out = {
-                "mode": _mode,
-                "job": {"id": job["id"], "title": job["title"], "company": job["company"],
-                        "url": job["url"], "location": _jloc, "apply_status": job["aps"]},
-                "resolved": resolved,
-                "target_url": _target,
-                "is_direct_ats": _ae._is_direct_ats(_target),
-                "applicant_ready": bool(applicant.get("full_name") or applicant.get("first_name")),
-                "applicant_name": applicant.get("full_name", ""),
-                "cv_present": bool(_cv_path and os.path.exists(_cv_path)),
-            }
-            if _mode != "live":
-                out["note"] = "DRY RUN — nothing submitted. Add &mode=live to actually submit this ONE job."
+                resolved = None
+                if not _ae._is_direct_ats(job["url"] or ""):
+                    try:
+                        resolved = _ae.resolve_ats_application(job["company"], job["title"], location=_jloc)
+                    except Exception as _e:
+                        resolved = {"error": str(_e)[:200]}
+                _target = (resolved or {}).get("url") if isinstance(resolved, dict) else None
+                _target = _target or (job["url"] or "")
+
+                out = {
+                    "mode": _mode,
+                    "job": {"id": job["id"], "title": job["title"], "company": job["company"],
+                            "url": job["url"], "location": _jloc, "apply_status": job["aps"]},
+                    "resolved": resolved,
+                    "target_url": _target,
+                    "is_direct_ats": _ae._is_direct_ats(_target),
+                    "applicant_ready": bool(applicant.get("full_name") or applicant.get("first_name")),
+                    "applicant_name": applicant.get("full_name", ""),
+                    "cv_present": bool(_cv_path and os.path.exists(_cv_path)),
+                }
+                if _mode != "live":
+                    out["note"] = "DRY RUN — nothing submitted. Add &mode=live to actually submit this ONE job."
+                    self.send_json(out)
+                    return
+
+                # LIVE: submit exactly this one job, forcing past the kill-switch.
+                res = _ae.submit_application(
+                    job["url"] or "", job["title"], job["company"], applicant, _cv_path,
+                    GEMINI_KEY, _jloc, True,   # api_key, job_location, force=True
+                )
+                out["result"] = {
+                    "status": res.get("status"), "success": res.get("success"),
+                    "resolved_url": res.get("resolved_url"),
+                    "confirmation_text": (res.get("confirmation_text") or "")[:500],
+                    "error": (res.get("error") or "")[:500],
+                    "apply_failure_type": res.get("apply_failure_type"),
+                    "apply_failure_detail": (res.get("apply_failure_detail") or "")[:500],
+                }
+                try:
+                    _st = res.get("status")
+                    c3 = database.get_db()
+                    try:
+                        if _st in ("submitted", "confirmed") and not (res.get("error") or "").strip():
+                            c3.execute(
+                                "UPDATE jobs SET status='applied', applied_date=?, apply_status=?, "
+                                "apply_confirmation=?, apply_error='', "
+                                "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
+                                (datetime.now().strftime('%Y-%m-%d'), _st,
+                                 (res.get('confirmation_text') or '')[:1000], job["id"], user["id"]))
+                        else:
+                            c3.execute(
+                                "UPDATE jobs SET apply_status=?, apply_error=?, "
+                                "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
+                                (_st, (res.get('error') or '')[:500], job["id"], user["id"]))
+                        c3.commit(); c3.close()
+                        out["persisted"] = True
+                    finally:
+                        c3.close()
+                except Exception as _e:
+                    out["persist_error"] = str(_e)[:200]
                 self.send_json(out)
                 return
-
-            # LIVE: submit exactly this one job, forcing past the kill-switch.
-            res = _ae.submit_application(
-                job["url"] or "", job["title"], job["company"], applicant, _cv_path,
-                GEMINI_KEY, _jloc, True,   # api_key, job_location, force=True
-            )
-            out["result"] = {
-                "status": res.get("status"), "success": res.get("success"),
-                "resolved_url": res.get("resolved_url"),
-                "confirmation_text": (res.get("confirmation_text") or "")[:500],
-                "error": (res.get("error") or "")[:500],
-                "apply_failure_type": res.get("apply_failure_type"),
-                "apply_failure_detail": (res.get("apply_failure_detail") or "")[:500],
-            }
-            try:
-                _st = res.get("status")
-                c3 = database.get_db()
-                if _st in ("submitted", "confirmed") and not (res.get("error") or "").strip():
-                    c3.execute(
-                        "UPDATE jobs SET status='applied', applied_date=?, apply_status=?, "
-                        "apply_confirmation=?, apply_error='', "
-                        "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
-                        (datetime.now().strftime('%Y-%m-%d'), _st,
-                         (res.get('confirmation_text') or '')[:1000], job["id"], user["id"]))
-                else:
-                    c3.execute(
-                        "UPDATE jobs SET apply_status=?, apply_error=?, "
-                        "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
-                        (_st, (res.get('error') or '')[:500], job["id"], user["id"]))
-                c3.commit(); c3.close()
-                out["persisted"] = True
-            except Exception as _e:
-                out["persist_error"] = str(_e)[:200]
-            self.send_json(out)
-            return
+            finally:
+                conn.close()
 
         if path == "/api/admin/apply-selftest":
             # Read-only production diagnosis of the apply engine. Does NOT submit
@@ -6555,44 +6654,50 @@ class Handler(BaseHTTPRequestHandler):
             }
             try:
                 _c = database.get_db()
-                _pr = _c.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
-                _c.close()
-                _cvp = (_pr["cv_path"] if _pr else "") or ""
-                diag["cv_path"] = _cvp
-                diag["cv_exists"] = bool(_cvp and os.path.exists(_cvp))
+                try:
+                    _pr = _c.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
+                    _c.close()
+                    _cvp = (_pr["cv_path"] if _pr else "") or ""
+                    diag["cv_path"] = _cvp
+                    diag["cv_exists"] = bool(_cvp and os.path.exists(_cvp))
+                finally:
+                    _c.close()
             except Exception as _e:
                 diag["cv_error"] = str(_e)[:300]
             # Queue composition — is there anything AUTO-SUBMITTABLE to apply to?
             # (job-board URLs are manual_required by design; dead links are unusable.)
             try:
                 _c2 = database.get_db()
-                _rows = _c2.execute(
-                    "SELECT status, url, COALESCE(apply_status,'') AS aps, COALESCE(url_verified,-1) AS uv, "
-                    "COALESCE(apply_attempts,0) AS att FROM jobs WHERE user_id=? AND status IN ('new','approved')",
-                    (user["id"],)).fetchall()
-                _allcounts = {r[0]: r[1] for r in _c2.execute(
-                    "SELECT status, COUNT(*) FROM jobs WHERE user_id=? GROUP BY status",
-                    (user["id"],)).fetchall()}
-                _c2.close()
-                def _bucket(rows):
-                    tot = dead = board = manual = exh = sub = 0
-                    for _r in rows:
-                        tot += 1
-                        _u = _r["url"] or ""
-                        if _r["uv"] == 0: dead += 1; continue
-                        if _r["aps"] == "manual_required": manual += 1; continue
-                        if _ae._is_job_board(_u): board += 1; continue
-                        if _r["att"] >= _ae.MAX_APPLY_ATTEMPTS: exh += 1; continue
-                        sub += 1
-                    return {"total": tot, "auto_submittable": sub,
-                            "job_board_manual_by_design": board,
-                            "flagged_manual_required": manual,
-                            "dead_link": dead, "attempts_exhausted": exh}
-                diag["queue_audit"] = {
-                    "status_counts": _allcounts,
-                    "approved": _bucket([r for r in _rows if r["status"] == "approved"]),
-                    "new_unreviewed": _bucket([r for r in _rows if r["status"] == "new"]),
-                }
+                try:
+                    _rows = _c2.execute(
+                        "SELECT status, url, COALESCE(apply_status,'') AS aps, COALESCE(url_verified,-1) AS uv, "
+                        "COALESCE(apply_attempts,0) AS att FROM jobs WHERE user_id=? AND status IN ('new','approved')",
+                        (user["id"],)).fetchall()
+                    _allcounts = {r[0]: r[1] for r in _c2.execute(
+                        "SELECT status, COUNT(*) FROM jobs WHERE user_id=? GROUP BY status",
+                        (user["id"],)).fetchall()}
+                    _c2.close()
+                    def _bucket(rows):
+                        tot = dead = board = manual = exh = sub = 0
+                        for _r in rows:
+                            tot += 1
+                            _u = _r["url"] or ""
+                            if _r["uv"] == 0: dead += 1; continue
+                            if _r["aps"] == "manual_required": manual += 1; continue
+                            if _ae._is_job_board(_u): board += 1; continue
+                            if _r["att"] >= _ae.MAX_APPLY_ATTEMPTS: exh += 1; continue
+                            sub += 1
+                        return {"total": tot, "auto_submittable": sub,
+                                "job_board_manual_by_design": board,
+                                "flagged_manual_required": manual,
+                                "dead_link": dead, "attempts_exhausted": exh}
+                    diag["queue_audit"] = {
+                        "status_counts": _allcounts,
+                        "approved": _bucket([r for r in _rows if r["status"] == "approved"]),
+                        "new_unreviewed": _bucket([r for r in _rows if r["status"] == "new"]),
+                    }
+                finally:
+                    _c2.close()
             except Exception as _e:
                 diag["queue_audit_error"] = str(_e)[:300]
             # Optional live resolver probe (read-only, no submit):
@@ -6664,25 +6769,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _uid = user["id"]
             conn = database.get_db()
-            # Reuse the SAME source the dashboard/Analytics use so numbers match
-            # exactly (get_stats folds in passed_archived_count for the lifetime
-            # 'rejected'/'total', so Passed here == Passed on the dashboard).
-            base = database.get_stats(conn, _uid)
-            def _qs(where):
-                return conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? " + where, (_uid,)).fetchone()[0]
-            stats = {
-                "new": base.get("new", 0),
-                "approved": base.get("approved", 0),
-                "applied": base.get("applied", 0),
-                "rejected": base.get("rejected", 0),
-                "deferred": base.get("deferred", 0),
-                "total": base.get("total", 0),
-                "manual_required": _qs("AND status='approved' AND COALESCE(apply_status,'')='manual_required'"),
-                "dead_links": _qs("AND status IN ('new','approved') AND url_verified=0"),
-            }
-            conn.close()
-            self.send_json(stats)
-            return
+            try:
+                # Reuse the SAME source the dashboard/Analytics use so numbers match
+                # exactly (get_stats folds in passed_archived_count for the lifetime
+                # 'rejected'/'total', so Passed here == Passed on the dashboard).
+                base = database.get_stats(conn, _uid)
+                def _qs(where):
+                    return conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? " + where, (_uid,)).fetchone()[0]
+                stats = {
+                    "new": base.get("new", 0),
+                    "approved": base.get("approved", 0),
+                    "applied": base.get("applied", 0),
+                    "rejected": base.get("rejected", 0),
+                    "deferred": base.get("deferred", 0),
+                    "total": base.get("total", 0),
+                    "manual_required": _qs("AND status='approved' AND COALESCE(apply_status,'')='manual_required'"),
+                    "dead_links": _qs("AND status IN ('new','approved') AND url_verified=0"),
+                }
+                conn.close()
+                self.send_json(stats)
+                return
+            finally:
+                conn.close()
 
         if path == "/api/admin/dedup":
             # Deletes rows on a GET. Guarded until it can become a POST, which
@@ -6694,8 +6802,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "forbidden"}, 403)
                 return
             conn = database.get_db()
-            # Find duplicate jobs: same user_id + company + title, keep the one with lowest id
-            dupes = conn.execute("""
+            try:
+                # Find duplicate jobs: same user_id + company + title, keep the one with lowest id
+                dupes = conn.execute("""
                 SELECT j.id FROM jobs j
                 INNER JOIN (
                     SELECT user_id, LOWER(TRIM(company)) as c, LOWER(TRIM(title)) as t, MIN(id) as min_id
@@ -6704,13 +6813,15 @@ class Handler(BaseHTTPRequestHandler):
                     HAVING COUNT(*) > 1
                 ) d ON j.user_id = d.user_id AND LOWER(TRIM(j.company)) = d.c AND LOWER(TRIM(j.title)) = d.t AND j.id != d.min_id
             """).fetchall()
-            dupe_ids = [r[0] for r in dupes]
-            if dupe_ids:
-                conn.execute("DELETE FROM jobs WHERE id IN (%s)" % ",".join(str(i) for i in dupe_ids))
-                conn.commit()
-            conn.close()
-            self.send_json({"removed": len(dupe_ids), "ids": dupe_ids})
-            return
+                dupe_ids = [r[0] for r in dupes]
+                if dupe_ids:
+                    conn.execute("DELETE FROM jobs WHERE id IN (%s)" % ",".join(str(i) for i in dupe_ids))
+                    conn.commit()
+                conn.close()
+                self.send_json({"removed": len(dupe_ids), "ids": dupe_ids})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/admin/users":
             user = self.require_auth()
@@ -6718,7 +6829,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Forbidden"}, 403)
                 return
             conn = database.get_db()
-            rows = conn.execute("""
+            try:
+                rows = conn.execute("""
                 SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_date,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='new')      AS stats_new,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='approved') AS stats_approved,
@@ -6726,41 +6838,49 @@ class Handler(BaseHTTPRequestHandler):
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id)                          AS stats_total
                 FROM users u ORDER BY u.created_date DESC
             """).fetchall()
-            conn.close()
-            self.send_json([dict(r) for r in rows])
-            return
+                conn.close()
+                self.send_json([dict(r) for r in rows])
+                return
+            finally:
+                conn.close()
 
         if path == "/api/patterns":
             user = self.require_auth()
             if not user:
                 return
             conn = database.get_db()
-            rows = conn.execute(
-                "SELECT * FROM rejected_patterns WHERE user_id=? ORDER BY created_date DESC LIMIT 50",
-                (user["id"],)
-            ).fetchall()
-            conn.close()
-            self.send_json([dict(r) for r in rows])
-            return
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM rejected_patterns WHERE user_id=? ORDER BY created_date DESC LIMIT 50",
+                    (user["id"],)
+                ).fetchall()
+                conn.close()
+                self.send_json([dict(r) for r in rows])
+                return
+            finally:
+                conn.close()
 
         if path == "/api/learned":
             user = self.require_auth()
             if not user:
                 return
             conn = database.get_db()
-            pr = database.get_pass_reason_stats(conn, user["id"])
-            bl = database.get_blocklist(conn, user["id"])
-            rows2 = conn.execute(
-                "SELECT id, company, title, notes, created_date FROM rejected_patterns WHERE user_id=? ORDER BY created_date DESC LIMIT 100",
-                (user["id"],)
-            ).fetchall()
-            conn.close()
-            self.send_json({
-                "pass_reasons": [{"reason": k, "count": v} for k, v in pr.items()],
-                "blocklist": bl,
-                "patterns": [dict(r) for r in rows2],
-            })
-            return
+            try:
+                pr = database.get_pass_reason_stats(conn, user["id"])
+                bl = database.get_blocklist(conn, user["id"])
+                rows2 = conn.execute(
+                    "SELECT id, company, title, notes, created_date FROM rejected_patterns WHERE user_id=? ORDER BY created_date DESC LIMIT 100",
+                    (user["id"],)
+                ).fetchall()
+                conn.close()
+                self.send_json({
+                    "pass_reasons": [{"reason": k, "count": v} for k, v in pr.items()],
+                    "blocklist": bl,
+                    "patterns": [dict(r) for r in rows2],
+                })
+                return
+            finally:
+                conn.close()
 
         # ── Sync: export approved jobs for relay/scheduled tasks ──
         if path == "/api/sync/approved":
@@ -6769,10 +6889,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Unauthorized"}, 401)
                 return
             conn = database.get_db()
-            rows = conn.execute("SELECT * FROM jobs WHERE status='approved'").fetchall()
-            conn.close()
-            self.send_json([dict(r) for r in rows])
-            return
+            try:
+                rows = conn.execute("SELECT * FROM jobs WHERE status='approved'").fetchall()
+                conn.close()
+                self.send_json([dict(r) for r in rows])
+                return
+            finally:
+                conn.close()
 
         self.send_response(404)
         self.end_headers()
@@ -6897,8 +7020,11 @@ class Handler(BaseHTTPRequestHandler):
             company = (data.get("company") or "").strip()
             if company:
                 conn = database.get_db()
-                database.add_to_blocklist(conn, user_id, company, data.get("reason", ""))
-                conn.close()
+                try:
+                    database.add_to_blocklist(conn, user_id, company, data.get("reason", ""))
+                    conn.close()
+                finally:
+                    conn.close()
             self.send_json({"success": True})
             return
 
@@ -6907,8 +7033,11 @@ class Handler(BaseHTTPRequestHandler):
             company = (data.get("company") or "").strip()
             if company:
                 conn = database.get_db()
-                database.remove_from_blocklist(conn, user_id, company)
-                conn.close()
+                try:
+                    database.remove_from_blocklist(conn, user_id, company)
+                    conn.close()
+                finally:
+                    conn.close()
             self.send_json({"success": True})
             return
 
@@ -6916,11 +7045,14 @@ class Handler(BaseHTTPRequestHandler):
             data = self.read_json()
             pid = data.get("id")
             conn = database.get_db()
-            if pid is not None:
-                conn.execute("DELETE FROM rejected_patterns WHERE id=? AND user_id=?", (pid, user_id))
-            conn.commit(); conn.close()
-            self.send_json({"success": True})
-            return
+            try:
+                if pid is not None:
+                    conn.execute("DELETE FROM rejected_patterns WHERE id=? AND user_id=?", (pid, user_id))
+                conn.commit(); conn.close()
+                self.send_json({"success": True})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/push/subscribe":
             data = self.read_json()
@@ -6930,22 +7062,28 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "no endpoint"}, 400)
                 return
             conn = database.get_db()
-            conn.execute(
-                "INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, subscription, created_date) "
-                "VALUES (?,?,?,?)",
-                (user_id, endpoint, json.dumps(sub), datetime.now().isoformat())
-            )
-            conn.commit(); conn.close()
-            self.send_json({"success": True})
-            return
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, subscription, created_date) "
+                    "VALUES (?,?,?,?)",
+                    (user_id, endpoint, json.dumps(sub), datetime.now().isoformat())
+                )
+                conn.commit(); conn.close()
+                self.send_json({"success": True})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/push/unsubscribe":
             data = self.read_json()
             endpoint = data.get("endpoint")
             if endpoint:
                 conn = database.get_db()
-                conn.execute("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?", (user_id, endpoint))
-                conn.commit(); conn.close()
+                try:
+                    conn.execute("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?", (user_id, endpoint))
+                    conn.commit(); conn.close()
+                finally:
+                    conn.close()
             self.send_json({"success": True})
             return
 
@@ -7027,36 +7165,39 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # Get CV path from profile
             conn = database.get_db()
-            row = conn.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
-            conn.close()
-            cv_path = _cv_file(user_id, (row["cv_path"] or "") if row else "")
-            if not cv_path:
-                self.send_json({"error": "No CV uploaded yet. Please upload your PDF first."})
-                return
             try:
-                data = analyze_cv(cv_path, GEMINI_KEY, user_id=user_id)
-                # Save to profile
-                auth.update_profile(
-                    user_id,
-                    cv_analyzed=1,
-                    cv_summary=data.get("summary", ""),
-                    job_titles=json.dumps(data.get("job_titles", [])),
-                    keywords=json.dumps(data.get("keywords", [])),
-                    locations=json.dumps(data.get("locations", ["Tel Aviv"])),
-                    salary_min=data.get("salary_min", 0),
-                    salary_max=data.get("salary_max", 0),
-                    experience_years=data.get("experience_years", 0),
-                    seniority=data.get("seniority", ""),
-                )
-                database.write_users_config(BASE_DIR)
-                database.log_activity(user_id, "cv_analyzed",
-                    f"AI extracted {len(data.get('job_titles',[]))} job titles, "
-                    f"{len(data.get('keywords',[]))} keywords")
-                self.send_json(data)
-            except Exception as e:
-                print(f"[analyze] Error: {e}")
-                self.send_json({"error": str(e)})
-            return
+                row = conn.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
+                conn.close()
+                cv_path = _cv_file(user_id, (row["cv_path"] or "") if row else "")
+                if not cv_path:
+                    self.send_json({"error": "No CV uploaded yet. Please upload your PDF first."})
+                    return
+                try:
+                    data = analyze_cv(cv_path, GEMINI_KEY, user_id=user_id)
+                    # Save to profile
+                    auth.update_profile(
+                        user_id,
+                        cv_analyzed=1,
+                        cv_summary=data.get("summary", ""),
+                        job_titles=json.dumps(data.get("job_titles", [])),
+                        keywords=json.dumps(data.get("keywords", [])),
+                        locations=json.dumps(data.get("locations", ["Tel Aviv"])),
+                        salary_min=data.get("salary_min", 0),
+                        salary_max=data.get("salary_max", 0),
+                        experience_years=data.get("experience_years", 0),
+                        seniority=data.get("seniority", ""),
+                    )
+                    database.write_users_config(BASE_DIR)
+                    database.log_activity(user_id, "cv_analyzed",
+                        f"AI extracted {len(data.get('job_titles',[]))} job titles, "
+                        f"{len(data.get('keywords',[]))} keywords")
+                    self.send_json(data)
+                except Exception as e:
+                    print(f"[analyze] Error: {e}")
+                    self.send_json({"error": str(e)})
+                return
+            finally:
+                conn.close()
 
         # ── Save profile ──
         if path == "/api/save-profile":
@@ -7218,55 +7359,61 @@ class Handler(BaseHTTPRequestHandler):
         # ── Validate queue/new links: drop dead postings ──
         if path == "/api/validate-links":
             conn = database.get_db()
-            rows = conn.execute(
-                "SELECT id, url, title, company, status FROM jobs "
-                "WHERE user_id=? AND status IN ('new','approved')",
-                (user_id,)
-            ).fetchall()
-            jobs_to_check = [dict(r) for r in rows]
-            conn.close()
+            try:
+                rows = conn.execute(
+                    "SELECT id, url, title, company, status FROM jobs "
+                    "WHERE user_id=? AND status IN ('new','approved')",
+                    (user_id,)
+                ).fetchall()
+                jobs_to_check = [dict(r) for r in rows]
+                conn.close()
 
-            import concurrent.futures as _cf
-            results = []
-            if jobs_to_check:
-                with _cf.ThreadPoolExecutor(max_workers=8) as _ex:
-                    _futs = {_ex.submit(_link_status, j["url"]): j for j in jobs_to_check}
-                    for _fut in _cf.as_completed(_futs):
-                        results.append((_futs[_fut], _fut.result()))
+                import concurrent.futures as _cf
+                results = []
+                if jobs_to_check:
+                    with _cf.ThreadPoolExecutor(max_workers=8) as _ex:
+                        _futs = {_ex.submit(_link_status, j["url"]): j for j in jobs_to_check}
+                        for _fut in _cf.as_completed(_futs):
+                            results.append((_futs[_fut], _fut.result()))
 
-            checked = len(results)
-            removed = alive = unknown = 0
-            removed_items = []
-            _now_iso = datetime.now().isoformat(timespec="seconds")
-            conn = database.get_db()
-            for j, st in results:
-                if st == "dead":
-                    conn.execute(
-                        "UPDATE jobs SET status='rejected', "
-                        "notes=TRIM(COALESCE(notes,'') || ' [auto-removed: dead link]'), "
-                        "url_verified=0, url_check_date=? WHERE id=? AND user_id=?",
-                        (_now_iso, j["id"], user_id))
-                    removed += 1
-                    removed_items.append({"title": j.get("title") or "Untitled",
-                                          "company": j.get("company") or ""})
-                elif st == "alive":
-                    conn.execute(
-                        "UPDATE jobs SET url_verified=1, url_check_date=? WHERE id=? AND user_id=?",
-                        (_now_iso, j["id"], user_id))
-                    alive += 1
-                else:  # unknown - keep, just timestamp the check
-                    conn.execute(
-                        "UPDATE jobs SET url_check_date=? WHERE id=? AND user_id=?",
-                        (_now_iso, j["id"], user_id))
-                    unknown += 1
-            conn.commit()
-            conn.close()
-            if checked:
-                database.log_activity(user_id, "links_validated",
-                    f"Checked {checked} link(s): removed {removed} dead, {alive} alive, {unknown} unverified")
-            self.send_json({"checked": checked, "removed": removed, "alive": alive,
-                            "unknown": unknown, "removed_items": removed_items})
-            return
+                checked = len(results)
+                removed = alive = unknown = 0
+                removed_items = []
+                _now_iso = datetime.now().isoformat(timespec="seconds")
+                conn = database.get_db()
+                try:
+                    for j, st in results:
+                        if st == "dead":
+                            conn.execute(
+                                "UPDATE jobs SET status='rejected', "
+                                "notes=TRIM(COALESCE(notes,'') || ' [auto-removed: dead link]'), "
+                                "url_verified=0, url_check_date=? WHERE id=? AND user_id=?",
+                                (_now_iso, j["id"], user_id))
+                            removed += 1
+                            removed_items.append({"title": j.get("title") or "Untitled",
+                                                  "company": j.get("company") or ""})
+                        elif st == "alive":
+                            conn.execute(
+                                "UPDATE jobs SET url_verified=1, url_check_date=? WHERE id=? AND user_id=?",
+                                (_now_iso, j["id"], user_id))
+                            alive += 1
+                        else:  # unknown - keep, just timestamp the check
+                            conn.execute(
+                                "UPDATE jobs SET url_check_date=? WHERE id=? AND user_id=?",
+                                (_now_iso, j["id"], user_id))
+                            unknown += 1
+                    conn.commit()
+                    conn.close()
+                    if checked:
+                        database.log_activity(user_id, "links_validated",
+                            f"Checked {checked} link(s): removed {removed} dead, {alive} alive, {unknown} unverified")
+                    self.send_json({"checked": checked, "removed": removed, "alive": alive,
+                                    "unknown": unknown, "removed_items": removed_items})
+                    return
+                finally:
+                    conn.close()
+            finally:
+                conn.close()
 
         # ── Change password ──
         if path == "/api/change-password":
@@ -7291,139 +7438,148 @@ class Handler(BaseHTTPRequestHandler):
             action = m.group(2)
             data   = self.read_json()
             conn   = database.get_db()
+            try:
 
-            # Verify ownership
-            job = conn.execute(
-                "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
-            ).fetchone()
-            if not job:
-                conn.close()
-                self.send_json({"error": "Not found"}, 404)
-                return
-
-            status_map = {"approve":"approved","reject":"rejected","later":"deferred","applied":"applied","failed":"approved","retry":"approved","restore":"new"}
-            if action == "restore":
-                conn.execute(
-                    "UPDATE jobs SET status='new', apply_status=NULL, "
-                    "apply_error=NULL, apply_confirmation=NULL, "
-                    "apply_failure_type=NULL, apply_failure_detail=NULL, "
-                    "apply_attempts=0, apply_next_attempt_at=NULL, applied_date=NULL, notes='', url_verified=NULL "
-                    "WHERE id=? AND user_id=?",
-                    (job_id, user_id)
-                )
-                # Remove rejected pattern so it won't be filtered in future searches
-                conn.execute(
-                    "DELETE FROM rejected_patterns WHERE user_id=? AND LOWER(TRIM(company))=LOWER(TRIM(?)) AND LOWER(TRIM(title))=LOWER(TRIM(?))",
-                    (user_id, job["company"] or "", job["title"] or "")
-                )
-                conn.commit()
-                conn.close()
-                database.log_activity(user_id, "job_restored",
-                    f"Restored {job['title']} at {job['company']} to New")
-                self.send_json({"success": True})
-                return
-
-            if action == "retry":
-                conn.execute(
-                    "UPDATE jobs SET status='approved', apply_status=NULL, "
-                    "apply_error=NULL, apply_confirmation=NULL, "
-                    "apply_failure_type=NULL, apply_failure_detail=NULL, "
-                    "apply_attempts=0, apply_next_attempt_at=NULL, applied_date=NULL, notes='' "
-                    "WHERE id=? AND user_id=?",
-                    (job_id, user_id)
-                )
-                conn.commit()
-                conn.close()
-                database.log_activity(user_id, "job_retry",
-                    f"Retrying {job['title']} at {job['company']}")
-                self.send_json({"success": True})
-                return
-
-            new_status = status_map[action]
-            reason     = data.get("reason", "") or data.get("notes", "")
-
-            if action in ("applied", "failed"):
-                conn.execute(
-                    "UPDATE jobs SET status=?, applied_date=?, notes=?, apply_status=?, "
-                    "applied_via=? WHERE id=?",
-                    (new_status, datetime.now().isoformat(), reason,
-                     "submitted" if action == "applied" else "failed",
-                     "manual" if action == "applied" else None, job_id))
-            else:
-                # rejected_by separates the user's own passes from the system
-                # auto-rejecting dead, expired and already-attempted jobs. The
-                # approval rate is only meaningful over the ones he saw.
-                conn.execute(
-                    "UPDATE jobs SET status=?, notes=?, rejected_by=? WHERE id=?",
-                    (new_status, reason,
-                     "user" if action == "reject" else None, job_id))
-
-            if action == "reject":
-                conn.execute(
-                    "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
-                    (user_id, job["company"], job["title"],
-                     reason or "No reason given",
-                     (job["location"] if "location" in job.keys() else None),
-                     datetime.now().isoformat())
-                )
-                detail = f"Passed on {job['title']} at {job['company']}"
-                if reason:
-                    detail += f" — {reason}"
-                database.log_activity(user_id, "job_rejected", detail)
-                if reason:
-                    database.record_pass_reason_stat(conn, user_id, reason)
-            elif action == "approve":
-                database.log_activity(user_id, "job_approved",
-                    f"Approved {job['title']} at {job['company']}")
-
-            conn.commit()
-            conn.close()
-            database.write_approved_jobs(BASE_DIR)
-            bump_onboarding(user_id, "first_job_reviewed")
-
-            # On approval: kick off a background application ONLY if the user has
-            # auto-apply enabled. Otherwise approving just shortlists the job (moves
-            # it to the Approved queue); the user applies explicitly via "Apply Now"
-            # or the scheduled apply run. This keeps the apply engine OUT of the
-            # search/review flow unless auto-apply was deliberately turned on.
-            if action == "approve":
-                _aa_conn = database.get_db()
-                _aa_row = _aa_conn.execute(
-                    "SELECT auto_apply_enabled FROM user_profiles WHERE user_id=?",
-                    (user_id,)
+                # Verify ownership
+                job = conn.execute(
+                    "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
                 ).fetchone()
-                _aa_conn.close()
-                if _aa_row and _aa_row["auto_apply_enabled"] and entitlements.can_auto_apply(user):
-                    _trigger_apply_bg(user_id, job_id)
-                elif _aa_row and _aa_row["auto_apply_enabled"]:
-                    # Flag set, entitlement gone (downgrade, or a row that
-                    # predates the gate). Shortlist rather than apply.
-                    print(f"[approve] job {job_id} shortlisted (auto-apply flag set but plan does not allow it)")
-                else:
-                    print(f"[approve] job {job_id} shortlisted (auto-apply off — not applying)")
+                if not job:
+                    conn.close()
+                    self.send_json({"error": "Not found"}, 404)
+                    return
 
-            self.send_json({"success": True})
-            return
+                status_map = {"approve":"approved","reject":"rejected","later":"deferred","applied":"applied","failed":"approved","retry":"approved","restore":"new"}
+                if action == "restore":
+                    conn.execute(
+                        "UPDATE jobs SET status='new', apply_status=NULL, "
+                        "apply_error=NULL, apply_confirmation=NULL, "
+                        "apply_failure_type=NULL, apply_failure_detail=NULL, "
+                        "apply_attempts=0, apply_next_attempt_at=NULL, applied_date=NULL, notes='', url_verified=NULL "
+                        "WHERE id=? AND user_id=?",
+                        (job_id, user_id)
+                    )
+                    # Remove rejected pattern so it won't be filtered in future searches
+                    conn.execute(
+                        "DELETE FROM rejected_patterns WHERE user_id=? AND LOWER(TRIM(company))=LOWER(TRIM(?)) AND LOWER(TRIM(title))=LOWER(TRIM(?))",
+                        (user_id, job["company"] or "", job["title"] or "")
+                    )
+                    conn.commit()
+                    conn.close()
+                    database.log_activity(user_id, "job_restored",
+                        f"Restored {job['title']} at {job['company']} to New")
+                    self.send_json({"success": True})
+                    return
+
+                if action == "retry":
+                    conn.execute(
+                        "UPDATE jobs SET status='approved', apply_status=NULL, "
+                        "apply_error=NULL, apply_confirmation=NULL, "
+                        "apply_failure_type=NULL, apply_failure_detail=NULL, "
+                        "apply_attempts=0, apply_next_attempt_at=NULL, applied_date=NULL, notes='' "
+                        "WHERE id=? AND user_id=?",
+                        (job_id, user_id)
+                    )
+                    conn.commit()
+                    conn.close()
+                    database.log_activity(user_id, "job_retry",
+                        f"Retrying {job['title']} at {job['company']}")
+                    self.send_json({"success": True})
+                    return
+
+                new_status = status_map[action]
+                reason     = data.get("reason", "") or data.get("notes", "")
+
+                if action in ("applied", "failed"):
+                    conn.execute(
+                        "UPDATE jobs SET status=?, applied_date=?, notes=?, apply_status=?, "
+                        "applied_via=? WHERE id=?",
+                        (new_status, datetime.now().isoformat(), reason,
+                         "submitted" if action == "applied" else "failed",
+                         "manual" if action == "applied" else None, job_id))
+                else:
+                    # rejected_by separates the user's own passes from the system
+                    # auto-rejecting dead, expired and already-attempted jobs. The
+                    # approval rate is only meaningful over the ones he saw.
+                    conn.execute(
+                        "UPDATE jobs SET status=?, notes=?, rejected_by=? WHERE id=?",
+                        (new_status, reason,
+                         "user" if action == "reject" else None, job_id))
+
+                if action == "reject":
+                    conn.execute(
+                        "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
+                        (user_id, job["company"], job["title"],
+                         reason or "No reason given",
+                         (job["location"] if "location" in job.keys() else None),
+                         datetime.now().isoformat())
+                    )
+                    detail = f"Passed on {job['title']} at {job['company']}"
+                    if reason:
+                        detail += f" — {reason}"
+                    database.log_activity(user_id, "job_rejected", detail)
+                    if reason:
+                        database.record_pass_reason_stat(conn, user_id, reason)
+                elif action == "approve":
+                    database.log_activity(user_id, "job_approved",
+                        f"Approved {job['title']} at {job['company']}")
+
+                conn.commit()
+                conn.close()
+                database.write_approved_jobs(BASE_DIR)
+                bump_onboarding(user_id, "first_job_reviewed")
+
+                # On approval: kick off a background application ONLY if the user has
+                # auto-apply enabled. Otherwise approving just shortlists the job (moves
+                # it to the Approved queue); the user applies explicitly via "Apply Now"
+                # or the scheduled apply run. This keeps the apply engine OUT of the
+                # search/review flow unless auto-apply was deliberately turned on.
+                if action == "approve":
+                    _aa_conn = database.get_db()
+                    try:
+                        _aa_row = _aa_conn.execute(
+                            "SELECT auto_apply_enabled FROM user_profiles WHERE user_id=?",
+                            (user_id,)
+                        ).fetchone()
+                        _aa_conn.close()
+                        if _aa_row and _aa_row["auto_apply_enabled"] and entitlements.can_auto_apply(user):
+                            _trigger_apply_bg(user_id, job_id)
+                        elif _aa_row and _aa_row["auto_apply_enabled"]:
+                            # Flag set, entitlement gone (downgrade, or a row that
+                            # predates the gate). Shortlist rather than apply.
+                            print(f"[approve] job {job_id} shortlisted (auto-apply flag set but plan does not allow it)")
+                        else:
+                            print(f"[approve] job {job_id} shortlisted (auto-apply off — not applying)")
+                    finally:
+                        _aa_conn.close()
+
+                self.send_json({"success": True})
+                return
+            finally:
+                conn.close()
 
         # ── Manual "Apply Now" trigger (also used by Retry) ─────────────────
         m = re.match(r"^/api/jobs/(\d+)/apply-now$", path)
         if m:
             job_id = int(m.group(1))
             conn   = database.get_db()
-            job    = conn.execute(
-                "SELECT id, title, company, url, status, apply_status "
-                "FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
-            ).fetchone()
-            conn.close()
-            if not job:
-                self.send_json({"error": "Not found"}, 404)
+            try:
+                job    = conn.execute(
+                    "SELECT id, title, company, url, status, apply_status "
+                    "FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+                ).fetchone()
+                conn.close()
+                if not job:
+                    self.send_json({"error": "Not found"}, 404)
+                    return
+                if job["apply_status"] == "applying":
+                    self.send_json({"error": "Already applying"}, 409)
+                    return
+                _trigger_apply_bg(user_id, job_id)
+                self.send_json({"success": True, "message": "Application started"})
                 return
-            if job["apply_status"] == "applying":
-                self.send_json({"error": "Already applying"}, 409)
-                return
-            _trigger_apply_bg(user_id, job_id)
-            self.send_json({"success": True, "message": "Application started"})
-            return
+            finally:
+                conn.close()
 
         # ── Check if job is still open (calls Claude + fetches URL) ──────────
         m = re.match(r"^/api/jobs/(\d+)/check-status$", path)
@@ -7433,64 +7589,70 @@ class Handler(BaseHTTPRequestHandler):
                 return
             job_id = int(m.group(1))
             conn = database.get_db()
-            job = conn.execute(
-                "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user["id"])
-            ).fetchone()
-            if not job:
-                conn.close()
-                self.send_json({"error": "Job not found"}, 404)
-                return
-            if not job["url"]:
-                conn.close()
-                self.send_json({"error": "No URL for this job"}, 400)
-                return
-            conn.close()
-
-            # This endpoint had NO IMPLEMENTATION. It validated the job and the
-            # URL and then fell out of the branch: no response, no return, and
-            # the connection above left open. A caller got a bare 404 with an
-            # empty body on a perfectly valid job - proven by driving it,
-            # 2026-09-20. The legacy dashboard's "verify if still open" button
-            # has therefore never worked.
-            #
-            # Built on check_url_alive rather than an AI call (which is what the
-            # route comment promised): it already handles a 200-OK page that
-            # says the posting is closed, and a parked domain, and it is the
-            # same check the link sweeper uses - so one job re-checked by hand
-            # and the same job swept overnight cannot disagree.
-            today = datetime.now().strftime("%Y-%m-%d")
             try:
-                import apply_engine as _ae
-                alive = bool(_ae.check_url_alive(job["url"]))
-            except Exception as _cse:
-                self.send_json({"error": "Could not reach the posting: %s" % str(_cse)[:160]}, 502)
-                return
+                job = conn.execute(
+                    "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user["id"])
+                ).fetchone()
+                if not job:
+                    conn.close()
+                    self.send_json({"error": "Job not found"}, 404)
+                    return
+                if not job["url"]:
+                    conn.close()
+                    self.send_json({"error": "No URL for this job"}, 400)
+                    return
+                conn.close()
 
-            c2 = database.get_db()
-            if alive:
-                c2.execute(
-                    "UPDATE jobs SET url_verified=1, url_check_date=?, "
-                    "status_check='open', status_checked_date=? WHERE id=? AND user_id=?",
-                    (today, today, job_id, user["id"]))
-            else:
-                # Flagged, NOT auto-rejected. A one-off manual check is the user
-                # asking a question, not asking for the job to be thrown away;
-                # the sweeper is the thing allowed to retire a dead link.
-                c2.execute(
-                    "UPDATE jobs SET url_verified=0, url_check_date=?, "
-                    "status_check='closed', status_checked_date=? WHERE id=? AND user_id=?",
-                    (today, today, job_id, user["id"]))
-            c2.commit()
-            c2.close()
-            database.log_activity(
-                user["id"], "job_status_checked",
-                "%s still open: %s at %s" % ("Confirmed" if alive else "Could not confirm",
-                                             job["title"], job["company"]))
-            self.send_json({"success": True, "open": alive,
-                            "checked_date": today,
-                            "message": "Still open" if alive else
-                                       "The posting did not respond, or reads as closed"})
-            return
+                # This endpoint had NO IMPLEMENTATION. It validated the job and the
+                # URL and then fell out of the branch: no response, no return, and
+                # the connection above left open. A caller got a bare 404 with an
+                # empty body on a perfectly valid job - proven by driving it,
+                # 2026-09-20. The legacy dashboard's "verify if still open" button
+                # has therefore never worked.
+                #
+                # Built on check_url_alive rather than an AI call (which is what the
+                # route comment promised): it already handles a 200-OK page that
+                # says the posting is closed, and a parked domain, and it is the
+                # same check the link sweeper uses - so one job re-checked by hand
+                # and the same job swept overnight cannot disagree.
+                today = datetime.now().strftime("%Y-%m-%d")
+                try:
+                    import apply_engine as _ae
+                    alive = bool(_ae.check_url_alive(job["url"]))
+                except Exception as _cse:
+                    self.send_json({"error": "Could not reach the posting: %s" % str(_cse)[:160]}, 502)
+                    return
+
+                c2 = database.get_db()
+                try:
+                    if alive:
+                        c2.execute(
+                            "UPDATE jobs SET url_verified=1, url_check_date=?, "
+                            "status_check='open', status_checked_date=? WHERE id=? AND user_id=?",
+                            (today, today, job_id, user["id"]))
+                    else:
+                        # Flagged, NOT auto-rejected. A one-off manual check is the user
+                        # asking a question, not asking for the job to be thrown away;
+                        # the sweeper is the thing allowed to retire a dead link.
+                        c2.execute(
+                            "UPDATE jobs SET url_verified=0, url_check_date=?, "
+                            "status_check='closed', status_checked_date=? WHERE id=? AND user_id=?",
+                            (today, today, job_id, user["id"]))
+                    c2.commit()
+                    c2.close()
+                    database.log_activity(
+                        user["id"], "job_status_checked",
+                        "%s still open: %s at %s" % ("Confirmed" if alive else "Could not confirm",
+                                                     job["title"], job["company"]))
+                    self.send_json({"success": True, "open": alive,
+                                    "checked_date": today,
+                                    "message": "Still open" if alive else
+                                               "The posting did not respond, or reads as closed"})
+                    return
+                finally:
+                    c2.close()
+            finally:
+                conn.close()
 
         # ── Cover Letter (admin only) ──
         m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
@@ -7502,40 +7664,46 @@ class Handler(BaseHTTPRequestHandler):
                 return
             data = self.read_json()
             conn = database.get_db()
-            job = conn.execute(
-                "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
-            ).fetchone()
-            if not job:
-                conn.close()
-                self.send_json({"error": "Not found"}, 404)
-                return
-            action = data.get("action", "generate")
-            if action == "save":
-                # Save edited cover letter
-                conn.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (data.get("letter", ""), job_id))
-                conn.commit()
-                conn.close()
-                self.send_json({"success": True})
-                return
-            # Generate via Gemini Flash
-            profile = conn.execute(
-                "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
-            ).fetchone()
-            conn.close()
             try:
-                from ai_analysis import generate_cover_letter
-                letter = generate_cover_letter(dict(job), dict(profile) if profile else {},
-                                               GEMINI_KEY, user_id=user_id)
-            except Exception as gen_err:
-                self.send_json({"error": str(gen_err)}, 500)
-                return
-            # Persist only on success
-            c2 = database.get_db()
-            c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
-            c2.commit()
-            c2.close()
-            self.send_json({"success": True, "letter": letter})
-            return
+                job = conn.execute(
+                    "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+                ).fetchone()
+                if not job:
+                    conn.close()
+                    self.send_json({"error": "Not found"}, 404)
+                    return
+                action = data.get("action", "generate")
+                if action == "save":
+                    # Save edited cover letter
+                    conn.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (data.get("letter", ""), job_id))
+                    conn.commit()
+                    conn.close()
+                    self.send_json({"success": True})
+                    return
+                # Generate via Gemini Flash
+                profile = conn.execute(
+                    "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
+                ).fetchone()
+                conn.close()
+                try:
+                    from ai_analysis import generate_cover_letter
+                    letter = generate_cover_letter(dict(job), dict(profile) if profile else {},
+                                                   GEMINI_KEY, user_id=user_id)
+                except Exception as gen_err:
+                    self.send_json({"error": str(gen_err)}, 500)
+                    return
+                # Persist only on success
+                c2 = database.get_db()
+                try:
+                    c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
+                    c2.commit()
+                    c2.close()
+                    self.send_json({"success": True, "letter": letter})
+                    return
+                finally:
+                    c2.close()
+            finally:
+                conn.close()
 
         # ── Update applied-job pipeline stage ───────────────────────────────────
         if path == "/api/set-stage":
@@ -7548,25 +7716,28 @@ class Handler(BaseHTTPRequestHandler):
             if not job_id or stage not in ("screening","interviewing","offer","rejected"):
                 self.send_json({"error": "invalid"}, 400); return
             conn = database.get_db()
-            # WRITES `stage`, NOT `apply_status`. It wrote apply_status until
-            # 2026-09-15, which was wrong in both directions at once:
-            #   - the column the UI READS to highlight the selected stage is
-            #     `stage` (app.py:4828-4831), and nothing ever wrote it, so a
-            #     successful update lit up no button and the choice vanished on
-            #     reload while the toast said "Stage updated";
-            #   - `apply_status` records whether the application was actually
-            #     submitted/confirmed/failed, and overwriting it DESTROYED that.
-            #     Moving a confirmed application to "interviewing" erased the
-            #     evidence it had ever been sent.
-            # Proven by driving the route and reading the row back.
-            conn.execute(
-                "UPDATE jobs SET stage=? WHERE id=? AND user_id=?",
-                (stage, job_id, user["id"])
-            )
-            conn.commit(); conn.close()
-            database.log_activity(user["id"], "stage_update",
-                f"Stage updated to {stage} for job {job_id}")
-            self.send_json({"ok": True}); return
+            try:
+                # WRITES `stage`, NOT `apply_status`. It wrote apply_status until
+                # 2026-09-15, which was wrong in both directions at once:
+                #   - the column the UI READS to highlight the selected stage is
+                #     `stage` (app.py:4828-4831), and nothing ever wrote it, so a
+                #     successful update lit up no button and the choice vanished on
+                #     reload while the toast said "Stage updated";
+                #   - `apply_status` records whether the application was actually
+                #     submitted/confirmed/failed, and overwriting it DESTROYED that.
+                #     Moving a confirmed application to "interviewing" erased the
+                #     evidence it had ever been sent.
+                # Proven by driving the route and reading the row back.
+                conn.execute(
+                    "UPDATE jobs SET stage=? WHERE id=? AND user_id=?",
+                    (stage, job_id, user["id"])
+                )
+                conn.commit(); conn.close()
+                database.log_activity(user["id"], "stage_update",
+                    f"Stage updated to {stage} for job {job_id}")
+                self.send_json({"ok": True}); return
+            finally:
+                conn.close()
 
         # ── Put bulk-marked "applied" jobs back in the review queue ───────────
         if path == "/api/jobs/restore-bulk-marked":
@@ -7581,30 +7752,33 @@ class Handler(BaseHTTPRequestHandler):
             # applied by hand ('manual') and engine submissions ('engine') are
             # untouchable here whatever anyone passes in.
             conn = database.get_db()
-            rows = conn.execute(
-                "SELECT id FROM jobs WHERE user_id=? AND status='applied' AND applied_via='bulk'",
-                (user_id,)
-            ).fetchall()
-            ids = [r["id"] for r in rows]
-            for job_id in ids:
-                conn.execute(
-                    "UPDATE jobs SET status='new', applied_via=NULL, apply_status=NULL, "
-                    "apply_error=NULL, apply_confirmation=NULL, apply_failure_type=NULL, "
-                    "apply_failure_detail=NULL, apply_attempts=0, apply_next_attempt_at=NULL, "
-                    "applied_date=NULL, stage=NULL, notes='' WHERE id=? AND user_id=?",
-                    (job_id, user_id)
-                )
-            # The cleanup also left a rejected_patterns row for nothing; the jobs
-            # were never passed on, so nothing to undo there. But a restored job
-            # must not be filtered straight back out by its own company+title.
-            conn.commit()
-            conn.close()
-            if ids:
-                database.log_activity(user_id, "restore_bulk_marked",
-                    f"Put {len(ids)} bulk-marked job(s) back in the review queue")
-            database.write_approved_jobs(BASE_DIR)
-            self.send_json({"success": True, "restored": len(ids)})
-            return
+            try:
+                rows = conn.execute(
+                    "SELECT id FROM jobs WHERE user_id=? AND status='applied' AND applied_via='bulk'",
+                    (user_id,)
+                ).fetchall()
+                ids = [r["id"] for r in rows]
+                for job_id in ids:
+                    conn.execute(
+                        "UPDATE jobs SET status='new', applied_via=NULL, apply_status=NULL, "
+                        "apply_error=NULL, apply_confirmation=NULL, apply_failure_type=NULL, "
+                        "apply_failure_detail=NULL, apply_attempts=0, apply_next_attempt_at=NULL, "
+                        "applied_date=NULL, stage=NULL, notes='' WHERE id=? AND user_id=?",
+                        (job_id, user_id)
+                    )
+                # The cleanup also left a rejected_patterns row for nothing; the jobs
+                # were never passed on, so nothing to undo there. But a restored job
+                # must not be filtered straight back out by its own company+title.
+                conn.commit()
+                conn.close()
+                if ids:
+                    database.log_activity(user_id, "restore_bulk_marked",
+                        f"Put {len(ids)} bulk-marked job(s) back in the review queue")
+                database.write_approved_jobs(BASE_DIR)
+                self.send_json({"success": True, "restored": len(ids)})
+                return
+            finally:
+                conn.close()
 
         # ── Bulk job actions ──────────────────────────────────────────────────────
         if path == "/api/jobs/bulk":
@@ -7615,35 +7789,38 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Invalid"}, 400)
                 return
             conn       = database.get_db()
-            new_status = "approved" if action == "approve" else "rejected"
-            done       = 0
-            for job_id in ids:
-                job = conn.execute(
-                    "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
-                ).fetchone()
-                if not job:
-                    continue
-                # rejected_by: a bulk pass is still the USER'S decision, and
-                # without this every bulk-passed job reads as "origin unknown"
-                # in the analytics that separates his passes from the system's.
-                conn.execute(
-                    "UPDATE jobs SET status=?, rejected_by=? WHERE id=?",
-                    (new_status, "user" if action == "reject" else None, job_id))
-                if action == "reject":
+            try:
+                new_status = "approved" if action == "approve" else "rejected"
+                done       = 0
+                for job_id in ids:
+                    job = conn.execute(
+                        "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+                    ).fetchone()
+                    if not job:
+                        continue
+                    # rejected_by: a bulk pass is still the USER'S decision, and
+                    # without this every bulk-passed job reads as "origin unknown"
+                    # in the analytics that separates his passes from the system's.
                     conn.execute(
-                        "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
-                        (user_id, job["company"], job["title"], "Bulk pass",
-                         (job["location"] if "location" in job.keys() else None),
-                         datetime.now().isoformat())
-                    )
-                done += 1
-            conn.commit()
-            conn.close()
-            label = "Approved" if action == "approve" else "Passed on"
-            database.log_activity(user_id, f"bulk_{action}", f"{label} {done} job(s) at once")
-            database.write_approved_jobs(BASE_DIR)
-            self.send_json({"success": True, "updated": done})
-            return
+                        "UPDATE jobs SET status=?, rejected_by=? WHERE id=?",
+                        (new_status, "user" if action == "reject" else None, job_id))
+                    if action == "reject":
+                        conn.execute(
+                            "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
+                            (user_id, job["company"], job["title"], "Bulk pass",
+                             (job["location"] if "location" in job.keys() else None),
+                             datetime.now().isoformat())
+                        )
+                    done += 1
+                conn.commit()
+                conn.close()
+                label = "Approved" if action == "approve" else "Passed on"
+                database.log_activity(user_id, f"bulk_{action}", f"{label} {done} job(s) at once")
+                database.write_approved_jobs(BASE_DIR)
+                self.send_json({"success": True, "updated": done})
+                return
+            finally:
+                conn.close()
 
         # ── Admin: toggle user active state ───────────────────────────────────
         m = re.match(r"^/api/admin/users/(\d+)/toggle$", path)
@@ -7665,22 +7842,25 @@ class Handler(BaseHTTPRequestHandler):
                 }, 400)
                 return
             conn = database.get_db()
-            # 404 rather than a cheerful success on an id that does not exist:
-            # the old handler reported {"success": true} for any number at all.
-            row = conn.execute("SELECT is_active FROM users WHERE id=?", (target_id,)).fetchone()
-            if row is None:
+            try:
+                # 404 rather than a cheerful success on an id that does not exist:
+                # the old handler reported {"success": true} for any number at all.
+                row = conn.execute("SELECT is_active FROM users WHERE id=?", (target_id,)).fetchone()
+                if row is None:
+                    conn.close()
+                    self.send_json({"error": "No such user"}, 404)
+                    return
+                new_state = 0 if row["is_active"] else 1
+                conn.execute("UPDATE users SET is_active=? WHERE id=?", (new_state, target_id))
+                conn.commit()
                 conn.close()
-                self.send_json({"error": "No such user"}, 404)
+                database.log_activity(user["id"], "admin_user_toggle",
+                    f"{'Enabled' if new_state else 'Disabled'} user {target_id}")
+                # The new state, so the UI renders what IS rather than what it guessed.
+                self.send_json({"success": True, "is_active": new_state})
                 return
-            new_state = 0 if row["is_active"] else 1
-            conn.execute("UPDATE users SET is_active=? WHERE id=?", (new_state, target_id))
-            conn.commit()
-            conn.close()
-            database.log_activity(user["id"], "admin_user_toggle",
-                f"{'Enabled' if new_state else 'Disabled'} user {target_id}")
-            # The new state, so the UI renders what IS rather than what it guessed.
-            self.send_json({"success": True, "is_active": new_state})
-            return
+            finally:
+                conn.close()
 
         # ── Run Search Now ────────────────────────────────────────────────────────
         if path == "/api/run-search":
@@ -7760,20 +7940,23 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.read_json()
             target_uid = payload.get("user_id") or user["id"]
             conn = database.get_db()
-            cur = conn.execute(
-                "UPDATE jobs SET status='rejected', rejected_by='system', "
-                "notes=COALESCE(notes,'') || ' [admin: cleared attempted]' "
-                "WHERE user_id=? AND status='approved' AND COALESCE(apply_attempts,0) >= 1 "
-                "AND COALESCE(apply_status,'') IN ('manual_required','failed')",
-                (int(target_uid),)
-            )
-            cleared = cur.rowcount
-            conn.commit(); conn.close()
-            database.log_activity(user["id"], "admin_clear_attempted",
-                                  f"Cleared {cleared} attempted job(s) from queue")
-            print(f"[admin] clear-attempted: {cleared} rows")
-            self.send_json({"cleared": cleared})
-            return
+            try:
+                cur = conn.execute(
+                    "UPDATE jobs SET status='rejected', rejected_by='system', "
+                    "notes=COALESCE(notes,'') || ' [admin: cleared attempted]' "
+                    "WHERE user_id=? AND status='approved' AND COALESCE(apply_attempts,0) >= 1 "
+                    "AND COALESCE(apply_status,'') IN ('manual_required','failed')",
+                    (int(target_uid),)
+                )
+                cleared = cur.rowcount
+                conn.commit(); conn.close()
+                database.log_activity(user["id"], "admin_clear_attempted",
+                                      f"Cleared {cleared} attempted job(s) from queue")
+                print(f"[admin] clear-attempted: {cleared} rows")
+                self.send_json({"cleared": cleared})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/admin/clear-applied":
             if not user or user.get("role") != "admin":
@@ -7782,25 +7965,28 @@ class Handler(BaseHTTPRequestHandler):
             payload   = self.read_json()
             target_uid = payload.get("user_id")   # None → all users
             conn = database.get_db()
-            if target_uid:
-                cur = conn.execute(
-                    "DELETE FROM jobs WHERE status='applied' AND user_id=?",
-                    (int(target_uid),)
+            try:
+                if target_uid:
+                    cur = conn.execute(
+                        "DELETE FROM jobs WHERE status='applied' AND user_id=?",
+                        (int(target_uid),)
+                    )
+                else:
+                    cur = conn.execute("DELETE FROM jobs WHERE status='applied'")
+                deleted = cur.rowcount
+                conn.commit()
+                conn.close()
+                database.log_activity(
+                    user["id"], "admin_clear_applied",
+                    f"Deleted {deleted} applied job(s)"
+                    + (f" for user {target_uid}" if target_uid else " for all users")
                 )
-            else:
-                cur = conn.execute("DELETE FROM jobs WHERE status='applied'")
-            deleted = cur.rowcount
-            conn.commit()
-            conn.close()
-            database.log_activity(
-                user["id"], "admin_clear_applied",
-                f"Deleted {deleted} applied job(s)"
-                + (f" for user {target_uid}" if target_uid else " for all users")
-            )
-            print(f"[admin] clear-applied: {deleted} rows deleted"
-                  + (f" (user {target_uid})" if target_uid else " (all users)"))
-            self.send_json({"deleted": deleted})
-            return
+                print(f"[admin] clear-applied: {deleted} rows deleted"
+                      + (f" (user {target_uid})" if target_uid else " (all users)"))
+                self.send_json({"deleted": deleted})
+                return
+            finally:
+                conn.close()
 
         # ── Admin: re-score existing 'new' jobs with current model ───────────────
         if path == "/api/admin/rescore":
@@ -7810,91 +7996,103 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.read_json()
             target_uid = payload.get("user_id", user["id"])
             conn = database.get_db()
-            rows = conn.execute(
-                "SELECT id, title, company, location, url, description, full_description "
-                "FROM jobs WHERE user_id=? AND status='new'",
-                (int(target_uid),)
-            ).fetchall()
-            conn.close()
-            if not rows:
-                self.send_json({"rescored": 0, "message": "No new jobs to rescore"})
-                return
-            # Build jobs list for scoring
-            jobs_to_rescore = [
-                {"job_title": r[1], "company": r[2], "location": r[3] or "",
-                 "url": r[4] or "", "description": r[5] or "", "full_description": r[6] or "",
-                 "source": "rescore", "_db_id": r[0]}
-                for r in rows
-            ]
-            # Call Gemini directly for rescoring
-            import os as _os_rs, json as _js_rs, urllib.request as _ur_rs, base64 as _b64_rs
-            GEMINI_KEY_RS = os.environ.get('GEMINI_API_KEY', '')
-            profile_row = database.get_db().execute(
-                "SELECT job_titles, keywords, locations, cv_summary, cv_path FROM user_profiles WHERE user_id=?",
-                (int(target_uid),)
-            ).fetchone()
-            titles_rs = (profile_row[0] or '').replace('\n', ', ') if profile_row else ''
-            locs_rs = (profile_row[2] or 'Israel') if profile_row else 'Israel'
-            cv_path_rs = (profile_row[4] or '') if profile_row else ''
-            rescored = 0
-            failed = 0
-            batch_size = 20
-            for i in range(0, len(jobs_to_rescore), batch_size):
-                batch = jobs_to_rescore[i:i+batch_size]
-                jobs_json_rs = _js_rs.dumps(
-                    [{"job_title": j["job_title"], "company": j["company"],
-                      "location": j["location"], "url": j["url"],
-                      "description": j["description"],
-                      "full_description": j["full_description"][:2000]} for j in batch],
-                    ensure_ascii=False)
-                prompt_rs = (
-                    "You are a precise job matching assistant. The candidate's full CV is attached as a PDF.\n"
-                    f"Target roles: {titles_rs}\nTarget locations: {locs_rs}\n\n"
-                    f"Jobs:\n{jobs_json_rs}\n\n"
-                    "Score each job 0-100: Title match (0-30) + Seniority (0-20) + Location (0-20) + CV-Requirements match (0-30). "
-                    "Exclude non-PM roles (engineering, sales, design, finance, HR). "
-                    "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown."
-                )
+            try:
+                rows = conn.execute(
+                    "SELECT id, title, company, location, url, description, full_description "
+                    "FROM jobs WHERE user_id=? AND status='new'",
+                    (int(target_uid),)
+                ).fetchall()
+                conn.close()
+                if not rows:
+                    self.send_json({"rescored": 0, "message": "No new jobs to rescore"})
+                    return
+                # Build jobs list for scoring
+                jobs_to_rescore = [
+                    {"job_title": r[1], "company": r[2], "location": r[3] or "",
+                     "url": r[4] or "", "description": r[5] or "", "full_description": r[6] or "",
+                     "source": "rescore", "_db_id": r[0]}
+                    for r in rows
+                ]
+                # Call Gemini directly for rescoring
+                import os as _os_rs, json as _js_rs, urllib.request as _ur_rs, base64 as _b64_rs
+                GEMINI_KEY_RS = os.environ.get('GEMINI_API_KEY', '')
+                # Was `database.get_db().execute(...)`: the connection was never
+                # closed at all, on any path - on Postgres, one pool slot per call.
+                _pc_admin = database.get_db()
                 try:
-                    _parts_rs = []
-                    if cv_path_rs and os.path.exists(cv_path_rs) and cv_path_rs.lower().endswith('.pdf'):
-                        with open(cv_path_rs, 'rb') as _f:
-                            _parts_rs.append({'inlineData': {'mimeType': 'application/pdf', 'data': _b64_rs.b64encode(_f.read()).decode()}})
-                    _parts_rs.append({'text': prompt_rs})
-                    _body_rs = _js_rs.dumps({'contents': [{'parts': _parts_rs}],
-                                             'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 4096}}).encode()
-                    # Attributed to the user whose jobs are rescored, not to the
-                    # admin who pressed the button — the spend is theirs.
-                    _data_rs = gemini.generate(_body_rs, purpose='resume_search',
-                                               user_id=int(target_uid), key=GEMINI_KEY_RS,
-                                               timeout=90)
-                    _text_rs = _data_rs['candidates'][0]['content']['parts'][0]['text'].strip()
-                    si = _text_rs.rfind('['); ei = _text_rs.rfind(']')
-                    if si >= 0 and ei > si:
-                        scored_rs = _js_rs.loads(_text_rs[si:ei+1])
-                        url_to_score = {j.get('url', ''): j for j in scored_rs if isinstance(j, dict)}
-                        conn2 = database.get_db()
-                        for orig in batch:
-                            scored_j = url_to_score.get(orig['url'])
-                            if scored_j and scored_j.get('candidate_score', 0) >= 30:
-                                conn2.execute(
-                                    "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
-                                    (scored_j['candidate_score'], scored_j['candidate_score'],
-                                     scored_j.get('fit_reason', ''), orig['_db_id'])
-                                )
-                                rescored += 1
-                            else:
-                                failed += 1
-                        conn2.commit()
-                        conn2.close()
-                except Exception as _e_rs:
-                    print(f"[rescore] batch error: {_e_rs}")
-                    failed += len(batch)
-            database.log_activity(user["id"], "admin_rescore",
-                f"Rescored {rescored} jobs, {failed} unchanged for user {target_uid}")
-            print(f"[admin] rescore: {rescored} updated, {failed} unchanged (user {target_uid})")
-            self.send_json({"rescored": rescored, "unchanged": failed, "total": len(jobs_to_rescore)})
-            return
+                    profile_row = _pc_admin.execute(
+                        "SELECT job_titles, keywords, locations, cv_summary, cv_path FROM user_profiles WHERE user_id=?",
+                        (int(target_uid),)
+                    ).fetchone()
+                finally:
+                    _pc_admin.close()
+                titles_rs = (profile_row[0] or '').replace('\n', ', ') if profile_row else ''
+                locs_rs = (profile_row[2] or 'Israel') if profile_row else 'Israel'
+                cv_path_rs = (profile_row[4] or '') if profile_row else ''
+                rescored = 0
+                failed = 0
+                batch_size = 20
+                for i in range(0, len(jobs_to_rescore), batch_size):
+                    batch = jobs_to_rescore[i:i+batch_size]
+                    jobs_json_rs = _js_rs.dumps(
+                        [{"job_title": j["job_title"], "company": j["company"],
+                          "location": j["location"], "url": j["url"],
+                          "description": j["description"],
+                          "full_description": j["full_description"][:2000]} for j in batch],
+                        ensure_ascii=False)
+                    prompt_rs = (
+                        "You are a precise job matching assistant. The candidate's full CV is attached as a PDF.\n"
+                        f"Target roles: {titles_rs}\nTarget locations: {locs_rs}\n\n"
+                        f"Jobs:\n{jobs_json_rs}\n\n"
+                        "Score each job 0-100: Title match (0-30) + Seniority (0-20) + Location (0-20) + CV-Requirements match (0-30). "
+                        "Exclude non-PM roles (engineering, sales, design, finance, HR). "
+                        "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown."
+                    )
+                    try:
+                        _parts_rs = []
+                        if cv_path_rs and os.path.exists(cv_path_rs) and cv_path_rs.lower().endswith('.pdf'):
+                            with open(cv_path_rs, 'rb') as _f:
+                                _parts_rs.append({'inlineData': {'mimeType': 'application/pdf', 'data': _b64_rs.b64encode(_f.read()).decode()}})
+                        _parts_rs.append({'text': prompt_rs})
+                        _body_rs = _js_rs.dumps({'contents': [{'parts': _parts_rs}],
+                                                 'generationConfig': {'temperature': 0.1, 'maxOutputTokens': 4096}}).encode()
+                        # Attributed to the user whose jobs are rescored, not to the
+                        # admin who pressed the button — the spend is theirs.
+                        _data_rs = gemini.generate(_body_rs, purpose='resume_search',
+                                                   user_id=int(target_uid), key=GEMINI_KEY_RS,
+                                                   timeout=90)
+                        _text_rs = _data_rs['candidates'][0]['content']['parts'][0]['text'].strip()
+                        si = _text_rs.rfind('['); ei = _text_rs.rfind(']')
+                        if si >= 0 and ei > si:
+                            scored_rs = _js_rs.loads(_text_rs[si:ei+1])
+                            url_to_score = {j.get('url', ''): j for j in scored_rs if isinstance(j, dict)}
+                            conn2 = database.get_db()
+                            try:
+                                for orig in batch:
+                                    scored_j = url_to_score.get(orig['url'])
+                                    if scored_j and scored_j.get('candidate_score', 0) >= 30:
+                                        conn2.execute(
+                                            "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
+                                            (scored_j['candidate_score'], scored_j['candidate_score'],
+                                             scored_j.get('fit_reason', ''), orig['_db_id'])
+                                        )
+                                        rescored += 1
+                                    else:
+                                        failed += 1
+                                conn2.commit()
+                                conn2.close()
+                            finally:
+                                conn2.close()
+                    except Exception as _e_rs:
+                        print(f"[rescore] batch error: {_e_rs}")
+                        failed += len(batch)
+                database.log_activity(user["id"], "admin_rescore",
+                    f"Rescored {rescored} jobs, {failed} unchanged for user {target_uid}")
+                print(f"[admin] rescore: {rescored} updated, {failed} unchanged (user {target_uid})")
+                self.send_json({"rescored": rescored, "unchanged": failed, "total": len(jobs_to_rescore)})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/admin/inject-jobs":
             if not user or user.get("role") != "admin":
@@ -7903,27 +8101,30 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.read_json()
             jobs = payload.get("jobs", [])
             conn = database.get_db()
-            inserted = 0
-            for j in jobs:
-                try:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO jobs "
-                        "(user_id,title,company,location,url,description,why_relevant,source,"
-                        "found_date,match_score,candidate_score,status) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new')",
-                        (user["id"], j.get("job_title",""), j.get("company",""),
-                         j.get("location",""), j.get("url",""), j.get("description",""),
-                         j.get("fit_reason",""), j.get("source",""), j.get("found_date",""),
-                         j.get("match_score",0), j.get("candidate_score",0)))
-                    inserted += 1
-                except Exception as e:
-                    print(f"[inject] {e}")
-            conn.commit()
-            conn.close()
-            database.log_activity(user["id"], "jobs_injected",
-                                  f"{inserted} jobs added via admin inject")
-            self.send_json({"inserted": inserted})
-            return
+            try:
+                inserted = 0
+                for j in jobs:
+                    try:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO jobs "
+                            "(user_id,title,company,location,url,description,why_relevant,source,"
+                            "found_date,match_score,candidate_score,status) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,'new')",
+                            (user["id"], j.get("job_title",""), j.get("company",""),
+                             j.get("location",""), j.get("url",""), j.get("description",""),
+                             j.get("fit_reason",""), j.get("source",""), j.get("found_date",""),
+                             j.get("match_score",0), j.get("candidate_score",0)))
+                        inserted += 1
+                    except Exception as e:
+                        print(f"[inject] {e}")
+                conn.commit()
+                conn.close()
+                database.log_activity(user["id"], "jobs_injected",
+                                      f"{inserted} jobs added via admin inject")
+                self.send_json({"inserted": inserted})
+                return
+            finally:
+                conn.close()
 
         # ── Sync endpoints — called by relay.py on Mac, no session needed ──────
 
@@ -7934,33 +8135,36 @@ class Handler(BaseHTTPRequestHandler):
                 return
             jobs = data.get("jobs", [])
             conn = database.get_db()
-            inserted = 0
-            for j in jobs:
-                uid = j.get("user_id", 1)
-                try:
-                    conn.execute("""
+            try:
+                inserted = 0
+                for j in jobs:
+                    uid = j.get("user_id", 1)
+                    try:
+                        conn.execute("""
                         INSERT OR IGNORE INTO jobs
                           (user_id,title,company,location,url,description,
                            why_relevant,company_info,source,found_date,status)
                         VALUES (?,?,?,?,?,?,?,?,?,?,'new')
                     """, (uid, j.get("title",""), j.get("company",""),
-                          j.get("location","Tel Aviv"), j.get("url",""),
-                          j.get("description",""), j.get("why_relevant",""),
-                          j.get("company_info",""), j.get("source",""),
-                          j.get("found_date", datetime.now().isoformat())))
-                    if conn.execute("SELECT changes()").fetchone()[0] > 0:
-                        inserted += 1
-                except Exception:
-                    pass
-            conn.commit()
-            conn.close()
-            if inserted > 0:
-                for uid in set(j.get("user_id", 1) for j in jobs):
-                    cnt = sum(1 for j in jobs if j.get("user_id", 1) == uid)
-                    database.log_activity(uid, "jobs_searched", f"Relay synced {cnt} new job(s)")
-            print(f"[sync] {inserted} new jobs ingested via API")
-            self.send_json({"success": True, "inserted": inserted})
-            return
+                              j.get("location","Tel Aviv"), j.get("url",""),
+                              j.get("description",""), j.get("why_relevant",""),
+                              j.get("company_info",""), j.get("source",""),
+                              j.get("found_date", datetime.now().isoformat())))
+                        if conn.execute("SELECT changes()").fetchone()[0] > 0:
+                            inserted += 1
+                    except Exception:
+                        pass
+                conn.commit()
+                conn.close()
+                if inserted > 0:
+                    for uid in set(j.get("user_id", 1) for j in jobs):
+                        cnt = sum(1 for j in jobs if j.get("user_id", 1) == uid)
+                        database.log_activity(uid, "jobs_searched", f"Relay synced {cnt} new job(s)")
+                print(f"[sync] {inserted} new jobs ingested via API")
+                self.send_json({"success": True, "inserted": inserted})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/sync/updates":
             data = self.read_json()
@@ -7969,28 +8173,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             updates = data.get("updates", [])
             conn = database.get_db()
-            for u in updates:
-                conn.execute(
-                    "UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
-                    (u.get("status","applied"), u.get("applied_date"),
-                     u.get("notes",""), u["id"])
-                )
-            conn.commit()
-            conn.close()
-            if updates:
-                # Log activity per user — look up user_id for each updated job
-                conn2 = database.get_db()
-                uid_counts: dict = {}
+            try:
                 for u in updates:
-                    row = conn2.execute("SELECT user_id FROM jobs WHERE id=?", (u["id"],)).fetchone()
-                    if row:
-                        uid_counts[row["user_id"]] = uid_counts.get(row["user_id"], 0) + 1
-                conn2.close()
-                for uid, cnt in uid_counts.items():
-                    database.log_activity(uid, "job_applied", f"Auto-applied to {cnt} job(s)")
-            print(f"[sync] {len(updates)} job statuses updated via API")
-            self.send_json({"success": True, "updated": len(updates)})
-            return
+                    conn.execute(
+                        "UPDATE jobs SET status=?, applied_date=?, notes=? WHERE id=?",
+                        (u.get("status","applied"), u.get("applied_date"),
+                         u.get("notes",""), u["id"])
+                    )
+                conn.commit()
+                conn.close()
+                if updates:
+                    # Log activity per user — look up user_id for each updated job
+                    conn2 = database.get_db()
+                    try:
+                        uid_counts: dict = {}
+                        for u in updates:
+                            row = conn2.execute("SELECT user_id FROM jobs WHERE id=?", (u["id"],)).fetchone()
+                            if row:
+                                uid_counts[row["user_id"]] = uid_counts.get(row["user_id"], 0) + 1
+                        conn2.close()
+                        for uid, cnt in uid_counts.items():
+                            database.log_activity(uid, "job_applied", f"Auto-applied to {cnt} job(s)")
+                    finally:
+                        conn2.close()
+                print(f"[sync] {len(updates)} job statuses updated via API")
+                self.send_json({"success": True, "updated": len(updates)})
+                return
+            finally:
+                conn.close()
 
         if path == "/api/sync/notify":
             data = self.read_json()
@@ -8016,11 +8226,14 @@ class Handler(BaseHTTPRequestHandler):
             _uid = data.get("user_id")
             if not _uid:
                 _c0 = database.get_db()
-                _arow = _c0.execute(
-                    "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
-                ).fetchone()
-                _c0.close()
-                _uid = _arow["id"] if _arow else 1
+                try:
+                    _arow = _c0.execute(
+                        "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
+                    ).fetchone()
+                    _c0.close()
+                    _uid = _arow["id"] if _arow else 1
+                finally:
+                    _c0.close()
             _uid = int(_uid)
             dry_run = data.get("dry_run", True)
             if isinstance(dry_run, str):
@@ -8045,45 +8258,48 @@ class Handler(BaseHTTPRequestHandler):
                     return True
                 return False
             conn = database.get_db()
-            _ph = ",".join("?" for _ in statuses)
-            rows = conn.execute(
-                "SELECT id, title, company, status FROM jobs "
-                "WHERE user_id=? AND status IN (" + _ph + ")",
-                (_uid, *statuses)
-            ).fetchall()
-            keep_list, clear_list = [], []
-            for r in rows:
-                rec = {"id": r["id"], "title": r["title"],
-                       "company": r["company"], "status": r["status"]}
-                (keep_list if _is_keeper(r["company"], r["title"]) else clear_list).append(rec)
-            if dry_run:
+            try:
+                _ph = ",".join("?" for _ in statuses)
+                rows = conn.execute(
+                    "SELECT id, title, company, status FROM jobs "
+                    "WHERE user_id=? AND status IN (" + _ph + ")",
+                    (_uid, *statuses)
+                ).fetchall()
+                keep_list, clear_list = [], []
+                for r in rows:
+                    rec = {"id": r["id"], "title": r["title"],
+                           "company": r["company"], "status": r["status"]}
+                    (keep_list if _is_keeper(r["company"], r["title"]) else clear_list).append(rec)
+                if dry_run:
+                    conn.close()
+                    self.send_json({
+                        "dry_run": True, "user_id": _uid,
+                        "would_keep": keep_list, "would_keep_count": len(keep_list),
+                        "would_clear_count": len(clear_list), "would_clear": clear_list,
+                    })
+                    return
+                today = datetime.now().strftime("%Y-%m-%d")
+                cleared = 0
+                for c in clear_list:
+                    conn.execute(
+                        "UPDATE jobs SET status=?, applied_date=?, notes=?, "
+                        "apply_status='manual', applied_via='bulk' WHERE id=? AND user_id=?",
+                        (mark_status, today, "Marked applied manually (bulk queue cleanup)",
+                         c["id"], _uid)
+                    )
+                    cleared += 1
+                conn.commit()
                 conn.close()
-                self.send_json({
-                    "dry_run": True, "user_id": _uid,
-                    "would_keep": keep_list, "would_keep_count": len(keep_list),
-                    "would_clear_count": len(clear_list), "would_clear": clear_list,
-                })
-                return
-            today = datetime.now().strftime("%Y-%m-%d")
-            cleared = 0
-            for c in clear_list:
-                conn.execute(
-                    "UPDATE jobs SET status=?, applied_date=?, notes=?, "
-                    "apply_status='manual', applied_via='bulk' WHERE id=? AND user_id=?",
-                    (mark_status, today, "Marked applied manually (bulk queue cleanup)",
-                     c["id"], _uid)
+                database.log_activity(
+                    _uid, "job_applied",
+                    f"Bulk cleanup: marked {cleared} queued job(s) applied (manual); kept {len(keep_list)}"
                 )
-                cleared += 1
-            conn.commit()
-            conn.close()
-            database.log_activity(
-                _uid, "job_applied",
-                f"Bulk cleanup: marked {cleared} queued job(s) applied (manual); kept {len(keep_list)}"
-            )
-            print(f"[cleanup] user {_uid}: kept {len(keep_list)}, marked {cleared} applied(manual)")
-            self.send_json({"success": True, "kept": len(keep_list),
-                            "cleared": cleared, "kept_jobs": keep_list})
-            return
+                print(f"[cleanup] user {_uid}: kept {len(keep_list)}, marked {cleared} applied(manual)")
+                self.send_json({"success": True, "kept": len(keep_list),
+                                "cleared": cleared, "kept_jobs": keep_list})
+                return
+            finally:
+                conn.close()
 
         self.send_response(404)
         self.end_headers()
@@ -8116,13 +8332,16 @@ if __name__ == "__main__":
     try:
         if ADMIN_EMAIL:
             _ac = database.get_db()
-            _promoted = _ac.execute(
-                "UPDATE users SET role='admin' WHERE lower(email)=lower(?) AND COALESCE(role,'') != 'admin'",
-                (ADMIN_EMAIL,)
-            ).rowcount
-            _ac.commit(); _ac.close()
-            if _promoted:
-                print(f"[startup] promoted {ADMIN_EMAIL} to admin role")
+            try:
+                _promoted = _ac.execute(
+                    "UPDATE users SET role='admin' WHERE lower(email)=lower(?) AND COALESCE(role,'') != 'admin'",
+                    (ADMIN_EMAIL,)
+                ).rowcount
+                _ac.commit(); _ac.close()
+                if _promoted:
+                    print(f"[startup] promoted {ADMIN_EMAIL} to admin role")
+            finally:
+                _ac.close()
     except Exception as _ae:
         print(f"[startup] admin-role ensure failed: {_ae}")
 
@@ -8130,32 +8349,38 @@ if __name__ == "__main__":
     # succeeded -> move it back to the queue as a retryable failure. Idempotent.
     try:
         _cc = database.get_db()
-        _moved = _cc.execute(
-            "UPDATE jobs SET status='approved', apply_status='failed' "
-            "WHERE status='applied' AND COALESCE(TRIM(apply_error), '') != '' "
-            "AND COALESCE(apply_status,'') NOT IN ('manual_required','confirmed','submitted') "
-            "AND COALESCE(apply_attempts,0) < 3"
-        ).rowcount
-        _cc.commit(); _cc.close()
-        if _moved:
-            print(f"[startup] moved {_moved} errored 'applied' job(s) back to the queue")
+        try:
+            _moved = _cc.execute(
+                "UPDATE jobs SET status='approved', apply_status='failed' "
+                "WHERE status='applied' AND COALESCE(TRIM(apply_error), '') != '' "
+                "AND COALESCE(apply_status,'') NOT IN ('manual_required','confirmed','submitted') "
+                "AND COALESCE(apply_attempts,0) < 3"
+            ).rowcount
+            _cc.commit(); _cc.close()
+            if _moved:
+                print(f"[startup] moved {_moved} errored 'applied' job(s) back to the queue")
+        finally:
+            _cc.close()
     except Exception as _ce:
         print(f"[startup] applied-cleanup error: {_ce}")
 
     # Migrate expired jobs to rejected (expired tab removed)
     try:
         _mconn = database.get_db()
-        # The expiry rule is gone (db.expire_old_jobs, 2026-09-15), so there is
-        # nothing left to convert. Migration 11 restores the rows it made.
-        _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status='failed' AND COALESCE(apply_attempts,0) < 3")
-        # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
-        _stuck = _mconn.execute(
-            "UPDATE jobs SET apply_status=NULL WHERE apply_status='applying'"
-        ).rowcount
-        if _stuck:
-            print(f"[startup] Reset {_stuck} job(s) stuck in 'applying' state")
-        _mconn.commit()
-        _mconn.close()
+        try:
+            # The expiry rule is gone (db.expire_old_jobs, 2026-09-15), so there is
+            # nothing left to convert. Migration 11 restores the rows it made.
+            _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status='failed' AND COALESCE(apply_attempts,0) < 3")
+            # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
+            _stuck = _mconn.execute(
+                "UPDATE jobs SET apply_status=NULL WHERE apply_status='applying'"
+            ).rowcount
+            if _stuck:
+                print(f"[startup] Reset {_stuck} job(s) stuck in 'applying' state")
+            _mconn.commit()
+            _mconn.close()
+        finally:
+            _mconn.close()
     except Exception:
         pass
 
@@ -8166,21 +8391,24 @@ if __name__ == "__main__":
     #    'rejected' with a note, not deleted. Bump the token (v2) to re-run. ──
     try:
         _pc = database.get_db()
-        _pc.execute("CREATE TABLE IF NOT EXISTS app_flags "
-                    "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
-        _pdone = _pc.execute("SELECT value FROM app_flags WHERE key='prune_attempted_v1'").fetchone()
-        if not _pdone:
-            _pn = _pc.execute(
-                "UPDATE jobs SET status='rejected', rejected_by='system', "
-                "notes=COALESCE(notes,'') || ' [auto-removed: already attempted]' "
-                "WHERE status='approved' AND COALESCE(apply_attempts,0) >= 1 "
-                "AND COALESCE(apply_status,'') IN ('manual_required','failed')"
-            ).rowcount
-            _pc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES ('prune_attempted_v1', ?)",
-                        (str(_pn),))
-            _pc.commit()
-            print(f"[startup] one-time prune: retired {_pn} already-attempted job(s) from the queue")
-        _pc.close()
+        try:
+            _pc.execute("CREATE TABLE IF NOT EXISTS app_flags "
+                        "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
+            _pdone = _pc.execute("SELECT value FROM app_flags WHERE key='prune_attempted_v1'").fetchone()
+            if not _pdone:
+                _pn = _pc.execute(
+                    "UPDATE jobs SET status='rejected', rejected_by='system', "
+                    "notes=COALESCE(notes,'') || ' [auto-removed: already attempted]' "
+                    "WHERE status='approved' AND COALESCE(apply_attempts,0) >= 1 "
+                    "AND COALESCE(apply_status,'') IN ('manual_required','failed')"
+                ).rowcount
+                _pc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES ('prune_attempted_v1', ?)",
+                            (str(_pn),))
+                _pc.commit()
+                print(f"[startup] one-time prune: retired {_pn} already-attempted job(s) from the queue")
+            _pc.close()
+        finally:
+            _pc.close()
     except Exception as _pe:
         print(f"[startup] prune-attempted error: {_pe}")
 
@@ -8195,76 +8423,79 @@ if __name__ == "__main__":
         _qc_flag = (os.environ.get("QUEUE_CLEANUP", "") or "").strip().lower()
         if _qc_flag in ("1", "true", "yes", "on", "force"):
             _qc = database.get_db()
-            _qc.execute("CREATE TABLE IF NOT EXISTS app_flags "
-                        "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
-            _tok_row = _qc.execute("SELECT value FROM app_flags WHERE key='queue_cleanup_token'").fetchone()
-            _last_tok = _tok_row[0] if _tok_row else ""
-            if _qc_flag == _last_tok:
-                _qc.close()
-                print(f"[cleanup] QUEUE_CLEANUP='{_qc_flag}' already ran for this value — skipping (it will NOT touch new search results). Change the value to re-run (e.g. =force2), or remove the var.")
-            else:
-                _arow = _qc.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
-                                    (ADMIN_EMAIL,)).fetchone()
-                _cuid = _arow["id"] if _arow else 1
-                import re as _re_qc2
-                _keep_env = (os.environ.get("QUEUE_CLEANUP_KEEP", "") or "").strip()
-                if _keep_env:
-                    _keepers = []
-                    for _pair in _keep_env.split(";"):
-                        if ":" in _pair:
-                            _c, _t = _pair.split(":", 1)
-                            _keepers.append((_c.strip().lower(), _t.strip().lower()))
+            try:
+                _qc.execute("CREATE TABLE IF NOT EXISTS app_flags "
+                            "(key TEXT PRIMARY KEY, value TEXT, set_date TEXT DEFAULT (datetime('now')))")
+                _tok_row = _qc.execute("SELECT value FROM app_flags WHERE key='queue_cleanup_token'").fetchone()
+                _last_tok = _tok_row[0] if _tok_row else ""
+                if _qc_flag == _last_tok:
+                    _qc.close()
+                    print(f"[cleanup] QUEUE_CLEANUP='{_qc_flag}' already ran for this value — skipping (it will NOT touch new search results). Change the value to re-run (e.g. =force2), or remove the var.")
                 else:
-                    _keepers = [("limy", "senior product manager"),
-                                ("riskified", "product strategy director")]
-                def _qnorm(_s):
-                    return _re_qc2.sub(r"\s+", " ",
-                        _re_qc2.sub(r"[^a-z0-9 ]", " ", (_s or "").lower())).strip()
-                def _qkeep(_co, _ti):
-                    _con, _tin = _qnorm(_co), _qnorm(_ti)
-                    for _kc, _kt in _keepers:
-                        if _kc and _kc not in _con:
+                    _arow = _qc.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
+                                        (ADMIN_EMAIL,)).fetchone()
+                    _cuid = _arow["id"] if _arow else 1
+                    import re as _re_qc2
+                    _keep_env = (os.environ.get("QUEUE_CLEANUP_KEEP", "") or "").strip()
+                    if _keep_env:
+                        _keepers = []
+                        for _pair in _keep_env.split(";"):
+                            if ":" in _pair:
+                                _c, _t = _pair.split(":", 1)
+                                _keepers.append((_c.strip().lower(), _t.strip().lower()))
+                    else:
+                        _keepers = [("limy", "senior product manager"),
+                                    ("riskified", "product strategy director")]
+                    def _qnorm(_s):
+                        return _re_qc2.sub(r"\s+", " ",
+                            _re_qc2.sub(r"[^a-z0-9 ]", " ", (_s or "").lower())).strip()
+                    def _qkeep(_co, _ti):
+                        _con, _tin = _qnorm(_co), _qnorm(_ti)
+                        for _kc, _kt in _keepers:
+                            if _kc and _kc not in _con:
+                                continue
+                            if _kt and _qnorm(_kt) not in _tin:   # ORDERED substring
+                                continue
+                            return True
+                        return False
+                    _rows = _qc.execute(
+                        "SELECT id, title, company FROM jobs WHERE user_id=? "
+                        "AND status IN ('new','approved','deferred')", (_cuid,)
+                    ).fetchall()
+                    _today = datetime.now().strftime("%Y-%m-%d")
+                    _kept = 0
+                    _cleared = 0
+                    _kept_names = []
+                    for _r in _rows:
+                        if _qkeep(_r["company"], _r["title"]):
+                            _kept += 1
+                            _kept_names.append(f"{_r['title']} @ {_r['company']}")
                             continue
-                        if _kt and _qnorm(_kt) not in _tin:   # ORDERED substring
-                            continue
-                        return True
-                    return False
-                _rows = _qc.execute(
-                    "SELECT id, title, company FROM jobs WHERE user_id=? "
-                    "AND status IN ('new','approved','deferred')", (_cuid,)
-                ).fetchall()
-                _today = datetime.now().strftime("%Y-%m-%d")
-                _kept = 0
-                _cleared = 0
-                _kept_names = []
-                for _r in _rows:
-                    if _qkeep(_r["company"], _r["title"]):
-                        _kept += 1
-                        _kept_names.append(f"{_r['title']} @ {_r['company']}")
-                        continue
-                    _qc.execute(
-                        "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                        "apply_status='manual', applied_via='bulk', apply_error=NULL, apply_failure_type=NULL, "
-                        "apply_failure_detail=NULL, apply_next_attempt_at=NULL "
-                        "WHERE id=? AND user_id=?",
-                        (_today, "Marked applied manually (one-time queue cleanup)",
-                         _r["id"], _cuid)
-                    )
-                    _cleared += 1
-                _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
-                            "('queue_cleanup_done', ?)",
-                            (f"kept={_kept} cleared={_cleared} {_today}",))
-                _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
-                            "('queue_cleanup_token', ?)", (_qc_flag,))
-                _qc.commit()
+                        _qc.execute(
+                            "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                            "apply_status='manual', applied_via='bulk', apply_error=NULL, apply_failure_type=NULL, "
+                            "apply_failure_detail=NULL, apply_next_attempt_at=NULL "
+                            "WHERE id=? AND user_id=?",
+                            (_today, "Marked applied manually (one-time queue cleanup)",
+                             _r["id"], _cuid)
+                        )
+                        _cleared += 1
+                    _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
+                                "('queue_cleanup_done', ?)",
+                                (f"kept={_kept} cleared={_cleared} {_today}",))
+                    _qc.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES "
+                                "('queue_cleanup_token', ?)", (_qc_flag,))
+                    _qc.commit()
+                    _qc.close()
+                    try:
+                        database.log_activity(_cuid, "job_applied",
+                            f"One-time cleanup: marked {_cleared} queued job(s) applied (manual); kept {_kept}")
+                    except Exception:
+                        pass
+                    print(f"[cleanup] ONE-TIME DONE: user {_cuid} kept {_kept} ({_kept_names}), "
+                          f"marked {_cleared} applied(manual). >>> Remove the QUEUE_CLEANUP env var now. <<<")
+            finally:
                 _qc.close()
-                try:
-                    database.log_activity(_cuid, "job_applied",
-                        f"One-time cleanup: marked {_cleared} queued job(s) applied (manual); kept {_kept}")
-                except Exception:
-                    pass
-                print(f"[cleanup] ONE-TIME DONE: user {_cuid} kept {_kept} ({_kept_names}), "
-                      f"marked {_cleared} applied(manual). >>> Remove the QUEUE_CLEANUP env var now. <<<")
     except Exception as _qce:
         import traceback as _tb_qc
         print(f"[cleanup] one-time queue cleanup error: {_qce}")

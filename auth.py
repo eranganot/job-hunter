@@ -114,42 +114,51 @@ def create_user(name: str, email: str, password: str):
 def authenticate(email: str, password: str):
     """Returns (user_dict, error_message)."""
     conn = _get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE email=? AND is_active=1",
-        (email.strip().lower(),)
-    ).fetchone()
-    conn.close()
-    if not user:
-        return None, "Invalid email or password."
-    if not verify_password(password, user["password_hash"], user["salt"]):
-        return None, "Invalid email or password."
-    return dict(user), None
+    try:
+        user = conn.execute(
+            "SELECT * FROM users WHERE email=? AND is_active=1",
+            (email.strip().lower(),)
+        ).fetchone()
+        conn.close()
+        if not user:
+            return None, "Invalid email or password."
+        if not verify_password(password, user["password_hash"], user["salt"]):
+            return None, "Invalid email or password."
+        return dict(user), None
+    finally:
+        conn.close()
 
 
 def change_password(user_id: int, current_pw: str, new_pw: str, keep_token: str = ""):
     conn = _get_db()
-    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    conn.close()
-    if not user:
-        return "User not found."
-    if not verify_password(current_pw, user["password_hash"], user["salt"]):
-        return "Current password is incorrect."
-    pw_hash, salt = hash_password(new_pw)
-    conn2 = _get_db()
-    conn2.execute(
-        "UPDATE users SET password_hash=?, salt=? WHERE id=?",
-        (pw_hash, salt, user_id)
-    )
-    conn2.commit()
-    conn2.close()
-    # Every other session for this user dies with the old password. `keep_token`
-    # is the one making the change, so the user is not signed out of the tab
-    # they are typing in.
-    revoked = delete_sessions_for_user(user_id, keep_token)
-    if revoked:
-        print("[auth] password change for user %s revoked %s other session(s)"
-              % (user_id, revoked))
-    return None
+    try:
+        user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        conn.close()
+        if not user:
+            return "User not found."
+        if not verify_password(current_pw, user["password_hash"], user["salt"]):
+            return "Current password is incorrect."
+        pw_hash, salt = hash_password(new_pw)
+        conn2 = _get_db()
+        try:
+            conn2.execute(
+                "UPDATE users SET password_hash=?, salt=? WHERE id=?",
+                (pw_hash, salt, user_id)
+            )
+            conn2.commit()
+            conn2.close()
+            # Every other session for this user dies with the old password. `keep_token`
+            # is the one making the change, so the user is not signed out of the tab
+            # they are typing in.
+            revoked = delete_sessions_for_user(user_id, keep_token)
+            if revoked:
+                print("[auth] password change for user %s revoked %s other session(s)"
+                      % (user_id, revoked))
+            return None
+        finally:
+            conn2.close()
+    finally:
+        conn.close()
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -158,13 +167,16 @@ def create_session(user_id: int) -> str:
     token = secrets.token_urlsafe(48)
     expires = _stamp(_utc_now() + timedelta(days=SESSION_DAYS))
     conn = _get_db()
-    conn.execute(
-        "INSERT INTO sessions (token, user_id, expires_date) VALUES (?,?,?)",
-        (token, user_id, expires)
-    )
-    conn.commit()
-    conn.close()
-    return token
+    try:
+        conn.execute(
+            "INSERT INTO sessions (token, user_id, expires_date) VALUES (?,?,?)",
+            (token, user_id, expires)
+        )
+        conn.commit()
+        conn.close()
+        return token
+    finally:
+        conn.close()
 
 
 def _slide_if_stale(token: str, current_expires) -> bool:
@@ -232,7 +244,8 @@ def get_session_user(token: str):
     if not token:
         return None
     conn = _get_db()
-    row = conn.execute("""
+    try:
+        row = conn.execute("""
         SELECT u.id, u.name, u.email, u.created_date, u.role, u.plan,
                p.cv_path, p.cv_analyzed, p.cv_summary,
                p.cv_filename, p.cv_uploaded_date, p.cv_optimizer_date,
@@ -253,24 +266,29 @@ def get_session_user(token: str):
         LEFT JOIN user_profiles p ON p.user_id = u.id
         WHERE s.token=? AND s.expires_date > datetime('now') AND u.is_active=1
     """, (token,)).fetchone()
-    conn.close()
-    if row is None:
-        return None
-    row = dict(row)
-    # Slide the window using the value this query already read, rather than
-    # spending a second round trip per request on it.
-    _slide_if_stale(token, row.pop("_session_expires", None))
-    # The profile this returns is what /api/me hands the browser, so the
-    # credentials have to be readable here or the settings page shows
-    # ciphertext in the input boxes.
-    return crypto.decrypt_row(row)
+        conn.close()
+        if row is None:
+            return None
+        row = dict(row)
+        # Slide the window using the value this query already read, rather than
+        # spending a second round trip per request on it.
+        _slide_if_stale(token, row.pop("_session_expires", None))
+        # The profile this returns is what /api/me hands the browser, so the
+        # credentials have to be readable here or the settings page shows
+        # ciphertext in the input boxes.
+        return crypto.decrypt_row(row)
+    finally:
+        conn.close()
 
 
 def delete_session(token: str):
     conn = _get_db()
-    conn.execute("DELETE FROM sessions WHERE token=?", (token,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+    finally:
+        conn.close()
 
 
 def cleanup_expired_sessions() -> int:
@@ -291,22 +309,28 @@ def update_profile(user_id: int, **kwargs):
     # place encryption has to happen. Non-secret fields pass through untouched.
     kwargs = crypto.encrypt_fields(kwargs)
     conn = _get_db()
-    sets = ", ".join(f"{k}=?" for k in kwargs)
-    vals = list(kwargs.values()) + [user_id]
-    conn.execute(f"UPDATE user_profiles SET {sets} WHERE user_id=?", vals)
-    conn.commit()
-    conn.close()
+    try:
+        sets = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [user_id]
+        conn.execute(f"UPDATE user_profiles SET {sets} WHERE user_id=?", vals)
+        conn.commit()
+        conn.close()
+    finally:
+        conn.close()
 
 
 def update_user(user_id: int, **kwargs):
     if not kwargs:
         return
     conn = _get_db()
-    sets = ", ".join(f"{k}=?" for k in kwargs)
-    vals = list(kwargs.values()) + [user_id]
-    conn.execute(f"UPDATE users SET {sets} WHERE id=?", vals)
-    conn.commit()
-    conn.close()
+    try:
+        sets = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [user_id]
+        conn.execute(f"UPDATE users SET {sets} WHERE id=?", vals)
+        conn.commit()
+        conn.close()
+    finally:
+        conn.close()
 
 
 # ── Cookie helpers ────────────────────────────────────────────────────────────
