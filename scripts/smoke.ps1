@@ -12,6 +12,13 @@
         .\scripts\smoke.ps1                                 # production
         .\scripts\smoke.ps1 -BaseUrl https://web-staging-8e79.up.railway.app -SkipLocal
         .\scripts\smoke.ps1 -ExpectedSchema 3               # pin the schema version
+        .\scripts\smoke.ps1 -WaitForDeployMinutes 6 -SkipLocal   # right after a push
+
+    Right after `git push`, Railway keeps serving the OLD build for a minute or
+    two. -WaitForDeployMinutes polls /api/health until it reports your local
+    HEAD, so the checks below never grade the build you just replaced
+    (2026-09-28: a health check run seconds after the push hit the old build
+    and read as "the fix did not work").
 #>
 [CmdletBinding()]
 param(
@@ -27,7 +34,12 @@ param(
     # the staging Postgres flip first read as a failure (2026-09-07). Pass this
     # only when you deliberately mean to smoke a box that is not on local HEAD.
     [switch]$AllowStaleDeploy,
-    [switch]$SkipLocal
+    [switch]$SkipLocal,
+    # Poll until the deployed commit equals local HEAD before checking anything.
+    [int]$WaitForDeployMinutes = 0,
+    # /api/health slower than this fails the pool check. The pool's own wait is
+    # 20s, so a starved pool shows up as ~20s here, nowhere near this.
+    [double]$HealthBudgetSeconds = 5
 )
 
 # Native commands (python, git) write to stderr for harmless warnings; under
@@ -139,6 +151,51 @@ if (-not $SkipLocal) {
     Check "route harness present" {
         if (Test-Path "tests\test_routes.py") { $true } else { "tests\test_routes.py missing" }
     }
+    # Already part of the full suite; run on its own so a failure reads as
+    # "a connection is not closed" rather than one line among 700.
+    Check "every database connection is closed in a finally (static check)" {
+        $out = (& python -m pytest -q --tb=line (Join-Path $script:RepoRoot "tests/test_connections_closed.py") 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0) { return $true }
+        $lines = $out -split "`r?`n" | Where-Object { $_ -match "\.py:\d+ " -or $_ -match "^FAILED" } | Select-Object -First 6
+        "unclosed get_db() found:`n      " + ($lines -join "`n      ")
+    }
+    if (-not $env:JH_TEST_PG_URL) {
+        # Not a failure - but the pool-leak and Postgres-dialect tests only run
+        # against a real Postgres, and SQLite is exactly where the 2026-09-25
+        # bug was invisible. Say it every time so "green" is not over-read.
+        Write-Host "      NOTE: JH_TEST_PG_URL is not set - the Postgres-only tests (pool leak," -ForegroundColor Yellow
+        Write-Host "      upsert dialect, health 503) were SKIPPED. Point it at a scratch database" -ForegroundColor Yellow
+        Write-Host "      (never jobhunter_prod) to run them." -ForegroundColor Yellow
+    }
+    Write-Host ""
+}
+
+# --- Wait for the deploy --------------------------------------------------------
+if ($WaitForDeployMinutes -gt 0) {
+    Write-Host "-- waiting for the deploy --" -ForegroundColor Cyan
+    $want = (& git -C $script:RepoRoot rev-parse --short=7 HEAD 2>&1 | Out-String).Trim()
+    $deadline = (Get-Date).AddMinutes($WaitForDeployMinutes)
+    $seen = ""
+    while ((Get-Date) -lt $deadline) {
+        $got = ""
+        try {
+            $r = Get-Status "$BaseUrl/api/health"
+            if ($r.Body) { $got = "$(($r.Body | ConvertFrom-Json).commit)" }
+        } catch { }
+        if ($got -ne $seen) {
+            Write-Host ("      " + (Get-Date -Format "HH:mm:ss") + "  deployed=" + $(if ($got) { $got } else { "?" }) + "  want=" + $want) -ForegroundColor DarkGray
+            $seen = $got
+        }
+        if ($got -eq $want) { break }
+        Start-Sleep -Seconds 15
+    }
+    if ($seen -ne $want) {
+        Write-Host ("      still not on " + $want + " after " + $WaitForDeployMinutes + " min - the checks below will say so") -ForegroundColor Yellow
+    } else {
+        # The first requests after a swap can land on a container that is still
+        # warming up; give it a moment rather than grading its first breath.
+        Start-Sleep -Seconds 5
+    }
     Write-Host ""
 }
 
@@ -147,7 +204,14 @@ Write-Host "-- reachability --" -ForegroundColor Cyan
 $script:health = $null
 Check "GET /api/health is 200 and well-formed" {
     $r = Get-Status "$BaseUrl/api/health"
-    if ($r.Code -ne 200) { return "status $($r.Code)" }
+    if ($r.Code -eq 503) {
+        # Since 2026-09-28 health answers 503 db_unavailable - with the pool
+        # state - instead of hanging when it cannot get a connection.
+        $b = $null; try { $b = $r.Body | ConvertFrom-Json } catch { }
+        $pool = ""; if ($b -and $b.db_pool) { $pool = ($b.db_pool | ConvertTo-Json -Compress) }
+        return "503 - the app cannot get a database connection: $($b.error)  pool=$pool"
+    }
+    if ($r.Code -ne 200) { return "status $($r.Code)  $($r.Body.Substring(0, [Math]::Min(160, $r.Body.Length)))" }
     $script:health = $r.Body | ConvertFrom-Json
     if ($script:health.status -ne "ok") { return "status field = $($script:health.status)" }
     Write-Host ("      users=" + $script:health.active_users + "  jobs=" + $script:health.total_jobs + "  schema=" + $script:health.schema_version + "  backend=" + $script:health.db_backend) -ForegroundColor DarkGray
@@ -422,6 +486,80 @@ Check "no job is claimed and abandoned" {
 }
 Write-Host ""
 
+# --- Connection pool (the 2026-09-25 outage) -----------------------------------
+#
+# Nine requests that failed without closing their connection filled the
+# 10-slot Postgres pool; from then on every request waited 20s and failed with
+# "couldn't get a connection". Fixed 2026-09-28: every get_db() is closed in a
+# finally, and anything that still slips through is handed back at the end of
+# the request and counted in db_leaks_reclaimed. These checks are read-only.
+Write-Host "-- connection pool --" -ForegroundColor Cyan
+function Get-Timed($url) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $r = Get-Status $url
+    $sw.Stop()
+    $r.Seconds = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+    return $r
+}
+$script:isPg = ($null -ne $script:health -and $script:health.db_backend -eq "postgres")
+Check "health answers inside its budget (a starved pool takes ~20s)" {
+    # Timed against a control that cannot touch the database, in the same
+    # window: if /login is slow too, the network is slow, not the pool.
+    $ctl = Get-Timed "$BaseUrl/login"
+    $h   = Get-Timed "$BaseUrl/api/health"
+    Write-Host ("      /api/health " + $h.Seconds + "s   control /login " + $ctl.Seconds + "s") -ForegroundColor DarkGray
+    if ($h.Code -ne 200) { return "health status $($h.Code)" }
+    if ($h.Seconds -le $HealthBudgetSeconds) { return $true }
+    if ($ctl.Seconds -gt $HealthBudgetSeconds) { return "everything is slow ($($ctl.Seconds)s for /login too) - network, not the pool; re-run" }
+    "health took $($h.Seconds)s while /login took $($ctl.Seconds)s - the app is waiting for a database connection"
+}
+Check "nothing is queued waiting for a connection" {
+    if ($null -eq $script:health) { return "no health payload" }
+    if (-not $script:isPg) { Write-Host "      (SQLite - no pool)" -ForegroundColor DarkGray; return $true }
+    $pools = $script:health.db_pool
+    if ($null -eq $pools) { return "no db_pool in /api/health" }
+    $problems = @()
+    foreach ($prop in $pools.PSObject.Properties) {
+        $p = $prop.Value
+        Write-Host ("      " + $prop.Name + "  size=" + $p.size + "  available=" + $p.available + "  waiting=" + $p.waiting) -ForegroundColor DarkGray
+        if ([int]$p.waiting -gt 0) { $problems += "$($prop.Name): $($p.waiting) request(s) waiting" }
+    }
+    if ($problems.Count -eq 0) { $true } else { $problems -join "; " }
+}
+Check "no request has leaked a connection since the app started" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $lk = $script:health.db_leaks_reclaimed
+    if ($null -eq $lk) { return "no db_leaks_reclaimed in /api/health - this build predates the 2026-09-28 fix" }
+    Write-Host ("      reclaimed=" + $lk.count + $(if ($lk.last) { "  last at: " + $lk.last } else { "" })) -ForegroundColor DarkGray
+    if ([int]$lk.count -eq 0) { return $true }
+    # The app survives this (the connection was handed back), but a code path
+    # skipped its close - tests/test_connections_closed.py should have caught it.
+    "$($lk.count) connection(s) were leaked and reclaimed, last at '$($lk.last)' - that route needs a try/finally (the app is still up)"
+}
+Check "a burst of 20 requests leaves the pool as it found it" {
+    if ($null -eq $script:health) { return "no health payload" }
+    $before = $script:health.db_leaks_reclaimed
+    $slowest = 0.0
+    for ($i = 0; $i -lt 20; $i++) {
+        $r = Get-Timed "$BaseUrl/api/health"
+        if ($r.Code -ne 200) { return "request $($i + 1) of 20 returned $($r.Code)" }
+        if ($r.Seconds -gt $slowest) { $slowest = $r.Seconds }
+        $last = $r.Body | ConvertFrom-Json
+    }
+    Write-Host ("      slowest of 20: " + $slowest + "s") -ForegroundColor DarkGray
+    if ($slowest -gt $HealthBudgetSeconds) { return "slowest request took $($slowest)s" }
+    if ($script:isPg) {
+        foreach ($prop in $last.db_pool.PSObject.Properties) {
+            if ([int]$prop.Value.waiting -gt 0) { return "requests are waiting on $($prop.Name) after the burst" }
+        }
+    }
+    if ($null -ne $before -and [int]$last.db_leaks_reclaimed.count -ne [int]$before.count) {
+        return "leaks went from $($before.count) to $($last.db_leaks_reclaimed.count) during the burst"
+    }
+    $true
+}
+Write-Host ""
+
 # --- Cost guardrails (Gemini spend ceiling + daily run caps) ------------------
 Write-Host "-- cost guardrails --" -ForegroundColor Cyan
 Check "health reports today's Gemini spend" {
@@ -505,6 +643,15 @@ Check "health reports the last apply (engine expected parked)" {
     Write-Host ("      last_search: " + $script:health.last_search.detail + "  (" + $script:health.last_search.date + ")") -ForegroundColor DarkGray
     $true
 }
+Write-Host ""
+
+# --- What this script cannot do ----------------------------------------------
+# It never writes. The request that caused the 2026-09-25 outage was a write
+# (pass on a job WITH a reason), so the last step is manual:
+Write-Host "-- manual step (writes, so not automated) --" -ForegroundColor Cyan
+Write-Host "      1. In /app, pass on a job and pick a reason." -ForegroundColor DarkGray
+Write-Host "      2. Re-run:  .\scripts\smoke.ps1 -SkipLocal" -ForegroundColor DarkGray
+Write-Host "         'no request has leaked a connection' must still PASS (reclaimed=0)." -ForegroundColor DarkGray
 Write-Host ""
 
 # --- Result -------------------------------------------------------------------
