@@ -61,6 +61,11 @@ def acquire(get_conn, backend: str) -> bool:
         row = conn.execute("SELECT pg_try_advisory_lock(%s)" % LOCK_KEY).fetchone()
         got = bool(row[0]) if row is not None else False
         if got:
+            # Detached, or the end-of-tick release (dbdriver) would return the
+            # session to the pool and silently drop the lock with it.
+            _detach = getattr(conn, "detach", None)
+            if _detach is not None:
+                _detach()
             _conn = conn          # keep the session, keep the lock
         else:
             try:

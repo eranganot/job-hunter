@@ -267,6 +267,11 @@ class PgConnection:
         self._conn = conn
         self._pool = pool
         self._returned = False
+        # Every connection is registered with the thread that borrowed it, so
+        # release_thread_connections() can hand back any the code forgot to
+        # close. See the note above _BORROWED for why that has to exist.
+        self._owner = _borrowed_list()
+        self._owner.append(self)
 
     def execute(self, sql, params=()):
         sql = translate(sql, POSTGRES, bool(params))
@@ -292,10 +297,48 @@ class PgConnection:
         if self._returned:
             return
         self._returned = True
+        self._untrack()
         if self._pool is not None:
             self._pool.putconn(self._conn)
         else:
             self._conn.close()
+
+    def detach(self):
+        """Keep this connection past the end of the current request or loop tick.
+
+        For the one legitimate long-lived borrower - schedlock, whose advisory
+        lock lives on its session. Without this, the end-of-request release
+        would hand the session back to the pool and silently drop the lock.
+        The caller now owns the connection outright and must close() it.
+        """
+        self._untrack()
+        return self
+
+    def _untrack(self):
+        owner, self._owner = getattr(self, "_owner", None), None
+        if owner is not None:
+            try:
+                owner.remove(self)
+            except ValueError:
+                pass
+
+    def __del__(self):
+        # Last resort for a borrower that neither closed its connection nor
+        # reached a release point - a background thread that died mid-call. A
+        # pooled connection that is garbage-collected without putconn() stays
+        # counted against max_size forever, which is exactly how the pool ran
+        # dry on 2026-09-25. Never raise from a finaliser.
+        if getattr(self, "_returned", True):
+            return
+        try:
+            self._returned = True
+            if self._pool is not None:
+                self._pool.putconn(self._conn)
+            else:
+                self._conn.close()
+            _note_reclaimed(1, "garbage-collected")
+        except Exception:
+            pass
 
     @property
     def closed(self):
@@ -318,6 +361,73 @@ _POOL_LOCK = threading.Lock()
 
 POOL_MIN = int(os.environ.get("JH_PG_POOL_MIN", "1"))
 POOL_MAX = int(os.environ.get("JH_PG_POOL_MAX", "10"))
+# How long get_db() waits for a free connection before PoolTimeout.
+POOL_TIMEOUT = float(os.environ.get("JH_PG_POOL_TIMEOUT", "20"))
+
+# ── Leaked-connection recovery ───────────────────────────────────────────────
+# `conn = get_db(); ...; conn.close()` is the pattern at ~189 call sites, most
+# without try/finally. On SQLite a connection skipped by an exception costs
+# nothing. On a pool it is gone for good: psycopg_pool never learns it can
+# reuse it, and after max_size of them every get_db() waits out the timeout.
+# That is the 2026-09-25 outage - nine failed "pass" requests plus the
+# scheduler's lock connection used all ten slots, and the whole app answered
+# "couldn't get a connection after 20.00 sec" until it was restarted.
+#
+# Rather than audit every call site and trust the next one to be written
+# correctly, each borrowed connection is registered with its thread, and the
+# request handler / worker loop / scheduler tick hand back whatever is still
+# out when they finish. A leak then costs one request, not the process - and it
+# is logged, because a silent leak is what let this build up for 3.5 days.
+_BORROWED = threading.local()
+_RECLAIMED = {"count": 0, "last": None}
+
+
+def _borrowed_list():
+    lst = getattr(_BORROWED, "conns", None)
+    if lst is None:
+        lst = _BORROWED.conns = []
+    return lst
+
+
+def _note_reclaimed(n: int, where: str):
+    _RECLAIMED["count"] += n
+    _RECLAIMED["last"] = where
+    try:
+        print("[db] WARNING: reclaimed %d leaked connection(s) at %s - a code path "
+              "skipped conn.close()" % (n, where))
+    except Exception:
+        pass
+
+
+def release_thread_connections(where: str = "") -> int:
+    """Return every connection this thread borrowed and never closed.
+
+    Call at a point where the thread can no longer legitimately be using one:
+    the end of an HTTP request, the end of a worker or scheduler iteration.
+    Returns how many were reclaimed (0 on the healthy path).
+    """
+    lst = getattr(_BORROWED, "conns", None)
+    if not lst:
+        return 0
+    leaked, _BORROWED.conns = list(lst), []
+    n = 0
+    for c in leaked:
+        c._owner = None               # already off the list; close() must not look
+        if c._returned:
+            continue
+        try:
+            c.close()
+        except Exception:
+            pass
+        n += 1
+    if n:
+        _note_reclaimed(n, where or "thread release")
+    return n
+
+
+def reclaimed_stats() -> dict:
+    return dict(_RECLAIMED)
+
 
 # Set when psycopg_pool could not be imported. /api/health reports it, because
 # "the app is quietly unpooled" and "the app is pooled" look identical from
@@ -367,7 +477,7 @@ def _get_pool(url: str):
                 conn.autocommit = True
 
             pool = ConnectionPool(url, min_size=POOL_MIN, max_size=POOL_MAX,
-                                  configure=_configure, open=True, timeout=20)
+                                  configure=_configure, open=True, timeout=POOL_TIMEOUT)
             _POOLS[url] = pool
         return pool
 

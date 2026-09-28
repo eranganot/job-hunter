@@ -29,6 +29,7 @@ import functools
 import auth
 import crypto
 import db as database
+import dbdriver
 import entitlements
 import errors
 import schedlock
@@ -731,6 +732,10 @@ def file_watcher():
                     print(f"[sessions] purged {_purged} expired session(s)")
             except Exception as _se:
                 print(f"[sessions] cleanup error: {_se}")
+        # This thread never ends, so a connection one of the calls above
+        # leaked would otherwise be lost to the pool for the life of the
+        # process. schedlock's lock connection is detached and survives this.
+        dbdriver.release_thread_connections("scheduler tick")
         time.sleep(60)
 
 
@@ -5701,6 +5706,19 @@ class Handler(BaseHTTPRequestHandler):
     def log_error(self, fmt, *args):
         _log.get("http").warning(fmt, *args)
 
+    def handle_one_request(self):
+        # The one point every request passes through after its handler has
+        # finished, whatever the method and however it ended. Any pooled
+        # connection the handler borrowed and did not close - typically
+        # because an exception skipped `conn.close()` - goes back here, so a
+        # buggy route costs one failed request instead of a pool slot for the
+        # life of the process (the 2026-09-25 outage). See dbdriver.
+        try:
+            BaseHTTPRequestHandler.handle_one_request(self)
+        finally:
+            dbdriver.release_thread_connections(
+                "end of request %s" % (getattr(self, "path", "") or "?")[:120])
+
     def send_response(self, code, *a, **kw):
         # Every reply in this app goes through here (send_json, send_html and
         # redirect all call it), so it is the one place the access line can
@@ -6128,7 +6146,28 @@ class Handler(BaseHTTPRequestHandler):
                     return {"unavailable": str(_qe)[:120]}
 
             import time as _ht
-            conn = database.get_db()
+            # Read BEFORE touching the database. db_pool existed to make pool
+            # exhaustion visible, but it was computed after get_db() - so when
+            # the pool ran dry on 2026-09-25, health hung for 20s and returned
+            # a generic 500 like every other route, and the one field built to
+            # explain the outage was never sent.
+            try:
+                _pool_stats = dbdriver.pool_stats()
+            except Exception:
+                _pool_stats = {}
+            try:
+                conn = database.get_db()
+            except Exception as _dbe:
+                self.send_json({
+                    "status": "db_unavailable",
+                    "error": str(_dbe)[:200],
+                    "db_backend": database.backend(),
+                    "db_pool": _pool_stats,
+                    "db_leaks_reclaimed": dbdriver.reclaimed_stats(),
+                    "scheduler_lock": schedlock.status(),
+                    "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7],
+                }, 503)
+                return
             user_count = conn.execute("SELECT COUNT(*) FROM users WHERE is_active=1").fetchone()[0]
             job_count = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
             last_search = conn.execute(
@@ -6139,11 +6178,6 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT details, created_date FROM activity_log "
                 "WHERE event_type='job_applied' ORDER BY id DESC LIMIT 1"
             ).fetchone()
-            try:
-                import dbdriver as _dbd
-                _pool_stats = _dbd.pool_stats()
-            except Exception:
-                _pool_stats = {}
             try:
                 _schema_version = conn.execute(
                     "SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
@@ -6207,6 +6241,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Pool exhaustion looks like "the app hung" from outside; this
                 # makes it visible. Empty on SQLite.
                 "db_pool": _pool_stats,
+                # Connections a code path borrowed and never closed, handed
+                # back at the end of the request/tick. Should stay 0; a rising
+                # count names a route that needs a try/finally.
+                "db_leaks_reclaimed": dbdriver.reclaimed_stats(),
             })
             return
 

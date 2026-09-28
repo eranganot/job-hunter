@@ -127,7 +127,21 @@ def loop(stop=None, poll=None):
             # The loop itself must not be killable by one bad iteration.
             print("[worker] loop error: %s\n%s" % (exc, traceback.format_exc()))
             stop.wait(poll)
+        finally:
+            # This thread lives as long as the process, so a connection a
+            # handler leaked would never come back to the pool on its own.
+            _release_leaked("worker iteration")
     print("[worker] stopped")
+
+
+def _release_leaked(where):
+    # dbdriver is a leaf module (no app imports), so this does not reintroduce
+    # the circular import the module docstring warns about.
+    try:
+        import dbdriver
+        dbdriver.release_thread_connections(where)
+    except Exception:
+        pass
 
 
 def adopt_orphans():

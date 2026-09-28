@@ -570,11 +570,16 @@ def record_pass_reason_stat(conn: sqlite3.Connection, user_id: int, reason: str)
     inside another transaction, inline the SQL (see app.py approve/reject).
     """
     from datetime import datetime
+    # `pass_reason_stats.count`, not bare `count`: inside ON CONFLICT DO UPDATE
+    # Postgres sees both the existing row and EXCLUDED, and rejects the bare
+    # name as ambiguous. SQLite resolved it silently, so this passed every test
+    # until production moved to Postgres - where each failure also leaked a
+    # pooled connection and, after nine of them, took the app down (2026-09-25).
     conn.execute(
         """INSERT INTO pass_reason_stats (user_id, reason, count, last_hit_date)
            VALUES (?, ?, 1, ?)
            ON CONFLICT(user_id, reason) DO UPDATE SET
-               count = count + 1,
+               count = pass_reason_stats.count + 1,
                last_hit_date = excluded.last_hit_date""",
         (user_id, reason, datetime.now().isoformat())
     )
