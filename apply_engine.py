@@ -825,23 +825,26 @@ def _looks_parked(final_url: str, body: str) -> bool:
 
 
 def check_url_alive(url: str, timeout: int = 8) -> bool:
-    """Return True if the URL responds with a non-error status AND is not a
-    parked / for-sale domain page (which return 200 but the job is gone)."""
+    """True only when the URL lands on a live posting for this job.
+
+    Delegates to linkcheck.classify (2026-10-12): "answers 200" was the old
+    test, and a closed posting almost always answers 200 - from the ATS root
+    it redirected to, from a careers home page, or with a closed banner. See
+    linkcheck.py for the observed shapes. Fetches through urllib.request.urlopen
+    (looked up at call time) so tests can stub the network.
+    """
     if not url:
         return False
+    import linkcheck
+
+    def _fetch(u, t):
+        req = urllib.request.Request(u, method="GET", headers={
+            "User-Agent": linkcheck.UA, "Accept-Language": "en-US,en;q=0.9"})
+        with urllib.request.urlopen(req, timeout=t) as r:
+            return r.status, r.geturl(), r.read(linkcheck.READ_BYTES).decode("utf-8", "ignore")
+
     try:
-        req = urllib.request.Request(url, method="GET", headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            if r.status >= 400:
-                return False
-            body = r.read(40000).decode("utf-8", "ignore")
-            if _looks_parked(r.geturl(), body):
-                return False
-            if _looks_closed(body):
-                return False
-            return True
-    except urllib.error.HTTPError as e:
-        return e.code < 400
+        return linkcheck.classify(url, timeout, fetch=_fetch)[0] == "alive"
     except Exception:
         return False
 

@@ -1692,9 +1692,12 @@ def run_job_search(user_id: int):
                                 f'Search for current job openings matching this query: "{query_hint_}". '
                                 f'STRONGLY PREFER direct application URLs on company career pages and applicant-tracking systems '
                                 f'(boards.greenhouse.io, jobs.lever.co, *.myworkdayjobs.com, comeet.com, smartrecruiters.com, '
-                                f'ashbyhq.com, and company "/careers" pages). These let the candidate apply directly. '
+                                f'ashbyhq.com, or a single posting on a company careers site). These let the candidate apply directly. '
                                 f'AVOID job-board aggregator links (linkedin.com/jobs, indeed.com, glassdoor.com) unless no direct URL exists, '
                                 f'because those require manual application. Return the direct apply URL whenever possible. '
+                                f'Every url MUST be the page of that ONE posting, copied exactly from a search result - never a '
+                                f'careers home page (e.g. company.com/careers), a job-board index, or a URL you composed yourself. '
+                                f'If you cannot find the posting\'s own URL, leave that job out. '
                                 f'Candidate context — seniority: {_seniority_hint}; location: {_locs_str}. '
                                 + (f'Background: {_cv_snippet} ' if _cv_snippet else '')
                                 + 'Return ONLY a JSON array of up to 8 results. '
@@ -1969,11 +1972,27 @@ def run_job_search(user_id: int):
                 from concurrent.futures import ThreadPoolExecutor as _TPE
                 _new_urls = {j.get("url","").strip() for j in all_jobs_data if j.get("url")}
                 _url_ok   = {}
+                _url_final = {}
+                import linkcheck as _lc
+
+                def _insert_check(u_):
+                    v_, why_, fin_ = _lc.classify(u_, 12)
+                    return v_, why_, fin_
                 with _TPE(max_workers=8) as _ex:
-                    _futs = {_ex.submit(_ae.check_url_alive, u): u for u in _new_urls}
+                    _futs = {_ex.submit(_insert_check, u): u for u in _new_urls}
                     for _f, _u in _futs.items():
-                        try:    _url_ok[_u] = 1 if _f.result(timeout=12) else 0
-                        except Exception: _url_ok[_u] = 0
+                        try:
+                            _v, _why, _fin = _f.result(timeout=25)
+                        except Exception:
+                            _v, _why, _fin = "unknown", "timeout", ""
+                        # Same bar as before for unknown (skip): only 'alive' is inserted.
+                        _url_ok[_u] = 1 if _v == "alive" else 0
+                        if _v != "alive":
+                            print(f"[run-search] skipped at insert ({_v}): {_why} - {_u[:120]}")
+                        # Gemini grounding links 404 within days; keep where they LAND,
+                        # or the next sweep retires a live job for its expired redirect.
+                        if _v == "alive" and _fin and "grounding-api-redirect" in _u:
+                            _url_final[_u] = _fin
                 _chk_date = datetime.now().isoformat()
 
                 # ── Load rejected patterns to filter out ────────────────────────
@@ -2025,6 +2044,9 @@ def run_job_search(user_id: int):
                                 _jurl = (j.get("url") or "").strip()
                                 if _jurl and _url_ok.get(_jurl) == 0:
                                     continue  # skip dead links
+                                if _jurl in _url_final:
+                                    _url_ok[_url_final[_jurl]] = 1
+                                    _jurl = _url_final[_jurl]
                                 # Dedup: skip if same company+title already exists for this user
                                 _jtitle = j.get("job_title", "").strip().lower()
                                 _jcomp = j.get("company", "").strip().lower()
@@ -2061,23 +2083,37 @@ def run_job_search(user_id: int):
                         conn = database.get_db()
                         try:
                             unverified = conn.execute(
-                                "SELECT id, url FROM jobs WHERE user_id=? AND url_verified IS NULL AND url!=''", (user_id,)
+                                "SELECT id, url, status FROM jobs WHERE user_id=? AND url_verified IS NULL AND url!=''", (user_id,)
                             ).fetchall()
                             conn.close()
                             hist_alive = hist_dead = 0
                             if unverified:
+                                # _link_verdict, not check_url_alive: a rate limit or a
+                                # bot-block is 'unknown' and must not count as dead.
                                 with _TPE(max_workers=8) as _ex2:
-                                    _futs2 = {_ex2.submit(_ae.check_url_alive, r["url"]): r for r in unverified}
+                                    _futs2 = {_ex2.submit(_link_verdict, r["url"]): r for r in unverified}
                                     hist_results = {}
                                     for _f2, _r2 in _futs2.items():
-                                        try:    hist_results[_r2["id"]] = 1 if _f2.result(timeout=12) else 0
-                                        except Exception: hist_results[_r2["id"]] = 0
+                                        try:    hist_results[_r2["id"]] = (_r2, _f2.result(timeout=20))
+                                        except Exception: hist_results[_r2["id"]] = (_r2, ("unknown", "timeout"))
+                                _autoreject_h = os.environ.get("LINK_AUTOREJECT_DEAD", "1").strip().lower() not in ("0", "false", "no", "off")
                                 conn = database.get_db()
                                 try:
-                                    for job_id, ok in hist_results.items():
-                                        conn.execute("UPDATE jobs SET url_verified=?, url_check_date=? WHERE id=?",(ok,_chk_date,job_id))
-                                        if ok: hist_alive += 1
-                                        else:  hist_dead  += 1
+                                    for job_id, (_hr, (_hst, _hwhy)) in hist_results.items():
+                                        if _hst == "alive":
+                                            conn.execute("UPDATE jobs SET url_verified=1, url_check_date=? WHERE id=?", (_chk_date, job_id))
+                                            hist_alive += 1
+                                        elif _hst == "dead":
+                                            hist_dead += 1
+                                            # /app shows a url_verified=0 job like any other, so a
+                                            # flag alone still put dead postings in front of him.
+                                            if _autoreject_h and (_hr["status"] or "") in ("new", "approved"):
+                                                conn.execute(
+                                                    "UPDATE jobs SET status='rejected', rejected_by='system', url_verified=0, "
+                                                    "url_check_date=?, notes=COALESCE(notes,'') || ? WHERE id=?",
+                                                    (_chk_date, " [auto-removed: link dead/closed - %s]" % _hwhy[:80], job_id))
+                                            else:
+                                                conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, job_id))
                                     conn.commit(); conn.close()
                                 finally:
                                     conn.close()
@@ -2097,17 +2133,17 @@ def run_job_search(user_id: int):
                                 if prev_ok:
                                     _autoreject = os.environ.get("LINK_AUTOREJECT_DEAD", "1").strip().lower() not in ("0", "false", "no", "off")
                                     with _TPE(max_workers=8) as _ex3:
-                                        _futs3 = {_ex3.submit(_link_status, r["url"]): r for r in prev_ok}
+                                        _futs3 = {_ex3.submit(_link_verdict, r["url"]): r for r in prev_ok}
                                         _demote = []
                                         for _f3, _r3 in _futs3.items():
-                                            try:    _st = _f3.result(timeout=12)
-                                            except Exception: _st = "unknown"
+                                            try:    _st, _why3 = _f3.result(timeout=20)
+                                            except Exception: _st, _why3 = "unknown", "timeout"
                                             if _st == "dead":
-                                                _demote.append(_r3)
+                                                _demote.append((_r3, _why3))
                                     if _demote:
                                         conn = database.get_db()
                                         try:
-                                            for _r in _demote:
+                                            for _r, _why in _demote:
                                                 _jid = _r["id"]; _rst = (_r["status"] or "")
                                                 # A definitively-dead link in the REVIEW queue is useless — move it
                                                 # out so Eran stops seeing expired postings. Applied/rejected rows
@@ -2116,8 +2152,8 @@ def run_job_search(user_id: int):
                                                     conn.execute(
                                                         "UPDATE jobs SET status='rejected', url_verified=0, url_check_date=?, "
                                                         "rejected_by='system', "
-                                                        "notes=COALESCE(notes,'') || ' [auto-removed: link dead/closed]' WHERE id=?",
-                                                        (_chk_date, _jid))
+                                                        "notes=COALESCE(notes,'') || ? WHERE id=?",
+                                                        (_chk_date, " [auto-removed: link dead/closed - %s]" % _why[:80], _jid))
                                                     reval_removed += 1
                                                 else:
                                                     conn.execute("UPDATE jobs SET url_verified=0, url_check_date=? WHERE id=?", (_chk_date, _jid))
@@ -5727,47 +5763,30 @@ _LINK_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 def _link_status(url: str, timeout: int = 8) -> str:
-    """Classify a job URL: 'alive' | 'dead' | 'unknown'.
+    """Classify a job URL for the sweepers: 'alive' | 'dead' | 'unknown'.
 
-    Conservative on purpose - we only call a link 'dead' when it is
-    *definitively* gone (HTTP 404/410, or DNS that no longer resolves).
-    Bot-blocks and rate-limits (401/403/429), timeouts, and transient
-    network errors return 'unknown' so a live posting is never removed
-    just because the server refused our automated request.
+    Delegates to linkcheck.classify (2026-10-12). 'generic' - the URL is a
+    careers/board home page, not a posting - counts as dead here: it is what
+    "the link sent me to the company's general website" meant, and a queue
+    entry nobody can apply from. Bot-blocks, rate limits and timeouts stay
+    'unknown' so a live posting is never removed for refusing a robot.
     """
-    import urllib.request as _ur, urllib.error as _ue, socket as _sock
-    if not url or not str(url).strip():
-        return "dead"  # no URL = unusable
-    url = str(url).strip()
+    import linkcheck
     try:
-        req = _ur.Request(url, method="GET", headers={"User-Agent": _LINK_UA})
-        with _ur.urlopen(req, timeout=timeout) as r:
-            if r.status in (404, 410):
-                return "dead"
-            if r.status >= 400:
-                return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
-            body = r.read(40000).decode("utf-8", "ignore")
-            try:
-                import apply_engine as _ae
-                if _ae._looks_parked(r.geturl(), body):
-                    return "dead"  # parked / for-sale domain = posting is gone
-                if _ae._looks_closed(body):
-                    return "dead"  # 200-OK but posting closed/filled/expired
-            except Exception:
-                pass
-            return "alive"
-    except _ue.HTTPError as e:
-        if e.code in (404, 410):
-            return "dead"
-        if e.code < 400:
-            return "alive"
-        return "unknown"  # 401/403/429/5xx - keep, can't prove it's gone
-    except _ue.URLError as e:
-        if isinstance(getattr(e, "reason", None), _sock.gaierror):
-            return "dead"  # hostname no longer resolves
-        return "unknown"
+        verdict = linkcheck.classify(url, max(timeout, 10))[0]
     except Exception:
         return "unknown"
+    return "dead" if verdict in ("dead", "generic") else verdict
+
+
+def _link_verdict(url: str, timeout: int = 10):
+    """(status, reason) for callers that record WHY a link was retired."""
+    import linkcheck
+    try:
+        verdict, reason, _final = linkcheck.classify(url, timeout)
+    except Exception as e:
+        return "unknown", type(e).__name__
+    return ("dead" if verdict in ("dead", "generic") else verdict), reason
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -7385,7 +7404,7 @@ class Handler(BaseHTTPRequestHandler):
                     for j, st in results:
                         if st == "dead":
                             conn.execute(
-                                "UPDATE jobs SET status='rejected', "
+                                "UPDATE jobs SET status='rejected', rejected_by='system', "
                                 "notes=TRIM(COALESCE(notes,'') || ' [auto-removed: dead link]'), "
                                 "url_verified=0, url_check_date=? WHERE id=? AND user_id=?",
                                 (_now_iso, j["id"], user_id))

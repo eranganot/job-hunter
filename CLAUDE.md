@@ -29,3 +29,10 @@ Do not edit either. If you find yourself in a Job Hunter clone that is not `C:\d
 
 ## Response style (token-saving)
 Short checklist summaries (files changed + commands + smoke check). Don't paste whole logs — last ~20 lines. Edit in place. Use the Explore subagent for broad searches.
+
+## Ship rules (added by setup-claude-local.ps1)
+- Read STATUS.md first; update it last.
+- Before commit: run the repo's checks (see the ship-it skill / README). Never commit failing typecheck or tests.
+- Commit messages via git commit -F <file> written WITHOUT a BOM. One commit per round; check git log -1 so a re-run never duplicates a commit.
+- Never force-push. Never commit secrets (.env, agent keys, tokens).
+- Deploys happen on push to main (Railway). After pushing, read the deploy logs and confirm a line only the new code emits.
