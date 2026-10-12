@@ -642,6 +642,58 @@ def m0011_undo_expiry(conn):
     conn.commit()
 
 
+def m0012_reconcile_eran_backlog(conn):
+    """One-time correction of two mis-filed sets for user 1 (Eran), 2026-10-12.
+
+    Both were reviewed row by row with him and he approved the outcome. Rows
+    are named by primary key AND re-checked against the exact state they were
+    reviewed in, so this can touch nothing else - not another user's rows, and
+    not these rows if anything changed them since.
+
+    1. Twenty real hand applications. Each carries his own note ("Manually
+       applied by user" / "Marked applied manually") and an applied_date, but
+       the old apply engine had stamped them apply_status='failed', so the
+       prune_attempted_v1 boot step retired them as system passes
+       ("[auto-removed: already attempted]"). They go back to status='applied',
+       applied_via='manual', keeping the original applied_date.
+
+    2. Seventy-six bulk-marked rows (applied_via='bulk': a queue cleanup marked
+       them applied, nobody applied). Every link was fetched on 2026-10-12: all
+       are dead, a careers home page, off-function, outside Israel, or a role
+       he already applied to under another row. Retired as system passes. The
+       eight live, relevant ones were already moved to Approved by hand.
+    """
+    if not all(_has_column(conn, "jobs", c) for c in
+               ("applied_via", "rejected_by", "notes", "applied_date", "apply_status", "status", "user_id")):
+        return
+    real_apps = (1757, 1758, 1688, 1687, 1689, 1634, 1628, 1627, 1630, 1615,
+                 1591, 1592, 1590, 1459, 1462, 1383, 1374, 1322, 1377, 1247)
+    bulk_dead = (601, 729, 747, 748, 763, 765, 770, 771, 774, 777, 873, 875, 900, 905,
+                 1027, 1187, 1188, 1248, 1259, 1276, 1278, 1279, 1280, 1282, 1283, 1285,
+                 1286, 1287, 1288, 1289, 1318, 1320, 1321, 1323, 1324, 1325, 1326, 1327,
+                 1328, 1329, 1330, 1331, 1332, 1333, 1334, 1335, 1336, 1337, 1338, 1339,
+                 1340, 1341, 1342, 1343, 1344, 1345, 1346, 1347, 1349, 1350, 1351, 1352,
+                 1353, 1354, 1355, 1356, 1357, 1358, 1359, 1360, 1361, 1363, 1365, 1366,
+                 1367, 1368)
+    for jid in real_apps:
+        conn.execute(
+            "UPDATE jobs SET status='applied', applied_via='manual', apply_status='submitted', "
+            "rejected_by=NULL, "
+            "notes=TRIM(REPLACE(COALESCE(notes,''), ' [auto-removed: already attempted]', '')) "
+            "WHERE id=? AND user_id=1 AND status='rejected' AND rejected_by='system' "
+            "AND applied_date IS NOT NULL "
+            "AND notes LIKE '%[auto-removed: already attempted]%' "
+            "AND (notes LIKE 'Manually applied by user%' OR notes LIKE 'Marked applied manually%')",
+            (jid,))
+    for jid in bulk_dead:
+        conn.execute(
+            "UPDATE jobs SET status='rejected', rejected_by='system', "
+            "notes=TRIM(COALESCE(notes,'') || ' [auto-removed: bulk-marked, never applied; dead or not relevant 2026-10-12]') "
+            "WHERE id=? AND user_id=1 AND status='applied' AND applied_via='bulk'",
+            (jid,))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -654,6 +706,7 @@ MIGRATIONS = [
     (9, "decision_provenance",          m0009_decision_provenance),
     (10, "user_plan",                   m0010_user_plan),
     (11, "undo_expiry",                 m0011_undo_expiry),
+    (12, "reconcile_eran_backlog",      m0012_reconcile_eran_backlog),
 ]
 
 
