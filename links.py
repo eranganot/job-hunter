@@ -94,6 +94,20 @@ def needs_resolving(url: str) -> bool:
     return classify(url) in ("board", "aggregator", "redirect", "none")
 
 
+def _read_rows(db, sql, args):
+    """Rows from `db`: a connection (left open - the caller owns it) or a
+    get_db callable (opened and closed here, before any slow network work, so
+    a 45-second report never holds a pooled connection)."""
+    # sqlite3.Connection is itself callable, so test for .execute instead.
+    if not hasattr(db, "execute"):
+        conn = db()
+        try:
+            return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        finally:
+            conn.close()
+    return [dict(r) for r in db.execute(sql, args).fetchall()]
+
+
 # ── 1a: the measuring report ────────────────────────────────────────────────
 
 OPEN_STATUSES = ("new", "approved")
@@ -125,7 +139,7 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
         sql += " AND user_id=?"
         args = (user_id,)
     sql += " ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END, id DESC"
-    rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+    rows = _read_rows(conn, sql, args)
 
     by_type = {t: 0 for t in ORDER}
     by_host: dict = {}
@@ -344,3 +358,126 @@ def link_penalty(job) -> int:
 
 LINK_PENALTY_SQL = ("(CASE WHEN link_resolved_at IS NOT NULL AND link_type IN "
                     "('board','aggregator','redirect','none') THEN %d ELSE 0 END)" % LINK_PENALTY)
+
+
+# ── Step 2: link audit (evidence before a rule) ─────────────────────────────
+
+def _page_title(body: str) -> str:
+    import html as _html
+    import re
+    m = re.search(r"(?is)<title[^>]*>(.*?)</title>", body or "")
+    return re.sub(r"\s+", " ", _html.unescape(m.group(1))).strip()[:200] if m else ""
+
+
+def _title_tokens(t: str) -> list:
+    import apply_engine as _ae
+    return [w for w in _ae._norm_title(t).split() if len(w) > 1]
+
+
+def audit_one(job: dict, fetch=None, timeout: int = 15) -> dict:
+    """What a job's link actually shows. Read-only: one GET, nothing stored.
+
+    The point is to see real pages before writing a rule - the 10-12 attempt
+    at a title-on-page check was rejected because it failed real Payoneer,
+    NICE and LinkedIn postings, and the URLs it was judged on were not kept.
+    """
+    import re
+    import urllib.parse as _up
+    import linkcheck
+
+    url = (job.get("url") or "").strip()
+    out = {"job_id": job.get("id"), "company": job.get("company"), "title": job.get("title"),
+           "url": url, "type": classify(url)}
+    got = {}
+
+    def _once(u, t):
+        if "r" not in got:
+            try:
+                got["r"] = (fetch or linkcheck._fetch)(u, t)
+            except Exception as exc:
+                got["e"] = exc
+        if "e" in got:
+            raise got["e"]
+        return got["r"]
+
+    verdict, reason, final = linkcheck.classify(url, timeout=timeout, fetch=_once)
+    out.update({"verdict": verdict, "reason": reason, "final_url": final})
+    if "r" not in got:
+        out["fetched"] = False
+        return out
+    status, final_url, body = got["r"]
+    vis = linkcheck._visible_text(body)
+    page_title = _page_title(body)
+    toks = _title_tokens(job.get("title") or "")
+    fp = _up.urlparse(final_url or url)
+    out.update({
+        "fetched": True,
+        "status": status,
+        "moved_host": host_of(final_url) != host_of(url) if final_url else False,
+        "landed_on_root": not [s for s in (fp.path or "").split("/") if s],
+        "landed_generic": linkcheck.is_generic_url(final_url or url),
+        "page_title": page_title,
+        "title_tokens": toks,
+        "tokens_in_page_title": sum(1 for w in toks if w in page_title.lower()),
+        "tokens_in_text": sum(1 for w in toks if re.search(r"\b%s\b" % re.escape(w), vis)),
+        "company_in_page_title": bool(job.get("company")) and
+                                 (job.get("company") or "").strip().lower()[:12] in page_title.lower(),
+        "visible_chars": len(vis),
+        "body_bytes": len(body or ""),
+        # Little visible text in a big page = rendered by script; a title check
+        # cannot judge these from the HTML (the Payoneer/NICE false negatives).
+        "script_rendered": len(vis) < 1500 and len(body or "") > 20000,
+    })
+    return out
+
+
+def link_audit(conn, user_id=None, types=("company", "aggregator"), limit: int = 40,
+               budget_s: float = 50.0, workers: int = 8, fetch=None) -> dict:
+    """Fetch the open jobs whose links are on company or aggregator sites and
+    report what each page shows (audit_one). Read-only."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+
+    sql = ("SELECT id, user_id, title, company, location, url FROM jobs "
+           "WHERE status IN ('new','approved')")
+    args = ()
+    if user_id is not None:
+        sql += " AND user_id=?"
+        args = (user_id,)
+    sql += " ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END, id DESC"
+    rows = _read_rows(conn, sql, args)
+    picked = [r for r in rows if classify(r.get("url")) in types][:max(0, limit)]
+
+    started = time.monotonic()
+    results = []
+    pool = ThreadPoolExecutor(max_workers=max(1, workers))
+    try:
+        futs = {pool.submit(audit_one, r, fetch): r for r in picked}
+        pending = set(futs)
+        while pending:
+            left = budget_s - (time.monotonic() - started)
+            if left <= 0:
+                break
+            done, pending = wait(pending, timeout=left, return_when=FIRST_COMPLETED)
+            for f in done:
+                try:
+                    results.append(f.result())
+                except Exception as exc:
+                    r = futs[f]
+                    results.append({"job_id": r["id"], "url": r.get("url"), "error": repr(exc)[:160]})
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    verdicts = {}
+    for r in results:
+        verdicts[r.get("verdict", "error")] = verdicts.get(r.get("verdict", "error"), 0) + 1
+    return {
+        "scope": "all users" if user_id is None else f"user {user_id}",
+        "types": list(types),
+        "candidates": len([r for r in rows if classify(r.get("url")) in types]),
+        "audited": len(results),
+        "not_reached": len(picked) - len(results),
+        "seconds": round(time.monotonic() - started, 1),
+        "verdicts": verdicts,
+        "jobs": sorted(results, key=lambda r: (r.get("verdict") != "alive", r.get("job_id") or 0)),
+    }

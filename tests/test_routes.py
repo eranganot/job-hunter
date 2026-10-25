@@ -431,6 +431,15 @@ def test_jobs_rank_a_job_without_a_direct_link_5_points_lower(stack, users):
     assert mine[1]["link_penalty"] == 5 and mine[0]["link_penalty"] == 0
 
 
+def test_link_audit_is_admin_only(stack, users):
+    status, _, _ = Client(stack["port"]).get("/api/admin/link-audit")
+    assert status != 200
+    status, _, _ = users["b"].get("/api/admin/link-audit")
+    assert status == 403
+    status, _, body = users["admin"].get("/api/admin/link-audit?scope=me&limit=0")
+    assert status == 200 and json.loads(body)["audited"] == 0
+
+
 def test_admin_account_gets_the_admin_role(users):
     status, _, body = users["admin"].get("/api/me")
     assert status == 200
