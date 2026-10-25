@@ -356,3 +356,37 @@ def test_audit_survives_a_page_that_cannot_be_fetched():
         raise TimeoutError("slow site")
     r = links.link_audit(_db(AUDIT_ROWS), user_id=1, fetch=boom)
     assert r["audited"] == 3 and all(j["verdict"] == "unknown" and j["fetched"] is False for j in r["jobs"])
+
+
+# ── Step 2b: hosts reclassified from the 2026-10-25 link audit ──────────────
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://secrethunter.io/jobs/7D.F6E/customer-success-manager", "aggregator"),
+    ("https://jobs.secrettelaviv.com/list/job/acme/product-manager-1", "aggregator"),
+    ("https://www.builtinaustin.com/company/sciplay/jobs/2026/vp-product", "aggregator"),
+    ("https://builtin.com/companies/healthee/jobs/2779124/performance-marketing-manager", "aggregator"),
+    ("https://www.getajob.careers/job/marketing-automation-manager-artlist-tel-aviv", "aggregator"),
+    ("https://www.yuvalhr.com/job/monetization-manager/", "aggregator"),
+    ("https://jobify360.co.il/jobs/4363076694-in", "board"),
+    ("https://djinni.co/jobs/610587-senior-ppc-performance-marketing-manager/", "board"),
+    ("https://app.greenhouse.io/jobs/5446051002", "board"),
+    ("https://www.amazon.jobs/en/jobs/10583032/senior-hw-material-engineer", "company"),
+    ("https://www.playtika.com/careers/senior-product-manager", "company"),
+])
+def test_hosts_from_the_link_audit(url, expected):
+    assert links.classify(url) == expected
+
+
+def test_a_job_recorded_as_company_is_re_examined_once_its_host_is_reclassified():
+    get_db = _file_db([
+        (1, "CSM", "A Security", "Tel Aviv", "https://secrethunter.io/jobs/7D.F6E/csm", "web", "new"),
+        (1, "PM", "Playtika", "Tel Aviv", "https://www.playtika.com/careers/pm", "web", "new"),
+    ])
+    c = get_db()
+    c.execute("UPDATE jobs SET link_type='company', link_resolved_at='2026-10-25 10:00:00'")
+    c.commit(); c.close()
+    resolver, calls = _stub({})
+    links.resolve_open_jobs(get_db, 1, resolver=resolver)
+    assert calls == [("A Security", "CSM")]          # Playtika stays company, untouched
+    rows = _rows(get_db)
+    assert rows[1]["link_type"] == "aggregator" and rows[2]["link_type"] == "company"

@@ -138,3 +138,32 @@ def test_a_posting_slug_merely_containing_404_digits_is_not_dead():
     url = "https://jobs.lever.co/acme/4041-product-manager"
     v, _, _ = L.classify(url, fetch=_f(200, body="<title>Product Manager</title>"))
     assert v == "alive"
+
+
+# ── 2026-10-25: shapes from the link audit of the open queue ────────────────
+
+def test_greenhouse_recruiter_link_landing_on_sign_in_is_not_a_posting():
+    url = "https://app.greenhouse.io/jobs/5446051002"
+    v, why, _ = L.classify(url, fetch=_f(200, final="https://app.greenhouse.io/users/sign_in",
+                                          body="<title>Sign In | Greenhouse Recruiting</title>"))
+    assert v == "generic" and "sign-in" in why
+
+
+def test_non_numeric_gh_jid_is_an_invented_id():
+    url = "https://www.playtika.com/careers/senior-product-manager-growth-monetization"
+    final = "https://www.playtika.com/position/?gh_jid=senior-product-manager-growth-monetization"
+    v, why, _ = L.classify(url, fetch=_f(200, final=final, body="<title>Playtika - Position</title>"))
+    assert v == "dead" and "invented Greenhouse id" in why
+
+
+def test_numeric_gh_jid_is_fine():
+    url = "https://cheetahdigital.com/careers/job/?gh_jid=4350324"
+    v, _, _ = L.classify(url, fetch=_f(200, body="<title>Senior Marketing Manager</title>"))
+    assert v == "alive"
+
+
+def test_closed_cisco_posting_landing_on_careers_home_is_dead():
+    url = "https://jobs.cisco.com/jobs/Senior-Customer-Success-Architect-Tel-Aviv-Israel-2024498"
+    v, why, _ = L.classify(url, fetch=_f(200, final="https://careers.cisco.com/global/en",
+                                          body="<title>Careers at Cisco</title>"))
+    assert v == "dead" and "redirected" in why
