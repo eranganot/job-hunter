@@ -364,6 +364,20 @@ def test_sentry_test_route_reports_honestly_without_a_dsn(users):
     assert data["sent"] is False and data["reporting"] is False
 
 
+def test_link_report_is_admin_only_and_read_only(stack, users):
+    status, _, _ = Client(stack["port"]).get("/api/admin/link-report")
+    assert status != 200, "the link report answered anonymously"
+    status, _, _ = users["b"].get("/api/admin/link-report")
+    assert status == 403, f"a member reached the link report ({status})"
+    # sample=0: counts only, no resolver calls, so no network in the suite.
+    status, _, body = users["admin"].get("/api/admin/link-report?scope=all&sample=0")
+    assert status == 200
+    data = json.loads(body)
+    assert data["scope"] == "all users"
+    assert set(data["by_type"]) == {"direct_ats", "company", "aggregator", "board", "redirect", "none"}
+    assert data["dry_run"]["tried"] == 0
+
+
 def test_admin_account_gets_the_admin_role(users):
     status, _, body = users["admin"].get("/api/me")
     assert status == 200

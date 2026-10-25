@@ -6797,6 +6797,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"sent": _sent, **errors.status()})
             return
 
+        if path == "/api/admin/link-report":
+            # Step 1a of EXECUTION_PLAN_NEXT.md: what the open queue links to,
+            # and how much of it the existing ATS resolver could already turn
+            # into a direct posting. Read-only - no job's URL changes here.
+            #   ?scope=me (default) | all     ?sample=25     ?llm=0|1
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import links as _links
+            _scope = (qs.get("scope", ["me"])[0] or "me").strip().lower()
+            try:
+                _sample = max(0, min(60, int(qs.get("sample", ["25"])[0])))
+            except ValueError:
+                _sample = 25
+            _llm = (qs.get("llm", ["0"])[0] or "0").strip() in ("1", "true", "yes")
+            conn = database.get_db()
+            try:
+                report = _links.link_report(conn, None if _scope == "all" else user["id"],
+                                            sample=_sample, use_llm=_llm)
+            finally:
+                conn.close()
+            self.send_json(report)
+            return
+
         if path == "/api/admin/queue-stats":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
