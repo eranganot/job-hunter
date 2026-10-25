@@ -6781,6 +6781,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(diag)
             return
 
+        if path == "/api/admin/sentry-test":
+            # Proves error reporting end to end: raise a real exception, hand
+            # it to errors.capture(), and say whether it was sent. Admin only,
+            # read-only, and the request itself still answers 200 - a test of
+            # the alarm must not set off a real 500.
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                raise RuntimeError("Sentry test from /api/admin/sentry-test - safe to ignore")
+            except RuntimeError as _test_exc:
+                _sent = errors.capture(_test_exc, where="sentry-test", path=path, user_id=user.get("id"))
+            self.send_json({"sent": _sent, **errors.status()})
+            return
+
         if path == "/api/admin/queue-stats":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
