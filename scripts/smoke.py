@@ -583,6 +583,13 @@ def run(args):
         note(f"spent:  {llm['global'].get('calls')} calls, {llm['global'].get('tokens')} tokens")
         note(f"limits: {llm['limits'].get('global_calls')} calls/day global, "
              f"{llm['limits'].get('user_calls')} calls/day per user")
+        bill = llm.get("billing") or {}
+        if bill.get("paused"):
+            # Reported, not failed: an unpaid Gemini account is an ops matter,
+            # and the app is degrading to its fallbacks as designed.
+            note(f"NOTE: Gemini PAUSED for billing until {bill.get('paused_until')} UTC "
+                 f"(since {bill.get('since')}, {bill.get('skipped_calls')} calls skipped) - "
+                 f"AI scoring/search/cover letters are degraded", YELLOW)
         return True
     s.check("health reports today's Gemini spend", _llm)
 

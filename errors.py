@@ -28,6 +28,28 @@ _client = None        # the sentry_sdk module once initialised
 _state = "unconfigured"
 
 
+# Log lines that describe a state already reported once. While Gemini is
+# paused for billing, every skipped call logs a line, and the logging
+# integration would turn each into an event - 53 from one report on
+# 2026-10-25. The pause itself is reported once (the 402 that tripped it), and
+# the admin gets a daily alert, so the per-call lines are dropped here.
+_NOISE_MARKERS = ("[gemini-paused]",)
+
+
+def _drop_known_noise(event, hint):
+    try:
+        texts = [str((event.get("logentry") or {}).get("message") or ""),
+                 str((event.get("logentry") or {}).get("formatted") or ""),
+                 str(event.get("message") or "")]
+        for v in ((event.get("exception") or {}).get("values") or []):
+            texts.append(str(v.get("value") or ""))
+        if any(m in t for t in texts for m in _NOISE_MARKERS):
+            return None
+    except Exception:
+        pass
+    return event
+
+
 def init() -> str:
     """Set up reporting if a DSN is configured. Returns the resulting state.
 
@@ -63,6 +85,7 @@ def init() -> str:
             # `email_smtp_pass` locals went out in clear text. The stack trace
             # and source lines - which is what diagnosis needs - are kept.
             include_local_variables=False,
+            before_send=_drop_known_noise,
         )
         _client = sentry_sdk
         _state = "on"
