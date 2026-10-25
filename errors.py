@@ -55,6 +55,14 @@ def init() -> str:
             # expensive half of the free tier.
             traces_sample_rate=0.0,
             send_default_pii=False,
+            # NO local variables on stack frames. send_default_pii does not
+            # cover them, and the SDK's scrubber only blanks exact key names
+            # ("password"), so every frame's locals went out as-is. Observed
+            # 2026-10-25 with sentry-sdk 2.19.2: a frame holding the request's
+            # `user` dict sent email, name and CV fields; `telegram_token` and
+            # `email_smtp_pass` locals went out in clear text. The stack trace
+            # and source lines - which is what diagnosis needs - are kept.
+            include_local_variables=False,
         )
         _client = sentry_sdk
         _state = "on"
