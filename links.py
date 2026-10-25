@@ -194,3 +194,131 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
             "unresolved": unresolved[:40],
         },
     }
+
+
+# ── 1b: resolve open jobs to the company's own posting ──────────────────────
+
+RETRY_AFTER_DAYS = 7          # an unresolved job is tried again after this
+BATCH_LIMIT = 80              # rows per run; the rest are picked up next run
+RUN_BUDGET_S = 240.0          # stop early so one run never holds the worker long
+
+
+def _utc_stamp(dt=None) -> str:
+    from datetime import datetime, timezone
+    return (dt or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
+                      limit: int = BATCH_LIMIT, budget_s: float = RUN_BUDGET_S, now=None) -> dict:
+    """Give the user's open jobs (New + Approved) a direct link where one exists.
+
+    Touches only status new/approved rows of `user_id` - applied, passed and
+    deferred history is never rewritten (Eran's scope decision, 2026-10-25).
+    For each row not examined yet, or unresolved and last tried more than
+    RETRY_AFTER_DAYS ago:
+      * already direct / company site  -> recorded as such, url untouched
+      * board, aggregator, redirect    -> resolver(company, title, location, use_llm);
+        on a hit the url becomes the ATS posting, the old url moves to
+        source_url, url_verified=1 (the ATS API listing it is the proof it is
+        open). On a miss the type is recorded and link_attempts goes up.
+    A hit already stored on another row of the same user is NOT written
+    (UNIQUE(user_id, url)); the reason goes in link_note.
+
+    Returns counts for the run detail line. Opens and closes its own
+    connections, one short one per write, so a slow ATS never holds a
+    connection from the pool.
+    """
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    if resolver is None:
+        import apply_engine as _ae
+
+        def resolver(company, title, location, use_llm):
+            return _ae.resolve_ats_application(company, title, location=location, use_llm=use_llm)
+
+    now = now or datetime.now(timezone.utc)
+    stamp = _utc_stamp(now)
+    cutoff = _utc_stamp(now - timedelta(days=RETRY_AFTER_DAYS))
+
+    conn = get_db()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT id, title, company, location, url, link_type, link_resolved_at FROM jobs "
+            "WHERE user_id=? AND status IN ('new','approved') AND ("
+            "  link_resolved_at IS NULL OR "
+            "  (link_type IN ('board','aggregator','redirect','none') AND link_resolved_at < ?)"
+            ") ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END, id DESC",
+            (user_id, cutoff)).fetchall()]
+    finally:
+        conn.close()
+
+    out = {"examined": 0, "already_direct": 0, "resolved": 0, "unresolved": 0,
+           "duplicate": 0, "left_for_next_run": 0}
+    started = time.monotonic()
+    for i, r in enumerate(rows[:max(0, limit)]):
+        if time.monotonic() - started > budget_s:
+            out["left_for_next_run"] = len(rows) - i
+            break
+        out["examined"] += 1
+        t = classify(r.get("url"))
+        if t in ("direct_ats", "company"):
+            _write(get_db, "UPDATE jobs SET link_type=?, link_resolved_at=? WHERE id=? AND user_id=?",
+                   (t, stamp, r["id"], user_id))
+            out["already_direct"] += 1
+            continue
+        try:
+            hit = resolver(r.get("company") or "", r.get("title") or "", r.get("location") or "", use_llm)
+        except Exception as exc:
+            print("[links] resolve failed for job %s (%s): %s" % (r["id"], r.get("company"), exc))
+            hit = None
+        new_url = (hit or {}).get("url") or ""
+        if new_url:
+            conn = get_db()
+            try:
+                clash = conn.execute("SELECT id FROM jobs WHERE user_id=? AND url=? AND id<>?",
+                                     (user_id, new_url, r["id"])).fetchone()
+            finally:
+                conn.close()
+            if clash:
+                _write(get_db, "UPDATE jobs SET link_type=?, link_resolved_at=?, link_note=? "
+                               "WHERE id=? AND user_id=?",
+                       (t, stamp, "direct link already on job #%s" % clash[0], r["id"], user_id))
+                out["duplicate"] += 1
+                continue
+            # Guarded on the url we read, so a row changed meanwhile is left alone.
+            # Recorded as what it is: a Greenhouse hit can be the ATS page or
+            # the company's own careers page (Wiz's absolute_url is
+            # wiz.io/careers/job/<id>/:title?gh_jid=<id> - verified 2026-10-25
+            # to serve the posting). Both are direct; neither is penalised.
+            new_type = classify(new_url)
+            if new_type not in ("direct_ats", "company"):
+                new_type = "direct_ats"
+            _write(get_db, "UPDATE jobs SET source_url=COALESCE(source_url, url), url=?, link_type=?, "
+                           "link_resolved_at=?, url_verified=1, link_note=? "
+                           "WHERE id=? AND user_id=? AND url=?",
+                   (new_url, new_type, stamp, "%s match %s" % (hit.get("ats") or "ats", hit.get("score")),
+                    r["id"], user_id, r.get("url")))
+            out["resolved"] += 1
+        else:
+            _write(get_db, "UPDATE jobs SET link_type=?, link_resolved_at=?, "
+                           "link_attempts=COALESCE(link_attempts,0)+1 WHERE id=? AND user_id=?",
+                   (t, stamp, r["id"], user_id))
+            out["unresolved"] += 1
+    if not out["left_for_next_run"]:
+        out["left_for_next_run"] = max(0, len(rows) - max(0, limit))
+    return out
+
+
+def _write(get_db, sql, args):
+    conn = get_db()
+    try:
+        conn.execute(sql, args)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def run_detail(counts: dict) -> str:
+    return ("links: %(examined)d examined, %(resolved)d resolved, %(already_direct)d already direct, "
+            "%(unresolved)d unresolved, %(duplicate)d duplicate, %(left_for_next_run)d left for next run" % counts)

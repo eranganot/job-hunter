@@ -155,3 +155,127 @@ def test_ats_lookups_are_cached_per_company(monkeypatch):
     first = n["calls"]
     ae._ats_postings_for_slug("WizInc")
     assert first == 5 and n["calls"] == 5, "second lookup for the same company hit the network"
+
+
+# ── 1b: resolve_open_jobs ───────────────────────────────────────────────────
+
+import os
+import tempfile
+from datetime import datetime, timedelta, timezone
+
+
+def _file_db(rows):
+    path = os.path.join(tempfile.mkdtemp(prefix="jh-links-"), "t.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, company TEXT, "
+                 "location TEXT, url TEXT, source TEXT, status TEXT, url_verified INTEGER, "
+                 "source_url TEXT, link_type TEXT, link_resolved_at TEXT, link_attempts INTEGER DEFAULT 0, "
+                 "link_note TEXT, UNIQUE(user_id, url))")
+    for r in rows:
+        conn.execute("INSERT INTO jobs (user_id, title, company, location, url, source, status) "
+                     "VALUES (?,?,?,?,?,?,?)", r)
+    conn.commit()
+    conn.close()
+
+    def get_db():
+        c = sqlite3.connect(path)
+        c.row_factory = sqlite3.Row
+        return c
+    return get_db
+
+
+def _rows(get_db):
+    c = get_db()
+    try:
+        return {r["id"]: dict(r) for r in c.execute("SELECT * FROM jobs")}
+    finally:
+        c.close()
+
+
+WIZ = {"url": "https://boards.greenhouse.io/wizinc/jobs/9", "ats": "greenhouse",
+       "matched_title": "Senior Product Manager", "score": 91.0}
+
+
+def test_resolve_rewrites_board_links_of_open_jobs_and_keeps_the_original():
+    get_db = _file_db(ROWS)
+    resolver, _ = _stub({"Wiz": WIZ})
+    counts = links.resolve_open_jobs(get_db, 1, resolver=resolver)
+    rows = _rows(get_db)
+    # Jobs 1 and 2 are the same Wiz posting, found on LinkedIn and on Indeed.
+    # Exactly one of them gets the direct link (newest first: job 2); the other
+    # keeps its board URL and says where the direct link went.
+    won, lost = rows[2], rows[1]
+    assert won["url"] == WIZ["url"]
+    assert won["source_url"] == "https://il.indeed.com/viewjob?jk=1"
+    assert won["link_type"] == "direct_ats" and won["url_verified"] == 1
+    assert lost["url"] == "https://il.linkedin.com/jobs/view/1"
+    assert lost["link_note"] == "direct link already on job #2"
+    # Direct and company-site jobs are recorded, untouched.
+    assert rows[4]["link_type"] == "direct_ats" and rows[4]["url"] == "https://jobs.lever.co/melio/1"
+    assert rows[5]["link_type"] == "company"
+    # Misses are recorded with an attempt count.
+    assert rows[3]["link_type"] == "board" and rows[3]["link_attempts"] == 1
+    assert rows[6]["link_type"] == "aggregator" and rows[6]["link_attempts"] == 1
+    assert counts == {"examined": 6, "already_direct": 2, "resolved": 1, "unresolved": 2,
+                      "duplicate": 1, "left_for_next_run": 0}
+
+
+def test_resolve_never_touches_history_or_other_users():
+    get_db = _file_db(ROWS)
+    resolver, _ = _stub({"Wiz": WIZ, "Gong": WIZ})
+    links.resolve_open_jobs(get_db, 1, resolver=resolver)
+    rows = _rows(get_db)
+    assert rows[7]["url"] == "https://il.linkedin.com/jobs/view/3" and rows[7]["link_type"] is None  # applied
+    assert rows[8]["url"] == "https://il.linkedin.com/jobs/view/4" and rows[8]["link_type"] is None  # user 2
+
+
+def test_resolve_does_not_retry_until_a_week_has_passed():
+    get_db = _file_db(ROWS)
+    resolver, calls = _stub({})
+    t0 = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0)
+    first = len(calls)
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0 + timedelta(days=3))
+    assert len(calls) == first, "an unresolved job was retried before the week was up"
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0 + timedelta(days=8))
+    assert len(calls) == 2 * first
+    assert _rows(get_db)[3]["link_attempts"] == 2
+
+
+def test_resolve_does_not_look_again_at_jobs_already_direct():
+    get_db = _file_db(ROWS)
+    resolver, calls = _stub({"Wiz": WIZ})
+    t0 = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0)
+    calls.clear()
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0 + timedelta(days=30))
+    # The Wiz pair is asked about once more - for the LinkedIn copy, which is
+    # still a board link - never again for the row that already went direct.
+    assert calls.count(("Wiz", "Senior PM")) == 1
+    assert _rows(get_db)[2]["link_resolved_at"].startswith("2026-10-25")
+
+
+def test_resolve_survives_a_crashing_resolver_and_respects_its_limits():
+    get_db = _file_db(ROWS)
+
+    def boom(*_a):
+        raise TimeoutError("ATS hung")
+    counts = links.resolve_open_jobs(get_db, 1, resolver=boom, limit=2)
+    assert counts["examined"] == 2 and counts["left_for_next_run"] == 4
+    counts = links.resolve_open_jobs(get_db, 1, resolver=boom, budget_s=-1)
+    assert counts["examined"] == 0 and counts["left_for_next_run"] == 4
+
+
+def test_run_detail_reads_as_one_line():
+    assert links.run_detail({"examined": 3, "resolved": 1, "already_direct": 1, "unresolved": 1,
+                             "duplicate": 0, "left_for_next_run": 0}).startswith("links: 3 examined, 1 resolved")
+
+
+def test_a_resolved_company_careers_link_is_recorded_as_company():
+    get_db = _file_db(ROWS)
+    wiz_site = {"url": "https://www.wiz.io/careers/job/4621534006/:title?gh_jid=4621534006",
+                "ats": "greenhouse", "score": 95.0}
+    resolver, _ = _stub({"Nowhere Ltd": wiz_site})
+    links.resolve_open_jobs(get_db, 1, resolver=resolver)
+    row = _rows(get_db)[3]
+    assert row["url"] == wiz_site["url"] and row["link_type"] == "company"
