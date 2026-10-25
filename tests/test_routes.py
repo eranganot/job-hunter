@@ -378,6 +378,37 @@ def test_link_report_is_admin_only_and_read_only(stack, users):
     assert data["dry_run"]["tried"] == 0
 
 
+def test_link_resolve_handler_rewrites_an_open_linkedin_job(stack, users, monkeypatch):
+    # Step 1b end to end: real app, real migrations, real worker handler; only
+    # the ATS lookup is stubbed so the suite stays offline.
+    import apply_engine
+    db = stack["db"]
+    uid = _user_id(db, "alice@example.test")
+    conn = db.get_db()
+    try:
+        conn.execute("INSERT INTO jobs (user_id, title, company, location, url, status, match_score) "
+                     "VALUES (?,?,?,?,?,?,?)", (uid, "Product Lead", "Linkco", "Tel Aviv",
+                                                "https://il.linkedin.com/jobs/view/777", "new", 80))
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr(apply_engine, "resolve_ats_application",
+                        lambda company, title, location="", use_llm=True:
+                        {"url": "https://jobs.lever.co/linkco/777", "ats": "lever", "score": 96.0}
+                        if company == "Linkco" else None)
+    detail = stack["app"].run_link_resolve(uid)
+    assert "1 resolved" in detail
+    conn = db.get_db()
+    try:
+        row = conn.execute("SELECT url, source_url, link_type FROM jobs WHERE user_id=? AND company='Linkco'",
+                           (uid,)).fetchone()
+    finally:
+        conn.close()
+    assert row["url"] == "https://jobs.lever.co/linkco/777"
+    assert row["source_url"] == "https://il.linkedin.com/jobs/view/777"
+    assert row["link_type"] == "direct_ats"
+
+
 def test_admin_account_gets_the_admin_role(users):
     status, _, body = users["admin"].get("/api/me")
     assert status == 200

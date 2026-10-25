@@ -825,6 +825,12 @@ def run_job_search(user_id: int):
                 existing_urls = {r[0] for r in conn.execute(
                     "SELECT url FROM jobs WHERE user_id=? AND url!=''", (user_id,)
                 ).fetchall()}
+                # A job whose link was resolved to the company's posting keeps
+                # the board URL it was found at in source_url (Step 1b); that
+                # URL is still "already stored" for dedup purposes.
+                existing_urls |= {r[0] for r in conn.execute(
+                    "SELECT source_url FROM jobs WHERE user_id=? AND source_url IS NOT NULL AND source_url!=''",
+                    (user_id,)).fetchall()}
                 conn.close()
 
                 def _search_jobs_with_claude_websearch(titles_: list, locs_: list, kws_: list) -> list:
@@ -2222,6 +2228,36 @@ def run_job_search(user_id: int):
             print(f"[run-search] Notification also failed: {_ne}")
     finally:
         _search_running.discard(user_id)
+        # Step 1b: give the new (and still-open) jobs the company's own link.
+        # Its own queued run, so a slow ATS never lengthens the search itself.
+        try:
+            jobqueue.enqueue(user_id, "links", cap=False)
+        except Exception as _lq:
+            print(f"[run-search] could not queue link resolve for user {user_id}: {_lq}")
+
+
+@_attribute_gemini_to
+def run_link_resolve(user_id: int):
+    """Worker handler for kind 'links' (links.resolve_open_jobs)."""
+    import links as _links
+    # Gemini slug guesses are OFF by default: each one counts against the
+    # user's daily Gemini ceiling, and a first backfill of a full queue could
+    # crowd out their scoring. JH_LINKS_LLM=1 turns them on once the link
+    # report shows they earn their cost.
+    use_llm = (os.environ.get("JH_LINKS_LLM", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+    counts = _links.resolve_open_jobs(database.get_db, user_id, use_llm=use_llm)
+    detail = _links.run_detail(counts)
+    print(f"[links] user {user_id}: {detail}")
+    if counts.get("left_for_next_run"):
+        # A backfill bigger than one run's budget carries on in 5 minutes
+        # rather than waiting for tomorrow's search.
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        try:
+            jobqueue.enqueue(user_id, "links", cap=False, dedupe=False,
+                             run_after=_links._utc_stamp(_dt.now(_tz.utc) + _td(minutes=5)))
+        except Exception as _lq:
+            print(f"[links] could not queue the follow-up run for user {user_id}: {_lq}")
+    return detail
 
 import concurrent.futures as _cf
 
@@ -8381,6 +8417,7 @@ if __name__ == "__main__":
     # process later a CMD change rather than a refactor.
     worker.register("search", lambda user_id, _payload=None: run_job_search(user_id))
     worker.register("apply", lambda user_id, _payload=None: run_job_apply(user_id))
+    worker.register("links", lambda user_id, _payload=None: run_link_resolve(user_id))
     worker.start_background()
     try:
         _exp = auth.cleanup_expired_sessions()

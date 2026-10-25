@@ -694,6 +694,29 @@ def m0012_reconcile_eran_backlog(conn):
     conn.commit()
 
 
+def m0013_job_links(conn):
+    """Where a job's link came from, and whether it is the company's own posting.
+
+    Step 1 of EXECUTION_PLAN_NEXT.md: jobs found on LinkedIn/Indeed get their
+    `url` replaced by the posting on the company's ATS when one is found. The
+    original is kept in `source_url`, so nothing is lost and the search's
+    known-URL set can still recognise it.
+
+      source_url        the board/aggregator URL the job was found at (NULL
+                        until a resolve replaced it)
+      link_type         links.classify() of the current url, or 'direct_ats'
+                        after a resolve; NULL = never examined
+      link_resolved_at  UTC 'YYYY-MM-DD HH:MM:SS' of the last attempt
+      link_attempts     resolve attempts that found nothing
+      link_note         why a found link was not used (e.g. already on another row)
+    """
+    for col, ddl in (("source_url", "TEXT"), ("link_type", "TEXT"), ("link_resolved_at", "TEXT"),
+                     ("link_attempts", "INTEGER DEFAULT 0"), ("link_note", "TEXT")):
+        if not _has_column(conn, "jobs", col):
+            conn.execute("ALTER TABLE jobs ADD COLUMN %s %s" % (col, ddl))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -707,6 +730,7 @@ MIGRATIONS = [
     (10, "user_plan",                   m0010_user_plan),
     (11, "undo_expiry",                 m0011_undo_expiry),
     (12, "reconcile_eran_backlog",      m0012_reconcile_eran_backlog),
+    (13, "job_links",                   m0013_job_links),
 ]
 
 
