@@ -348,6 +348,22 @@ def test_non_admin_is_kept_out_of_admin(users):
     assert status == 403, f"non-admin reached the admin user list ({status})"
 
 
+def test_sentry_test_route_is_admin_only(stack, users):
+    status, _, _ = Client(stack["port"]).get("/api/admin/sentry-test")
+    assert status != 200, "the Sentry test route answered anonymously"
+    status, _, _ = users["b"].get("/api/admin/sentry-test")
+    assert status == 403, f"a member reached the Sentry test route ({status})"
+
+
+def test_sentry_test_route_reports_honestly_without_a_dsn(users):
+    # No JH_SENTRY_DSN in tests: the route must answer 200 and say nothing was
+    # sent, rather than claim success or turn its own test exception into a 500.
+    status, _, body = users["admin"].get("/api/admin/sentry-test")
+    assert status == 200
+    data = json.loads(body)
+    assert data["sent"] is False and data["reporting"] is False
+
+
 def test_admin_account_gets_the_admin_role(users):
     status, _, body = users["admin"].get("/api/me")
     assert status == 200
