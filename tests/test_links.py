@@ -303,3 +303,56 @@ def test_sql_penalty_matches_the_python_one():
         got = conn.execute("SELECT " + links.LINK_PENALTY_SQL.replace("link_resolved_at", "?", 1)
                            .replace("link_type", "?", 1), (job["link_resolved_at"], job["link_type"])).fetchone()[0]
         assert got == expected == links.link_penalty(job)
+
+
+# ── Step 2: link_audit ──────────────────────────────────────────────────────
+
+def _pages(mapping):
+    def fetch(url, timeout):
+        status, final, body = mapping[url]
+        return status, final or url, body
+    return fetch
+
+
+AUDIT_ROWS = [
+    (1, "Applied Data Scientist Expert", "Wiz", "Tel Aviv", "https://www.wiz.io/careers/job/4621534006/x", "gemini", "new"),
+    (1, "Senior Product Manager", "Wiz", "Tel Aviv", "https://www.wiz.io/careers/job/1111111111/pm", "gemini", "new"),
+    (1, "Senior Product Manager", "Monday", "Tel Aviv", "https://monday.com/careers/123987", "gemini", "approved"),
+    (1, "Group PM", "Melio", "Tel Aviv", "https://jobs.lever.co/melio/1", "ats", "new"),       # ATS: not audited
+    (1, "PM", "Gong", "Tel Aviv", "https://il.linkedin.com/jobs/view/3", "linkedin", "new"),   # board: not audited
+]
+PAGES = {
+    "https://www.wiz.io/careers/job/4621534006/x":
+        (200, None, "<title>Applied Data Scientist Expert | Wiz Careers</title>" + "<p>applied data scientist expert</p>" * 50),
+    "https://www.wiz.io/careers/job/1111111111/pm":
+        (200, "https://www.wiz.io/careers/not-found", "<title>We couldn't find the role | Wiz Careers</title>"),
+    "https://monday.com/careers/123987":
+        (200, None, "<title>monday.com Work Platform | Made For Work</title><p>" + "x " * 900 + "manager</p>"),
+}
+
+
+def test_audit_reads_company_and_aggregator_links_and_reports_what_the_page_shows():
+    r = links.link_audit(_db(AUDIT_ROWS), user_id=1, fetch=_pages(PAGES))
+    assert r["candidates"] == 3 and r["audited"] == 3 and r["not_reached"] == 0
+    by = {j["job_id"]: j for j in r["jobs"]}
+    real, fake_wiz, fake_monday = by[1], by[2], by[3]
+    assert real["verdict"] == "alive" and real["tokens_in_page_title"] == len(real["title_tokens"])
+    assert fake_wiz["verdict"] == "dead" and "not-found" in fake_wiz["reason"]
+    # The invented-slug shape: alive to the checker, front-page title, no job
+    # title tokens in it. Reported, not judged - that rule waits for real data.
+    assert fake_monday["verdict"] == "alive" and fake_monday["tokens_in_page_title"] == 0
+    assert r["verdicts"] == {"alive": 2, "dead": 1}
+
+
+def test_audit_never_writes():
+    conn = _db(AUDIT_ROWS)
+    before = [tuple(x) for x in conn.execute("SELECT * FROM jobs ORDER BY id")]
+    links.link_audit(conn, user_id=1, fetch=_pages(PAGES))
+    assert [tuple(x) for x in conn.execute("SELECT * FROM jobs ORDER BY id")] == before
+
+
+def test_audit_survives_a_page_that_cannot_be_fetched():
+    def boom(url, timeout):
+        raise TimeoutError("slow site")
+    r = links.link_audit(_db(AUDIT_ROWS), user_id=1, fetch=boom)
+    assert r["audited"] == 3 and all(j["verdict"] == "unknown" and j["fetched"] is False for j in r["jobs"])

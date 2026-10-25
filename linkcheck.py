@@ -103,6 +103,12 @@ _ATS_ROOTS = {
 _FAKE_IDS = re.compile(r"(?:^|[^0-9])(?:12345\d*|67890|123456789|0000000|99999)(?:$|[^0-9])")
 
 
+# Where a site sends a posting that does not exist while still answering 200.
+# Observed 2026-10-25: wiz.io/careers/job/<made-up id>/... redirects to
+# /careers/not-found ("We couldn't find the role you're looking for"), 200.
+_NOT_FOUND_SEGMENTS = {"not-found", "notfound", "page-not-found", "job-not-found",
+                       "position-not-found", "404"}
+
 def _segments(path: str) -> list[str]:
     return [s for s in (path or "").lower().split("/") if s]
 
@@ -215,6 +221,8 @@ def classify(url: str, timeout: int = 12, fetch=None) -> tuple[str, str, str]:
             return "dead", "parked domain", final
     except Exception:
         pass
+    if any(seg in _NOT_FOUND_SEGMENTS for seg in _segments(urlparse(final or url).path)):
+        return "dead", "landed on a not-found page (%s)" % _short(final or url), final
     if final and final.rstrip("/") != url.rstrip("/") and is_generic_url(final):
         return "dead", "posting redirected to %s" % _short(final), final
     if is_generic_url(final or url):

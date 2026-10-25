@@ -115,3 +115,26 @@ def test_redirect_between_two_postings_is_alive():
 
 def test_empty_url_is_dead():
     assert L.classify("")[0] == "dead"
+
+
+# ── 2026-10-25: a made-up posting id that redirects to a not-found page ──────
+
+def test_redirect_to_a_not_found_page_is_dead():
+    # Observed live: wiz.io/careers/job/<made-up id>/... answers 200 after
+    # redirecting to /careers/not-found ("We couldn't find the role...").
+    url = "https://www.wiz.io/careers/job/1111111111/senior-product-manager"
+    v, why, _ = L.classify(url, fetch=_f(200, final="https://www.wiz.io/careers/not-found",
+                                          body="<title>We couldn't find the role | Wiz Careers</title>"))
+    assert v == "dead" and "not-found" in why
+
+
+def test_real_wiz_posting_is_still_alive():
+    url = "https://www.wiz.io/careers/job/4621534006/:title?gh_jid=4621534006"
+    v, _, _ = L.classify(url, fetch=_f(200, body="<title>Applied Data Scientist Expert | Wiz Careers</title>"))
+    assert v == "alive"
+
+
+def test_a_posting_slug_merely_containing_404_digits_is_not_dead():
+    url = "https://jobs.lever.co/acme/4041-product-manager"
+    v, _, _ = L.classify(url, fetch=_f(200, body="<title>Product Manager</title>"))
+    assert v == "alive"

@@ -6856,12 +6856,30 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 _sample = 25
             _llm = (qs.get("llm", ["0"])[0] or "0").strip() in ("1", "true", "yes")
-            conn = database.get_db()
+            report = _links.link_report(database.get_db, None if _scope == "all" else user["id"],
+                                        sample=_sample, use_llm=_llm)
+            self.send_json(report)
+            return
+
+        if path == "/api/admin/link-audit":
+            # Step 2 of EXECUTION_PLAN_NEXT.md: fetch the open jobs whose links
+            # are on company or aggregator sites and report what each page
+            # actually shows, so the "invented slug" rule is designed from real
+            # pages. Read-only.  ?scope=me|all  ?limit=40  ?types=company,aggregator
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import links as _links
+            _scope = (qs.get("scope", ["me"])[0] or "me").strip().lower()
             try:
-                report = _links.link_report(conn, None if _scope == "all" else user["id"],
-                                            sample=_sample, use_llm=_llm)
-            finally:
-                conn.close()
+                _limit = max(0, min(80, int(qs.get("limit", ["40"])[0])))
+            except ValueError:
+                _limit = 40
+            _types = tuple(t for t in (qs.get("types", ["company,aggregator"])[0] or "").split(",")
+                           if t in _links.ORDER) or ("company", "aggregator")
+            report = _links.link_audit(database.get_db, None if _scope == "all" else user["id"],
+                                       types=_types, limit=_limit)
             self.send_json(report)
             return
 
