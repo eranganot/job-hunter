@@ -390,3 +390,89 @@ def test_a_job_recorded_as_company_is_re_examined_once_its_host_is_reclassified(
     assert calls == [("A Security", "CSM")]          # Playtika stays company, untouched
     rows = _rows(get_db)
     assert rows[1]["link_type"] == "aggregator" and rows[2]["link_type"] == "company"
+
+
+# ── 1c option 1: learned boards ─────────────────────────────────────────────
+
+import json as _json
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("https://boards.greenhouse.io/wizinc/jobs/4621534006", ("greenhouse", "wizinc")),
+    ("https://job-boards.eu.greenhouse.io/tavily/jobs/4970713101?gh_jid=4970713101", ("greenhouse", "tavily")),
+    ("https://jobs.lever.co/parallelwireless/3fd7bb8a", ("lever", "parallelwireless")),
+    ("https://jobs.ashbyhq.com/lightricks/abc", ("ashby", "lightricks")),
+    ("https://jobs.smartrecruiters.com/Wix2/744000", ("smartrecruiters", "wix2")),
+    ("https://www.comeet.com/jobs/coralogix/06.004/backend-engineer/0E.C68", ("comeet", "coralogix/06.004")),
+    ("https://www.comeet.com/jobs/global-e/62.002?coref=", ("comeet", "global-e/62.002")),
+    ("https://boards.greenhouse.io/embed/job_app?token=1", None),
+    ("https://il.linkedin.com/jobs/view/1", None),
+    ("https://coralogix.com/careers/co/ramat-gan-israel/1B.E5C/x/all/", None),
+])
+def test_board_of(url, expected):
+    assert links.board_of(url) == expected
+
+
+def test_company_names_normalise_across_sources():
+    assert links._norm_company("Global-e") == links._norm_company("Global e") == "globale"
+    assert links._norm_company("monday.com") == links._norm_company("Monday") == "monday"
+    assert links._norm_company("Yuval HR (Gaming Startup)") == "yuvalhr"
+    assert links._norm_company("Wiz Inc.") == "wiz"
+
+
+def test_learned_boards_come_from_any_user_and_any_status():
+    conn = _db([
+        (2, "Backend Engineer", "Coralogix", "Ramat Gan", "https://www.comeet.com/jobs/coralogix/06.004/be/0E.C68", "x", "rejected"),
+        (3, "Data Scientist", "Wiz", "Tel Aviv", "https://boards.greenhouse.io/wizinc/jobs/1", "x", "applied"),
+        (1, "PM", "Wiz", "Tel Aviv", "https://il.linkedin.com/jobs/view/9", "x", "new"),
+    ])
+    assert links.learned_boards(conn) == {"coralogix": [("comeet", "coralogix/06.004")],
+                                          "wiz": [("greenhouse", "wizinc")]}
+
+
+COMEET_PAGE = ('<script>var COMPANY_POSITIONS_DATA = ' + _json.dumps([
+    {"name": "Backend Engineer - Alerting", "location": {"name": "Ramat Gan, Israel"},
+     "url_active_page": "https://coralogix.com/careers/co/ramat-gan-israel/1B.E5C/backend-engineer-alerting/all/",
+     "url_comeet_hosted_page": "https://www.comeet.com/jobs/coralogix/06.004/backend-engineer---alerting/1B.E5C"},
+    {"name": "Senior Product Manager", "location": {"name": "Remote, Europe"},
+     "url_active_page": None,
+     "url_comeet_hosted_page": "https://www.comeet.com/jobs/coralogix/06.004/senior-product-manager/AA.111"},
+]) + ';\n</script>')
+
+
+def _comeet_fetch(url, timeout):
+    assert url == "https://www.comeet.com/jobs/coralogix/06.004"
+    return 200, url, COMEET_PAGE
+
+
+def test_comeet_postings_prefer_the_company_s_own_page():
+    links._COMEET_CACHE.clear()
+    posts = links.comeet_postings("coralogix/06.004", fetch=_comeet_fetch)
+    assert posts[0]["url"].startswith("https://coralogix.com/careers/")
+    assert posts[1]["url"].startswith("https://www.comeet.com/jobs/")      # no company page known
+    assert posts[0]["location"] == "Ramat Gan, Israel"
+
+
+def test_resolve_from_learned_matches_title_on_the_company_s_board():
+    links._COMEET_CACHE.clear()
+    learned = {"coralogix": [("comeet", "coralogix/06.004")]}
+    hit = links.resolve_from_learned("Coralogix", "Backend Engineer - Alerting", "Tel Aviv", learned,
+                                     fetch=_comeet_fetch)
+    assert hit["url"].startswith("https://coralogix.com/careers/") and hit["via"].startswith("learned board")
+    assert links.resolve_from_learned("Coralogix", "Head of Finance", "Tel Aviv", learned,
+                                      fetch=_comeet_fetch) is None
+    assert links.resolve_from_learned("Unknown Co", "Backend Engineer", "", learned, fetch=_comeet_fetch) is None
+
+
+def test_the_resolver_chain_tries_learned_boards_before_name_guessing(monkeypatch):
+    import apply_engine
+    links._COMEET_CACHE.clear()
+    guesses = []
+    monkeypatch.setattr(apply_engine, "resolve_ats_application",
+                        lambda company, title, location="", use_llm=True: guesses.append(company) or None)
+    conn = _db([(2, "BE", "Coralogix", "x", "https://www.comeet.com/jobs/coralogix/06.004/be/0E.C68", "x", "applied")])
+    resolver = links.make_resolver(conn, fetch=_comeet_fetch)
+    assert resolver("Coralogix", "Backend Engineer - Alerting", "Tel Aviv", False)["ats"] == "comeet"
+    assert guesses == []                                   # learned board answered; no guessing
+    assert resolver("Nowhere Ltd", "PM", "Tel Aviv", False) is None
+    assert guesses == ["Nowhere Ltd"]                      # fell back for an unknown company

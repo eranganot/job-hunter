@@ -139,10 +139,7 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
     import time
 
     if resolver is None:
-        import apply_engine as _ae
-
-        def resolver(company, title, location, use_llm):
-            return _ae.resolve_ats_application(company, title, location=location, use_llm=use_llm)
+        resolver = make_resolver(conn)
 
     sql = ("SELECT id, user_id, title, company, location, url, source, status FROM jobs "
            "WHERE status IN ('new','approved')")
@@ -190,7 +187,8 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
             by_ats[hit.get("ats") or "?"] = by_ats.get(hit.get("ats") or "?", 0) + 1
             resolved.append({"job_id": r["id"], "company": r.get("company"), "title": r.get("title"),
                              "from": host_of(r.get("url")), "to": hit["url"], "ats": hit.get("ats"),
-                             "matched_title": hit.get("matched_title"), "score": hit.get("score")})
+                             "matched_title": hit.get("matched_title"), "score": hit.get("score"),
+                             "via": hit.get("via") or "name guess"})
         else:
             unresolved.append({"job_id": r["id"], "company": r.get("company"), "title": r.get("title"),
                                "from": host_of(r.get("url")),
@@ -209,6 +207,8 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
         "by_source": by_source,
         "dry_run": {
             "use_llm": bool(use_llm),
+            "learned_companies": len(getattr(resolver, "learned", {}) or {}),
+            "resolved_via_learned": sum(1 for x in resolved if str(x.get("via", "")).startswith("learned")),
             "distinct_pairs_needing_link": len(pairs),
             "tried": tried,
             "not_reached": max(0, min(sample, len(pairs)) - tried),
@@ -258,10 +258,7 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     from datetime import datetime, timedelta, timezone
 
     if resolver is None:
-        import apply_engine as _ae
-
-        def resolver(company, title, location, use_llm):
-            return _ae.resolve_ats_application(company, title, location=location, use_llm=use_llm)
+        resolver = make_resolver(get_db)
 
     now = now or datetime.now(timezone.utc)
     stamp = _utc_stamp(now)
@@ -498,3 +495,147 @@ def link_audit(conn, user_id=None, types=("company", "aggregator"), limit: int =
         "verdicts": verdicts,
         "jobs": sorted(results, key=lambda r: (r.get("verdict") != "alive", r.get("job_id") or 0)),
     }
+
+
+# ── 1c (option 1): learn each company's board from links we already hold ────
+#
+# Measured 2026-10-25 on the open queue: the name-guessing resolver found the
+# company posting for 2 of 24 LinkedIn jobs (3 of 38 with Gemini slug guesses).
+# But the database already holds hundreds of direct links (352 open jobs on
+# Comeet, 210 on Greenhouse...), and each one names its company's board. A
+# company seen once on a board can be looked up there for every other role.
+#
+# Comeet in particular: its public API is not addressable by company name (the
+# resolver's Comeet branch found nothing for unframe, melio or lightricks), but
+# a company page - comeet.com/jobs/<slug>/<company uid> - embeds every open
+# position as COMPANY_POSITIONS_DATA, each with its Comeet page and its page on
+# the company's own site (url_active_page). Verified live 2026-10-25 on
+# Coralogix (64 positions), VAST Data (264), Global-e (49), Team8 (65).
+
+import re as _re
+
+_BOARD_RULES = (
+    ("greenhouse", _re.compile(r"^https?://(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io/([A-Za-z0-9_-]+)(?:/|$)", _re.I)),
+    ("lever", _re.compile(r"^https?://jobs\.lever\.co/([A-Za-z0-9_.-]+)(?:/|$)", _re.I)),
+    ("ashby", _re.compile(r"^https?://jobs\.ashbyhq\.com/([A-Za-z0-9_.%-]+)(?:/|$)", _re.I)),
+    ("smartrecruiters", _re.compile(r"^https?://jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)(?:/|$)", _re.I)),
+    ("comeet", _re.compile(r"^https?://(?:www\.)?comeet\.(?:com|co)/jobs/([A-Za-z0-9_-]+)/([0-9A-F]{2}\.[0-9A-F]{3})(?:/|$|\?)", _re.I)),
+)
+_NOT_A_BOARD = {"embed", "jobs", "careers", "api", "v0", "v1"}
+
+
+def board_of(url: str):
+    """('greenhouse', 'wizinc') / ('comeet', 'coralogix/06.004') / None."""
+    for ats, rx in _BOARD_RULES:
+        m = rx.match((url or "").strip())
+        if not m:
+            continue
+        if ats == "comeet":
+            return ats, "%s/%s" % (m.group(1).lower(), m.group(2).upper())
+        slug = m.group(1).lower()
+        return (ats, slug) if slug not in _NOT_A_BOARD else None
+    return None
+
+
+def _norm_company(name: str) -> str:
+    n = (name or "").lower()
+    n = _re.sub(r"\((.*?)\)", " ", n)                       # "Yuval HR (Gaming Startup)"
+    n = _re.sub(r"\b(inc|ltd|llc|corp|gmbh|co|the|technologies|technology|group)\b\.?", " ", n)
+    n = _re.sub(r"\.(com|io|ai|co)\b", " ", n)
+    return _re.sub(r"[^a-z0-9]+", "", n)
+
+
+_BOARD_LIKES = ("%greenhouse.io/%", "%jobs.lever.co/%", "%jobs.ashbyhq.com/%",
+                "%jobs.smartrecruiters.com/%", "%comeet.com/jobs/%", "%comeet.co/jobs/%")
+
+
+def learned_boards(db) -> dict:
+    """{normalised company: [(ats, ref), ...]} from every stored direct link,
+    any user, any status - a company's job board is public, not a user's data."""
+    sql = ("SELECT DISTINCT company, url FROM jobs WHERE "
+           + " OR ".join(["url LIKE ?"] * len(_BOARD_LIKES)))
+    out: dict = {}
+    for r in _read_rows(db, sql, _BOARD_LIKES):
+        b = board_of(r.get("url"))
+        key = _norm_company(r.get("company"))
+        if b and key and b not in out.setdefault(key, []):
+            out[key].append(b)
+    return out
+
+
+_COMEET_CACHE: dict = {}
+_COMEET_MAX_BYTES = 6_000_000   # Coralogix's page is ~508 KB; VAST Data lists 264 positions
+
+
+def _fetch_full(url: str, timeout: int):
+    """linkcheck._fetch reads 400 KB, enough to judge a page but not to hold a
+    big company's whole positions list (Coralogix's ran past it, 2026-10-25)."""
+    import urllib.request
+    import linkcheck
+    req = urllib.request.Request(url, headers={"User-Agent": linkcheck.UA, "Accept-Language": "en-US,en;q=0.9"})
+    with linkcheck._OPENER.open(req, timeout=timeout) as r:
+        return r.status, r.geturl(), r.read(_COMEET_MAX_BYTES).decode("utf-8", "ignore")
+
+
+def comeet_postings(ref: str, fetch=None) -> list:
+    """[{title, url, location, ats}] for comeet ref 'slug/UID', from the positions
+    the company page embeds. url = the posting on the company's own site when
+    Comeet knows it, else the Comeet page. Cached for 10 minutes."""
+    import json
+    import time
+    import linkcheck
+    hit = _COMEET_CACHE.get(ref)
+    if hit and time.monotonic() - hit[0] < 600:
+        return list(hit[1])
+    out = []
+    try:
+        _st, _final, body = (fetch or _fetch_full)("https://www.comeet.com/jobs/%s" % ref, 20)
+        i = body.find("COMPANY_POSITIONS_DATA =")
+        if i >= 0:
+            data, _ = json.JSONDecoder().raw_decode(body[i + len("COMPANY_POSITIONS_DATA ="):].lstrip())
+            for p in data if isinstance(data, list) else []:
+                loc = p.get("location")
+                loc = loc.get("name", "") if isinstance(loc, dict) else str(loc or "")
+                url = p.get("url_active_page") or p.get("url_comeet_hosted_page") or ""
+                if p.get("name") and url:
+                    out.append({"title": p["name"], "url": url, "location": loc, "ats": "comeet"})
+    except Exception as exc:
+        print("[links] comeet %s: %s" % (ref, exc))
+    if len(_COMEET_CACHE) > 300:
+        _COMEET_CACHE.clear()
+    _COMEET_CACHE[ref] = (time.monotonic(), out)
+    return list(out)
+
+
+def resolve_from_learned(company, title, location, learned, fetch=None, threshold: float = 82.0):
+    """Best posting for this title on the boards this company is known to use."""
+    import apply_engine as _ae
+    boards = learned.get(_norm_company(company)) or []
+    best, best_key = None, (-1, -1.0)
+    for ats, ref in boards:
+        posts = comeet_postings(ref, fetch=fetch) if ats == "comeet" else _ae._ats_postings_for_slug(ref)
+        for p in posts:
+            score = _ae._title_ratio(title, p.get("title") or "")
+            if score < threshold:
+                continue
+            key = (_ae._loc_match(p.get("location") or "", location or ""), score)
+            if key > best_key:
+                best_key = key
+                best = {"url": p["url"], "ats": p.get("ats") or ats, "matched_title": p.get("title"),
+                        "score": round(score, 1), "via": "learned board %s:%s" % (ats, ref)}
+    return best
+
+
+def make_resolver(db, fetch=None):
+    """The resolver chain Step 1 uses: learned boards first (free, exact board),
+    then apply_engine's name-guessing resolver."""
+    import apply_engine as _ae
+    learned = learned_boards(db)
+
+    def resolver(company, title, location, use_llm):
+        hit = resolve_from_learned(company, title, location, learned, fetch=fetch)
+        if hit:
+            return hit
+        return _ae.resolve_ats_application(company, title, location=location, use_llm=use_llm)
+    resolver.learned = learned
+    return resolver
