@@ -951,8 +951,30 @@ def _ats_get(url: str, timeout: int = 6):
         return None
 
 
+# A company's postings across the five ATSes, cached for a few minutes. One
+# search run can carry ten jobs from the same company, and the link resolver
+# (links.py / Step 1) would otherwise make the same 5 API calls for each.
+_ATS_CACHE: dict = {}
+_ATS_CACHE_TTL_S = 600
+_ATS_CACHE_MAX = 500
+
+
 def _ats_postings_for_slug(slug: str) -> list[dict]:
-    """Return [{title, url, location}] across ATSes for one company slug."""
+    """Return [{title, url, location}] across ATSes for one company slug.
+    Cached per slug for _ATS_CACHE_TTL_S seconds."""
+    import time as _time
+    key = (slug or "").strip().lower()
+    hit = _ATS_CACHE.get(key)
+    if hit and _time.monotonic() - hit[0] < _ATS_CACHE_TTL_S:
+        return list(hit[1])
+    out = _ats_postings_for_slug_uncached(key)
+    if len(_ATS_CACHE) >= _ATS_CACHE_MAX:
+        _ATS_CACHE.clear()
+    _ATS_CACHE[key] = (_time.monotonic(), out)
+    return list(out)
+
+
+def _ats_postings_for_slug_uncached(slug: str) -> list[dict]:
     out = []
     # Greenhouse
     gh = _ats_get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=false")
