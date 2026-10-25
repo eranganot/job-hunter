@@ -279,3 +279,27 @@ def test_a_resolved_company_careers_link_is_recorded_as_company():
     links.resolve_open_jobs(get_db, 1, resolver=resolver)
     row = _rows(get_db)[3]
     assert row["url"] == wiz_site["url"] and row["link_type"] == "company"
+
+
+# ── 1d: ranking penalty ─────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("job,expected", [
+    ({"link_type": "board", "link_resolved_at": "2026-10-25 10:00:00"}, 5),
+    ({"link_type": "aggregator", "link_resolved_at": "2026-10-25 10:00:00"}, 5),
+    ({"link_type": "direct_ats", "link_resolved_at": "2026-10-25 10:00:00"}, 0),
+    ({"link_type": "company", "link_resolved_at": "2026-10-25 10:00:00"}, 0),
+    ({"link_type": None, "link_resolved_at": None}, 0),          # not examined yet: no penalty
+    ({"link_type": "board", "link_resolved_at": None}, 0),
+])
+def test_link_penalty(job, expected):
+    assert links.link_penalty(job) == expected
+
+
+def test_sql_penalty_matches_the_python_one():
+    conn = sqlite3.connect(":memory:")
+    for job, expected in [({"link_type": "board", "link_resolved_at": "x"}, 5),
+                          ({"link_type": "company", "link_resolved_at": "x"}, 0),
+                          ({"link_type": "board", "link_resolved_at": None}, 0)]:
+        got = conn.execute("SELECT " + links.LINK_PENALTY_SQL.replace("link_resolved_at", "?", 1)
+                           .replace("link_type", "?", 1), (job["link_resolved_at"], job["link_type"])).fetchone()[0]
+        assert got == expected == links.link_penalty(job)

@@ -409,6 +409,28 @@ def test_link_resolve_handler_rewrites_an_open_linkedin_job(stack, users, monkey
     assert row["link_type"] == "direct_ats"
 
 
+def test_jobs_rank_a_job_without_a_direct_link_5_points_lower(stack, users):
+    # Step 1d: a 90 with no direct link (85 effective) ranks below an 88 with one.
+    db = stack["db"]
+    uid = _user_id(db, "bob@example.test")
+    conn = db.get_db()
+    try:
+        for title, score, url, ltype in (
+                ("Board PM", 90, "https://il.linkedin.com/jobs/view/9001", "board"),
+                ("Direct PM", 88, "https://jobs.lever.co/acme/9002", "direct_ats")):
+            conn.execute("INSERT INTO jobs (user_id, title, company, location, url, status, match_score, "
+                         "link_type, link_resolved_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (uid, title, "RankCo", "Tel Aviv", url, "new", score, ltype, "2026-10-25 10:00:00"))
+        conn.commit()
+    finally:
+        conn.close()
+    status, _, body = users["b"].get("/api/jobs?status=new&sort=match")
+    assert status == 200
+    mine = [j for j in json.loads(body) if j["company"] == "RankCo"]
+    assert [j["title"] for j in mine] == ["Direct PM", "Board PM"]
+    assert mine[1]["link_penalty"] == 5 and mine[0]["link_penalty"] == 0
+
+
 def test_admin_account_gets_the_admin_role(users):
     status, _, body = users["admin"].get("/api/me")
     assert status == 200

@@ -24,6 +24,13 @@ export type ApiJob = {
   // and then re-sorted by the raw score, undoing it. See SCORING.md §4.
   feedback_penalty?: number | null;
   feedback_reason?: string | null;
+  // Step 1 of EXECUTION_PLAN_NEXT.md. link_type: direct_ats | company | board |
+  // aggregator | redirect | none (null = not examined yet). source_url: the
+  // board URL the job was found at, when url was replaced by the company's
+  // own posting. link_penalty: 5 when we looked and found no direct link.
+  link_type?: string | null;
+  source_url?: string | null;
+  link_penalty?: number | null;
   apply_status?: string | null;
   // Where the application got to AFTER it was sent. A separate column from
   // apply_status on purpose: one records that we submitted, the other what
@@ -56,6 +63,12 @@ export type UiJob = {
    *  matchScore - feedbackPenalty; see SCORING.md. */
   feedbackPenalty: number;
   feedbackReason: string;
+  /** "" until examined; otherwise links.classify() of the job's url. */
+  linkType: string;
+  /** Where it was found, when url now points at the company's own posting. */
+  sourceUrl: string;
+  /** 5 when no direct link was found; part of the effective rank. */
+  linkPenalty: number;
   verified: boolean;
   timeAgo: string;
   status: string;
@@ -293,6 +306,9 @@ export function toUiJob(j: ApiJob): UiJob {
     candidateScore: j.candidate_score ?? null,
     feedbackPenalty: j.feedback_penalty ?? 0,
     feedbackReason: j.feedback_reason || "",
+    linkType: j.link_type || "",
+    sourceUrl: j.source_url || "",
+    linkPenalty: j.link_penalty ?? 0,
     verified: j.url_verified === 1,
     timeAgo: timeAgo(j.found_date),
     status: j.status,
@@ -307,4 +323,27 @@ export function toUiJob(j: ApiJob): UiJob {
     statusCheck: j.status_check || "",
     statusCheckedDate: j.status_checked_date || "",
   };
+}
+
+
+/** Where a link opens, in words. LinkedIn and the other boards say so, so the
+ *  user knows before tapping that it is not the company's own page. */
+export function linkSiteName(url: string): string {
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; }
+  const known: [string, string][] = [
+    ["linkedin.com", "LinkedIn"], ["indeed.com", "Indeed"], ["glassdoor.com", "Glassdoor"],
+    ["drushim.co.il", "Drushim"], ["alljobs.co.il", "AllJobs"], ["jobmaster.co.il", "JobMaster"],
+    ["builtin.com", "Built In"], ["jobgether.com", "Jobgether"], ["jobright.ai", "Jobright"],
+  ];
+  for (const [d, name] of known) if (host === d || host.endsWith("." + d)) return name;
+  return host;
+}
+
+export function openLabel(job: { url: string; linkType: string }): string {
+  if (job.linkType === "board" || job.linkType === "aggregator") {
+    const site = linkSiteName(job.url);
+    return site ? `Open on ${site}` : "Open";
+  }
+  return "Open";
 }

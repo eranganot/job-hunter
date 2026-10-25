@@ -14,7 +14,7 @@ Claude works in a cloud workspace with **push access to `github.com/eranganot/jo
   2. Before merge: `python3 scripts/smoke.py --boot-local` (boots this checkout on a throwaway DB, runs the suite and every smoke check). Paste the summary into the PR.
   3. Merge → Railway deploys `main`.
   4. After merge: `python3 scripts/smoke.py --skip-local --expect-commit <merge sha> --wait-for-deploy-minutes 8` against production; post the result on the PR. A red production smoke = revert PR first, investigate second.
-- `scripts/smoke.ps1` is the original Windows version; `scripts/smoke.py` is the one PRs use.
+- `scripts/smoke.ps1` / `scripts/build_web.ps1` are the original Windows versions; PRs use `scripts/smoke.py` and `scripts/build_web.py` (a workspace build of unchanged `web/` reproduced the committed bundle byte for byte, 2026-10-25).
 - Use the `investigate-issue` skill for any root-cause work, `app-bug-triage` for production bugs.
 
 ## Two UIs — know which one you're in
