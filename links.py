@@ -40,6 +40,10 @@ BOARD_DOMAINS = (
     "angel.co", "wellfound.com", "otta.com", "remoteok.com",
     "weworkremotely.com", "remotive.io", "geektime.co.il", "alljobs.co.il",
     "jobmaster.co.il", "drushim.co.il", "jobnet.co.il", "gotfriends.co.il",
+    # Added 2026-10-25 from the link audit of the open queue:
+    "djinni.co",            # a board; one job's id opened a different (QA) posting
+    "jobify360.co.il",      # Israeli board re-listing other companies' jobs
+    "app.greenhouse.io",    # Greenhouse's RECRUITER app: /jobs/<id> lands on sign-in
 )
 
 # Re-publishers observed in Eran's queue (STATUS.md 2026-10-12, and the
@@ -49,7 +53,15 @@ AGGREGATOR_DOMAINS = (
     "secrethunter.com", "jobgether.com", "jooble.org", "talent.com",
     "adzuna.com", "adzuna.co.il", "himalayas.app", "workingnomads.com",
     "jobleads.com", "efinancialcareers.com", "lensa.com",
+    # Added 2026-10-25 from the link audit / link report of the open queue:
+    "secrethunter.io",      # 10 jobs; every page title is the site's own
+    "secrettelaviv.com",    # jobs.secrettelaviv.com, 62 open jobs - a board
+    "getajob.careers", "bebee.com",
+    "yuvalhr.com",          # headhunter; posts client roles, often unnamed
 )
+
+# Built In runs one site per city (builtin.com, builtinaustin.com, builtinnyc.com...).
+_BUILTIN_HOST = __import__("re").compile(r"^builtin[a-z]*\.com$")
 
 REDIRECT_MARKERS = ("vertexaisearch.cloud.google.com/grounding-api-redirect",)
 
@@ -84,7 +96,7 @@ def classify(url: str) -> str:
         return "direct_ats"
     if _on(host, BOARD_DOMAINS):
         return "board"
-    if _on(host, AGGREGATOR_DOMAINS):
+    if _on(host, AGGREGATOR_DOMAINS) or _BUILTIN_HOST.match(host):
         return "aggregator"
     return "company"
 
@@ -260,12 +272,17 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
         rows = [dict(r) for r in conn.execute(
             "SELECT id, title, company, location, url, link_type, link_resolved_at FROM jobs "
             "WHERE user_id=? AND status IN ('new','approved') AND ("
-            "  link_resolved_at IS NULL OR "
+            "  link_resolved_at IS NULL OR link_type='company' OR "
             "  (link_type IN ('board','aggregator','redirect','none') AND link_resolved_at < ?)"
             ") ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END, id DESC",
             (user_id, cutoff)).fetchall()]
     finally:
         conn.close()
+    # A link recorded as 'company' is looked at again only if the host lists
+    # have since reclassified it (2026-10-25: secrethunter.io, secrettelaviv.com,
+    # builtin*.com... moved to aggregator). Still 'company' = nothing to do,
+    # and no network call.
+    rows = [r for r in rows if not (r.get("link_type") == "company" and classify(r.get("url")) == "company")]
 
     out = {"examined": 0, "already_direct": 0, "resolved": 0, "unresolved": 0,
            "duplicate": 0, "left_for_next_run": 0}

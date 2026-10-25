@@ -84,6 +84,7 @@ CLOSED_MARKUP = (
 # Path segments that make a URL a careers/board landing page when they are
 # the WHOLE path (optionally under a locale or "company"/"about" prefix).
 _GENERIC_SEGMENTS = {
+    "global",   # careers.cisco.com/global/en - where a closed Cisco posting lands (2026-10-25)
     "careers", "career", "jobs", "job", "join", "join-us", "joinus", "work-with-us",
     "positions", "open-positions", "openings", "vacancies", "opportunities",
     "position", "job-details", "company", "about", "about-us", "en", "en-us",
@@ -108,6 +109,11 @@ _FAKE_IDS = re.compile(r"(?:^|[^0-9])(?:12345\d*|67890|123456789|0000000|99999)(
 # /careers/not-found ("We couldn't find the role you're looking for"), 200.
 _NOT_FOUND_SEGMENTS = {"not-found", "notfound", "page-not-found", "job-not-found",
                        "position-not-found", "404"}
+
+# A login page is not a public posting. Observed 2026-10-25: two open jobs
+# linked app.greenhouse.io/jobs/<id> (Greenhouse's recruiter app), which lands
+# on /users/sign_in; the public embed for the same id answered 404.
+_SIGN_IN_SEGMENTS = {"sign_in", "sign-in", "signin", "login", "log-in"}
 
 def _segments(path: str) -> list[str]:
     return [s for s in (path or "").lower().split("/") if s]
@@ -221,12 +227,22 @@ def classify(url: str, timeout: int = 12, fetch=None) -> tuple[str, str, str]:
             return "dead", "parked domain", final
     except Exception:
         pass
-    if any(seg in _NOT_FOUND_SEGMENTS for seg in _segments(urlparse(final or url).path)):
+    _land = _segments(urlparse(final or url).path)
+    if any(seg in _NOT_FOUND_SEGMENTS for seg in _land):
         return "dead", "landed on a not-found page (%s)" % _short(final or url), final
+    if any(seg in _SIGN_IN_SEGMENTS for seg in _land):
+        return "generic", "sign-in page, not a public posting (%s)" % _short(final or url), final
     if final and final.rstrip("/") != url.rstrip("/") and is_generic_url(final):
         return "dead", "posting redirected to %s" % _short(final), final
     if is_generic_url(final or url):
         return "generic", "not a job posting (careers/board page)", final
+    # Greenhouse job ids are numbers. Observed 2026-10-25: playtika.com
+    # /position/?gh_jid=senior-product-manager-growth-monetization - a title
+    # slug where the id should be - renders an empty shell (19 visible chars).
+    for _u in (url, final or ""):
+        _gh = parse_qs(urlparse(_u).query or "").get("gh_jid")
+        if _gh and not _gh[0].strip().isdigit():
+            return "dead", "invented Greenhouse id (gh_jid=%s)" % _gh[0][:40], final
     if _FAKE_IDS.search(urlparse(url).path + "?" + urlparse(url).query):
         return "dead", "placeholder id in URL (invented by the search model)", final
     return "alive", "ok", final
