@@ -1,0 +1,54 @@
+{
+ "status": 200,
+ "error": {
+  "message": "",
+  "body": ""
+ },
+ "data": {
+  "positions": [
+   {
+    "id": 1970393557043459,
+    "displayJobId": "200062585",
+    "name": "Product Management Internship Opportunities",
+    "locations": [
+     "Israel, Tel Aviv, Herzliya"
+    ],
+    "standardizedLocations": [
+     "Herzliya, Tel Aviv District, IL"
+    ],
+    "postedTs": 1792558332,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Product Management",
+    "creationTs": 1792415342,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200062585",
+    "positionUrl": "/careers/job/1970393557043459"
+   },
+   {
+    "id": 1970393557043540,
+    "displayJobId": "200062610",
+    "name": "Principal AI Optimization Software Engineering Manager",
+    "locations": [
+     "Israel, Tel Aviv, Herzliya"
+    ],
+    "standardizedLocations": [
+     "Herzliya, Tel Aviv District, IL"
+    ],
+    "postedTs": 1792498550,
+    "solrScore": null,
+    "stars": 0,
+    "department": "Software Engineering",
+    "creationTs": 1792426678,
+    "isHot": 0,
+    "workLocationOption": "onsite",
+    "locationFlexibility": null,
+    "atsJobId": "200062610",
+    "positionUrl": "/careers/job/1970393557043540"
+   }
+  ],
+  "count": 2
+ }
+}

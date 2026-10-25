@@ -36,7 +36,7 @@ from .models import (
 )
 from .dedup import Deduplicator
 from .pipeline import IngestionPipeline, PipelineState, PipelineResult
-from .integration import collect_external_sources, deduplicate_raw
+from .integration import collect_external_sources, deduplicate_raw, source_health
 
 __all__ = [
     "NormalizedJob",
@@ -52,5 +52,6 @@ __all__ = [
     "PipelineState",
     "PipelineResult",
     "collect_external_sources",
+    "source_health",
     "deduplicate_raw",
 ]

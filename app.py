@@ -783,6 +783,14 @@ def _attribute_gemini_to(fn):
     return _wrapped
 
 
+
+def _source_health():
+    try:
+        import ingestion as _ing
+        return _ing.source_health()
+    except Exception as exc:  # never take health down for a statistic
+        return {"error": ("%s: %s" % (type(exc).__name__, exc))[:160]}
+
 @_attribute_gemini_to
 def run_job_search(user_id: int):
     """Search for new jobs via multi-round Anthropic web-search (one call per job title)."""
@@ -6359,6 +6367,8 @@ class Handler(BaseHTTPRequestHandler):
                 # TODAY, so until this existed the real peak was invisible from
                 # outside the box and the ceiling stayed at its placeholder.
                 "llm_history": gemini.history(14),
+                # Last outcome per job source since this process started (Step 3).
+                "sources": _source_health(),
                 # Queue depth and the age of the oldest running job: a wedged
                 # worker looks exactly like a healthy one from outside without
                 # this. Guarded because a box that predates migration 6 has no

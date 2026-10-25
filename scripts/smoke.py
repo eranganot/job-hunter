@@ -647,6 +647,29 @@ def run(args):
         return True
     s.check("health carries the 14-day spend record", _history)
 
+    # Job sources (Step 3): reported, not failed - a source can be briefly
+    # rate-limited, and a fresh deploy has not run a search yet.
+    section("job sources")
+
+    def _sources():
+        h = H()
+        if h is None:
+            return "no health payload"
+        src = h.get("sources")
+        if src is None:
+            note("(box predates per-source health)")
+            return True
+        if not src:
+            note("no search has run since this process started")
+            return True
+        for name, v in src.items():
+            line = (f"{name:<16} {v.get('status'):<8} fetched={v.get('fetched')} kept={v.get('kept')} "
+                    f"last jobs: {v.get('last_jobs_at') or 'never'}")
+            note(line + (f"  ({v.get('message')})" if v.get("message") else ""),
+                 YELLOW if v.get("status") != "ok" else GREY)
+        return True
+    s.check("health reports each job source's last run", _sources)
+
     # Parked state
     section("parked-state check")
 

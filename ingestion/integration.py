@@ -43,6 +43,36 @@ def _managers() -> tuple[ProxyManager, CreditManager]:
     return _PROXY_MGR, _CREDIT_MGR
 
 
+# Last outcome per source, for /api/health. Three Big-Tech adapters returned
+# nothing for weeks while reporting OK (found 2026-10-25), because nothing
+# outside the log line below remembered what each source last did.
+import threading as _threading
+from datetime import datetime as _dt, timezone as _tz
+
+_LAST: dict = {}
+_LAST_LOCK = _threading.Lock()
+
+
+def _remember(name: str, status: str, fetched: int, kept: int, message: str = "") -> None:
+    now = _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with _LAST_LOCK:
+        prev = _LAST.get(name) or {}
+        ok = status == "ok"
+        _LAST[name] = {
+            "status": status, "fetched": fetched, "kept": kept,
+            "message": (message or "")[:200], "at": now,
+            "last_ok_at": now if ok else prev.get("last_ok_at"),
+            "last_jobs_at": now if (ok and fetched) else prev.get("last_jobs_at"),
+        }
+
+
+def source_health() -> dict:
+    """{source: {status, fetched, kept, message, at, last_ok_at, last_jobs_at}}
+    for every source that has run since this process started."""
+    with _LAST_LOCK:
+        return {k: dict(v) for k, v in sorted(_LAST.items())}
+
+
 def collect_external_sources(
     role: str,
     titles: list[str],
@@ -71,8 +101,10 @@ def collect_external_sources(
                 res = fut.result()
             except Exception as e:
                 reports.append(f"{a.name.value}:ERR({type(e).__name__})")
+                _remember(a.name.value, "error", 0, 0, f"{type(e).__name__}: {e}")
                 continue
             reports.append(f"{a.name.value}:{res.status.value}({res.count})")
+            _kept_before = len(out)
             for nj in res.jobs:
                 # Geography + title gate: external sources are global and ignore
                 # the user's preferences server-side, so keep only jobs that match
@@ -83,6 +115,8 @@ def collect_external_sources(
                     dropped += 1
                     continue
                 out.append(CanonicalJob.from_normalized(nj).to_legacy_dict())
+            _remember(a.name.value, res.status.value, res.count, len(out) - _kept_before,
+                      getattr(res, "message", "") or "")
     print(f"[ingest] external sources (role={role}): " + ", ".join(sorted(reports)))
     print(f"[ingest] external sources contributed {len(out)} jobs "
           f"(gated out {dropped} off-preference; gate={'on' if _gate else 'off'})")
