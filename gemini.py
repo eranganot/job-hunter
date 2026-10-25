@@ -133,6 +133,18 @@ class BudgetExceeded(RuntimeError):
         )
 
 
+class BillingExhausted(BudgetExceeded):
+    """Gemini is refusing calls for billing (see the billing section below).
+    A BudgetExceeded, so every caller that already falls back on a spent
+    budget - scoring to keywords, cover letters failing loudly - does the
+    same here."""
+
+    def __init__(self, message: str, paused_until: float = 0.0):
+        self.scope, self.used, self.limit, self.unit = "billing", 0, 0, "billing"
+        self.paused_until = paused_until
+        RuntimeError.__init__(self, message)
+
+
 # ── limits ────────────────────────────────────────────────────────────────────
 
 def _limit(name: str, default: int) -> int:
@@ -241,7 +253,7 @@ def usage(user_id: int | None = None) -> dict:
         if day != _DAY:
             _roll_day_locked(day)
         _sync_locked(day)
-        out = {"day": day, "global": dict(_GLOBAL), "limits": limits()}
+        out = {"day": day, "global": dict(_GLOBAL), "limits": limits(), "billing": billing_status()}
         if user_id is not None:
             out["user"] = dict(_PER_USER.get(int(user_id), {"calls": 0, "tokens": 0}))
         return out
@@ -287,6 +299,71 @@ def _alert_locked(scope: str, message: str):
         _alert_sender(message)
     except Exception as e:
         print("[gemini] breach alert failed (non-fatal): %s" % e)
+
+
+# ── Billing exhausted: pause instead of failing every call ───────────────────
+#
+# 2026-10-25: the Gemini project's prepaid credits ran out. Google answered
+# every call with HTTP 402 RESOURCE_EXHAUSTED ("Your prepayment credits are
+# depleted"), and each failure became its own Sentry event (53 from one link
+# report). Credits return only when someone pays, so retrying is pointless: the
+# first billing refusal PAUSES Gemini for JH_LLM_BILLING_PAUSE_MIN minutes
+# (default 180). While paused, generate() raises BillingExhausted without
+# touching the network, which callers already handle as a spent budget
+# (scoring falls back to keywords, cover letters fail loudly). The admin is
+# alerted once per day. The first call after the pause tries again, so paid-up
+# credits resume service on their own.
+
+GEMINI_PAUSED_MARKER = "[gemini-paused]"   # errors.py drops log events carrying it
+_BILLING = {"paused_until": 0.0, "since": "", "last_error": "", "skipped": 0, "trips": 0}
+
+
+def _billing_pause_minutes() -> int:
+    try:
+        return max(1, int(os.environ.get("JH_LLM_BILLING_PAUSE_MIN", "180")))
+    except ValueError:
+        return 180
+
+
+def is_billing_error(code: int, body: str) -> bool:
+    """402, or RESOURCE_EXHAUSTED that talks about money rather than rate."""
+    low = (body or "").lower()
+    if code == 402:
+        return True
+    return "resource_exhausted" in low and any(w in low for w in ("prepay", "billing", "credits"))
+
+
+def billing_status() -> dict:
+    with _LOCK:
+        until = _BILLING["paused_until"]
+        paused = time.time() < until
+        return {
+            "paused": paused,
+            "paused_until": (datetime.fromtimestamp(until, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                             if until else None),
+            "since": _BILLING["since"] or None,
+            "last_error": _BILLING["last_error"] or None,
+            "skipped_calls": _BILLING["skipped"],
+            "trips": _BILLING["trips"],
+        }
+
+
+def _trip_billing_pause(error: str) -> float:
+    minutes = _billing_pause_minutes()
+    with _LOCK:
+        until = time.time() + minutes * 60
+        _BILLING["paused_until"] = until
+        _BILLING["since"] = _BILLING["since"] or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        _BILLING["last_error"] = (error or "")[:300]
+        _BILLING["trips"] += 1
+        _alert_locked(
+            "billing",
+            "\U000026A0 Job-Hunter: Gemini refused a call for BILLING (%s). AI scoring, search, CV "
+            "analysis and cover letters are degraded. Gemini is paused for %d min and retried after; "
+            "top up the project in Google AI Studio to restore it."
+            % ((error or "")[:120], minutes),
+        )
+    return until
 
 
 def check(user_id: int | None = None, cost: int = 1):
@@ -409,6 +486,15 @@ def generate(body, *, purpose: str, user_id: int | None = None,
         raise ValueError("GEMINI_API_KEY not configured.")
     if user_id is None:
         user_id = current_user()
+    with _LOCK:
+        _until = _BILLING["paused_until"]
+        if time.time() < _until:
+            _BILLING["skipped"] += 1
+    if time.time() < _until:
+        raise BillingExhausted(
+            "%s Gemini billing exhausted - call skipped until %s UTC"
+            % (GEMINI_PAUSED_MARKER, datetime.fromtimestamp(_until, timezone.utc).strftime("%H:%M")),
+            _until)
     check(user_id=user_id)
 
     if isinstance(body, (bytes, bytearray)):
@@ -448,6 +534,12 @@ def generate(body, *, purpose: str, user_id: int | None = None,
             # a ceiling should stop - so failures are recorded too.
             _record(user_id, purpose, model, 0, 0, 0, ok=False,
                     error="HTTP %s %s" % (e.code, body_txt))
+            if is_billing_error(e.code, body_txt):
+                _until = _trip_billing_pause("HTTP %s %s" % (e.code, body_txt))
+                raise BillingExhausted(
+                    "Gemini billing exhausted (HTTP %s) - pausing Gemini until %s UTC: %s"
+                    % (e.code, datetime.fromtimestamp(_until, timezone.utc).strftime("%H:%M"), body_txt[:160]),
+                    _until)
             raise RuntimeError("Gemini API error %s: %s" % (e.code, body_txt))
         except Exception as e:
             last = e
@@ -468,5 +560,6 @@ def generate_text(body, **kw) -> str:
 def reset_for_tests():
     with _LOCK:
         _roll_day_locked("")
+        _BILLING.update({"paused_until": 0.0, "since": "", "last_error": "", "skipped": 0, "trips": 0})
         _ALERTED.clear()
         del _PENDING[:]
