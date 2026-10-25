@@ -64,7 +64,14 @@ FIXTURES = {
 
 JOBS = {
     "new":      [_job(1), _job(2, match_score=80, feedback_penalty=10,
-                              feedback_reason="Location you've passed on")],
+                              feedback_reason="Location you've passed on"),
+                 # Step 1d: a LinkedIn job we found no direct link for, and one
+                 # whose link was resolved to the company's own posting.
+                 _job(7, company="Nowhere Labs", url="https://il.linkedin.com/jobs/view/4012345678",
+                      link_type="board", link_resolved_at="2026-10-25 10:00:00", link_penalty=5),
+                 _job(8, company="Wiz", url="https://boards.greenhouse.io/wizinc/jobs/4621534006",
+                      source_url="https://il.linkedin.com/jobs/view/4099999999", link_type="direct_ats",
+                      link_resolved_at="2026-10-25 10:00:00", link_penalty=0)],
     "approved": [_job(3, status="approved", apply_status="queued")],
     "applied":  [_job(4, status="applied", apply_status="submitted", applied_via="engine"),
                  _job(5, status="applied", apply_status="manual", applied_via="bulk")],

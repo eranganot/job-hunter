@@ -35,6 +35,7 @@ import errors
 import schedlock
 import gemini
 import jobqueue
+import links as _links_mod
 import ratelimit
 import worker
 import storage
@@ -6452,7 +6453,10 @@ class Handler(BaseHTTPRequestHandler):
             status  = qs.get("status", ["new"])[0]
             sort_by = qs.get("sort",   ["date"])[0]
             order_map = {
-                "match":   "(COALESCE(match_score, -1) - COALESCE(feedback_penalty, 0)) DESC",
+                # Effective rank: the score, less the learned feedback penalty,
+                # less links.LINK_PENALTY when no direct link was found (Step 1d).
+                "match":   "(COALESCE(match_score, -1) - COALESCE(feedback_penalty, 0) - "
+                           + _links_mod.LINK_PENALTY_SQL + ") DESC",
                 "company": "company ASC",
                 "date":    "found_date DESC",
             }
@@ -6471,6 +6475,8 @@ class Handler(BaseHTTPRequestHandler):
                         (user["id"], status)
                     ).fetchall()
                 jobs_list = [dict(r) for r in rows]
+                for _j in jobs_list:
+                    _j["link_penalty"] = _links_mod.link_penalty(_j)
 
                 # ── Live feedback learning: recompute deterministic penalties so the
                 #    New/Approved tabs reflect the user's latest pass feedback on every
@@ -6499,7 +6505,8 @@ class Handler(BaseHTTPRequestHandler):
                         conn.commit()
                     if sort_by == "match":
                         jobs_list.sort(
-                            key=lambda x: (x.get("match_score") or -1) - (x.get("feedback_penalty") or 0),
+                            key=lambda x: ((x.get("match_score") or -1) - (x.get("feedback_penalty") or 0)
+                                           - (x.get("link_penalty") or 0)),
                             reverse=True
                         )
                 except Exception as _fbe:

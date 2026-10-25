@@ -7,7 +7,7 @@ import {
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
 } from "lucide-react";
-import { api, toUiJob, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
+import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
 
 type View = "swipe" | "dashboard";
@@ -449,6 +449,7 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
               <div className="mt-2 text-xs text-gray-400 bg-gray-900/60 border border-gray-700 rounded-xl p-3 space-y-1.5">
                 <p><span className="text-blue-300 font-medium">Match Score</span> — how well this job fits your profile (titles, skills, seniority).</p>
                 <p><span className="text-green-300 font-medium">Your Strength</span> — your fit as a candidate: the match score adjusted for your CV and experience. They’re equal when no adjustments apply.</p>
+                {job.linkPenalty > 0 && <p><span className="text-slate-300 font-medium">No direct link</span> — we couldn’t find this posting on the company’s own site yet, so it ranks {job.linkPenalty} points lower. We’ll keep looking.</p>}
               </div>
             )}
           </div>
@@ -457,8 +458,9 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
           <div className="space-y-5 mt-5 lg:mt-0">
           {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${job.verified ? "bg-green-950/50 text-green-400 border border-green-800" : "bg-orange-950/50 text-orange-400 border border-orange-800"}`}>
-            {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">URL verified — ready to apply</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
+            {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">{job.linkPenalty > 0 && linkSiteName(job.url) ? `Posting is live on ${linkSiteName(job.url)}` : "URL verified — ready to apply"}</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
           </div>
+          {job.linkPenalty > 0 && <div><LinkBadge job={job} /></div>}
           </div>
         </div>
         <div className="p-5 lg:px-7 pt-0 space-y-3 lg:max-w-2xl lg:mx-auto lg:w-full">
@@ -549,7 +551,8 @@ function DashboardView(p: any) {
       // (match_score - feedback_penalty) in SQL; sorting here by matchScore
       // alone silently undid that, so a job the system had demoted 20 points
       // for being somewhere the user keeps passing on sat at the top anyway.
-      const eff = (j: UiJob) => (j.matchScore ?? -1) - (j.feedbackPenalty || 0);
+      // Less the "no direct link" penalty too (Step 1d), same as the API.
+      const eff = (j: UiJob) => (j.matchScore ?? -1) - (j.feedbackPenalty || 0) - (j.linkPenalty || 0);
       a.sort((x, y) => eff(y) - eff(x));
     }
     return a;
@@ -641,6 +644,19 @@ function FeedbackBadge({ job }: { job: UiJob }) {
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-950/50 border border-orange-800/60 text-orange-300"
           title={`Ranked ${job.feedbackPenalty} points lower because of your past feedback`}>
       <TrendingUp className="w-3 h-3 rotate-180" />{job.feedbackReason || "Adjusted from your feedback"}
+    </span>
+  );
+}
+
+/* Step 1d: we looked for this posting on the company's own site or ATS and did
+   not find it, so it opens on a job board and ranks LINK_PENALTY lower. */
+function LinkBadge({ job }: { job: UiJob }) {
+  if (!job.linkPenalty) return null;
+  const site = linkSiteName(job.url);
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-800 border border-slate-600 text-slate-300"
+          title={`We couldn't find this posting on the company's own site${site ? `, so it opens on ${site}` : ""}. Ranked ${job.linkPenalty} points lower; we'll keep looking.`}>
+      <ExternalLink className="w-3 h-3" />No direct link
     </span>
   );
 }
@@ -755,7 +771,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
             <span className="text-sm text-gray-400 truncate">{job.company}</span>
             {job.location && <span className="text-xs text-gray-400 truncate">{job.location}</span>}
           </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap"><ApplyBadge job={job} /><FeedbackBadge job={job} /></div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap"><ApplyBadge job={job} /><FeedbackBadge job={job} /><LinkBadge job={job} /></div>
           {/* Written by the scorer and shown on the swipe card, then dropped the
               moment a job reached the queue - which is where the decision to
               actually apply gets made. */}
@@ -772,7 +788,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
       </div>
       <div className="flex border-t border-gray-700 divide-x divide-gray-700">
         <button onClick={() => onMarkApplied(job)} className="flex-1 py-2.5 text-xs font-medium text-green-300 active:bg-gray-700 flex items-center justify-center gap-1"><CheckCircle className="w-4 h-4" />Mark applied</button>
-        {job.url && <a href={job.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex-1 py-2.5 text-xs font-medium text-indigo-300 active:bg-gray-700 flex items-center justify-center gap-1"><ExternalLink className="w-4 h-4" />Open</a>}
+        {job.url && <a href={job.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="flex-1 py-2.5 text-xs font-medium text-indigo-300 active:bg-gray-700 flex items-center justify-center gap-1"><ExternalLink className="w-4 h-4" />{openLabel(job)}</a>}
         <button onClick={() => onRemove(job)} className="flex-1 py-2.5 text-xs font-medium text-red-300 active:bg-gray-700 flex items-center justify-center gap-1"><X className="w-4 h-4" />Remove</button>
       </div>
     </div>
@@ -1002,7 +1018,7 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
                      right={showStatus && job.applyStatus ? <StatusPill s={job.applyStatus} /> : null}>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
               {job.timeAgo && <span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
-              <FeedbackBadge job={job} />
+              <FeedbackBadge job={job} /><LinkBadge job={job} />
             </div>
             {job.whyFits && (
               <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
@@ -1048,7 +1064,7 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer, onReload }: any) {
                    right={<button onClick={(e: any) => { e.stopPropagation(); onUnDefer(job); }} className="px-3 py-2 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-lg text-xs font-medium shrink-0">Move to review</button>}>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             {job.timeAgo && <span className="text-xs text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" />{job.timeAgo}</span>}
-            <FeedbackBadge job={job} />
+            <FeedbackBadge job={job} /><LinkBadge job={job} />
           </div>
           {job.whyFits && (
             <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
@@ -1454,7 +1470,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin }: { job: UiJob; onClos
               </div>
             </div>
           )}
-          {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-indigo-400 text-sm font-medium">Open job posting <ExternalLink className="w-3.5 h-3.5" /></a>}
+          {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-indigo-400 text-sm font-medium">{openLabel(job) === "Open" ? "Open job posting" : openLabel(job)} <ExternalLink className="w-3.5 h-3.5" /></a>}
         </div>
       </motion.div>
     </motion.div>

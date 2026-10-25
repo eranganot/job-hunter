@@ -190,6 +190,16 @@
       "since": "2026-09-20",
       "what": "Queue: apply to the whole approved queue (the button api.runApply never had)",
       "needle": "Apply to queue"
+    },
+    {
+      "since": "2026-10-25",
+      "what": "jobs without a direct link are badged",
+      "needle": "No direct link"
+    },
+    {
+      "since": "2026-10-25",
+      "what": "board links say where they open",
+      "needle": "Open on "
     }
   ]
 }

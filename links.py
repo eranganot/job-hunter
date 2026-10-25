@@ -322,3 +322,25 @@ def _write(get_db, sql, args):
 def run_detail(counts: dict) -> str:
     return ("links: %(examined)d examined, %(resolved)d resolved, %(already_direct)d already direct, "
             "%(unresolved)d unresolved, %(duplicate)d duplicate, %(left_for_next_run)d left for next run" % counts)
+
+
+# ── 1d: ranking ─────────────────────────────────────────────────────────────
+
+# Points a job drops in the ranking when we looked for the company's own
+# posting and did not find it (Eran approved 5, 2026-10-25). Visible on the
+# card as "No direct link" and in the score explanation, never hidden.
+LINK_PENALTY = 5
+_PENALISED = ("board", "aggregator", "redirect", "none")
+
+
+def link_penalty(job) -> int:
+    """5 for an open job whose resolve attempt found nothing; 0 otherwise -
+    including jobs not examined yet, which have not had their chance."""
+    get = job.get if hasattr(job, "get") else (lambda k: job[k])
+    if not get("link_resolved_at"):
+        return 0
+    return LINK_PENALTY if (get("link_type") or "") in _PENALISED else 0
+
+
+LINK_PENALTY_SQL = ("(CASE WHEN link_resolved_at IS NOT NULL AND link_type IN "
+                    "('board','aggregator','redirect','none') THEN %d ELSE 0 END)" % LINK_PENALTY)
