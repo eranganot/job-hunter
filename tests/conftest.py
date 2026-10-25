@@ -7,6 +7,9 @@ def _fresh_ats_cache():
     Tests stub _ats_get with different answers for the same slug, so every
     test starts with an empty cache."""
     import apply_engine
+    import links
     apply_engine._ATS_CACHE.clear()
+    links._COMEET_CACHE.clear()
     yield
     apply_engine._ATS_CACHE.clear()
+    links._COMEET_CACHE.clear()
