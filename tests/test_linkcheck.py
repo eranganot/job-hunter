@@ -167,3 +167,20 @@ def test_closed_cisco_posting_landing_on_careers_home_is_dead():
     v, why, _ = L.classify(url, fetch=_f(200, final="https://careers.cisco.com/global/en",
                                           body="<title>Careers at Cisco</title>"))
     assert v == "dead" and "redirected" in why
+
+
+def test_bot_protection_challenge_is_unknown_not_alive():
+    # The exact answer thalesgroup.com gave on 2026-10-26 (urllib and Chromium alike).
+    body = ('<html>\r\n<head>\r\n<META NAME="robots" CONTENT="noindex,nofollow">\r\n<script '
+            'src="/_Incapsula_Resource?SWJIYLWA=5074a744e2e3d891814e9a2dace20bd4,719d34d31c8e3a6e6fffd425f7e032f3">'
+            '\r\n</script>\r\n<body>\r\n</body></html>\r\n')
+    url = "https://www.thalesgroup.com/en/career/product-management-manager-edge-security-R0334627"
+    v, why, _ = L.classify(url, fetch=_f(200, body=body))
+    assert v == "unknown" and "bot-protection" in why
+
+
+def test_a_real_page_mentioning_cloudflare_scripts_is_still_alive():
+    body = "<html><title>Senior PM</title>" + "<p>Senior Product Manager, apply now</p>" * 700 + \
+           "<script src='/cdn-cgi/challenge-platform/scripts/x.js'></script></html>"
+    v, _, _ = L.classify("https://acme.com/careers/jobs/123", fetch=_f(200, body=body))
+    assert v == "alive"

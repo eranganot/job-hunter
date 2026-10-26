@@ -115,6 +115,19 @@ _NOT_FOUND_SEGMENTS = {"not-found", "notfound", "page-not-found", "job-not-found
 # on /users/sign_in; the public embed for the same id answered 404.
 _SIGN_IN_SEGMENTS = {"sign_in", "sign-in", "signin", "login", "log-in"}
 
+# Bot-protection interstitials: a tiny page whose only content is a challenge
+# script. Observed 2026-10-26: thalesgroup.com career postings answer 200 with
+# 212 bytes - an Imperva "_Incapsula_Resource" script and an empty body - to
+# urllib AND to headless Chromium. That says nothing about the posting, so it
+# is "unknown" (kept), never "alive" (it used to be) or "dead".
+_CHALLENGE_MARKERS = ("_incapsula_resource", "cf-browser-verification", "challenge-platform",
+                      "<title>just a moment...</title>", "px-captcha", "/_sec/cp_challenge")
+
+
+def _bot_challenge(body: str) -> bool:
+    low = (body or "")[:20000].lower()
+    return len(body or "") < 20000 and any(m in low for m in _CHALLENGE_MARKERS)
+
 def _segments(path: str) -> list[str]:
     return [s for s in (path or "").lower().split("/") if s]
 
@@ -215,6 +228,8 @@ def classify(url: str, timeout: int = 12, fetch=None) -> tuple[str, str, str]:
     if status >= 400:
         return "unknown", "HTTP %d (blocked/limited)" % status, final
 
+    if _bot_challenge(body):
+        return "unknown", "bot-protection challenge page - content not visible to a server", final
     why = closed_reason(body)
     if why:
         return "dead", why, final
