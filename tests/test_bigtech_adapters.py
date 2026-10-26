@@ -58,19 +58,56 @@ def test_apple_reads_the_search_page_and_drops_per_location_repeats():
     assert a.http.calls[0][1]["location"] == "israel-ISR"
 
 
+def _ms(monkeypatch, answers):
+    """MicrosoftAdapter with its cookie session replaced by scripted answers.
+    answers: list of (status, body) for the API calls, in order."""
+    import ingestion.adapters.bigtech as bt
+    monkeypatch.setattr(bt.time, "sleep", lambda s: None)
+    calls, queue = [], list(answers)
+
+    def call(self, opener, url, accept):
+        calls.append(url)
+        if url == MicrosoftAdapter.WARMUP:
+            return 200, "<html></html>"
+        return queue.pop(0) if queue else (200, '{"data": {"positions": [], "count": 0}}')
+    monkeypatch.setattr(MicrosoftAdapter, "_call", call)
+    return MicrosoftAdapter().fetch(Q), calls
+
+
 def test_microsoft_reads_the_eightfold_search(monkeypatch):
     body = (FX / "microsoft_pcsx.json").read_text()
-    a, res = _run(MicrosoftAdapter, [(200, body)], monkeypatch)
+    res, calls = _ms(monkeypatch, [(200, body)])
     assert res.status == AdapterStatus.OK and res.count == 2
     j = res.jobs[0]
     assert j.url.startswith("https://apply.careers.microsoft.com/careers/job/")
     assert "IL" in j.location and j.posted_at is not None
+    assert calls[0] == MicrosoftAdapter.WARMUP           # cookies first
+
+
+def test_microsoft_retries_a_cookieless_429_once(monkeypatch):
+    # Observed 2026-10-26: the refusal sets the session cookies; the same call
+    # repeated with them succeeds.
+    body = (FX / "microsoft_pcsx.json").read_text()
+    res, calls = _ms(monkeypatch, [(429, ""), (200, body)])
+    assert res.status == AdapterStatus.OK and res.count == 2
+    res, _ = _ms(monkeypatch, [(429, ""), (429, "")])
+    assert res.status == AdapterStatus.ERROR and "HTTP 429" in res.message
+
+
+def test_microsoft_keeps_cookies_between_calls():
+    import http.cookiejar
+    import urllib.request
+    op = MicrosoftAdapter()._opener()
+    assert any(isinstance(h, urllib.request.HTTPCookieProcessor) and isinstance(h.cookiejar, http.cookiejar.CookieJar)
+               for h in op.handlers)
 
 
 def test_a_moved_endpoint_is_an_error_not_an_empty_ok(monkeypatch):
-    for cls in (GoogleAdapter, AppleAdapter, MicrosoftAdapter, AmazonAdapter):
+    for cls in (GoogleAdapter, AppleAdapter, AmazonAdapter):
         _a, res = _run(cls, [(404, "")] * 4, monkeypatch)
         assert res.status == AdapterStatus.ERROR and "HTTP 404" in res.message, cls.__name__
+    res, _ = _ms(monkeypatch, [(404, "")])
+    assert res.status == AdapterStatus.ERROR and "HTTP 404" in res.message
 
 
 def test_a_changed_page_layout_is_an_error_not_an_empty_ok():
