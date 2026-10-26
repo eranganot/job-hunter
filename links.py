@@ -459,6 +459,8 @@ def audit_one(job: dict, fetch=None, timeout: int = 15) -> dict:
         "tokens_in_text": sum(1 for w in toks if re.search(r"\b%s\b" % re.escape(w), vis)),
         "company_in_page_title": bool(job.get("company")) and
                                  (job.get("company") or "").strip().lower()[:12] in page_title.lower(),
+        "company_in_text": bool(_norm_company(job.get("company"))) and
+                           _norm_company(job.get("company"))[:6] in _re.sub(r"[^a-z0-9]", "", vis[:200000]),
         "visible_chars": len(vis),
         "body_bytes": len(body or ""),
         # Little visible text in a big page = rendered by script; a title check
@@ -666,3 +668,183 @@ def make_resolver(db, fetch=None):
         return _ae.resolve_ats_application(company, title, location=location, use_llm=use_llm)
     resolver.learned = learned
     return resolver
+
+
+# ── 1c option 3: Gemini web search for the posting on the company's own site ─
+#
+# Measured first, wired in later. The free lookups (learned boards + name
+# guessing) resolve ~9% of LinkedIn jobs (2026-10-26); the misses are mostly
+# Israeli startups whose boards cannot be found by name. This asks Gemini, with
+# Google Search grounding, for that ONE posting. Gemini has invented URLs
+# before (STATUS 2026-10-12: placeholder ids, careers home pages), so nothing it
+# returns is used unless the page itself proves it:
+#   1. the link is the company's site or an ATS - never a board / aggregator;
+#   2. linkcheck says the posting is alive (not closed, not generic, not 404);
+#   3. the page shows most of the job title's words;
+#   4. the page or the URL names the company.
+# A script-rendered page cannot pass 3 and is rejected - a false negative only
+# keeps the LinkedIn link, which is the safe direction.
+
+SEARCH_PURPOSE = "link_search"
+
+
+def _search_prompt(company: str, title: str, location: str) -> str:
+    return (
+        'Find the current job posting for the role "%s" at the company "%s"%s. '
+        "Use Google Search. I need the URL of that ONE posting on the company's own careers site "
+        "or on its applicant-tracking system (for example greenhouse.io, lever.co, comeet.com, "
+        "ashbyhq.com, smartrecruiters.com, myworkdayjobs.com). "
+        "Never return LinkedIn, Indeed, Glassdoor or any other job board or aggregator, never a careers "
+        "home page or job list, and never a URL you composed yourself - copy it exactly from a search result. "
+        'Return ONLY JSON: {"url": "<posting url or empty>", "page_title": "<title of that page>"}. '
+        'If you cannot find the posting itself, return {"url": ""}.'
+        % (title, company, (" in %s" % location) if location else "")
+    )
+
+
+def _parse_search_answer(result: dict) -> tuple:
+    """(url, grounding_uris) from a generateContent response."""
+    import json
+    cand = ((result or {}).get("candidates") or [{}])[0]
+    text = "".join(p.get("text", "") for p in ((cand.get("content") or {}).get("parts") or []))
+    url = ""
+    i, j = text.find("{"), text.rfind("}")
+    if i >= 0 and j > i:
+        try:
+            url = (json.loads(text[i:j + 1]).get("url") or "").strip()
+        except ValueError:
+            m = _re.search(r'"url"\s*:\s*"([^"]+)"', text)
+            url = m.group(1).strip() if m else ""
+    chunks = ((cand.get("groundingMetadata") or {}).get("groundingChunks") or [])
+    uris = [((c.get("web") or {}).get("uri") or "") for c in chunks]
+    return url, [u for u in uris if u]
+
+
+def verify_found_posting(company: str, title: str, url: str, audit=None) -> tuple:
+    """(ok, reason, final_url). `audit` = audit_one, injectable for tests."""
+    import math
+    if not url:
+        return False, "no url returned", ""
+    t = classify(url)
+    if t == "redirect":
+        import linkcheck
+        url = linkcheck.resolve_redirect(url) or ""
+        t = classify(url)
+        if not url:
+            return False, "grounding redirect did not resolve", ""
+    if t not in ("direct_ats", "company"):
+        return False, "not the company's own site (%s: %s)" % (t, host_of(url)), url
+    a = (audit or audit_one)({"id": None, "company": company, "title": title, "url": url})
+    final = a.get("final_url") or url
+    if a.get("verdict") != "alive":
+        return False, "link check: %s (%s)" % (a.get("verdict"), a.get("reason")), final
+    if classify(final) not in ("direct_ats", "company"):
+        return False, "redirected to %s" % host_of(final), final
+    toks = a.get("title_tokens") or []
+    need = max(1, math.ceil(0.6 * len(toks)))
+    if a.get("tokens_in_text", 0) < need and a.get("tokens_in_page_title", 0) < need:
+        why = "script-rendered page" if a.get("script_rendered") else "page does not show the job title"
+        return False, "%s (%d/%d title words)" % (why, max(a.get("tokens_in_text", 0),
+                                                            a.get("tokens_in_page_title", 0)), len(toks)), final
+    key = _norm_company(company)
+    in_url = bool(key) and key[:6] in _re.sub(r"[^a-z0-9]", "", final.lower())
+    if not (in_url or a.get("company_in_page_title") or a.get("company_in_text")):
+        return False, "page does not name the company", final
+    return True, "verified", final
+
+
+def search_company_posting(company: str, title: str, location: str = "",
+                           generate=None, audit=None) -> dict:
+    """{'url', 'via', 'reason', 'candidate', 'grounding'} - url empty unless verified."""
+    import gemini
+    body = {"contents": [{"parts": [{"text": _search_prompt(company, title, location)}]}],
+            "tools": [{"google_search": {}}],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 512,
+                                 "thinkingConfig": {"thinkingBudget": 0}}}
+    try:
+        result = (generate or (lambda b: gemini.generate(b, purpose=SEARCH_PURPOSE, timeout=40, retries=1)))(body)
+    except gemini.BudgetExceeded as exc:
+        return {"url": "", "via": "web search", "reason": "gemini unavailable: %s" % exc, "candidate": ""}
+    except Exception as exc:
+        return {"url": "", "via": "web search", "reason": "search failed: %s" % str(exc)[:120], "candidate": ""}
+    cand, grounding = _parse_search_answer(result)
+    ok, why, final = verify_found_posting(company, title, cand, audit=audit)
+    return {"url": final if ok else "", "via": "web search", "reason": why, "candidate": cand,
+            "grounding": len(grounding)}
+
+
+def search_trial(db, user_id=None, n: int = 20, budget_s: float = 55.0, workers: int = 5,
+                 resolver=None, searcher=None) -> dict:
+    """Read-only measurement of option 3: for open board/aggregator jobs, run
+    the free resolver; where it misses, run the web search and verify. Nothing
+    is written. Reports every candidate URL and why it was accepted or not."""
+    import time
+    import gemini
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+
+    if resolver is None:
+        resolver = make_resolver(db)
+    searcher = searcher or search_company_posting
+    sql = ("SELECT id, title, company, location, url FROM jobs WHERE status IN ('new','approved')"
+           + (" AND user_id=?" if user_id is not None else "")
+           + " ORDER BY CASE status WHEN 'approved' THEN 0 ELSE 1 END, id DESC")
+    rows = _read_rows(db, sql, (user_id,) if user_id is not None else ())
+    pairs, seen = [], set()
+    for r in rows:
+        if classify(r.get("url")) not in ("board", "aggregator", "redirect"):
+            continue
+        key = (_norm_company(r.get("company")), (r.get("title") or "").strip().lower())
+        if not key[0] or not key[1] or key in seen:
+            continue
+        seen.add(key)
+        pairs.append(r)
+    pairs = pairs[:max(0, n)]
+
+    def one(r):
+        import apply_engine as _ae
+        _ae.begin_lookup()
+        free = resolver(r["company"], r["title"], r.get("location") or "", False)
+        if free and free.get("url"):
+            return {"job_id": r["id"], "company": r["company"], "title": r["title"],
+                    "result": "free hit", "url": free["url"], "via": free.get("via") or "name guess"}
+        s = searcher(r["company"], r["title"], r.get("location") or "")
+        return {"job_id": r["id"], "company": r["company"], "title": r["title"],
+                "result": "search hit" if s.get("url") else "search miss",
+                "url": s.get("url") or "", "candidate": s.get("candidate") or "",
+                "reason": s.get("reason"), "grounding_sources": s.get("grounding")}
+
+    before = gemini.usage()["global"]
+    started = time.monotonic()
+    results = []
+    pool = ThreadPoolExecutor(max_workers=max(1, workers))
+    try:
+        futs = {pool.submit(one, r): r for r in pairs}
+        pending = set(futs)
+        while pending:
+            left = budget_s - (time.monotonic() - started)
+            if left <= 0:
+                break
+            done, pending = wait(pending, timeout=left, return_when=FIRST_COMPLETED)
+            for f in done:
+                try:
+                    results.append(f.result())
+                except Exception as exc:
+                    r = futs[f]
+                    results.append({"job_id": r["id"], "company": r["company"], "title": r["title"],
+                                    "result": "error", "reason": repr(exc)[:160]})
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    after = gemini.usage()["global"]
+    count = lambda k: sum(1 for x in results if x.get("result") == k)
+    searched = count("search hit") + count("search miss")
+    return {
+        "scope": "all users" if user_id is None else "user %s" % user_id,
+        "pairs": len(pairs), "done": len(results), "not_reached": len(pairs) - len(results),
+        "seconds": round(time.monotonic() - started, 1),
+        "free_hits": count("free hit"), "searched": searched, "search_hits": count("search hit"),
+        "search_hit_rate": round(100.0 * count("search hit") / searched, 1) if searched else None,
+        "candidates_rejected": sum(1 for x in results if x.get("result") == "search miss" and x.get("candidate")),
+        "gemini_calls": after["calls"] - before["calls"], "gemini_tokens": after["tokens"] - before["tokens"],
+        "jobs": sorted(results, key=lambda x: ({"search hit": 0, "free hit": 1, "search miss": 2}.get(x.get("result"), 3),
+                                               x.get("job_id") or 0)),
+    }

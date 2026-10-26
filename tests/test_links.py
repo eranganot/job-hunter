@@ -573,3 +573,80 @@ def test_migration_14_clears_only_unresolved_verdicts_of_open_jobs():
     got = {r[0]: (r[1], r[2], r[3]) for r in conn.execute("SELECT id, url, link_resolved_at, link_attempts FROM jobs")}
     assert got[1] == ("li/1", None, 0) and got[4] == ("agg/4", None, 0)
     assert got[2][1] and got[3][1]                         # direct and history untouched
+
+
+# ── 1c option 3: web search, verified ──────────────────────────────────────
+
+def _gemini_answer(text, uris=()):
+    return {"candidates": [{"content": {"parts": [{"text": text}]},
+                            "groundingMetadata": {"groundingChunks": [{"web": {"uri": u}} for u in uris]}}]}
+
+
+def test_parse_search_answer_reads_json_and_grounding():
+    url, uris = links._parse_search_answer(_gemini_answer(
+        'Here it is: {"url": "https://acme.com/careers/jobs/123", "page_title": "PM"}',
+        ["https://vertexaisearch.cloud.google.com/grounding-api-redirect/x"]))
+    assert url == "https://acme.com/careers/jobs/123" and len(uris) == 1
+    assert links._parse_search_answer(_gemini_answer('{"url": ""}'))[0] == ""
+    assert links._parse_search_answer(_gemini_answer('no json at all'))[0] == ""
+
+
+def _audit(verdict="alive", final=None, tokens_text=3, tokens_title=3, toks=("product", "manager", "growth"),
+           company_title=True, company_text=True, script=False):
+    def audit(job):
+        return {"verdict": verdict, "reason": "x", "final_url": final or job["url"], "title_tokens": list(toks),
+                "tokens_in_text": tokens_text, "tokens_in_page_title": tokens_title,
+                "company_in_page_title": company_title, "company_in_text": company_text, "script_rendered": script}
+    return audit
+
+
+@pytest.mark.parametrize("url,audit,ok,why", [
+    ("https://acme.com/careers/jobs/123", _audit(), True, "verified"),
+    ("https://il.linkedin.com/jobs/view/1", _audit(), False, "board"),
+    ("https://jobgether.com/offer/1", _audit(), False, "aggregator"),
+    ("https://acme.com/careers/jobs/123", _audit(verdict="dead"), False, "link check: dead"),
+    ("https://acme.com/careers/jobs/123", _audit(final="https://il.linkedin.com/jobs/view/9"), False, "redirected"),
+    ("https://acme.com/careers/jobs/123", _audit(tokens_text=1, tokens_title=0), False, "does not show the job title"),
+    ("https://acme.com/careers/jobs/123", _audit(tokens_text=0, tokens_title=0, script=True), False, "script-rendered"),
+    ("https://other.io/jobs/1", _audit(company_title=False, company_text=False), False, "does not name the company"),
+    ("", _audit(), False, "no url"),
+])
+def test_verify_found_posting(url, audit, ok, why):
+    got_ok, got_why, _ = links.verify_found_posting("Acme", "Product Manager, Growth", url, audit=audit)
+    assert got_ok is ok and why in got_why
+
+
+def test_search_company_posting_only_returns_a_verified_url():
+    gen = lambda body: _gemini_answer('{"url": "https://acme.com/careers/jobs/123"}')
+    assert links.search_company_posting("Acme", "Product Manager", generate=gen, audit=_audit())["url"] \
+        == "https://acme.com/careers/jobs/123"
+    r = links.search_company_posting("Acme", "Product Manager", generate=gen, audit=_audit(verdict="generic"))
+    assert r["url"] == "" and r["candidate"] == "https://acme.com/careers/jobs/123"
+
+
+def test_search_survives_gemini_being_unavailable():
+    import gemini
+
+    def gen(body):
+        raise gemini.BillingExhausted("[gemini-paused] Gemini billing exhausted", 0.0)
+    r = links.search_company_posting("Acme", "PM", generate=gen)
+    assert r["url"] == "" and "gemini unavailable" in r["reason"]
+
+
+def test_search_trial_searches_only_what_the_free_lookup_misses_and_writes_nothing():
+    conn = _db(ROWS)
+    before = [tuple(x) for x in conn.execute("SELECT * FROM jobs ORDER BY id")]
+    searched = []
+
+    def resolver(company, title, location, use_llm):
+        return {"url": "https://boards.greenhouse.io/wizinc/jobs/9", "via": "learned board"} if company == "Wiz" else None
+
+    def searcher(company, title, location=""):
+        searched.append(company)
+        return {"url": "https://jobgether.com/careers/1" if company == "Jobgether" else "",
+                "candidate": "https://x.com/1", "reason": "verified" if company == "Jobgether" else "dead"}
+    r = links.search_trial(conn, user_id=1, n=10, resolver=resolver, searcher=searcher)
+    assert sorted(searched) == ["Jobgether", "Nowhere Ltd"]          # Wiz resolved free, not searched
+    assert r["free_hits"] == 1 and r["searched"] == 2 and r["search_hits"] == 1
+    assert r["jobs"][0]["result"] == "search hit"
+    assert [tuple(x) for x in conn.execute("SELECT * FROM jobs ORDER BY id")] == before

@@ -440,6 +440,15 @@ def test_link_audit_is_admin_only(stack, users):
     assert status == 200 and json.loads(body)["audited"] == 0
 
 
+def test_link_search_trial_is_admin_only(stack, users):
+    status, _, _ = Client(stack["port"]).get("/api/admin/link-search-trial")
+    assert status != 200
+    status, _, _ = users["b"].get("/api/admin/link-search-trial")
+    assert status == 403
+    status, _, body = users["admin"].get("/api/admin/link-search-trial?scope=me&n=0")
+    assert status == 200 and json.loads(body)["searched"] == 0
+
+
 def test_admin_account_gets_the_admin_role(users):
     status, _, body = users["admin"].get("/api/me")
     assert status == 200
