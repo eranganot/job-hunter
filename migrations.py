@@ -717,6 +717,25 @@ def m0013_job_links(conn):
     conn.commit()
 
 
+def m0014_recheck_unresolved_links(conn):
+    """Re-check the open jobs Step 1b recorded as "no direct link".
+
+    Between 2026-10-25 (Step 1b) and 2026-10-26 a job board that timed out
+    looked exactly like a company with no board (apply_engine._ats_get returned
+    None for both), so some of those verdicts are timeouts, not misses -
+    observed: api.lever.co took 6.3 s once, 0.9 s the next time, and Parallel
+    Wireless's live posting was missed. Clearing the verdict makes the next
+    link run re-examine them with the fixed lookup; until then they carry no
+    penalty. Link fields of open jobs only - url, status and history untouched.
+    """
+    conn.execute(
+        "UPDATE jobs SET link_resolved_at=NULL, link_attempts=0 "
+        "WHERE status IN ('new','approved') "
+        "AND link_type IN ('board','aggregator','redirect','none') "
+        "AND link_resolved_at IS NOT NULL")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -731,6 +750,7 @@ MIGRATIONS = [
     (11, "undo_expiry",                 m0011_undo_expiry),
     (12, "reconcile_eran_backlog",      m0012_reconcile_eran_backlog),
     (13, "job_links",                   m0013_job_links),
+    (14, "recheck_unresolved_links",    m0014_recheck_unresolved_links),
 ]
 
 

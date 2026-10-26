@@ -80,14 +80,13 @@ def test_a_non_admin_cannot_toggle_anyone(stack, users):
     assert _active(db, "alice@example.test") == 1
 
 
-def test_the_selftest_probe_is_read_only_and_admin_only(stack, users, monkeypatch):
-    """The 8-week ops item. It has never been run because running it meant
-    hand-crafting a request; it is about to get a button, so it gets a test.
-
-    The probe's browser step is stubbed: it launches Chromium and loads
-    example.com with a 20 s allowance, which made this test fail on the test
-    client's 10 s timeout (observed 2026-10-25, socket TimeoutError) once
-    Chromium was installed where the suite runs. The suite stays offline."""
+@pytest.fixture(autouse=True)
+def _no_real_browser(monkeypatch):
+    """/api/admin/apply-selftest launches Chromium and loads example.com with a
+    20 s allowance. Once Chromium was installed where the suite runs, every
+    test calling it could exceed the test client's 10 s timeout (observed
+    2026-10-25 and again 2026-10-26 in test_an_admin_is_not_refused, socket
+    TimeoutError). Stubbed for the whole file; the suite stays offline."""
     import apply_engine
 
     class _NoBrowser:
@@ -97,6 +96,11 @@ def test_the_selftest_probe_is_read_only_and_admin_only(stack, users, monkeypatc
         def __exit__(self, *a):
             return False
     monkeypatch.setattr(apply_engine, "sync_playwright", lambda: _NoBrowser(), raising=False)
+
+
+def test_the_selftest_probe_is_read_only_and_admin_only(stack, users):
+    """The 8-week ops item. It has never been run because running it meant
+    hand-crafting a request; it is about to get a button, so it gets a test."""
     status, _loc, _b = users["a"].get("/api/admin/apply-selftest")
     assert status in (302, 403), "a non-admin reached the apply diagnostics"
 

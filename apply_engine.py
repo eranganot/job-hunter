@@ -940,15 +940,53 @@ def _company_slugs(company: str) -> list[str]:
     return out[:3]
 
 
+# Lookups can fail two ways, and they used to look the same (None):
+#   * "no such board" - a 4xx: definitive, the company is not on that ATS;
+#   * "no answer"     - a timeout, 5xx, 429 or network error: says nothing.
+# Observed 2026-10-25/26: api.lever.co took 6.3 s on one call (over the old
+# 6 s timeout) and 0.9 s on the next, so Parallel Wireless's live "Product Line
+# Manager" posting was missed, the job was recorded as having no direct link
+# (5-point penalty, not retried for 7 days) and the empty answer was cached.
+# Now a "no answer" is retried once with a longer timeout, and if it still
+# fails it is COUNTED on the current thread, so callers can tell an incomplete
+# lookup from a genuine miss (lookup_incomplete()).
+import threading as _threading
+_LOOKUP = _threading.local()
+
+
+def begin_lookup() -> None:
+    """Start counting failed lookups on this thread."""
+    _LOOKUP.failures = 0
+
+
+def lookup_failures() -> int:
+    return getattr(_LOOKUP, "failures", 0)
+
+
+def lookup_incomplete() -> bool:
+    """True if a board lookup since begin_lookup() got no answer."""
+    return lookup_failures() > 0
+
+
+def _mark_lookup_failure() -> None:
+    _LOOKUP.failures = getattr(_LOOKUP, "failures", 0) + 1
+
+
 def _ats_get(url: str, timeout: int = 6):
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            if r.status >= 400:
-                return None
-            return json.loads(r.read().decode("utf-8", "ignore"))
-    except Exception:
-        return None
+    for attempt, t in enumerate((timeout, max(timeout, 12))):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": _UA})
+            with urllib.request.urlopen(req, timeout=t) as r:
+                return json.loads(r.read().decode("utf-8", "ignore"))
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500 and e.code not in (408, 429):
+                return None                      # definitive: no such board
+        except ValueError:
+            return None                          # answered, but not JSON: no board here
+        except Exception:
+            pass                                 # timeout / network: no answer
+    _mark_lookup_failure()
+    return None
 
 
 # A company's postings across the five ATSes, cached for a few minutes. One
@@ -967,17 +1005,50 @@ def _ats_postings_for_slug(slug: str) -> list[dict]:
     hit = _ATS_CACHE.get(key)
     if hit and _time.monotonic() - hit[0] < _ATS_CACHE_TTL_S:
         return list(hit[1])
+    before = lookup_failures()
     out = _ats_postings_for_slug_uncached(key)
-    if len(_ATS_CACHE) >= _ATS_CACHE_MAX:
-        _ATS_CACHE.clear()
-    _ATS_CACHE[key] = (_time.monotonic(), out)
+    if lookup_failures() == before:
+        # Only a complete answer is cached: a board that did not answer must
+        # be asked again next time, not remembered as empty for 10 minutes.
+        if len(_ATS_CACHE) >= _ATS_CACHE_MAX:
+            _ATS_CACHE.clear()
+        _ATS_CACHE[key] = (_time.monotonic(), out)
     return list(out)
+
+
+def _ats_fetch_all(slug: str) -> dict:
+    """The five board APIs for one slug, asked at once rather than one after
+    another (each can take seconds; serially a company cost ~10 s and the link
+    report reached 13 of 40 jobs in its budget, 2026-10-26). Failure counts are
+    carried back to the calling thread."""
+    from concurrent.futures import ThreadPoolExecutor
+    urls = {
+        "gh": f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=false",
+        "lv": f"https://api.lever.co/v0/postings/{slug}?mode=json",
+        "sr": f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100",
+        "ab": f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=false",
+        "cm": f"https://www.comeet.co/careers/api/{slug}/positions",
+    }
+
+    def one(url):
+        begin_lookup()
+        data = _ats_get(url)
+        return data, lookup_failures()
+
+    with ThreadPoolExecutor(max_workers=len(urls)) as ex:
+        futs = {k: ex.submit(one, u) for k, u in urls.items()}
+        res = {k: f.result() for k, f in futs.items()}
+    for _data, failed in res.values():
+        for _ in range(failed):
+            _mark_lookup_failure()
+    return {k: v[0] for k, v in res.items()}
 
 
 def _ats_postings_for_slug_uncached(slug: str) -> list[dict]:
     out = []
+    got = _ats_fetch_all(slug)
     # Greenhouse
-    gh = _ats_get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=false")
+    gh = got["gh"]
     if isinstance(gh, dict):
         for j in gh.get("jobs", []) or []:
             loc = j.get("location", {}) or {}
@@ -986,7 +1057,7 @@ def _ats_postings_for_slug_uncached(slug: str) -> list[dict]:
                         "location": loc.get("name", "") if isinstance(loc, dict) else "",
                         "ats": "greenhouse"})
     # Lever
-    lv = _ats_get(f"https://api.lever.co/v0/postings/{slug}?mode=json")
+    lv = got["lv"]
     if isinstance(lv, list):
         for j in lv:
             cats = j.get("categories") or {}
@@ -995,7 +1066,7 @@ def _ats_postings_for_slug_uncached(slug: str) -> list[dict]:
                         "location": cats.get("location", "") or "",
                         "ats": "lever"})
     # SmartRecruiters
-    sr = _ats_get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
+    sr = got["sr"]
     if isinstance(sr, dict):
         for j in sr.get("content", []) or []:
             loc = j.get("location") or {}
@@ -1004,14 +1075,14 @@ def _ats_postings_for_slug_uncached(slug: str) -> list[dict]:
                         "url": f"https://jobs.smartrecruiters.com/{slug}/{j.get('id','')}",
                         "location": city, "ats": "smartrecruiters"})
     # Ashby
-    ab = _ats_get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=false")
+    ab = got["ab"]
     if isinstance(ab, dict):
         for j in ab.get("jobs", []) or []:
             out.append({"title": j.get("title", ""),
                         "url": j.get("jobUrl") or j.get("applyUrl") or "",
                         "location": j.get("location", "") or "", "ats": "ashby"})
     # Comeet
-    cm = _ats_get(f"https://www.comeet.co/careers/api/{slug}/positions")
+    cm = got["cm"]
     if isinstance(cm, list):
         for j in cm:
             loc = j.get("location")

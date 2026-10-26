@@ -217,7 +217,7 @@ def test_resolve_rewrites_board_links_of_open_jobs_and_keeps_the_original():
     assert rows[3]["link_type"] == "board" and rows[3]["link_attempts"] == 1
     assert rows[6]["link_type"] == "aggregator" and rows[6]["link_attempts"] == 1
     assert counts == {"examined": 6, "already_direct": 2, "resolved": 1, "unresolved": 2,
-                      "duplicate": 1, "left_for_next_run": 0}
+                      "incomplete": 0, "duplicate": 1, "left_for_next_run": 0}
 
 
 def test_resolve_never_touches_history_or_other_users():
@@ -262,8 +262,14 @@ def test_resolve_survives_a_crashing_resolver_and_respects_its_limits():
         raise TimeoutError("ATS hung")
     counts = links.resolve_open_jobs(get_db, 1, resolver=boom, limit=2)
     assert counts["examined"] == 2 and counts["left_for_next_run"] == 4
+    # A crash is not an answer: the two jobs are NOT recorded as misses (no
+    # stamp, no penalty), so all six are still waiting on the next run.
+    assert counts["incomplete"] == 2 and counts["unresolved"] == 0
+    rows = _rows(get_db)
+    crashed = [r for r in rows.values() if r["link_note"] and "incomplete" in r["link_note"]]
+    assert len(crashed) == 2 and all(r["link_resolved_at"] is None for r in crashed)
     counts = links.resolve_open_jobs(get_db, 1, resolver=boom, budget_s=-1)
-    assert counts["examined"] == 0 and counts["left_for_next_run"] == 4
+    assert counts["examined"] == 0 and counts["left_for_next_run"] == 6
 
 
 def test_run_detail_reads_as_one_line():
@@ -476,3 +482,94 @@ def test_the_resolver_chain_tries_learned_boards_before_name_guessing(monkeypatc
     assert guesses == []                                   # learned board answered; no guessing
     assert resolver("Nowhere Ltd", "PM", "Tel Aviv", False) is None
     assert guesses == ["Nowhere Ltd"]                      # fell back for an unknown company
+
+
+
+# ── 2026-10-26: a job board that does not answer is not a miss ─────────────
+
+def test_a_board_timeout_is_retried_then_counted_not_treated_as_no_board(monkeypatch):
+    import socket
+    import urllib.error
+    import apply_engine as ae
+    seen = []
+
+    def urlopen(req, timeout=None):
+        seen.append(timeout)
+        raise socket.timeout("timed out")
+    monkeypatch.setattr(ae.urllib.request, "urlopen", urlopen)
+    ae.begin_lookup()
+    assert ae._ats_get("https://api.lever.co/v0/postings/x?mode=json") is None
+    assert seen == [6, 12]                      # one retry, longer timeout
+    assert ae.lookup_incomplete()
+
+    def not_found(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 404, "x", {}, None)
+    monkeypatch.setattr(ae.urllib.request, "urlopen", not_found)
+    ae.begin_lookup()
+    assert ae._ats_get("https://api.lever.co/v0/postings/x?mode=json") is None
+    assert not ae.lookup_incomplete()           # a 404 is a real answer: no board
+
+
+def test_an_incomplete_lookup_is_not_cached(monkeypatch):
+    import apply_engine as ae
+    calls = {"n": 0}
+
+    def flaky(url, timeout=6):
+        calls["n"] += 1
+        if "lever" in url and calls["n"] <= 5:
+            ae._mark_lookup_failure()           # Lever did not answer the first time
+            return None
+        if "lever" in url:
+            return [{"text": "Product Line Manager", "hostedUrl": "https://jobs.lever.co/pw/1",
+                     "categories": {"location": "Kfar Saba"}}]
+        return None
+    monkeypatch.setattr(ae, "_ats_get", flaky)
+    ae.begin_lookup()
+    assert ae._ats_postings_for_slug("pw") == []
+    assert ae.lookup_incomplete()
+    ae.begin_lookup()
+    posts = ae._ats_postings_for_slug("pw")     # asked again, not served from cache
+    assert [p["title"] for p in posts] == ["Product Line Manager"] and not ae.lookup_incomplete()
+    n = calls["n"]
+    ae._ats_postings_for_slug("pw")             # complete answer IS cached
+    assert calls["n"] == n
+
+
+def test_failures_on_worker_threads_reach_the_caller(monkeypatch):
+    import apply_engine as ae
+
+    def lever_down(url, timeout=6):
+        if "lever" in url:
+            ae._mark_lookup_failure()
+        return None
+    monkeypatch.setattr(ae, "_ats_get", lever_down)
+    ae.begin_lookup()
+    ae._ats_postings_for_slug_uncached("someco")
+    assert ae.lookup_failures() == 1
+
+
+def test_the_link_report_counts_incomplete_lookups():
+    import apply_engine as ae
+
+    def resolver(company, title, location, use_llm):
+        if company == "Wiz":
+            ae._mark_lookup_failure()
+        return None
+    r = links.link_report(_db(ROWS), user_id=1, sample=10, resolver=resolver)
+    assert r["dry_run"]["incomplete"] == 1 and r["dry_run"]["resolved"] == 0
+
+
+def test_migration_14_clears_only_unresolved_verdicts_of_open_jobs():
+    import migrations
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, url TEXT, status TEXT, link_type TEXT, "
+                 "link_resolved_at TEXT, link_attempts INTEGER)")
+    rows = [(1, "li/1", "new", "board", "2026-10-25 10:00:00", 1),
+            (2, "lever/2", "new", "direct_ats", "2026-10-25 10:00:00", 0),
+            (3, "li/3", "applied", "board", "2026-10-25 10:00:00", 1),
+            (4, "agg/4", "approved", "aggregator", "2026-10-25 10:00:00", 1)]
+    conn.executemany("INSERT INTO jobs VALUES (?,?,?,?,?,?)", rows)
+    migrations.m0014_recheck_unresolved_links(conn)
+    got = {r[0]: (r[1], r[2], r[3]) for r in conn.execute("SELECT id, url, link_resolved_at, link_attempts FROM jobs")}
+    assert got[1] == ("li/1", None, 0) and got[4] == ("agg/4", None, 0)
+    assert got[2][1] and got[3][1]                         # direct and history untouched
