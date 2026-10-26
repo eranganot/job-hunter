@@ -6893,6 +6893,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(report)
             return
 
+        if path == "/api/admin/link-search-trial":
+            # Step 1c option 3, MEASUREMENT ONLY: for open LinkedIn/aggregator
+            # jobs the free lookups miss, ask Gemini (Google Search grounding)
+            # for the posting on the company's own site and verify the page.
+            # Writes nothing. Costs one Gemini call per searched job.
+            #   ?scope=me|all  ?n=20 (max 30)
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import links as _links
+            _scope = (qs.get("scope", ["me"])[0] or "me").strip().lower()
+            try:
+                _n = max(0, min(30, int(qs.get("n", ["20"])[0])))
+            except ValueError:
+                _n = 20
+            self.send_json(_links.search_trial(database.get_db, None if _scope == "all" else user["id"], n=_n))
+            return
+
         if path == "/api/admin/queue-stats":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
