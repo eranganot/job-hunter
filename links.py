@@ -174,15 +174,19 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
         pairs.append(r)
 
     started = time.monotonic()
-    tried, resolved, unresolved, by_ats = 0, [], [], {}
+    tried, resolved, unresolved, by_ats, incomplete = 0, [], [], {}, 0
     for r in pairs[:max(0, sample)]:
         if time.monotonic() - started > budget_s:
             break
         tried += 1
+        import apply_engine as _ae
+        _ae.begin_lookup()
         try:
             hit = resolver(r.get("company") or "", r.get("title") or "", r.get("location") or "", use_llm)
         except Exception as exc:  # one bad company must not sink the report
             hit = {"error": f"{type(exc).__name__}: {exc}"[:160]}
+        if not (hit and hit.get("url")) and _ae.lookup_incomplete():
+            incomplete += 1
         if hit and hit.get("url"):
             by_ats[hit.get("ats") or "?"] = by_ats.get(hit.get("ats") or "?", 0) + 1
             resolved.append({"job_id": r["id"], "company": r.get("company"), "title": r.get("title"),
@@ -214,6 +218,8 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
             "not_reached": max(0, min(sample, len(pairs)) - tried),
             "resolved": len(resolved),
             "hit_rate": round(100.0 * len(resolved) / tried, 1) if tried else None,
+            # Misses where a job board did not answer: not evidence of absence.
+            "incomplete": incomplete,
             "by_ats": by_ats,
             "seconds": round(time.monotonic() - started, 1),
             "resolved_examples": resolved[:20],
@@ -281,7 +287,7 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     # and no network call.
     rows = [r for r in rows if not (r.get("link_type") == "company" and classify(r.get("url")) == "company")]
 
-    out = {"examined": 0, "already_direct": 0, "resolved": 0, "unresolved": 0,
+    out = {"examined": 0, "already_direct": 0, "resolved": 0, "unresolved": 0, "incomplete": 0,
            "duplicate": 0, "left_for_next_run": 0}
     started = time.monotonic()
     for i, r in enumerate(rows[:max(0, limit)]):
@@ -295,11 +301,14 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
                    (t, stamp, r["id"], user_id))
             out["already_direct"] += 1
             continue
+        import apply_engine as _ae
+        _ae.begin_lookup()
         try:
             hit = resolver(r.get("company") or "", r.get("title") or "", r.get("location") or "", use_llm)
         except Exception as exc:
             print("[links] resolve failed for job %s (%s): %s" % (r["id"], r.get("company"), exc))
             hit = None
+            _ae._mark_lookup_failure()     # an exception is not an answer either
         new_url = (hit or {}).get("url") or ""
         if new_url:
             conn = get_db()
@@ -328,6 +337,13 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
                    (new_url, new_type, stamp, "%s match %s" % (hit.get("ats") or "ats", hit.get("score")),
                     r["id"], user_id, r.get("url")))
             out["resolved"] += 1
+        elif _lookup_incomplete():
+            # A board did not answer (timeout / 5xx / 429): this is not a
+            # miss. Leave link_resolved_at as it was, so the job is tried
+            # again on the next run and carries no "No direct link" penalty.
+            _write(get_db, "UPDATE jobs SET link_note=? WHERE id=? AND user_id=?",
+                   ("lookup incomplete (a job board did not answer) - retried next run", r["id"], user_id))
+            out["incomplete"] += 1
         else:
             _write(get_db, "UPDATE jobs SET link_type=?, link_resolved_at=?, "
                            "link_attempts=COALESCE(link_attempts,0)+1 WHERE id=? AND user_id=?",
@@ -348,8 +364,15 @@ def _write(get_db, sql, args):
 
 
 def run_detail(counts: dict) -> str:
+    c = {"incomplete": 0, **counts}
     return ("links: %(examined)d examined, %(resolved)d resolved, %(already_direct)d already direct, "
-            "%(unresolved)d unresolved, %(duplicate)d duplicate, %(left_for_next_run)d left for next run" % counts)
+            "%(unresolved)d unresolved, %(incomplete)d incomplete, %(duplicate)d duplicate, "
+            "%(left_for_next_run)d left for next run" % c)
+
+
+def _lookup_incomplete() -> bool:
+    import apply_engine as _ae
+    return _ae.lookup_incomplete()
 
 
 # ── 1d: ranking ─────────────────────────────────────────────────────────────
@@ -601,6 +624,9 @@ def comeet_postings(ref: str, fetch=None) -> list:
                     out.append({"title": p["name"], "url": url, "location": loc, "ats": "comeet"})
     except Exception as exc:
         print("[links] comeet %s: %s" % (ref, exc))
+        import apply_engine as _ae
+        _ae._mark_lookup_failure()          # no answer - not "no positions"
+        return []
     if len(_COMEET_CACHE) > 300:
         _COMEET_CACHE.clear()
     _COMEET_CACHE[ref] = (time.monotonic(), out)
@@ -633,6 +659,7 @@ def make_resolver(db, fetch=None):
     learned = learned_boards(db)
 
     def resolver(company, title, location, use_llm):
+        _ae.begin_lookup()
         hit = resolve_from_learned(company, title, location, learned, fetch=fetch)
         if hit:
             return hit
