@@ -11,7 +11,8 @@ Endpoint notes (verify periodically — these are undocumented and DO drift).
 Re-discovered live 2026-10-25, when three of them had been returning nothing:
   Microsoft  GET  apply.careers.microsoft.com/api/pcsx/search   (Eightfold; the old
                   gcsservices.careers.microsoft.com host now fails TLS - retired.
-                  Rate-limits hard: 429 on several of a handful of calls)
+                  Answers 429 to any request without its session cookies - see
+                  MicrosoftAdapter)
   Amazon     GET  www.amazon.jobs/en/search.json               (unchanged, working)
   Google     GET  www.google.com/about/careers/applications/jobs/results  (HTML page;
                   results are embedded as AF_initDataCallback 'ds:1'. The v3 JSON
@@ -89,19 +90,60 @@ def _israel(query) -> bool:
 # ─────────────────────────── Microsoft ─────────────────────────────────────
 
 class MicrosoftAdapter(_BigTechBase):
+    """Microsoft careers on Eightfold.
+
+    The API refuses a request without its session cookies (_vs, _vscid) with
+    HTTP 429 - and sets them on that refusal. Observed 2026-10-26: cookieless
+    calls got 429 six times out of six; the same call repeated with the cookies
+    from the refusal got 200, and after loading the careers page every API call
+    succeeded, back to back. No Retry-After is sent. The shared HttpClient opens
+    a new connection with no cookies per request, so this adapter keeps its own
+    cookie jar for the run: warm up on the careers page, then page through the
+    API, retrying a 429 once with whatever cookies it just set.
+    """
     name = JobSource.MICROSOFT
     BASE = "https://apply.careers.microsoft.com/api/pcsx/search"
     SITE = "https://apply.careers.microsoft.com"
+    WARMUP = SITE + "/careers?domain=microsoft.com"
+
+    def _opener(self):
+        import http.cookiejar
+        import urllib.request
+        return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+    def _call(self, opener, url, accept):
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(url, headers={
+            "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+            "Accept": accept, "Accept-Language": "en-US,en;q=0.9",
+            "Referer": self.WARMUP})
+        try:
+            with opener.open(req, timeout=config.HTTP_TIMEOUT) as r:
+                return r.status, r.read().decode("utf-8", "ignore")
+        except urllib.error.HTTPError as e:
+            return e.code, ""
 
     def _fetch_bigtech(self, query) -> list:
+        import urllib.parse
+        opener = self._opener()
+        try:
+            self._call(opener, self.WARMUP, "text/html")      # sets the session cookies
+        except Exception:
+            pass                                               # the 429 retry below still recovers
         out, seen, start = [], set(), 0
         while len(out) < query.limit_per_source and start < 100:
-            r = self._get_ok(self.BASE, params={
+            url = self.BASE + "?" + urllib.parse.urlencode({
                 "domain": "microsoft.com", "query": _q(query), "location": _loc(query),
-                "start": start, "sort_by": "relevance",
-            }, headers={"Accept": "application/json",
-                        "Referer": self.SITE + "/careers?domain=microsoft.com"})
-            data = (r.json() or {}).get("data") or {}
+                "start": start, "sort_by": "relevance"})
+            status, body = self._call(opener, url, "application/json")
+            if status == 429:
+                time.sleep(2.0)
+                status, body = self._call(opener, url, "application/json")
+            if status != 200:
+                raise RuntimeError("HTTP %s from apply.careers.microsoft.com" % status)
+            data = (json.loads(body or "{}") or {}).get("data") or {}
             page = data.get("positions") or []
             for j in page:
                 pid = str(j.get("id") or "")
@@ -125,7 +167,6 @@ class MicrosoftAdapter(_BigTechBase):
             start += len(page)
             if not page or start >= total:
                 break
-            time.sleep(1.0)       # Eightfold answers 429 to a quick second call
         return out[: query.limit_per_source]
 
 
