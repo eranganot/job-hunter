@@ -1315,18 +1315,24 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
      unknowable, but almost every pass is his, and excluding them understated
      the denominator by more than including them overstates it. */
   const yourPasses = n("passed_by_user") + n("passed_unknown") + archived;
+  /* "Already applied elsewhere" (Eran, 2026-11-05): he approved the job and then
+     applied on his own. It is not a pass, so it counts as a yes in the approval
+     rate - but the app did not apply, so it stays OUT of "Actually applied",
+     numerator and denominator both. */
+  const elsewhere = n("applied_elsewhere");
   /* Decided = you made a call on it, which INCLUDES everything sitting in the
      queue: approving a job is a decision, whether or not it has been applied to
      yet. Only "still in the swipe queue" and "deferred" are undecided, and
      those sit outside the rate rather than dragging it down. */
   const decided   = hasBreakdown
-    ? approvedCount + appliedCount + yourPasses
+    ? approvedCount + appliedCount + elsewhere + yourPasses
     : approvedCount + rejectedCount;
   const reviewed  = decided;
 
   const approvedAllTime = approvedCount + appliedCount;
   const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0);
-  const approvalRate = pct(approvedAllTime, decided);
+  const saidYes = approvedAllTime + elsewhere;
+  const approvalRate = pct(saidYes, decided);
   const applyRate    = pct(reallyApplied, approvedAllTime);
 
   /* Every figure on this screen, and how they meet.
@@ -1341,7 +1347,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
      from the top line, not just from the rate. */
   const foundRaw  = totalSuggested || 0;
   const found     = foundRaw - filtered;
-  const parts     = approvedAllTime + yourPasses + stillNew + deferredCount;
+  const parts     = saidYes + yourPasses + stillNew + deferredCount;
   const reconciles = found === parts;
 
   const Row = ({ label, value, sub, tone }: any) => (
@@ -1360,7 +1366,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
         <div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-2xl p-5 border border-blue-800/50">
           <h4 className="text-sm font-medium text-gray-400 mb-1">Approval rate</h4>
           <div className="text-3xl font-bold text-blue-400 mb-1">{approvalRate}%</div>
-          <p className="text-sm text-gray-400">{approvedAllTime} approved of {decided} you decided on</p>
+          <p className="text-sm text-gray-400">{saidYes} approved of {decided} you decided on</p>
           {filtered > 0 && <p className="text-xs text-gray-400 mt-1">{filtered} more never reached you and are not counted</p>}
         </div>
         <div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-2xl p-5 border border-green-800/50">
@@ -1368,6 +1374,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
           <div className="text-3xl font-bold text-green-400 mb-1">{applyRate}%</div>
           <p className="text-sm text-gray-400">{reallyApplied} applied of {approvedAllTime} approved</p>
           {notApplied > 0 && <p className="text-xs text-amber-400/90 mt-1">{notApplied} more are marked applied but never were</p>}
+          {elsewhere > 0 && <p className="text-xs text-gray-400 mt-1">{elsewhere} you applied to elsewhere are not counted here</p>}
         </div>
       </div>
 
@@ -1383,6 +1390,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
               <span>Jobs that reached you</span><span className="font-semibold">{found}</span>
             </div>
             <div className="flex justify-between gap-3 text-green-300 pl-4 pt-1"><span>approved</span><span>{approvedAllTime}</span></div>
+            {elsewhere > 0 && <div className="flex justify-between gap-3 text-green-300 pl-4"><span>approved, then applied elsewhere</span><span>{elsewhere}</span></div>}
             <div className="flex justify-between gap-3 text-red-300 pl-4"><span>you passed</span><span>{yourPasses}</span></div>
             <div className="flex justify-between gap-3 text-amber-300 pl-4"><span>deferred</span><span>{deferredCount}</span></div>
             <div className="flex justify-between gap-3 text-gray-400 pl-4"><span>still in your swipe queue</span><span>{stillNew}</span></div>
@@ -1392,7 +1400,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
             </div>
           </div>
           <p className="text-xs text-gray-400 mt-3">
-            Approval rate = {approvedAllTime} approved ÷ ({approvedAllTime} approved + {yourPasses} passed) = <span className="text-blue-300 font-medium">{approvalRate}%</span>.
+            Approval rate = {saidYes} approved ÷ ({saidYes} approved + {yourPasses} passed) = <span className="text-blue-300 font-medium">{approvalRate}%</span>.
             {" "}Approved counts everything you said yes to, queued or already applied to — approving is the decision.
             {deferredCount + stillNew > 0 ? ` The ${stillNew} still in your swipe queue and ${deferredCount} deferred are not decisions yet, so they are outside the rate.` : ""}
           </p>
@@ -1430,6 +1438,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
           <h4 className="font-semibold text-white mb-1">What &ldquo;passed&rdquo; is made of</h4>
           <p className="text-xs text-gray-400 mb-2">Only the first line is a decision you made.</p>
           <Row label="You passed" sub="Swiped left, with or without a reason" value={n("passed_by_user")} tone="text-red-300" />
+          {elsewhere > 0 && <Row label="Not a pass: applied elsewhere" sub="Removed from the queue because you applied on your own. Counted as approved, never as a pass, and the company is never demoted." value={elsewhere} tone="text-green-300" />}
           <Row label="Filtered out automatically" sub="Dead link, expired, gone, or already attempted" value={filtered} tone="text-gray-400" />
           {n("passed_unknown") > 0 && <Row label="Origin unknown" sub="Recorded before the app tracked this" value={n("passed_unknown")} tone="text-gray-400" />}
           {archived > 0 && <Row label="Archived after 30 days" sub="Rows deleted to save space; origin not recoverable" value={archived} tone="text-gray-400" />}
@@ -1439,7 +1448,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
       <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
         <h4 className="font-semibold text-white mb-4">Your decisions</h4>
         <div className="space-y-3">
-          {[["Approved", approvedAllTime, "bg-green-500"],
+          {[["Approved", saidYes, "bg-green-500"],
             ["Passed", hasBreakdown ? yourPasses : rejectedCount, "bg-red-500"],
             ["Deferred", deferredCount, "bg-amber-500"]].map(([label, v, color]: any) => (
             <div key={label}>

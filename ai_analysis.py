@@ -160,6 +160,10 @@ def _feedback_notes(signals: "dict | None") -> str:
                 lines.append(seg)
         if lines:
             parts.append("Roles they recently rejected: " + "; ".join(lines) + ".")
+    liked = sorted(signals.get("interested_companies") or [])
+    if liked:
+        parts.append("Companies they applied to on their own (they WANT to work there - "
+                     "never lower a score for the company itself): " + ", ".join(liked[:15]) + ".")
     if not parts:
         return ""
     return (
@@ -194,9 +198,13 @@ def compute_feedback_penalty(
     bad    = signals.get("bad_companies") or set()
     passed = signals.get("passed_companies") or {}
 
+    interested = signals.get("interested_companies") or set()
+
     if company and company in bad:
         penalty += 45
         reason = "Company you flagged as bad"
+    elif company and company in interested:
+        pass        # he applied there himself: never "you've passed on this company"
     elif company:
         w = passed.get(company, 0)
         if w >= 1.5:
