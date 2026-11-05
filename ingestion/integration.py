@@ -24,6 +24,7 @@ from typing import Any, Optional
 from .models import NormalizedJob, CanonicalJob, SearchQuery
 from .dedup import Deduplicator
 from .registry import build_adapters
+from .models import SourceTier
 from .proxies import ProxyManager
 from .credits import CreditManager
 from .relevance import gate_enabled, passes as _passes_relevance
@@ -80,15 +81,21 @@ def collect_external_sources(
     keywords: list[str],
     existing_urls: Optional[set[str]] = None,
     limit_per_source: int = 60,
+    allow_paid: bool = False,
+    on_paid_call=None,
 ) -> list[dict[str, Any]]:
-    """Fetch the new sources concurrently; return raw legacy dicts. Fails soft."""
+    """Fetch the new sources concurrently; return raw legacy dicts. Fails soft.
+
+    allow_paid    the user's plan includes paid sources and has credit left
+    on_paid_call  called once per paid source that answered OK - the user's
+                  monthly paid-source credits (plans.py)"""
     proxies, credits = _managers()
     query = SearchQuery(
         titles=titles or [], locations=locations or ["Israel"],
         keywords=keywords or [], existing_urls=existing_urls or set(),
         limit_per_source=limit_per_source,
     )
-    adapters = build_adapters(role, proxies, credits)
+    adapters = build_adapters(role, proxies, credits, allow_paid=allow_paid)
     out: list[dict[str, Any]] = []
     reports: list[str] = []
     _gate = gate_enabled()
@@ -104,6 +111,11 @@ def collect_external_sources(
                 _remember(a.name.value, "error", 0, 0, f"{type(e).__name__}: {e}")
                 continue
             reports.append(f"{a.name.value}:{res.status.value}({res.count})")
+            if on_paid_call is not None and a.tier == SourceTier.PAID and res.status.value == "ok":
+                try:
+                    on_paid_call(a.name.value)
+                except Exception as _pc:
+                    print(f"[ingest] WARNING could not count a paid-source credit: {_pc}")
             _kept_before = len(out)
             for nj in res.jobs:
                 # Geography + title gate: external sources are global and ignore

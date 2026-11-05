@@ -669,6 +669,16 @@ def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
         return False
 
 
+def _plan_search_schedule(freq, s_dow, plan_row):
+    """(frequency, search weekday) after the plan's cadence. The plan decides
+    (Free: weekly), whatever the profile says - a downgraded user keeps 'daily'
+    in their profile. A weekly plan with no chosen day searches on Sunday
+    (weekday 6), the start of the Israeli week."""
+    if entitlements.limit(plan_row, "search_cadence") == "weekly":
+        return "weekly", (6 if s_dow is None else s_dow)
+    return freq, s_dow
+
+
 def _check_scheduled_jobs() -> None:
     """Auto-trigger search/apply for each active user when their scheduled hour arrives."""
     # Only one instance may decide that a scheduled run is due. The queue's
@@ -685,7 +695,8 @@ def _check_scheduled_jobs() -> None:
         try:
             rows = conn.execute(
                 "SELECT u.id, p.search_hour, p.apply_hour, "
-                "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only, p.auto_apply_enabled "
+                "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only, p.auto_apply_enabled, "
+                "u.role, u.plan, u.plan_until, u.plan_after "
                 "FROM users u JOIN user_profiles p ON p.user_id = u.id "
                 "WHERE u.is_active = 1"
             ).fetchall()
@@ -698,6 +709,8 @@ def _check_scheduled_jobs() -> None:
                 wo = row[6]
                 auto_apply = row[7]
                 cur_dow = now.weekday()  # 0=Mon ... 6=Sun
+                freq, s_dow = _plan_search_schedule(
+                    freq, s_dow, {"role": row[8], "plan": row[9], "plan_until": row[10], "plan_after": row[11]})
                 # Skip weekends if weekdays_only
                 if wo and cur_dow >= 5:
                     continue
@@ -793,6 +806,20 @@ def _attribute_gemini_to(fn):
             return fn(user_id, *a, **kw)
     return _wrapped
 
+
+
+def _plan_ai_cap(user_id):
+    """gemini.py asks this for a user's daily AI-call cap from their plan."""
+    conn = database.get_db()
+    try:
+        row = conn.execute("SELECT role, plan, plan_until, plan_after FROM users WHERE id=?",
+                           (user_id,)).fetchone()
+    finally:
+        conn.close()
+    return entitlements.limit(dict(row), "ai_calls_per_day") if row else None
+
+
+gemini.set_plan_cap_resolver(_plan_ai_cap)
 
 
 def _source_health():
@@ -1386,20 +1413,39 @@ def run_job_search(user_id: int):
                         import ingestion as _ingestion
                         # role gates the paid sources (admin-only)
                         _role = "user"
+                        _paid_ok = False
+                        _plan_row = None
                         try:
                             _conn_r = database.get_db()
                             try:
                                 _rr = _conn_r.execute(
-                                    "SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
-                                _conn_r.close()
+                                    "SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
                                 _role = (_rr["role"] if _rr and _rr["role"] else "user")
+                                if _rr:
+                                    _plan_row = dict(_rr)
+                                    # Paid sources: Premium and Expert, while this
+                                    # month's credits last (plans.py); admin always.
+                                    if entitlements.limit(_plan_row, "paid_sources"):
+                                        _paid_ok = entitlements.allowed(
+                                            _conn_r, _plan_row, "paid_source_credit")[0]
+                                _conn_r.close()
                             finally:
                                 _conn_r.close()
                         except Exception:
                             _role = "user"
+
+                        def _spend_paid_credit(_src, _row=_plan_row):
+                            if _row is None:
+                                return
+                            _cc = database.get_db()
+                            try:
+                                entitlements.try_consume(_cc, _row, "paid_source_credit")
+                            finally:
+                                _cc.close()
                         _ext = _ingestion.collect_external_sources(
                             role=_role, titles=titles_, locations=locs_,
-                            keywords=kws_, existing_urls=existing_urls)
+                            keywords=kws_, existing_urls=existing_urls,
+                            allow_paid=_paid_ok, on_paid_call=_spend_paid_credit)
                         all_raw.extend(_ext)
                         _before = len(all_raw)
                         all_raw = _ingestion.deduplicate_raw(all_raw)
@@ -2037,6 +2083,8 @@ def run_job_search(user_id: int):
                     conn = database.get_db()
                     try:
                         inserted = 0; new_jobs_info = []; skipped_rej = 0
+                        # Phase 5b: this search's jobs are the ones above this id.
+                        _batch_after = conn.execute("SELECT COALESCE(MAX(id), 0) FROM jobs").fetchone()[0]
                         for j in all_jobs_data:
                             _jc = j.get("company","").strip().lower()
                             _jt = j.get("job_title","").strip().lower()
@@ -2094,9 +2142,28 @@ def run_job_search(user_id: int):
                                      j.get("publish_date"), (j.get("full_description") or "")[:5000],
                                      _fb_pen, _fb_rsn))
                                 inserted += 1
-                                new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url_ok":_url_ok.get(_jurl) if _jurl else None})
+                                new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url":_jurl,"url_ok":_url_ok.get(_jurl) if _jurl else None})
                             except Exception as e: print(f"[run-search] insert error: {e}")
-                        conn.commit(); conn.close()
+                        conn.commit()
+                        # ── Plan: matches shown per search (Phase 5b) ──────────────────
+                        # The plan's top N new jobs stay 'new'; the rest are 'locked' and
+                        # reach the user only as a count. A failure here leaves every job
+                        # visible (logged), never hides the whole search.
+                        locked_n = 0
+                        try:
+                            _plan_user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                            _locked = entitlements.lock_matches_beyond_limit(
+                                conn, dict(_plan_user), _batch_after, _batch_after + 1)
+                            locked_n = len(_locked)
+                            if locked_n:
+                                _locked_urls = {u for _i, u in _locked}
+                                new_jobs_info = [i for i in new_jobs_info if i.get("url") not in _locked_urls]
+                                inserted -= locked_n
+                                print(f"[run-search] user {user_id}: {locked_n} match(es) beyond the "
+                                      f"'{entitlements.tier_of(dict(_plan_user))}' plan locked")
+                        except Exception as _lk:
+                            print(f"[run-search] ERROR could not apply the plan's match limit: {_lk}")
+                        conn.close()
 
                         # ── URL check ALL historical unverified jobs ─────────────────────
                         conn = database.get_db()
@@ -2181,7 +2248,8 @@ def run_job_search(user_id: int):
                                         finally:
                                             conn.close()
 
-                                database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)")
+                                database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)"
+                                                      + (f"; {locked_n} more need a higher plan" if locked_n else ""))
 
                                 # ── Consolidated search notification ─────────────────────────────
                                 # The FIRST line is what the phone push banner shows, so summarize the
@@ -2201,8 +2269,12 @@ def run_job_search(user_id: int):
                                         icon = "🔗" if info["url_ok"]==1 else ("⚠️" if info["url_ok"]==0 else "")
                                         notif_lines.append(f"  • {info['title']} @ {info['company']} {icon}".rstrip())
                                     if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
+                                elif locked_n:
+                                    notif_lines = [f"🔒 {locked_n} new match(es) found — upgrade your plan to see them"]
                                 else:
                                     notif_lines = [f"🔍 Search done — no new matches today ({today})"]
+                                if inserted > 0 and locked_n:
+                                    notif_lines.append(f"\n🔒 +{locked_n} more found — upgrade your plan to see them")
                                 if (hist_alive+hist_dead)>0:
                                     notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
                                     notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
@@ -6470,6 +6542,20 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
 
+        if path == "/api/jobs/locked":
+            user = self.require_auth()
+            if not user:
+                return
+            conn = database.get_db()
+            try:
+                out = entitlements.locked_summary(conn, user["id"])
+            finally:
+                conn.close()
+            out["matches_per_search"] = entitlements.limit(user, "matches_per_search")
+            out["plan"] = entitlements.tier_of(user)
+            self.send_json(out)
+            return
+
         if path == "/api/jobs":
             user = self.require_auth()
             if not user:
@@ -6488,11 +6574,16 @@ class Handler(BaseHTTPRequestHandler):
             conn  = database.get_db()
             try:
                 database.expire_old_jobs(conn, user["id"])
+                # A locked match (beyond the plan's per-search limit) is never
+                # sent, whatever status is asked for - only its count, from
+                # /api/jobs/locked (Phase 5b).
                 if status == "all":
                     rows = conn.execute(
-                        f"SELECT * FROM jobs WHERE user_id=? ORDER BY {order}",
+                        f"SELECT * FROM jobs WHERE user_id=? AND status!='locked' ORDER BY {order}",
                         (user["id"],)
                     ).fetchall()
+                elif status == "locked":
+                    rows = []
                 else:
                     rows = conn.execute(
                         f"SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY {order}",
@@ -7179,6 +7270,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         user_id = user["id"]
 
+        # A locked match (beyond the plan's per-search limit) cannot be acted on
+        # by any per-job route - approve, restore, apply, cover letter, check -
+        # whatever the route itself checks. One guard here, so a route added
+        # later is covered too (Phase 5b).
+        _lm = re.match(r"^/api/jobs/(\d+)/", path)
+        if _lm:
+            _lc = database.get_db()
+            try:
+                _is_locked = entitlements.is_locked(_lc, user_id, int(_lm.group(1)))
+            finally:
+                _lc.close()
+            if _is_locked:
+                self.send_json(entitlements.upgrade_required(
+                    "locked_match", user, message="Upgrade your plan to see this match."), 402)
+                return
+
         if path == "/api/blocklist":
             data = self.read_json()
             company = (data.get("company") or "").strip()
@@ -7458,6 +7565,14 @@ class Handler(BaseHTTPRequestHandler):
                 if user.get("role") == "admin":
                     kwargs["schedule_frequency"] = "daily"
                 else:
+                    # A daily search is a plan feature (Free is weekly). The
+                    # scheduler enforces it too, so a downgrade needs no rewrite.
+                    if (data["schedule_frequency"] == "daily"
+                            and entitlements.limit(user, "search_cadence") == "weekly"):
+                        self.send_json(entitlements.upgrade_required(
+                            "search_cadence", user,
+                            message="Daily searches are included from the Premium plan."), 402)
+                        return
                     kwargs["schedule_frequency"] = data["schedule_frequency"]
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
@@ -7506,7 +7621,22 @@ class Handler(BaseHTTPRequestHandler):
                     _cv_text = _extract_cv_text(_cv_path, _prof['cv_summary'])
                     if not _cv_path and (not _cv_text or len(_cv_text.strip()) < 30):
                         self.send_json({'error': 'No CV found. Please upload your CV first.'}); return
+                    _qc = database.get_db()
+                    try:
+                        _ok, _used, _cap = entitlements.allowed(_qc, user, 'cv_review')
+                    finally:
+                        _qc.close()
+                    if not _ok:
+                        self.send_json(entitlements.upgrade_required(
+                            'cv_review_limit', user, used=_used, limit=_cap,
+                            message="You've used all %d CV reviews this month." % (_cap or 0)), 402)
+                        return
                     _result = _call_gemini_cv_optimizer(cv_text=_cv_text, cv_path=_cv_path, user_id=user_id)
+                    _qc = database.get_db()
+                    try:
+                        entitlements.try_consume(_qc, user, 'cv_review')
+                    finally:
+                        _qc.close()
                     _result['cached'] = False
                     _now = _dt.now().isoformat()
                     _result['analyzed_date'] = _now
@@ -7614,6 +7744,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 status_map = {"approve":"approved","reject":"rejected","later":"deferred","applied":"applied","failed":"approved","retry":"approved","restore":"new"}
+                if action == "later" and not entitlements.limit(user, "deferred_list"):
+                    conn.close()
+                    self.send_json(entitlements.upgrade_required(
+                        "deferred_list", user, message="Saving jobs for later is included from the Premium plan."), 402)
+                    return
                 if action == "restore":
                     conn.execute(
                         "UPDATE jobs SET status='new', apply_status=NULL, "
@@ -7822,10 +7957,10 @@ class Handler(BaseHTTPRequestHandler):
         m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
         if m:
             job_id = int(m.group(1))
-            # Admin check
-            if not user.get("email") or user["email"].lower() != (ADMIN_EMAIL or "").lower():
-                self.send_json({"error": "Admin only"}, 403)
-                return
+            # Cover letters are a plan feature (approved matrix, 2026-11-05):
+            # Free none, Premium 10 / month, Expert 30 / month, admin unmetered.
+            # They used to be admin-only. Checked before generating, counted
+            # after a success, so a failed generation costs the user nothing.
             data = self.read_json()
             conn = database.get_db()
             try:
@@ -7844,6 +7979,14 @@ class Handler(BaseHTTPRequestHandler):
                     conn.close()
                     self.send_json({"success": True})
                     return
+                _ok, _used, _cap = entitlements.allowed(conn, user, "cover_letter")
+                if not _ok:
+                    conn.close()
+                    self.send_json(entitlements.upgrade_required(
+                        "cover_letter_limit", user, used=_used, limit=_cap,
+                        message=("Cover letters are included from the Premium plan." if not _cap else
+                                 "You've used all %d cover letters this month." % _cap)), 402)
+                    return
                 # Generate via Gemini Flash
                 profile = conn.execute(
                     "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
@@ -7859,6 +8002,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Persist only on success
                 c2 = database.get_db()
                 try:
+                    entitlements.try_consume(c2, user, "cover_letter")
                     c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
                     c2.commit()
                     c2.close()
@@ -7881,6 +8025,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "invalid"}, 400); return
             conn = database.get_db()
             try:
+                if str(job_id).isdigit() and entitlements.is_locked(conn, user["id"], int(job_id)):
+                    self.send_json(entitlements.upgrade_required(
+                        "locked_match", user, message="Upgrade your plan to see this match."), 402)
+                    return
                 # WRITES `stage`, NOT `apply_status`. It wrote apply_status until
                 # 2026-09-15, which was wrong in both directions at once:
                 #   - the column the UI READS to highlight the selected stage is
@@ -7958,7 +8106,7 @@ class Handler(BaseHTTPRequestHandler):
                 done       = 0
                 for job_id in ids:
                     job = conn.execute(
-                        "SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)
+                        "SELECT * FROM jobs WHERE id=? AND user_id=? AND status!='locked'", (job_id, user_id)
                     ).fetchone()
                     if not job:
                         continue
@@ -8045,6 +8193,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": f"Search was run too many times recently. "
                                          f"Try again in about {_mins} minute(s)."}, 429)
                 return
+            # On-demand searches are a plan limit (Free 1 / day, Premium 3,
+            # Expert 10). Checked first, counted only once a run is actually
+            # queued - pressing again while one is in flight costs nothing.
+            _sc = database.get_db()
+            try:
+                _ok, _used, _cap = entitlements.allowed(_sc, user, "on_demand_search")
+            finally:
+                _sc.close()
+            if not _ok:
+                self.send_json(entitlements.upgrade_required(
+                    "on_demand_search_limit", user, used=_used, limit=_cap,
+                    message="You've used today's %d on-demand search%s. Your scheduled search still runs."
+                            % (_cap, "" if _cap == 1 else "es")), 402)
+                return
             # A row, not a thread. Pressing the button twice while one is in
             # flight is now a no-op rather than a second Gemini-spending search.
             try:
@@ -8057,6 +8219,12 @@ class Handler(BaseHTTPRequestHandler):
                                          f"Resets at midnight UTC.",
                                 "status": "daily_cap"}, 429)
                 return
+            if _run_id:
+                _sc = database.get_db()
+                try:
+                    entitlements.try_consume(_sc, user, "on_demand_search")
+                finally:
+                    _sc.close()
             self.send_json({"status": "queued" if _run_id else "already_running",
                             "run_id": _run_id})
             return

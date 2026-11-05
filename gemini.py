@@ -366,6 +366,42 @@ def _trip_billing_pause(error: str) -> float:
     return until
 
 
+# ── the plan's daily AI cap (Phase 5b) ───────────────────────────────────────
+#
+# plans.py gives each plan "AI calls per day" (Free 30, Premium 300, Expert 600,
+# admin none). The per-user env ceiling (JH_LLM_USER_CALLS) stays as a safety
+# net; the stricter of the two applies. Reaching the PLAN cap is expected
+# behaviour, not a cost incident, so it blocks without alerting the admin - the
+# env ceilings still alert. app.py installs the resolver; it is cached per user
+# for a few minutes so a scoring run is not a database query per call.
+
+_PLAN_CAP_RESOLVER = None
+_PLAN_CAP_CACHE: dict = {}
+_PLAN_CAP_TTL_S = 300
+
+
+def set_plan_cap_resolver(fn):
+    """fn(user_id) -> int | None (None = no plan cap)."""
+    global _PLAN_CAP_RESOLVER
+    _PLAN_CAP_RESOLVER = fn
+    _PLAN_CAP_CACHE.clear()
+
+
+def _plan_cap(user_id):
+    if _PLAN_CAP_RESOLVER is None or user_id is None:
+        return None
+    hit = _PLAN_CAP_CACHE.get(user_id)
+    if hit and time.monotonic() - hit[0] < _PLAN_CAP_TTL_S:
+        return hit[1]
+    try:
+        cap = _PLAN_CAP_RESOLVER(user_id)
+    except Exception as e:
+        print("[gemini] WARNING plan cap lookup failed for user %s: %s" % (user_id, e))
+        return None
+    _PLAN_CAP_CACHE[user_id] = (time.monotonic(), cap)
+    return cap
+
+
 def check(user_id: int | None = None, cost: int = 1):
     """Raise BudgetExceeded if this call would cross a ceiling.
 
@@ -390,6 +426,11 @@ def check(user_id: int | None = None, cost: int = 1):
             if lim["user_tokens"] and u["tokens"] >= lim["user_tokens"]:
                 breaches.append(("user:%s" % user_id, u["tokens"], lim["user_tokens"], "tokens"))
         if not breaches:
+            cap = _plan_cap(user_id)
+            if cap is not None and user_id is not None:
+                u = _PER_USER.get(int(user_id), {"calls": 0, "tokens": 0})
+                if u["calls"] + cost > cap:
+                    raise BudgetExceeded("plan:%s" % user_id, u["calls"], cap, "calls")
             return
         scope, used, limit, unit = breaches[0]
         _alert_locked(
