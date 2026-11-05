@@ -852,6 +852,15 @@ def m0016_enforcement_launch(conn):
     conn.commit()
 
 
+def m0017_account_deletion(conn):
+    """Step 6: users.delete_after - UTC 'YYYY-MM-DD HH:MM:SS' when a requested
+    account deletion happens (accountdata.GRACE_DAYS after the request);
+    signing in before then clears it. NULL = no deletion pending."""
+    if not _has_column(conn, "users", "delete_after"):
+        conn.execute("ALTER TABLE users ADD COLUMN delete_after TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -869,6 +878,7 @@ MIGRATIONS = [
     (14, "recheck_unresolved_links",    m0014_recheck_unresolved_links),
     (15, "plans_and_promotions",        m0015_plans_and_promotions),
     (16, "enforcement_launch",          m0016_enforcement_launch),
+    (17, "account_deletion",            m0017_account_deletion),
 ]
 
 

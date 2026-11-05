@@ -2306,6 +2306,46 @@ function PlanPanel({ me }: { me: any }) {
   </>);
 }
 
+/* Step 6: the user's own data. Export is one zip (everything we hold about
+   them as JSON, plus their CV). Deletion is scheduled 14 days ahead and signs
+   them out everywhere; signing in before then cancels it. Typing the email is
+   the confirmation the server also requires. */
+function YourData({ me }: { me: any }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const del = async () => {
+    setBusy(true); setMsg("");
+    try {
+      await api.deleteAccount(typed.trim());
+      window.location.href = "/login?deleted=1";
+    } catch (e: any) { setMsg(e?.message || "Couldn't schedule the deletion"); setBusy(false); }
+  };
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><FileText className="w-5 h-5 text-gray-400" />Your data</h3>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <a href="/api/me/export" className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><ExternalLink className="w-4 h-4" />Export my data</a>
+        <button onClick={() => setOpen((v) => !v)} className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-red-500/40 hover:bg-red-500/10 text-red-300 rounded-xl text-sm font-medium"><Trash2 className="w-4 h-4" />Delete my account</button>
+      </div>
+      <p className="text-xs text-gray-400 mt-2">The export is a zip with your profile, jobs, activity and settings, plus your CV. Passwords and access tokens are never included.</p>
+      {open && (
+        <div className="mt-3 p-4 rounded-xl border border-red-500/40 bg-red-500/5">
+          <p className="text-sm text-white font-medium">Delete your account?</p>
+          <p className="text-xs text-gray-300 mt-1">You'll be signed out everywhere now. Your account, CV, jobs and settings are deleted permanently in 14 days. Sign in before then to keep everything.</p>
+          <label className="block text-xs text-gray-400 mt-3 mb-1">Type <b className="text-gray-200">{me?.email}</b> to confirm</label>
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-900 text-white text-sm" />
+          <button onClick={del} disabled={busy || typed.trim().toLowerCase() !== String(me?.email || "").toLowerCase()}
+            className="mt-3 w-full py-2.5 rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-500 text-white disabled:opacity-40">
+            {busy ? "Scheduling\u2026" : "Delete my account in 14 days"}</button>
+          {msg && <p className="text-xs text-red-300 mt-2">{msg}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () => void; initialTab?: SettingsTab }) {
   const parseTitles = (v: any): string[] => { if (!v) return []; if (Array.isArray(v)) return v; try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); } catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); } };
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
@@ -2445,6 +2485,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
               <a href="/logout" className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><LogOut className="w-4 h-4" />Sign out</a>
             </div>
           </div>
+          {!isAdmin && <YourData me={me} />}
           </>)}
           {tab === "prefs" && (<>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Briefcase className="w-5 h-5 text-indigo-400" />Job Titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="VP Product" /></div>
