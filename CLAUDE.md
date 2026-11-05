@@ -17,9 +17,9 @@ Claude works in a cloud workspace with **push access to `github.com/eranganot/jo
 - `scripts/smoke.ps1` / `scripts/build_web.ps1` are the original Windows versions; PRs use `scripts/smoke.py` and `scripts/build_web.py` (a workspace build of unchanged `web/` reproduced the committed bundle byte for byte, 2026-10-25).
 - Use the `investigate-issue` skill for any root-cause work, `app-bug-triage` for production bugs.
 
-## Two UIs — know which one you're in
-- **`/app`** — React + Vite + TS + Tailwind PWA, source in `web/`, shipped as the **committed `web_bundle/`**. Railway does NOT build the frontend: any `web/src` change needs a local rebuild, a check that the built CSS is ~25KB (not ~400 bytes), a service-worker cache bump, and a commit of `web_bundle/`.
-- **`/dashboard`** — legacy server-rendered HTML, `app.py` lines ~2345–5380, styled by a frozen gzip+base64 Tailwind blob at `app.py:33` that no build regenerates. Being retired in Phase 4 of the execution plan.
+## One UI — `/app`
+- **`/app`** — React + Vite + TS + Tailwind PWA, source in `web/`, shipped as the **committed `web_bundle/`**. Railway does NOT build the frontend: any `web/src` change needs `python3 scripts/build_web.py` (builds, checks the CSS size, bumps the service-worker cache, verifies) and a commit of `web_bundle/`.
+- The legacy server-rendered UI (`/dashboard`, `/settings`, `/onboarding`, `/admin`, the frozen Tailwind blob, `LEGACY_UI`) was **deleted in Step 9 (2026-11-05)**. Those URLs only redirect into `/app`. `/login` and `/register` are still server-rendered (`LOGIN_HTML` / `REGISTER_HTML`, self-contained styles) — they are not legacy.
 
 ## Domain facts
 - Auto-apply is **OFF in production** (`APPLY_ENGINE_ENABLED` unset ⇒ `apply_engine.submit_application` no-ops), root cause open — see `APPLY_ENGINE_INVESTIGATION.md`. That workstream is parked by Eran's decision; do not re-enable it without him.
