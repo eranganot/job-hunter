@@ -22,6 +22,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 11 | Payments, Paddle sandbox only (Phase 6) | P2 | Med | L | Not started; Paddle account status unrecorded |
 | 12 | Feedback-loop effectiveness metrics (old #19) | P2 | Med | M | Not started |
 | 13 | Capture salary at pass time (old #17; location half done) | P3 | Low | M | Not started |
+| 14 | **Job-tailored CV** — rewrite the user's CV for one job description (new, Eran 2026-11-05); plan tier to be set in the matrix | P3 | Med | M | Not started |
 
 ## Done since 2026-10-25
 - **Step 0 — housekeeping** (#2, #6): PR shipping, `scripts/smoke.py`, Sentry on in production (`error_reporting: on`).
