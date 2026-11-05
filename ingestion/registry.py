@@ -46,19 +46,23 @@ def build_adapters(
     role: Optional[str],
     proxy_manager: Optional[ProxyManager] = None,
     credit_manager: Optional[CreditManager] = None,
+    allow_paid: bool = False,
 ) -> list[SourceAdapter]:
     """
     Instantiate the adapters this user is allowed to run.
 
-    FREE tier → everyone. PAID tier → admin only. Proxies (a paid resource) are
-    only handed to adapters on admin runs; free users hit Big-Tech endpoints
-    directly (best-effort, no proxy spend on the admin's account).
+    FREE tier → everyone. PAID tier → admin, or a plan that includes paid
+    sources with credit left this month (`allow_paid`, decided by the caller
+    from plans.py - Premium and Expert, credit-capped). Proxies (a paid
+    resource) are only handed to adapters on admin runs; everyone else hits
+    endpoints directly (best-effort, no proxy spend on the admin's account).
     """
     admin = is_admin(role)
     proxies = proxy_manager if admin else None
+    paid_ok = admin or bool(allow_paid)
     out: list[SourceAdapter] = []
     for cls in ALL_ADAPTERS:
-        if cls.tier == SourceTier.PAID and not admin:
+        if cls.tier == SourceTier.PAID and not paid_ok:
             continue                      # gated out — never instantiated
         out.append(cls(proxy_manager=proxies, credit_manager=credit_manager))
     return out

@@ -179,8 +179,23 @@ def grant_plan(conn, user_id: int, plan: str, days: int | None = None, after: st
         (plan, until, after if days else None, source, user_id))
     _event(conn, user_id, prev[0], plan, until, reason, by_user_id, now)
     conn.commit()
+    if _has_locked_jobs_table(conn):
+        unlock_matches(conn, user_id, plan)
     return {"plan": plan, "plan_until": until, "plan_after": after if days else None,
             "plan_source": source}
+
+
+def _has_locked_jobs_table(conn) -> bool:
+    """search_batch arrives with migration 16; before it there is nothing to unlock."""
+    try:
+        conn.execute("SELECT search_batch FROM jobs WHERE 1=0").fetchall()
+        return True
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
 
 
 def start_new_user_promotion(conn, user_id: int, now: datetime | None = None) -> dict:
@@ -295,3 +310,100 @@ def plan_info(user, now: datetime | None = None) -> dict:
         "days_left": int(-(-(until - now).total_seconds() // 86400)) if active else None,
         "limits": {k: v for k, v in plans.row(tier_of(user, now)).items() if k != "label"},
     }
+
+
+def allowed(conn, user, meter: str, n: int = 1, now: datetime | None = None) -> tuple:
+    """(ok, used, limit) without counting - for a route that must first know
+    whether the work will happen (a search already in flight costs nothing)."""
+    cap = limit(user, meter)
+    have = used(conn, _get(user, "id"), meter, now)
+    return (cap is None or have + n <= cap), have, cap
+
+
+def upgrade_required(reason: str, user, **extra) -> dict:
+    """The one body every plan refusal sends (HTTP 402), so the UI can show the
+    same upgrade prompt wherever a limit is hit."""
+    body = {"error": extra.pop("message", "This needs a higher plan."), "code": "upgrade_required",
+            "reason": reason, "plan": tier_of(user)}
+    body.update(extra)
+    return body
+
+
+# ── matches shown per search (the blurred rest) ────────────────────────────
+#
+# A search's new jobs beyond the plan's matches_per_search are stored with
+# status 'locked'. Every queue view filters on status, so a locked job is
+# invisible to them all; the routes that act on a job by id refuse a locked one
+# (app.py). Only the COUNT of locked jobs is ever sent to the browser, so a
+# blurred card cannot be read from the page's data. jobs.search_batch groups a
+# search's jobs, so an upgrade can unlock per search.
+
+_RANK = "COALESCE(match_score, 0) - COALESCE(feedback_penalty, 0)"
+
+
+def lock_matches_beyond_limit(conn, user, after_id: int, batch: int) -> list:
+    """Tag the jobs this search inserted (id > after_id, status 'new') with
+    `batch`, keep the plan's top N by score, lock the rest. Returns the locked
+    rows as [(id, url)]."""
+    uid = _get(user, "id")
+    rows = conn.execute(
+        "SELECT id, url FROM jobs WHERE user_id=? AND id>? AND status='new' "
+        "ORDER BY " + _RANK + " DESC, id ASC", (uid, after_id)).fetchall()
+    if not rows:
+        return []
+    ids = [r[0] for r in rows]
+    conn.execute("UPDATE jobs SET search_batch=? WHERE id IN (%s)" % ",".join("?" * len(ids)),
+                 [batch] + ids)
+    cap = limit(user, "matches_per_search")
+    locked = [] if cap is None else [(r[0], r[1]) for r in rows[cap:]]
+    if locked:
+        conn.execute("UPDATE jobs SET status='locked' WHERE id IN (%s)" % ",".join("?" * len(locked)),
+                     [i for i, _u in locked])
+    conn.commit()
+    return locked
+
+
+def unlock_matches(conn, user_id: int, tier: str) -> int:
+    """After a move to `tier`, unlock locked jobs up to the new per-search
+    limit, best first, batch by batch. A downgrade never re-locks anything the
+    user has already seen. Returns how many were unlocked."""
+    cap = plans.row(tier).get("matches_per_search")
+    if cap is None:
+        n = conn.execute("UPDATE jobs SET status='new' WHERE user_id=? AND status='locked'",
+                         (user_id,)).rowcount
+        conn.commit()
+        return max(n or 0, 0)
+    opened = 0
+    batches = [r[0] for r in conn.execute(
+        "SELECT DISTINCT search_batch FROM jobs WHERE user_id=? AND status='locked'", (user_id,))]
+    for b in batches:
+        shown = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE user_id=? AND search_batch=? AND status!='locked'",
+            (user_id, b)).fetchone()[0]
+        room = cap - shown
+        if room <= 0:
+            continue
+        ids = [r[0] for r in conn.execute(
+            "SELECT id FROM jobs WHERE user_id=? AND search_batch=? AND status='locked' "
+            "ORDER BY " + _RANK + " DESC, id ASC", (user_id, b)).fetchall()[:room]]
+        if ids:
+            conn.execute("UPDATE jobs SET status='new' WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
+            opened += len(ids)
+    conn.commit()
+    return opened
+
+
+def locked_summary(conn, user_id: int) -> dict:
+    """Counts only - never a title, company or link."""
+    total = conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='locked'",
+                         (user_id,)).fetchone()[0]
+    last = conn.execute(
+        "SELECT search_batch, COUNT(*) FROM jobs WHERE user_id=? AND status='locked' "
+        "GROUP BY search_batch ORDER BY search_batch DESC LIMIT 1", (user_id,)).fetchone()
+    return {"count": int(total or 0),
+            "latest_search": {"batch": last[0], "count": int(last[1])} if last else None}
+
+
+def is_locked(conn, user_id: int, job_id: int) -> bool:
+    row = conn.execute("SELECT status FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
+    return bool(row) and row[0] == "locked"

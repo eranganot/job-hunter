@@ -820,6 +820,38 @@ def m0015_plans_and_promotions(conn):
     conn.commit()
 
 
+def m0016_enforcement_launch(conn):
+    """Phase 5b (Step 4): plan limits are enforced from this deploy.
+
+      jobs.search_batch  groups one search's new jobs, so the matches beyond the
+                         plan's per-search limit (status 'locked') can be
+                         unlocked search by search after an upgrade
+
+    The launch promotion (Eran, 2026-11-05): every existing account that is not
+    admin and has never had a plan decision (plan_source IS NULL) gets Premium
+    free for 30 days from now, then Free - the same deal new signups have had
+    since 4a. Accounts that signed up after 4a already carry their promotion and
+    are left alone. Admin is a role and gets none. Each grant is logged in
+    plan_events (reason 'launch_promotion'). Idempotent: a re-run finds no
+    account with plan_source NULL.
+    """
+    if not _has_column(conn, "jobs", "search_batch"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN search_batch INTEGER")
+    conn.commit()
+    import entitlements
+    import plans
+    rows = conn.execute(
+        "SELECT id FROM users WHERE plan_source IS NULL "
+        "AND LOWER(COALESCE(role, 'user')) != 'admin'").fetchall()
+    for r in rows:
+        entitlements.grant_plan(conn, r[0], plans.PROMOTION_PLAN, days=plans.PROMOTION_DAYS,
+                                after="free", reason="launch_promotion")
+    if rows:
+        print("[db] launch promotion: %d account(s) on Premium for %d days"
+              % (len(rows), plans.PROMOTION_DAYS))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -836,6 +868,7 @@ MIGRATIONS = [
     (13, "job_links",                   m0013_job_links),
     (14, "recheck_unresolved_links",    m0014_recheck_unresolved_links),
     (15, "plans_and_promotions",        m0015_plans_and_promotions),
+    (16, "enforcement_launch",          m0016_enforcement_launch),
 ]
 
 
