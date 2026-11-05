@@ -20,7 +20,9 @@ Re-discovered live 2026-10-25, when three of them had been returning nothing:
   Apple      GET  jobs.apple.com/en-us/search?location=israel-ISR  (HTML page; results
                   in window.__staticRouterHydrationData. /api/role/search redirects to
                   /pagenotfound, and /api/v1/search ignores the location filter)
-  Meta       POST www.metacareers.com/graphql   (doc_id rotates → META_GRAPHQL_DOC_ID)
+  Meta       removed 2026-11-05: metacareers.com/robots.txt prohibits automated
+             collection without written permission, and the site answers scripted
+             requests 400/429. Meta's Israel roles still arrive via the LinkedIn search.
 
 A failed request now RAISES (status ERROR with the HTTP code) instead of
 returning [] - an empty list reported as OK is how these three broke silently.
@@ -313,50 +315,3 @@ class AppleAdapter(_BigTechBase):
             if len(out) >= query.limit_per_source:
                 break
         return out[: query.limit_per_source]
-
-
-# ─────────────────────────── Meta ──────────────────────────────────────────
-
-class MetaAdapter(_BigTechBase):
-    name = JobSource.META
-    BASE = "https://www.metacareers.com/graphql"
-
-    def _fetch_bigtech(self, query) -> list:
-        # Meta's careers search is a GraphQL POST whose persisted-query doc_id
-        # rotates. We can only run it when META_GRAPHQL_DOC_ID is supplied;
-        # otherwise we skip cleanly (still FREE tier, just config-gated).
-        doc_id = config.META_GRAPHQL_DOC_ID
-        if not doc_id:
-            return []
-        out = []
-        variables = {
-            "search_input": {
-                "q": _q(query),
-                "divisions": [], "offices": [], "roles": [], "teams": [],
-                "page": 1, "results_per_page": query.limit_per_source,
-            }
-        }
-        import json as _json
-        data = self.http.post_json(self.BASE, data={
-            "doc_id": doc_id,
-            "variables": _json.dumps(variables),
-        }, headers={"Origin": "https://www.metacareers.com"})
-        if not data:
-            return out
-        results = (((data or {}).get("data") or {}).get("job_search") or [])
-        for j in results[: query.limit_per_source]:
-            pid = j.get("id") or ""
-            url = f"https://www.metacareers.com/jobs/{pid}/" if pid else ""
-            locs = j.get("locations") or []
-            loc = ", ".join(locs) if isinstance(locs, list) else str(locs or "")
-            out.append(self._mk(
-                title=j.get("title", ""),
-                company="Meta",
-                location=loc,
-                url=url,
-                description="",
-                full_description="",
-                apply_type=ApplyType.DIRECT_ATS,
-                source_job_id=str(pid),
-            ))
-        return out

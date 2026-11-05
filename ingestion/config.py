@@ -79,9 +79,6 @@ class Config:
     # by the relevance gate (Israel-office jobs), so no global flood. Turn off
     # entirely with BIGTECH_ENABLED=0.
     BIGTECH_ENABLED = _env_bool("BIGTECH_ENABLED", True)
-    # Meta's GraphQL doc_id rotates; expose it as config so it can be refreshed
-    # without a code change.
-    META_GRAPHQL_DOC_ID = _env("META_GRAPHQL_DOC_ID")
 
     # ── general HTTP ──────────────────────────────────────────────────────
     HTTP_TIMEOUT = _env_int("INGEST_HTTP_TIMEOUT", 15)

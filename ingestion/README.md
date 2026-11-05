@@ -26,11 +26,11 @@ Adapter hierarchy (one common contract — adding a source is a ~40-line file):
 ```
 SourceAdapter (base.py)            # fetch() → AdapterResult; env/credit/tier gating
 ├── _BigTechBase (bigtech.py)      # FREE, requires_proxy=True
-│   ├── MicrosoftAdapter           # gcsservices.careers.microsoft.com/search/api/v1
+│   ├── MicrosoftAdapter           # apply.careers.microsoft.com/api/pcsx/search (Eightfold, cookie jar)
 │   ├── AmazonAdapter              # www.amazon.jobs/en/search.json
-│   ├── GoogleAdapter              # careers.google.com/api/v3/search
-│   ├── AppleAdapter               # jobs.apple.com/api/role/search (POST)
-│   └── MetaAdapter                # metacareers.com/graphql (doc_id via env)
+│   ├── GoogleAdapter              # google.com/about/careers/applications/jobs/results (HTML, ds:1)
+│   └── AppleAdapter               # jobs.apple.com/en-us/search?location=israel-ISR (HTML)
+│       (Meta removed 2026-11-05: robots.txt prohibits automated collection)
 ├── aggregators.py  (PAID, admin)  # TheirStack / Adzuna / Coresignal
 └── managed.py      (PAID, admin)  # ApifyAdapter / JobSpyAdapter (+ proxies)
 

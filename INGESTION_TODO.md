@@ -19,7 +19,7 @@ Big-Tech sources work and tells me which (if any) endpoints drifted so I can fix
 2. In **Deploy Logs**, confirm pip installed the new deps (search the log for `rapidfuzz`, `pydantic`, `httpx`).
 3. Trigger a job search from the app (or wait for the daily run).
 4. In the logs, copy every line containing `[ingest]` or `[search] Multi-source fuzzy dedup` and paste them back to me.
-   - Expect lines like: `external sources (role=admin): amazon:ok(60), apple:ok(0), google:ok(0), meta:skipped_no_creds(0), microsoft:error(0)` and `Multi-source fuzzy dedup: 320 -> 271 canonical jobs`.
+   - Expect lines like: `external sources (role=admin): amazon:ok(60), apple:ok(0), google:ok(0), microsoft:error(0)` and `Multi-source fuzzy dedup: 320 -> 271 canonical jobs`.
 **Send me:** those log lines. → I'll tell you which Big-Tech endpoints need a fix.
 
 ### ☐ 2. Decide the retain threshold + confirm admin email
@@ -67,14 +67,10 @@ Big-Tech sources work and tells me which (if any) endpoints drifted so I can fix
 4. In Railway add: `PROXY_USERNAME`, `PROXY_PASSWORD`, `PROXY_HOST`, `PROXY_PORT`, and keep `PROXY_ENABLED=1`.
 **Send me:** nothing — proxies activate on admin runs automatically. (Cost note: residential proxies bill per GB — start with a small cap.)
 
-### ☐ 7. Unlock Meta careers (GraphQL doc_id)
-**Value: Medium · Effort: ~10 min.** Meta's search uses a rotating persisted-query id; it self-skips until you supply one.
-1. Open https://www.metacareers.com/jobs in Chrome.
-2. Open DevTools (F12) → **Network** tab → filter for `graphql`.
-3. Type a search (e.g. "product manager") on the page so a `graphql` request fires.
-4. Click that request → **Payload/Form Data** → find `doc_id` → copy the long number.
-5. In Railway add: `META_GRAPHQL_DOC_ID=<that number>`.
-**Send me:** the `doc_id` if you want me to verify the Meta adapter against it. (It rotates every few weeks — re-grab if Meta goes quiet.)
+### ~~7. Unlock Meta careers (GraphQL doc_id)~~ — WITHDRAWN 2026-11-05
+Meta is no longer a source. `metacareers.com/robots.txt` prohibits automated collection without
+Facebook's written permission, and the site answers scripted requests 400/429. Do not set
+`META_GRAPHQL_DOC_ID` (the code no longer reads it). Meta's Israel roles still arrive via the LinkedIn search.
 
 ---
 
@@ -108,7 +104,6 @@ Big-Tech sources work and tells me which (if any) endpoints drifted so I can fix
 
 - ☐ **Tune the dedup threshold** — once I see real cross-source volume in the logs, I may nudge the fuzzy threshold (default 88) so we don't over- or under-merge. No action from you beyond sending logs.
 - ☐ **Watch credit usage** — the pipeline logs each paid source's status (`ok` / `no_credits` / `skipped_no_creds` / `unavailable`); glance at these weekly.
-- ☐ **Re-grab Meta `doc_id`** if Meta results dry up (it rotates).
 
 ---
 

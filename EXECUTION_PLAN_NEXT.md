@@ -152,6 +152,8 @@ Google (404), Apple (301 to a not-found page) and Microsoft fail; Amazon works.
 
 **Done when:** all five Big-Tech adapters return Israel product roles in a live run and their health lines are green.
 
+**Amended 2026-11-05:** four, not five. Meta is removed as a source: its robots.txt prohibits automated collection without written permission and the site refuses scripted requests (STATUS changelog 2026-11-05). Google, Apple, Microsoft and Amazon were all fetching in production on 2026-11-05, so Step 3 is done.
+
 ### Step 4 — Phase 5: plans, quotas, entitlements (2 sessions)
 Builds on what exists: `users.plan` (migration 10) and `entitlements.py` (`plan_of`, `is_admin`, `can_auto_apply`).
 

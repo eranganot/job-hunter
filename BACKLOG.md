@@ -1,6 +1,6 @@
 # Job-Hunter — Backlog
 
-_Rewritten 2026-10-25. Replaces the June 2026 codebase audit, 13 of whose 20 items have shipped (listed at the end).
+_Rewritten 2026-10-25; **re-validated against production 2026-11-05** (`/api/health` on commit `7c2c4eb` + live route probes).
 The order, detail and "done when" of every open item live in **`EXECUTION_PLAN_NEXT.md`** — this file is the index._
 
 Effort: **S** <½ day · **M** ~1–2 days · **L** multi-day.
@@ -8,22 +8,24 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 
 ## Open — in execution order
 
-| Step | Item | Pri | Value | Effort |
-|---|---|---|---|---|
-| 0 | Housekeeping: push from the workspace, Mac-era CLAUDE.md, `scripts/smoke.py`, Sentry on | P1 | High | S |
-| 1 | **Direct company links** — every job links to the company's own posting, not LinkedIn/Indeed | P1 | High | L |
-| 2 | Link checker: aggregator pages and invented slugs still read as alive | P1 | High | M |
-| 3 | Big-Tech sources: Google, Apple, Microsoft adapters broken | P1 | Med | S–M |
-| 4 | **Plans, quotas, entitlements (Phase 5)** — waits for the approved tier matrix | P1 | High | L |
-| 5 | Email verification + password reset — needs the custom domain | P1 | High | M |
-| 6 | Legal pages + data export / account deletion | P1 | High | M |
-| 7 | Broad-exception audit (253 `except Exception`, 1 bare `except:`) | P1 | Med | M |
-| 8 | Un-park auto-apply, incl. apply-flow UX and the self-test's stale SQLite fields | P2 | High | L |
-| 9 | Delete legacy HTML from `app.py` (Phase 4 step 5; closes most of old #13) | P2 | Med-High | M |
-| 10 | Custom domain + landing page + funnel analytics | P2 | Med | M |
-| 11 | Payments, Paddle sandbox only (Phase 6) | P2 | Med | L |
-| 12 | Feedback-loop effectiveness metrics (old #19) | P2 | Med | M |
-| 13 | Capture salary at pass time (old #17; location half done) | P3 | Low | M |
+| Step | Item | Pri | Value | Effort | State (2026-11-05) |
+|---|---|---|---|---|---|
+| 1 | **Direct company links** — remaining: Workday fallback, known careers-site map, agree the direct-link target | P1 | High | M | 1a/1b/1c (learned boards + Comeet)/1d shipped (#3–#5, #9, #12); Gemini search tried, 0 of 18, not wired (#13, #15) |
+| 2 | Link checker — remaining: nothing planned; the title-on-page rule was rejected on evidence | P1 | High | — | 2a/2b shipped (#7, #8); bot-challenge pages `unknown` (#15) |
+| 4 | **Plans, quotas, entitlements (Phase 5)** — waits for the approved tier matrix | P1 | High | L | Not started |
+| 5 | Email verification + password reset — needs the custom domain | P1 | High | M | Not started (`/forgot-password` 404) |
+| 6 | Legal pages + data export / account deletion | P1 | High | M | Not started (`/terms`, `/privacy` 404) |
+| 7 | Broad-exception audit (**271** `except Exception`, 1 bare `except:`) | P1 | Med | M | Not started; count grew from 253 |
+| 8 | Un-park auto-apply, incl. apply-flow UX and the self-test's stale SQLite fields | P2 | High | L | Parked; last apply 2026-07-20 |
+| 9 | Delete legacy HTML from `app.py` (Phase 4 step 5; closes most of old #13) | P2 | Med-High | M | Not started (`app.py` 8,687 lines) |
+| 10 | Custom domain + landing page + funnel analytics | P2 | Med | M | Not started (still on the Railway domain) |
+| 11 | Payments, Paddle sandbox only (Phase 6) | P2 | Med | L | Not started; Paddle account status unrecorded |
+| 12 | Feedback-loop effectiveness metrics (old #19) | P2 | Med | M | Not started |
+| 13 | Capture salary at pass time (old #17; location half done) | P3 | Low | M | Not started |
+
+## Done since 2026-10-25
+- **Step 0 — housekeeping** (#2, #6): PR shipping, `scripts/smoke.py`, Sentry on in production (`error_reporting: on`).
+- **Step 3 — Big-Tech sources** (#11, #14): Google, Apple, Microsoft restored with per-source health; **Meta removed** (robots.txt prohibits automated collection; it had reported `ok, 0` every run).
 
 ## Parked
 
