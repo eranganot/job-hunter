@@ -115,7 +115,7 @@ Eran opens it once while signed in. **The result sets the target for "done" and 
 
 **1c. Fallbacks for companies not on those five ATSes (session 2).**
 In this order, stopping at the first verified hit:
-1. **Workday.** The search loop already queries `myworkdayjobs.com` tenants; reuse that to match company + title.
+1. **Workday.** The search loop already queries `myworkdayjobs.com` tenants; reuse that to match company + title. **Shipped 2026-11-05** (`workday.py`): 8 of the 10 tenants the loop queried were dead (STATUS changelog); 16 verified tenants now serve both the search and the resolver.
 2. **Known careers domains.** Small curated map (company → careers page/feed) seeded from the companies that actually appear in 1a's report — the same pattern as `_ATS_BOARD_MAP`.
 3. **Grounded search, company domain only.** Ask Gemini for the posting **restricted to the company's own domain**; accept a URL only if `linkcheck` says it is alive **and** not a generic careers page **and** the page title matches the job title. This is the last resort because Gemini has invented URLs before (see the 10-12 STATUS entry).
 

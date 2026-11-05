@@ -1292,36 +1292,29 @@ def run_job_search(user_id: int):
                             pass
                     print(f"[search] Sparkhire: {_sparkhire_count} jobs matched")
 
-                    # -- Workday tenants (public JSON search API) --
-                    _WORKDAY_TENANTS = [
-                        ("nvidia", "wd5", "nvidiaexternal", "NVIDIA"),
-                        ("ibm", "wd1", "IBM", "IBM"),
-                        ("ebay", "wd1", "ebay", "eBay"),
-                        ("paypal", "wd1", "paypal", "PayPal"),
-                        ("intel", "wd1", "External", "Intel"),
-                        ("hpe", "wd1", "Jobsatyou", "HPE"),
-                        ("vmware", "wd1", "VMware", "VMware"),
-                        ("accenture", "wd3", "AccentureCareers", "Accenture"),
-                        ("salesforce", "wd12", "External_Career_Site", "Salesforce"),
-                        ("dell", "wd1", "External", "Dell"),
-                    ]
+                    # -- Workday tenants (workday.py: verified tenants, Israel only, failures reported) --
                     _workday_count = 0
-                    for _wd_t, _wd_s, _wd_st, _wd_n in _WORKDAY_TENANTS:
-                        try:
-                            _wd_url = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com/wday/cxs/{_wd_t}/{_wd_st}/jobs"
-                            _wd_body = _js2.dumps({"limit": 20, "offset": 0, "searchText": ""}).encode('utf-8')
-                            _wd_req = _ur2.Request(_wd_url, data=_wd_body, headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "Mozilla/5.0 JobHunter/1.0"})
-                            with _ur2.urlopen(_wd_req, timeout=12) as _wd_resp:
-                                _wd_data = _js2.loads(_wd_resp.read().decode('utf-8', errors='replace'))
-                            for _wd_j in (_wd_data.get("jobPostings") or [])[:20]:
-                                _wd_tt = (_wd_j.get("title") or "").strip()
-                                if _title_match(_wd_tt):
-                                    _wd_p = _wd_j.get("externalPath") or ""
-                                    _wd_full = f"https://{_wd_t}.{_wd_s}.myworkdayjobs.com{_wd_p}" if _wd_p else ""
-                                    all_raw.append({"title": _wd_tt, "company": _wd_n, "location": _wd_j.get("locationsText","") or "", "url": _wd_full, "description": "", "source": "workday"})
-                                    _workday_count += 1
-                        except Exception:
-                            pass
+                    try:
+                        import workday as _workday
+                        _wd_jobs, _wd_stats = _workday.search_israel(titles_, _title_match)
+                        for _wd_j in _wd_jobs:
+                            all_raw.append({"title": _wd_j["title"], "company": _wd_j["company"],
+                                            "location": _wd_j["location"], "url": _wd_j["url"],
+                                            "description": "", "source": "workday"})
+                        _workday_count = len(_wd_jobs)
+                        _wd_status, _wd_msg = _workday.health_line(_wd_stats)
+                        if _wd_stats["failed"]:
+                            print(f"[search] WARNING Workday: {_wd_msg}")
+                    except Exception as _wd_exc:
+                        _wd_status, _wd_stats = "error", {"fetched": 0, "kept": 0}
+                        _wd_msg = f"{type(_wd_exc).__name__}: {_wd_exc}"
+                        print(f"[search] ERROR Workday source failed: {_wd_msg}")
+                    try:
+                        from ingestion.integration import _remember as _src_remember
+                        _src_remember("workday", _wd_status, _wd_stats.get("fetched", 0),
+                                      _wd_stats.get("kept", 0), _wd_msg)
+                    except Exception as _wd_hexc:
+                        print(f"[search] WARNING could not record Workday health: {_wd_hexc}")
                     print(f"[search] Workday: {_workday_count} jobs matched")
 
                     # -- LinkedIn public guest endpoint --

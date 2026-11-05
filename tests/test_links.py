@@ -414,6 +414,10 @@ import json as _json
     ("https://boards.greenhouse.io/embed/job_app?token=1", None),
     ("https://il.linkedin.com/jobs/view/1", None),
     ("https://coralogix.com/careers/co/ramat-gan-israel/1B.E5C/x/all/", None),
+    ("https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/Israel-Tel-Aviv/Senior-PM_JR2029254",
+     ("workday", "nvidia.wd5/NVIDIAExternalCareerSite")),
+    ("https://amat.wd1.myworkdayjobs.com/en-US/External/job/Rehovot-ISR/Product-Manager_R2512",
+     ("workday", "amat.wd1/External")),
 ])
 def test_board_of(url, expected):
     assert links.board_of(url) == expected
@@ -432,8 +436,11 @@ def test_learned_boards_come_from_any_user_and_any_status():
         (3, "Data Scientist", "Wiz", "Tel Aviv", "https://boards.greenhouse.io/wizinc/jobs/1", "x", "applied"),
         (1, "PM", "Wiz", "Tel Aviv", "https://il.linkedin.com/jobs/view/9", "x", "new"),
     ])
-    assert links.learned_boards(conn) == {"coralogix": [("comeet", "coralogix/06.004")],
-                                          "wiz": [("greenhouse", "wizinc")]}
+    learned = links.learned_boards(conn)
+    assert learned["coralogix"] == [("comeet", "coralogix/06.004")]
+    assert learned["wiz"] == [("greenhouse", "wizinc")]
+    # everything else is a verified Workday tenant, known before any link is stored
+    assert all(ats == "workday" for k, v in learned.items() if k not in ("coralogix", "wiz") for ats, _r in v)
 
 
 COMEET_PAGE = ('<script>var COMPANY_POSITIONS_DATA = ' + _json.dumps([

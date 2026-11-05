@@ -550,7 +550,12 @@ _NOT_A_BOARD = {"embed", "jobs", "careers", "api", "v0", "v1"}
 
 
 def board_of(url: str):
-    """('greenhouse', 'wizinc') / ('comeet', 'coralogix/06.004') / None."""
+    """('greenhouse', 'wizinc') / ('comeet', 'coralogix/06.004') /
+    ('workday', 'nvidia.wd5/NVIDIAExternalCareerSite') / None."""
+    import workday
+    wd = workday.ref_of(url)
+    if wd:
+        return "workday", wd
     for ats, rx in _BOARD_RULES:
         m = rx.match((url or "").strip())
         if not m:
@@ -571,7 +576,8 @@ def _norm_company(name: str) -> str:
 
 
 _BOARD_LIKES = ("%greenhouse.io/%", "%jobs.lever.co/%", "%jobs.ashbyhq.com/%",
-                "%jobs.smartrecruiters.com/%", "%comeet.com/jobs/%", "%comeet.co/jobs/%")
+                "%jobs.smartrecruiters.com/%", "%comeet.com/jobs/%", "%comeet.co/jobs/%",
+                "%myworkdayjobs.com/%")
 
 
 def learned_boards(db) -> dict:
@@ -585,6 +591,15 @@ def learned_boards(db) -> dict:
         key = _norm_company(r.get("company"))
         if b and key and b not in out.setdefault(key, []):
             out[key].append(b)
+    # Step 1c (Workday): the verified tenants are known boards before any of
+    # their links has been stored - a LinkedIn job at NVIDIA gets NVIDIA's own
+    # Workday posting on its first resolve.
+    import workday
+    for company, ref, aliases in workday.tenant_refs():
+        for name in (company,) + tuple(aliases):
+            key = _norm_company(name)
+            if key and ("workday", ref) not in out.setdefault(key, []):
+                out[key].append(("workday", ref))
     return out
 
 
@@ -635,16 +650,31 @@ def comeet_postings(ref: str, fetch=None) -> list:
     return list(out)
 
 
+def _israeli(location: str) -> bool:
+    import workday
+    return workday.is_israel(location)
+
+
 def resolve_from_learned(company, title, location, learned, fetch=None, threshold: float = 82.0):
     """Best posting for this title on the boards this company is known to use."""
     import apply_engine as _ae
     boards = learned.get(_norm_company(company)) or []
     best, best_key = None, (-1, -1.0)
     for ats, ref in boards:
-        posts = comeet_postings(ref, fetch=fetch) if ats == "comeet" else _ae._ats_postings_for_slug(ref)
+        if ats == "comeet":
+            posts = comeet_postings(ref, fetch=fetch)
+        elif ats == "workday":
+            import workday
+            posts = workday.postings_for(ref, title)
+        else:
+            posts = _ae._ats_postings_for_slug(ref)
         for p in posts:
             score = _ae._title_ratio(title, p.get("title") or "")
             if score < threshold:
+                continue
+            # A Workday search spans the whole company worldwide: an Israeli
+            # job must not be pointed at the same title in another country.
+            if ats == "workday" and _israeli(location) and not workday.is_israel(p.get("location")):
                 continue
             key = (_ae._loc_match(p.get("location") or "", location or ""), score)
             if key > best_key:
