@@ -7087,6 +7087,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 rows = conn.execute("""
                 SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_date,
+                       u.plan, u.plan_until, u.plan_after, u.plan_source,
+                       (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='locked')   AS stats_locked,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='new')      AS stats_new,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='approved') AS stats_approved,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='applied')  AS stats_applied,
@@ -8135,6 +8137,51 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         # ── Admin: toggle user active state ───────────────────────────────────
+        # ── Admin: set a user's plan, permanently or as a promotion ───────────
+        # Body: {"plan": "free"|"premium"|"expert", "days": int|null, "after": plan}.
+        # days = a promotion that ends after that many days and falls back to
+        # `after` (default free); null = permanent. Logged in plan_events with
+        # the admin's id. Admin is a role, not a plan, so an admin's own row is
+        # refused - it would change nothing they can do.
+        m = re.match(r"^/api/admin/users/(\d+)/plan$", path)
+        if m:
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            data = self.read_json()
+            target_id = int(m.group(1))
+            plan = str(data.get("plan") or "").strip().lower()
+            days = data.get("days")
+            after = str(data.get("after") or "free").strip().lower()
+            if plan not in entitlements.PLANS or after not in entitlements.PLANS:
+                self.send_json({"error": "plan and after must be one of: %s" % ", ".join(entitlements.PLANS)}, 400)
+                return
+            if days is not None:
+                try:
+                    days = int(days)
+                except (TypeError, ValueError):
+                    days = -1
+                if not 1 <= days <= 366:
+                    self.send_json({"error": "days must be between 1 and 366, or null for a permanent plan"}, 400)
+                    return
+            conn = database.get_db()
+            try:
+                row = conn.execute("SELECT role FROM users WHERE id=?", (target_id,)).fetchone()
+                if row is None:
+                    self.send_json({"error": "No such user"}, 404)
+                    return
+                if (row[0] or "").lower() == "admin":
+                    self.send_json({"error": "Admin is a role, not a plan - it has every feature already.",
+                                    "code": "admin_has_no_plan"}, 400)
+                    return
+                out = entitlements.grant_plan(conn, target_id, plan, days=days, after=after,
+                                              reason="admin", by_user_id=user["id"])
+                out["locked"] = entitlements.locked_summary(conn, target_id)["count"]
+            finally:
+                conn.close()
+            self.send_json({"success": True, **out})
+            return
+
         m = re.match(r"^/api/admin/users/(\d+)/toggle$", path)
         if m:
             if user.get("role") != "admin":

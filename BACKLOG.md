@@ -12,7 +12,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 |---|---|---|---|---|---|
 | 1 | **Direct company links** — remaining: known careers-site map, agree the direct-link target | P1 | High | M | 1a/1b/1c (learned boards + Comeet + **Workday**)/1d shipped (#3–#5, #9, #12, #17); Gemini search tried, 0 of 18, not wired (#13, #15) |
 | 2 | Link checker — remaining: nothing planned; the title-on-page rule was rejected on evidence | P1 | High | — | 2a/2b shipped (#7, #8); bot-challenge pages `unknown` (#15) |
-| 4 | **Plans, quotas, entitlements (Phase 5)** — matrix approved 2026-11-05; 4a machinery, 4b enforcement + blurred matches, 4c UI + admin | P1 | High | L | 4a (#19) and 4b (#20) shipped; 4c next |
+| 4 | **Plans, quotas, entitlements (Phase 5)** — matrix approved 2026-11-05; 4a machinery, 4b enforcement + blurred matches, 4c UI + admin | P1 | High | L | **Done** - 4a (#19), 4b (#20), 4c (#21); history retention moves to Step 6 |
 | 5 | Email verification + password reset — needs the custom domain | P1 | High | M | Not started (`/forgot-password` 404) |
 | 6 | Legal pages + data export / account deletion | P1 | High | M | Not started (`/terms`, `/privacy` 404) |
 | 7 | Broad-exception audit (**271** `except Exception`, 1 bare `except:`) | P1 | Med | M | Not started; count grew from 253 |

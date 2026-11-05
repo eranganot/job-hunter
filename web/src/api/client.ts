@@ -109,6 +109,10 @@ export type Me = {
   // 'free' | 'premium' | 'expert'. The UI must ask the server rather than
   // infer entitlement, or the two disagree about who may do what.
   plan?: string | null;
+  // Phase 5: what the plan includes and how much of it is used. The server
+  // enforces every limit; these only let the screens say so before a click.
+  plan_info?: PlanInfo;
+  usage?: Record<string, { used: number; limit: number | null; period: "day" | "month" }>;
   auto_apply_enabled?: number | null;
   phone?: string | null;
   email_address?: string | null;
@@ -120,6 +124,28 @@ export type Me = {
   search_day_of_week?: number | null;
   apply_day_of_week?: number | null;
   notification_channel?: string | null;
+};
+
+export type PlanInfo = {
+  /** 'free' | 'premium' | 'expert' | 'admin' - the row of the matrix that applies */
+  tier: string;
+  plan: string;
+  label: string;
+  /** UTC 'YYYY-MM-DD HH:MM:SS' a promotion ends, or null for a permanent plan */
+  plan_until: string | null;
+  plan_after: string | null;
+  plan_source: string | null;
+  days_left: number | null;
+  /** plans.py row; null = unlimited */
+  limits: Record<string, any>;
+};
+
+export type LockedMatches = {
+  /** how many matches the plan is hiding - never their content */
+  count: number;
+  latest_search: { batch: number; count: number } | null;
+  matches_per_search: number | null;
+  plan: string;
 };
 
 export type CvOptimizerResult = {
@@ -281,6 +307,10 @@ export const api = {
   adminRescore: () => request<{ rescored?: number; message?: string }>("/api/admin/rescore", "POST", {}),
   adminDedup: () => request<{ removed: number }>("/api/admin/dedup"),
   adminUsers: () => request<any[]>("/api/admin/users"),
+  adminSetPlan: (id: number, plan: string, days: number | null, after = "free") =>
+    request<{ success: boolean; plan: string; plan_until: string | null; locked: number }>(
+      `/api/admin/users/${id}/plan`, "POST", { plan, days, after }),
+  lockedMatches: () => request<LockedMatches>("/api/jobs/locked"),
   // Returns the NEW state, so the row renders what is rather than what it
   // guessed. 400 with code "cannot_disable_self" if you aim it at yourself.
   adminToggleUser: (id: number) =>
