@@ -17,7 +17,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 6 | Legal pages + data export / account deletion + history retention (hide, not delete) | P1 | High | M | 6a export + delete (#22) and 6b history hiding (#23) shipped; legal drafts need the legal name + contact |
 | 7 | Broad-exception audit | P1 | Med | M | **Done** (#24): 122 silent found, risky ones probed; Comeet removed (404), sync count fixed; ratchet test; 116 silent remain under the ratchet |
 | 8 | Un-park auto-apply, incl. apply-flow UX and the self-test's stale SQLite fields | P2 | High | L | Parked; last apply 2026-07-20 |
-| 9 | Delete legacy HTML from `app.py` (Phase 4 step 5; closes most of old #13) | P2 | Med-High | M | Not started (`app.py` 8,687 lines) |
+| 9 | Delete legacy HTML from `app.py` (Phase 4 step 5; closes most of old #13) | P2 | Med-High | M | **Done** (#25): app.py 9,062 → ~6,250 lines; old URLs redirect into /app |
 | 10 | Custom domain + landing page + funnel analytics | P2 | Med | M | Not started (still on the Railway domain) |
 | 11 | Payments, Paddle sandbox only (Phase 6) | P2 | Med | L | Not started; Paddle account status unrecorded |
 | 12 | Feedback-loop effectiveness metrics (old #19) | P2 | Med | M | Not started |

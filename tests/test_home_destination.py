@@ -19,32 +19,10 @@ import app
 from tests.test_routes import Client, stack, users  # noqa: F401
 
 
-@pytest.fixture
-def legacy(monkeypatch):
-    def _set(on):
-        if on:
-            monkeypatch.setenv("LEGACY_UI", "1")
-        else:
-            monkeypatch.delenv("LEGACY_UI", raising=False)
-    return _set
-
-
-def test_home_is_the_app_by_default():
-    assert app.home_url() == "/app"
-
-
-@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
-def test_the_escape_hatch_works_without_a_deploy(monkeypatch, value):
-    monkeypatch.setenv("LEGACY_UI", value)
-    assert app.home_url() == "/dashboard", "LEGACY_UI=%r did not take effect" % value
-
-
-@pytest.mark.parametrize("value", ["0", "false", "no", "off", "", "  "])
-def test_a_falsey_value_does_not_silently_flip_it_back(monkeypatch, value):
-    """A variable that is set to "0" must not read as on. That mistake is how a
-    kill switch ends up permanently engaged with nobody knowing why."""
-    monkeypatch.setenv("LEGACY_UI", value)
-    assert app.home_url() == "/app"
+def test_home_is_the_app(monkeypatch):
+    for value in ("1", "true", "0", ""):              # the LEGACY_UI switch is gone (Step 9)
+        monkeypatch.setenv("LEGACY_UI", value)
+        assert app.home_url() == "/app"
 
 
 def test_signing_in_lands_on_the_app(stack):
@@ -70,20 +48,23 @@ def test_an_already_signed_in_user_asking_for_register_is_sent_to_the_app(stack,
     assert status == 302 and location == "/app", location
 
 
-def test_a_non_admin_bounced_off_admin_lands_on_the_app(stack, users):
-    status, location, _b = users["a"].get("/admin")
-    assert status == 302 and location == "/app", location
+def test_admin_url_opens_the_app_dashboard(stack, users):
+    for who in ("a", "admin"):
+        status, location, _b = users[who].get("/admin")
+        assert status == 302 and location == "/app?view=dashboard", (who, location)
 
 
-def test_the_legacy_pages_are_still_reachable(stack, users, monkeypatch):
-    """Nothing is deleted yet - but since 2026-09-21 /dashboard is reachable only
-    behind LEGACY_UI=1. This test used to require /dashboard to serve the old
-    page to anyone who typed it, for "someone who needs a feature that has not
-    been ported". Phase 4 then ported all of them, and the same rule meant the
-    bare domain, every bookmark and every notification link opened the legacy
-    design (tests/test_root_lands_on_app.py). The escape hatch is the switch."""
-    monkeypatch.setenv("LEGACY_UI", "1")
-    for path in ("/dashboard", "/settings"):
-        status, _loc, body = users["a"].get(path)
-        assert status == 200, "%s is gone, and item 6 said nothing would be deleted yet" % path
-        assert b"<!DOCTYPE html>" in body or b"<!doctype html>" in body
+@pytest.mark.parametrize("path, dest", [("/dashboard", "/app"), ("/dashboard/", "/app"),
+                                        ("/settings", "/app"), ("/onboarding", "/app"),
+                                        ("/admin", "/app?view=dashboard")])
+def test_every_legacy_url_redirects_into_the_app(stack, users, path, dest):
+    """Step 9 deleted the legacy pages (DASHBOARD/SETTINGS/ONBOARDING/ADMIN_HTML
+    and the frozen Tailwind blob). Their URLs live on in bookmarks, installed
+    icons and old notifications, so each redirects - and never serves HTML."""
+    status, location, body = users["a"].get(path)
+    assert (status, location) == (302, dest)
+    assert b"<html" not in body.lower()
+
+
+def test_the_frozen_tailwind_blob_is_gone(stack):
+    assert Client(stack["port"]).get("/static/tw.css")[0] == 404

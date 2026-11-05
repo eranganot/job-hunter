@@ -36,12 +36,12 @@ def test_an_old_dashboard_link_opens_the_new_ui(stack, users, monkeypatch):
         "/dashboard served %s %r - the legacy page" % (status, body[:60]))
 
 
-def test_legacy_ui_still_restores_the_old_page(stack, users, monkeypatch):
-    """The escape hatch must keep working until the legacy code is deleted."""
+def test_the_switch_that_restored_the_old_page_is_gone(stack, users, monkeypatch):
+    """Step 9 (2026-11-05) deleted the legacy pages; LEGACY_UI=1 now changes
+    nothing - every old URL opens /app."""
     monkeypatch.setenv("LEGACY_UI", "1")
-    assert users["a"].get("/")[1] == "/dashboard"
-    status, _loc, body = users["a"].get("/dashboard")
-    assert status == 200 and b"<html" in body.lower()
+    assert users["a"].get("/")[1] == "/app"
+    assert users["a"].get("/dashboard")[:2] == (302, "/app")
 
 
 def test_signed_out_still_goes_to_login(stack, monkeypatch):

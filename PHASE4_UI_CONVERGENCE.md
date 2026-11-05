@@ -1,5 +1,7 @@
 # Phase 4 — UI convergence: the verified inventory
 
+> **Closed 2026-11-05 (Step 9):** the legacy constants, the Tailwind blob and `LEGACY_UI` are deleted; the old URLs redirect into `/app`. This file is history.
+
 _2026-09-15. Every row below was checked against the code, not taken from the
 plan. Three of the plan's rows were wrong; they are corrected here._
 

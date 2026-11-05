@@ -341,9 +341,10 @@ def test_non_admin_is_kept_out_of_admin(users):
     # literal path. Pinning "/dashboard" made this fail when the home
     # destination flipped to /app (Phase 4 item 6), which is a test asserting a
     # decision rather than a behaviour.
-    import app as _app
+    # Since Step 9 /admin is only a redirect into /app (the admin tab shows to
+    # admins alone); what keeps a non-admin out is the API refusing them.
     status, location, _ = users["b"].get("/admin")
-    assert status == 302 and location == _app.home_url()
+    assert status == 302 and location.startswith("/app")
     status, _, body = users["b"].get("/api/admin/users")
     assert status == 403, f"non-admin reached the admin user list ({status})"
 
@@ -1104,15 +1105,6 @@ def test_the_legacy_onboarding_url_redirects_into_the_app(stack, users):
     status, location, _ = users["a"].get("/onboarding")
     assert status == 302
     assert location == "/app", location
-
-
-def test_legacy_onboarding_can_be_brought_back_for_one_release(stack, users, monkeypatch):
-    """LEGACY_UI=1 is the escape hatch. Without a way back, replacing a flow
-    that every new signup hits is a one-way door."""
-    monkeypatch.setattr(stack["app"], "LEGACY_UI", True)
-    status, _location, body = users["a"].get("/onboarding")
-    assert status == 200
-    assert b"Upload your CV" in body
 
 
 def test_onboarding_is_still_behind_auth(stack):
