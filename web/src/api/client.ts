@@ -311,6 +311,8 @@ export const api = {
     request<{ success: boolean; plan: string; plan_until: string | null; locked: number }>(
       `/api/admin/users/${id}/plan`, "POST", { plan, days, after }),
   lockedMatches: () => request<LockedMatches>("/api/jobs/locked"),
+  deleteAccount: (confirm_email: string) =>
+    request<{ success: boolean; delete_after: string; grace_days: number }>("/api/account/delete", "POST", { confirm_email }),
   // Returns the NEW state, so the row renders what is rather than what it
   // guessed. 400 with code "cannot_disable_self" if you aim it at yourself.
   adminToggleUser: (id: number) =>

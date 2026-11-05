@@ -178,6 +178,18 @@ def change_password(user_id: int, current_pw: str, new_pw: str, keep_token: str 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 def create_session(user_id: int) -> str:
+    # Signing in cancels a pending account deletion (Step 6): the request
+    # promised "sign in within 14 days to keep your account".
+    try:
+        import accountdata
+        _c = _get_db()
+        try:
+            if accountdata.cancel_deletion(_c, user_id):
+                print("[account] user %s signed in - pending deletion cancelled" % user_id)
+        finally:
+            _c.close()
+    except Exception as e:
+        print("[account] ERROR could not check pending deletion for user %s: %s" % (user_id, e))
     token = secrets.token_urlsafe(48)
     expires = _stamp(_utc_now() + timedelta(days=SESSION_DAYS))
     conn = _get_db()
@@ -261,7 +273,7 @@ def get_session_user(token: str):
     try:
         row = conn.execute("""
         SELECT u.id, u.name, u.email, u.created_date, u.role, u.plan,
-               u.plan_until, u.plan_after, u.plan_source,
+               u.plan_until, u.plan_after, u.plan_source, u.delete_after,
                p.cv_path, p.cv_analyzed, p.cv_summary,
                p.cv_filename, p.cv_uploaded_date, p.cv_optimizer_date,
                p.job_titles, p.keywords, p.locations,

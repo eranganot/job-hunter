@@ -31,6 +31,7 @@ import crypto
 import db as database
 import dbdriver
 import entitlements
+import accountdata
 import errors
 import schedlock
 import gemini
@@ -772,6 +773,20 @@ def file_watcher():
                     _pl = entitlements.run_lifecycle(database.get_db, send_web_push_to_user)
                     if _pl["notices"] or _pl["moved"]:
                         print(f"[plans] notices sent: {_pl['notices']}; promotions ended: {_pl['moved']}")
+                    # Accounts whose 14-day deletion grace is over (Step 6).
+                    _pc = database.get_db()
+                    try:
+                        _gone = accountdata.purge_due(_pc)
+                    finally:
+                        _pc.close()
+                    for _gid in _gone:
+                        try:
+                            storage.delete(_gid)
+                        except Exception as _sde:
+                            print(f"[account] WARNING CV cache for deleted user {_gid}: {_sde}")
+                    if _gone:
+                        print(f"[account] deleted {len(_gone)} account(s) after their grace period: {_gone}")
+                        database.write_users_config(BASE_DIR)
             except Exception as _ple:
                 print(f"[plans] ERROR plan lifecycle sweep failed: {_ple}")
         if _tick % 60 == 0:  # ~hourly
@@ -6183,7 +6198,11 @@ class Handler(BaseHTTPRequestHandler):
             if user:
                 self.redirect(home_url())
             else:
-                self.send_html(LOGIN_HTML.replace("{error_block}", ""))
+                _note = ""
+                if qs.get("deleted", ["0"])[0] == "1":
+                    _note = error_block("Your account will be deleted in %d days. Changed your mind? "
+                                        "Sign in before then and nothing is deleted." % accountdata.GRACE_DAYS)
+                self.send_html(LOGIN_HTML.replace("{error_block}", _note))
             return
 
         if path in ("/register", "/register/"):
@@ -6469,6 +6488,35 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # API routes (all require auth)
+        if path == "/api/me/export":
+            # Step 6: everything we hold about the user, as one zip (data.json +
+            # the CV). Secrets and held-back matches are not in it (accountdata).
+            user = self.require_auth()
+            if not user:
+                return
+            try:
+                _cv = storage.get_bytes(user["id"])
+            except Exception as _ce:
+                print("[export] WARNING CV unreadable for user %s: %s" % (user["id"], _ce))
+                _cv = None
+            conn = database.get_db()
+            try:
+                _name = "cv.pdf"
+                _r = conn.execute("SELECT cv_filename FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
+                if _r and _r["cv_filename"]:
+                    _name = os.path.basename(str(_r["cv_filename"])) or "cv.pdf"
+                _zip = accountdata.export_zip(conn, user["id"], _cv, _name)
+            finally:
+                conn.close()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="job-hunter-data.zip"')
+            self.send_header("Content-Length", str(len(_zip)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(_zip)
+            return
+
         if path == "/api/me":
             user = self.require_auth()
             if not user:
@@ -7287,6 +7335,41 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(entitlements.upgrade_required(
                     "locked_match", user, message="Upgrade your plan to see this match."), 402)
                 return
+
+        # ── Delete my account (Step 6) ────────────────────────────────────────
+        # Scheduled accountdata.GRACE_DAYS ahead; every session ends now, and
+        # signing in before the date cancels it. The body must repeat the
+        # account's email, so a stray POST cannot schedule it.
+        if path == "/api/account/delete":
+            data = self.read_json()
+            if (user.get("role") or "").lower() == "admin":
+                self.send_json({"error": "The admin account cannot be deleted from the app.",
+                                "code": "admin_cannot_delete"}, 400)
+                return
+            if (str(data.get("confirm_email") or "").strip().lower()
+                    != (user.get("email") or "").strip().lower()):
+                self.send_json({"error": "Type your account's email to confirm.",
+                                "code": "confirm_email_mismatch"}, 400)
+                return
+            conn = database.get_db()
+            try:
+                when = accountdata.request_deletion(conn, user_id)
+            finally:
+                conn.close()
+            try:
+                database.log_activity(user_id, "account_deletion_requested", "Deletion scheduled for %s UTC" % when)
+            except Exception:
+                pass
+            print(f"[account] user {user_id} requested deletion; scheduled {when} UTC")
+            body = json.dumps({"success": True, "delete_after": when,
+                               "grace_days": accountdata.GRACE_DAYS}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", auth.clear_session_cookie())
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
 
         if path == "/api/blocklist":
             data = self.read_json()
