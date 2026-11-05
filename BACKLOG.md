@@ -15,7 +15,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 4 | **Plans, quotas, entitlements (Phase 5)** — matrix approved 2026-11-05; 4a machinery, 4b enforcement + blurred matches, 4c UI + admin | P1 | High | L | **Done** - 4a (#19), 4b (#20), 4c (#21); history retention moves to Step 6 |
 | 5 | Email verification + password reset — needs the custom domain | P1 | High | M | Not started (`/forgot-password` 404) |
 | 6 | Legal pages + data export / account deletion + history retention (hide, not delete) | P1 | High | M | 6a export + delete (#22) and 6b history hiding (#23) shipped; legal drafts need the legal name + contact |
-| 7 | Broad-exception audit (**271** `except Exception`, 1 bare `except:`) | P1 | Med | M | Not started; count grew from 253 |
+| 7 | Broad-exception audit | P1 | Med | M | **Done** (#24): 122 silent found, risky ones probed; Comeet removed (404), sync count fixed; ratchet test; 116 silent remain under the ratchet |
 | 8 | Un-park auto-apply, incl. apply-flow UX and the self-test's stale SQLite fields | P2 | High | L | Parked; last apply 2026-07-20 |
 | 9 | Delete legacy HTML from `app.py` (Phase 4 step 5; closes most of old #13) | P2 | Med-High | M | Not started (`app.py` 8,687 lines) |
 | 10 | Custom domain + landing page + funnel analytics | P2 | Med | M | Not started (still on the Railway domain) |
@@ -34,7 +34,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 |---|---|
 | Replace stdlib `http.server` (old #14) | Not worth it at current scale; the Postgres half is done |
 | Android APK (Capacitor) | `/app` is already an installable PWA with web push; revisit with the Play Store |
-| SecretJobs source | Adapter built; needs Eran's logged-in feed request + 3 Railway variables |
+| SecretJobs source | Adapter built; needs Eran's logged-in feed request + 3 Railway variables. **Its ingest hook `/api/sync/jobs` is unreachable key-only** (behind the session gate; relay.py never matched it) - redesign before un-parking (STATUS 2026-11-05) |
 
 ## Decisions of record (2026-10-25)
 - Payments provider: **Paddle** (Stripe does not onboard Israeli entities without a US company).

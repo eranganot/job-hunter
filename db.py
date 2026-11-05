@@ -465,7 +465,9 @@ def import_pending_jobs(base_dir: str):
             inserted = 0
             for j in jobs:
                 user_id = j.get("user_id", 1)  # default to first user if not specified
-                conn.execute("""
+                # rowcount, not `SELECT changes()` (SQLite-only: on Postgres it
+                # raised, aborting the import before the file was removed).
+                _cur = conn.execute("""
                 INSERT OR IGNORE INTO jobs
                   (user_id,title,company,location,url,description,
                    why_relevant,company_info,source,found_date,status)
@@ -477,7 +479,7 @@ def import_pending_jobs(base_dir: str):
                     j.get("company_info",""), j.get("source",""),
                     j.get("found_date", datetime.now().isoformat())
                 ))
-                if conn.execute("SELECT changes()").fetchone()[0] > 0:
+                if (_cur.rowcount or 0) > 0:
                     inserted += 1
             conn.commit()
             conn.close()

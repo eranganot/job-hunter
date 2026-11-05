@@ -823,6 +823,42 @@ def _attribute_gemini_to(fn):
 
 
 
+class _SourceTally:
+    """Per-run health for a legacy search-loop source (LinkedIn, Indeed,
+    Sparkhire, SpeakNow). Every request either answers or is counted as a
+    failure with its reason, and the result lands in /api/health `sources` the
+    way the ingestion adapters' do - so a source that has died shows up there
+    instead of printing "0 jobs matched" forever (Step 7: Comeet and Indeed had
+    done exactly that)."""
+
+    def __init__(self, name):
+        self.name, self.calls, self.failed, self.fetched, self.kept = name, 0, [], 0, 0
+
+    def fail(self, exc):
+        self.calls += 1
+        why = getattr(exc, "code", None)
+        self.failed.append("HTTP %s" % why if why else type(exc).__name__)
+
+    def ok(self, fetched):
+        self.calls += 1
+        self.fetched += fetched
+
+    def done(self):
+        if not self.calls:
+            return
+        if not self.failed:
+            status, msg = "ok", ""
+        else:
+            status = "error" if len(self.failed) == self.calls else "degraded"
+            msg = "%d of %d requests failed: %s" % (len(self.failed), self.calls, ", ".join(sorted(set(self.failed)))[:150])
+            print(f"[search] WARNING {self.name}: {msg}")
+        try:
+            from ingestion.integration import _remember
+            _remember(self.name, status, self.fetched, self.kept, msg)
+        except Exception as e:
+            print(f"[search] WARNING could not record {self.name} health: {e}")
+
+
 def _plan_ai_cap(user_id):
     """gemini.py asks this for a user's daily AI-call cap from their plan."""
     conn = database.get_db()
@@ -1286,25 +1322,11 @@ def run_job_search(user_id: int):
                     except Exception as _tme:
                         print(f"[search] TechMap CSV error: {_tme}")
 
-                    # -- Comeet boards for Israeli companies --
-                    _comeet_slugs = {'monday': 'monday.com', 'ironsource': 'ironSource', 'gong': 'Gong',
-                                     'yotpo2': 'Yotpo', 'lightricks2': 'Lightricks'}
-                    for _cm_slug, _cm_name in _comeet_slugs.items():
-                        try:
-                            _cm_url = f'https://www.comeet.co/careers/api/{_cm_slug}/positions'
-                            _cm_data = _get_json(_cm_url, timeout=12)
-                            if isinstance(_cm_data, list):
-                                for _cm_j in _cm_data:
-                                    _cm_t = _cm_j.get('name', '')
-                                    if _title_match(_cm_t):
-                                        _cm_loc = ''
-                                        if _cm_j.get('location'):
-                                            _cm_loc = _cm_j['location'].get('name', '') if isinstance(_cm_j['location'], dict) else str(_cm_j['location'])
-                                        all_raw.append({"job_title": _cm_t, "company": _cm_name,
-                                                        "location": _cm_loc, "url": _cm_j.get('url',''),
-                                                        "description": _cm_t, "source": "comeet"})
-                        except Exception:
-                            pass
+                    # -- Comeet by company name: REMOVED 2026-11-05 (Step 7). All five slugs
+                    #    (monday, ironsource, gong, yotpo2, lightricks2) answered 404 to the
+                    #    exact request, every run, behind `except Exception: pass`. Comeet's
+                    #    API is not addressable by company name (STATUS 2026-10-25); Comeet
+                    #    postings come through links.learned_boards with real company ids.
                     print(f"[search] Comeet + SpeakNow queries done")
 
                     # -- SpeakNow careers --
@@ -1328,6 +1350,7 @@ def run_job_search(user_id: int):
                         ('rapyd', 'Rapyd'), ('gong', 'Gong'), ('lemonade', 'Lemonade'),
                     ]
                     _sparkhire_count = 0
+                    _sh_tally = _SourceTally("sparkhire")
                     for _sh_slug, _sh_name in _SPARKHIRE_COMPANIES:
                         try:
                             _sh_req = _ur2.Request(f"https://candidate.sparkhire.com/users/{_sh_slug}/jobs", headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
@@ -1335,14 +1358,17 @@ def run_job_search(user_id: int):
                                 _sh_html = _sh_resp.read().decode('utf-8', errors='replace')
                             import re as _re_sh
                             _sh_jobs = _re_sh.findall(r'<a[^>]+href="([^"]+)"[^>]*>\s*<[^>]+>([^<]{5,120})</[^>]+>\s*</a>', _sh_html)
+                            _sh_tally.ok(len(_sh_jobs))
                             for _sh_href, _sh_title in _sh_jobs[:15]:
                                 _t = _sh_title.strip()
                                 if _title_match(_t):
                                     _u = _sh_href if _sh_href.startswith('http') else f"https://candidate.sparkhire.com{_sh_href}"
                                     all_raw.append({"title": _t, "company": _sh_name, "location": "", "url": _u, "description": "", "source": "sparkhire"})
                                     _sparkhire_count += 1
-                        except Exception:
-                            pass
+                        except Exception as _sh_e:
+                            _sh_tally.fail(_sh_e)
+                    _sh_tally.kept = _sparkhire_count
+                    _sh_tally.done()
                     print(f"[search] Sparkhire: {_sparkhire_count} jobs matched")
 
                     # -- Workday tenants (workday.py: verified tenants, Israel only, failures reported) --
@@ -1372,6 +1398,7 @@ def run_job_search(user_id: int):
 
                     # -- LinkedIn public guest endpoint --
                     _linkedin_count = 0
+                    _li_tally = _SourceTally("linkedin")
                     import urllib.parse as _urp2
                     for _li_kw in titles_[:5]:
                         try:
@@ -1386,6 +1413,11 @@ def run_job_search(user_id: int):
                             _li_titles = _re_li.findall(r'<h3[^>]+class="base-search-card__title"[^>]*>\s*([^<]+?)\s*</h3>', _li_html)
                             _li_comps = _re_li.findall(r'<h4[^>]+class="base-search-card__subtitle"[^>]*>\s*<a[^>]*>\s*([^<]+?)\s*</a>', _li_html)
                             _li_locs = _re_li.findall(r'<span[^>]+class="job-search-card__location"[^>]*>\s*([^<]+?)\s*</span>', _li_html)
+                            # A 200 with no cards is LinkedIn changing its markup or
+                            # serving a challenge - a failure, not "no jobs today".
+                            if not _li_cards and "base-card" not in _li_html:
+                                raise ValueError("no job cards in the page (markup changed or blocked)")
+                            _li_tally.ok(len(_li_cards))
                             for _li_i in range(min(20, len(_li_cards), len(_li_titles))):
                                 _li_t = _li_titles[_li_i].strip()
                                 if _title_match(_li_t):
@@ -1393,12 +1425,15 @@ def run_job_search(user_id: int):
                                     _li_lc = _li_locs[_li_i].strip() if _li_i < len(_li_locs) else ""
                                     all_raw.append({"title": _li_t, "company": _li_c, "location": _li_lc, "url": _li_cards[_li_i], "description": "", "source": "linkedin"})
                                     _linkedin_count += 1
-                        except Exception:
-                            pass
+                        except Exception as _li_e:
+                            _li_tally.fail(_li_e)
+                    _li_tally.kept = _linkedin_count
+                    _li_tally.done()
                     print(f"[search] LinkedIn guest: {_linkedin_count} jobs matched")
 
                     # -- Indeed (best-effort) --
                     _indeed_count = 0
+                    _in_tally = _SourceTally("indeed")
                     for _in_kw in titles_[:3]:
                         try:
                             _in_q = _urp2.quote(_in_kw)
@@ -1408,13 +1443,16 @@ def run_job_search(user_id: int):
                                 _in_html = _in_resp.read().decode('utf-8', errors='replace')
                             import re as _re_in
                             _in_items = _re_in.findall(r'data-jk="([a-z0-9]+)"[^>]*>[\s\S]{0,2000}?title="([^"]{5,200})"', _in_html)
+                            _in_tally.ok(len(_in_items))
                             for _in_jk, _in_tt in _in_items[:15]:
                                 _in_t = _in_tt.strip()
                                 if _title_match(_in_t):
                                     all_raw.append({"title": _in_t, "company": "", "location": "", "url": f"https://il.indeed.com/viewjob?jk={_in_jk}", "description": "", "source": "indeed"})
                                     _indeed_count += 1
-                        except Exception:
-                            pass
+                        except Exception as _in_e:
+                            _in_tally.fail(_in_e)
+                    _in_tally.kept = _indeed_count
+                    _in_tally.done()
                     print(f"[search] Indeed: {_indeed_count} jobs matched")
 
                     # ── Multi-source ingestion + cross-platform fuzzy dedup ──────────
@@ -2098,6 +2136,7 @@ def run_job_search(user_id: int):
                     conn = database.get_db()
                     try:
                         inserted = 0; new_jobs_info = []; skipped_rej = 0
+                        _rel_fail = 0; _rel_err = ""
                         # Phase 5b: this search's jobs are the ones above this id.
                         _batch_after = conn.execute("SELECT COALESCE(MAX(id), 0) FROM jobs").fetchone()[0]
                         for j in all_jobs_data:
@@ -2120,8 +2159,11 @@ def run_job_search(user_id: int):
                                         j.get("location") or "", titles, locations, keywords):
                                     skipped_rej += 1
                                     continue
-                            except Exception:
-                                pass
+                            except Exception as _rel_e:
+                                # Fails OPEN (the job goes in unfiltered) - a broken
+                                # gate must not empty the queue - but no longer silently.
+                                _rel_fail += 1
+                                _rel_err = f"{type(_rel_e).__name__}: {_rel_e}"
                             try:
                                 _jurl = (j.get("url") or "").strip()
                                 if _jurl and _url_ok.get(_jurl) == 0:
@@ -2160,6 +2202,9 @@ def run_job_search(user_id: int):
                                 new_jobs_info.append({"title":j.get("job_title",""),"company":j.get("company",""),"url":_jurl,"url_ok":_url_ok.get(_jurl) if _jurl else None})
                             except Exception as e: print(f"[run-search] insert error: {e}")
                         conn.commit()
+                        if _rel_fail:
+                            print(f"[run-search] ERROR relevance gate failed for {_rel_fail} job(s) of user "
+                                  f"{user_id}; they were inserted unfiltered. Last error: {_rel_err[:200]}")
                         # ── Plan: matches shown per search (Phase 5b) ──────────────────
                         # The plan's top N new jobs stay 'new'; the rest are 'locked' and
                         # reach the user only as a count. A failure here leaves every job
@@ -8614,7 +8659,12 @@ class Handler(BaseHTTPRequestHandler):
                 for j in jobs:
                     uid = j.get("user_id", 1)
                     try:
-                        conn.execute("""
+                        # The INSERT's own rowcount (0 when the row already
+                        # existed). It used `SELECT changes()`, a SQLite-only
+                        # function: on Postgres it raised every time, the
+                        # handler swallowed it, and every sync reported 0
+                        # inserted - so its notification never fired (Step 7).
+                        _cur = conn.execute("""
                         INSERT OR IGNORE INTO jobs
                           (user_id,title,company,location,url,description,
                            why_relevant,company_info,source,found_date,status)
@@ -8624,10 +8674,10 @@ class Handler(BaseHTTPRequestHandler):
                               j.get("description",""), j.get("why_relevant",""),
                               j.get("company_info",""), j.get("source",""),
                               j.get("found_date", datetime.now().isoformat())))
-                        if conn.execute("SELECT changes()").fetchone()[0] > 0:
+                        if (_cur.rowcount or 0) > 0:
                             inserted += 1
-                    except Exception:
-                        pass
+                    except Exception as _sj_e:
+                        print(f"[sync] WARNING job not inserted ({j.get('url','')[:80]}): {_sj_e}")
                 conn.commit()
                 conn.close()
                 if inserted > 0:
