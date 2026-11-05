@@ -14,7 +14,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 2 | Link checker — remaining: nothing planned; the title-on-page rule was rejected on evidence | P1 | High | — | 2a/2b shipped (#7, #8); bot-challenge pages `unknown` (#15) |
 | 4 | **Plans, quotas, entitlements (Phase 5)** — matrix approved 2026-11-05; 4a machinery, 4b enforcement + blurred matches, 4c UI + admin | P1 | High | L | **Done** - 4a (#19), 4b (#20), 4c (#21); history retention moves to Step 6 |
 | 5 | Email verification + password reset — needs the custom domain | P1 | High | M | Not started (`/forgot-password` 404) |
-| 6 | Legal pages + data export / account deletion + history retention (hide, not delete) | P1 | High | M | 6a export + delete (14-day grace) shipped (#22); history hiding and legal drafts next |
+| 6 | Legal pages + data export / account deletion + history retention (hide, not delete) | P1 | High | M | 6a export + delete (#22) and 6b history hiding (#23) shipped; legal drafts need the legal name + contact |
 | 7 | Broad-exception audit (**271** `except Exception`, 1 bare `except:`) | P1 | Med | M | Not started; count grew from 253 |
 | 8 | Un-park auto-apply, incl. apply-flow UX and the self-test's stale SQLite fields | P2 | High | L | Parked; last apply 2026-07-20 |
 | 9 | Delete legacy HTML from `app.py` (Phase 4 step 5; closes most of old #13) | P2 | Med-High | M | Not started (`app.py` 8,687 lines) |

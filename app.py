@@ -6625,17 +6625,26 @@ class Handler(BaseHTTPRequestHandler):
                 # A locked match (beyond the plan's per-search limit) is never
                 # sent, whatever status is asked for - only its count, from
                 # /api/jobs/locked (Phase 5b).
+                # History older than the plan keeps (Free 30 days, Premium 12
+                # months) is hidden, not deleted (Step 6) - the open queue never.
+                _cut = entitlements.history_cutoff(user)
+                _hist = ""
+                _hargs = ()
+                if _cut:
+                    _hs = ",".join("'%s'" % h for h in entitlements.HISTORY_STATUSES)
+                    _hist = (" AND (status NOT IN (%s) OR %s >= ?)" % (_hs, entitlements.HISTORY_DATE_SQL))
+                    _hargs = (_cut,)
                 if status == "all":
                     rows = conn.execute(
-                        f"SELECT * FROM jobs WHERE user_id=? AND status!='locked' ORDER BY {order}",
-                        (user["id"],)
+                        f"SELECT * FROM jobs WHERE user_id=? AND status!='locked'{_hist} ORDER BY {order}",
+                        (user["id"],) + _hargs
                     ).fetchall()
                 elif status == "locked":
                     rows = []
                 else:
                     rows = conn.execute(
-                        f"SELECT * FROM jobs WHERE user_id=? AND status=? ORDER BY {order}",
-                        (user["id"], status)
+                        f"SELECT * FROM jobs WHERE user_id=? AND status=?{_hist} ORDER BY {order}",
+                        (user["id"], status) + _hargs
                     ).fetchall()
                 jobs_list = [dict(r) for r in rows]
                 for _j in jobs_list:
@@ -6736,6 +6745,9 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             items = database.get_activity(user["id"], limit=100)
+            _cut = entitlements.history_cutoff(user)
+            if _cut:
+                items = [i for i in items if str(i.get("created_date") or "")[:10] >= _cut]
             for _it in items:
                 if "details" in _it and _it["details"]:
                     _it["details"] = repair_mojibake(_it["details"])

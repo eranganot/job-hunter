@@ -2298,7 +2298,9 @@ function PlanPanel({ me }: { me: any }) {
       <h3 className="font-semibold text-white mb-3">Included</h3>
       <div className="grid grid-cols-2 gap-2 text-sm">
         {[["Matches per search", fmt(lim.matches_per_search)], ["Automatic search", lim.search_cadence === "weekly" ? "Weekly" : "Daily"],
-          ["Save for later", lim.deferred_list ? "Yes" : "Not included"], ["AI calls per day", fmt(lim.ai_calls_per_day)]].map(([k, v]) => (
+          ["Save for later", lim.deferred_list ? "Yes" : "Not included"], ["AI calls per day", fmt(lim.ai_calls_per_day)],
+          ["History kept", lim.history_days === null ? "All of it" : lim.history_days >= 365 ? "12 months" : `${lim.history_days} days`],
+          ["Cover letters", lim.cover_letter === null ? "Unlimited" : lim.cover_letter ? `${lim.cover_letter} / month` : "Not included"]].map(([k, v]) => (
           <div key={k} className="p-3 bg-gray-800 rounded-xl border border-gray-700"><p className="text-xs text-gray-400">{k}</p><p className="text-white font-medium">{v}</p></div>
         ))}
       </div>
