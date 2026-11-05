@@ -687,7 +687,8 @@ def israel_now(now_utc=None):
     try:
         from zoneinfo import ZoneInfo
         return now_utc.astimezone(ZoneInfo("Asia/Jerusalem"))
-    except Exception:
+    except Exception as _tz_exc:
+        print(f"[scheduler] WARNING no tz database ({_tz_exc}); using fixed GMT+3")
         return now_utc.astimezone(_dt.timezone(_dt.timedelta(hours=3)))
 
 
@@ -3237,7 +3238,8 @@ class Handler(BaseHTTPRequestHandler):
             return True
         try:
             user = self.get_user()
-        except Exception:
+        except Exception as _hu_exc:
+            print(f"[health] WARNING session lookup failed, serving the public view: {_hu_exc}")
             return False
         return bool(user) and user.get("role") == "admin"
 
