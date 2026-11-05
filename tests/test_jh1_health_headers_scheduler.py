@@ -89,3 +89,29 @@ def test_scheduler_clock_follows_israel_dst():
     assert app.israel_now(dt.datetime(2026, 11, 5, 10, 0, tzinfo=utc)).hour == 12
     # Summer: GMT+3, as before.
     assert app.israel_now(dt.datetime(2026, 7, 1, 10, 0, tzinfo=utc)).hour == 13
+
+
+def test_a_rotating_forwarded_for_does_not_dodge_the_register_limiter(stack, monkeypatch):
+    """JH-3: the client picks the first X-Forwarded-For entry; the proxy appends
+    the real address last. Keyed on the first, five signups with five invented
+    addresses were five fresh buckets."""
+    import urllib.parse
+    import ratelimit
+    ratelimit.reset_all()
+    monkeypatch.setenv("JH_RL_REGISTER_MAX", "3")
+    seen = []
+    for i in range(5):
+        body = urllib.parse.urlencode({
+            "name": "xff%d" % i, "email": "xff%d@example.test" % i,
+            "password": "correct-horse-1", "password2": "correct-horse-1"}).encode()
+        conn = http.client.HTTPConnection("127.0.0.1", stack["port"], timeout=10)
+        conn.request("POST", "/register", body=body, headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": str(len(body)),
+            "X-Forwarded-For": "10.9.8.%d, 203.0.113.9" % i})
+        resp = conn.getresponse()
+        resp.read()
+        conn.close()
+        seen.append(resp.status)
+    ratelimit.reset_all()
+    assert 429 in seen, "rotating X-Forwarded-For bypassed the limiter: %s" % seen

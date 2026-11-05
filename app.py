@@ -3319,12 +3319,17 @@ class Handler(BaseHTTPRequestHandler):
 
         Railway terminates TLS and appends X-Forwarded-For, so the socket peer
         is the proxy and would put every user in one bucket - a global lockout
-        the first time anyone typo'd a password. The first entry is the client.
-        It is spoofable, which is why anything that matters is limited on a
-        second, unspoofable key as well (login on the email, run-search on the
-        user id): rotating a header does not help you against those.
+        the first time anyone typo'd a password.
+
+        JH-3 (2026-11-05): the LAST entry, not the first. The first entry is
+        whatever the client typed - sending a fresh X-Forwarded-For per request
+        put every signup in a new register-limiter bucket. The proxy appends the
+        address it actually saw, so the last entry is the one the client cannot
+        choose (and with no client header, first and last are the same).
+        Anything that matters is still limited on a second key as well (login
+        on the email, run-search on the user id).
         """
-        fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
+        fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[-1].strip()
         return fwd or (self.client_address[0] if self.client_address else "?")
 
     def reject_cross_site(self) -> bool:
