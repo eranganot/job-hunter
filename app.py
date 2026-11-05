@@ -3367,9 +3367,17 @@ class Handler(BaseHTTPRequestHandler):
             self.redirect("/login")
         return user
 
-    def _check_sync_key(self, key: str) -> bool:
-        """Validate the shared secret used by relay.py and scheduled tasks."""
-        return bool(SYNC_API_KEY) and key == SYNC_API_KEY
+    def _check_sync_key(self, key: str = "") -> bool:
+        """Validate the shared secret used by relay.py and scheduled tasks.
+
+        JH-2 (2026-11-05): the X-Sync-Key header is preferred - a key in the
+        query string is written to every access log line. The body / query
+        argument is still accepted so an older relay keeps working until it is
+        updated. Compared in constant time."""
+        if not SYNC_API_KEY:
+            return False
+        sent = (self.headers.get("X-Sync-Key", "") if self.headers else "") or (key or "")
+        return bool(sent) and hmac.compare_digest(sent.encode(), SYNC_API_KEY.encode())
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -4299,6 +4307,10 @@ class Handler(BaseHTTPRequestHandler):
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)
                 return
+            # JH-4 / B5: spends Gemini (up to 30 grounded calls); a GET a
+            # link elsewhere could make an admin's browser fire.
+            if self.reject_cross_site():
+                return
             import links as _links
             _scope = (qs.get("scope", ["me"])[0] or "me").strip().lower()
             try:
@@ -4321,6 +4333,10 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)
+                return
+            # JH-4 / B5: spends Gemini (up to 30 grounded calls); a GET a
+            # link elsewhere could make an admin's browser fire.
+            if self.reject_cross_site():
                 return
             import links as _links
             _scope = (qs.get("scope", ["me"])[0] or "me").strip().lower()
@@ -4579,12 +4595,16 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # All API POST routes require auth
+        # All API POST routes require auth - except /api/sync/*, which relay.py
+        # and scheduled tasks call with the sync key and no session. JH-2
+        # (2026-11-05): this gate sat in front of the sync routes, so every
+        # relay POST got 401 before its key was ever checked; each sync handler
+        # below checks the key itself.
         user = self.get_user()
-        if not user:
+        if not user and not path.startswith("/api/sync/"):
             self.send_json({"error": "Unauthorized"}, 401)
             return
-        user_id = user["id"]
+        user_id = user["id"] if user else None
 
         # A locked match (beyond the plan's per-search limit) cannot be acted on
         # by any per-job route - approve, restore, apply, cover letter, check -

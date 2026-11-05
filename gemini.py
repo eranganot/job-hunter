@@ -542,14 +542,16 @@ def generate(body, *, purpose: str, user_id: int | None = None,
         data = bytes(body)
     else:
         data = json.dumps(body).encode("utf-8")
-    url = "%s/%s:generateContent?key=%s" % (API_BASE, model, k)
+    # JH-2: the key travels in the x-goog-api-key header, not ?key= - a URL
+    # lands in exception messages and Sentry's http breadcrumbs.
+    url = "%s/%s:generateContent" % (API_BASE, model)
 
     last = None
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(
                 url, data=data, method="POST",
-                headers={"Content-Type": "application/json"})
+                headers={"Content-Type": "application/json", "x-goog-api-key": k})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
             p, o, t = _usage_from(result)
