@@ -63,6 +63,13 @@ TABLE_ORDER = [
     # a migration adds a table this list does not name.
     "job_runs",
     "llm_usage",
+    # m0015 (Phase 5, 2026-11-05): plans, usage and billing. No foreign keys;
+    # they only need to come after users.
+    "usage_counters",
+    "plan_events",
+    "plan_notices",
+    "subscriptions",
+    "billing_events",
 ]
 
 BATCH = 500

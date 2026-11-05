@@ -236,4 +236,23 @@ Follows Appendix A of `EXECUTION_PLAN_PUBLIC_LAUNCH.md`. Starting point is bette
 
 ## 7. Tier matrix
 
-Lives in its own editable doc while Eran refines it: **Job Hunter — Plan tier matrix** (claude.ai doc, https://claude.ai/artifact/HNeqn25jQRU2taPiN3YrUm). Step 4 starts only after he approves it there; the approved version is copied into this section at that point.
+**Approved by Eran on 2026-11-05** in the doc **Job Hunter — Plan tier matrix** (https://claude.ai/artifact/HNeqn25jQRU2taPiN3YrUm). The code's copy is `plans.py`; this table is the approved version.
+
+| Feature | Free | Premium | Expert | Admin (role) |
+|---|---|---|---|---|
+| Price | free | hidden | hidden | — |
+| Automatic search cadence | weekly | daily | daily + on demand | unmetered |
+| On-demand searches | 1 / day | 3 / day | 10 / day | unmetered |
+| Matches shown per search (scored) | 3, the rest shown blurred | 6, the rest shown blurred | unlimited | unmetered |
+| Direct company links | yes | yes | yes | yes |
+| Auto-apply | no | not sold while parked | not sold while parked | when on |
+| Cover letters | no | 10 / month | 30 / month | unmetered |
+| CV optimizer (general review) | 2 / month | 4 / month | unlimited | unmetered |
+| Notifications | all | all | all | all |
+| Pipeline + analytics | basic counts | full | full + export | full |
+| Paid job sources | no | yes (credit-capped) | yes (higher cap than Premium) | unlimited |
+| History kept | 30 days | 12 months | unlimited | unlimited |
+| AI calls per day (hard cap) | 30 | 300 | 600 | global ceiling only |
+| Deferred list | no | yes | yes | yes |
+
+Rules: no Beta plan; new users, and existing users when enforcement ships, get Premium free for 30 days, then Free; web push 7 days and 1 day before a promotion ends; hidden matches are counted, never sent to the browser; admin sets any plan, with or without an end date; billing monthly or 6 months upfront at 20% off. Open: a trial for paid plans, decided before pricing goes live.

@@ -24,11 +24,11 @@ def env(tmp_path, monkeypatch):
         "applications_reset_date=?, cv_summary='x' WHERE user_id=?",
         (today, uid),
     )
-    # Auto-apply is a paid feature, and since 2026-09-20 run_job_apply checks the
-    # PLAN and not just the flag (see tests/test_auto_apply_entitlement.py). Left
-    # at the 'free' default, every test below would stop at the gate and pass or
-    # fail for a reason that has nothing to do with retries or backoff.
-    conn.execute("UPDATE users SET plan='premium' WHERE id=?", (uid,))
+    # run_job_apply checks entitlement, not just the flag (see
+    # tests/test_auto_apply_entitlement.py). While auto-apply is parked only the
+    # admin role is entitled (plans.py, 2026-11-05); without this every test
+    # below would stop at the gate for a reason unrelated to retries or backoff.
+    conn.execute("UPDATE users SET role='admin' WHERE id=?", (uid,))
     conn.commit()
     conn.close()
     monkeypatch.setattr(apply_engine, "extract_applicant_data", lambda cv, em: {"email": em})

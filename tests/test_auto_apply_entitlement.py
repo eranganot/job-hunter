@@ -79,9 +79,17 @@ def test_an_empty_plan_is_not_a_paid_plan(engine_on):
     assert engine_on["app"].run_job_apply(uid)["skipped"] == "not_entitled"
 
 
-def test_a_premium_user_is_applied_for(engine_on):
-    """The gate has to let the paying case through, or it is just an outage."""
-    uid = _make_user(engine_on["db"], "premium-gate@example.test", "premium", True)
+def test_paid_plans_are_not_applied_for_while_auto_apply_is_parked(engine_on):
+    """Approved matrix (2026-11-05): auto-apply is not sold while parked. A
+    Premium or Expert user with the flag set is refused at the chokepoint."""
+    for plan in ("premium", "expert"):
+        uid = _make_user(engine_on["db"], "%s-gate@example.test" % plan, plan, True)
+        assert engine_on["app"].run_job_apply(uid)["skipped"] == "not_entitled", plan
+
+
+def test_the_entitled_case_still_gets_through(engine_on):
+    """The gate has to let the entitled case through, or it is just an outage."""
+    uid = _make_user(engine_on["db"], "admin-through@example.test", "free", True, role="admin")
     out = engine_on["app"].run_job_apply(uid)
     assert out.get("skipped") != "not_entitled", out
     assert out["applied"] >= 1, out

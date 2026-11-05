@@ -736,6 +736,90 @@ def m0014_recheck_unresolved_links(conn):
     conn.commit()
 
 
+def m0015_plans_and_promotions(conn):
+    """Phase 5 (Step 4): plans with end dates, usage counters, and the empty
+    billing tables Step 11 fills - created now so payments add no schema.
+
+      users.plan_until   UTC 'YYYY-MM-DD HH:MM:SS' a promotion ends; NULL = permanent
+      users.plan_after   the plan a promotion falls back to (normally 'free')
+      users.plan_source  'promotion' | 'admin' | 'promotion_ended' | 'paid' | NULL
+      usage_counters     uses per (user, meter, period) - entitlements.try_consume
+      plan_events        every plan change: who, from, to, why, until
+      plan_notices       promotion-end pushes already sent (one per window per end date)
+      subscriptions      Step 11: one row per provider subscription
+      billing_events     Step 11: provider webhooks, unique per event id (idempotency)
+
+    No row is changed here. Existing users get their 30-day Premium promotion
+    in the migration that ships enforcement (Step 4b), so their 30 days start
+    when the plan limits do, not before.
+    """
+    for col in ("plan_until", "plan_after", "plan_source"):
+        if not _has_column(conn, "users", col):
+            conn.execute("ALTER TABLE users ADD COLUMN %s TEXT" % col)
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS usage_counters (
+            user_id       INTEGER NOT NULL,
+            meter         TEXT NOT NULL,
+            period        TEXT NOT NULL,
+            uses          INTEGER NOT NULL DEFAULT 0,
+            updated_date  TEXT,
+            PRIMARY KEY (user_id, meter, period)
+        )
+    """, conn))
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS plan_events (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            from_plan     TEXT,
+            to_plan       TEXT NOT NULL,
+            plan_until    TEXT,
+            reason        TEXT NOT NULL,
+            by_user_id    INTEGER,
+            created_date  TEXT DEFAULT (datetime('now'))
+        )
+    """, conn))
+    conn.execute(ddl_for(
+        "CREATE INDEX IF NOT EXISTS idx_plan_events_user ON plan_events (user_id)", conn))
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS plan_notices (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            kind          TEXT NOT NULL,
+            plan_until    TEXT NOT NULL,
+            sent_date     TEXT,
+            UNIQUE (user_id, kind, plan_until)
+        )
+    """, conn))
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id                   INTEGER NOT NULL,
+            provider                  TEXT NOT NULL,
+            provider_subscription_id  TEXT NOT NULL,
+            plan                      TEXT NOT NULL,
+            status                    TEXT NOT NULL,
+            billing_cycle             TEXT,
+            current_period_end        TEXT,
+            created_date              TEXT DEFAULT (datetime('now')),
+            updated_date              TEXT,
+            UNIQUE (provider, provider_subscription_id)
+        )
+    """, conn))
+    conn.execute(ddl_for("""
+        CREATE TABLE IF NOT EXISTS billing_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider        TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            event_type      TEXT NOT NULL,
+            payload         TEXT,
+            received_date   TEXT DEFAULT (datetime('now')),
+            processed_date  TEXT,
+            UNIQUE (provider, event_id)
+        )
+    """, conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -751,6 +835,7 @@ MIGRATIONS = [
     (12, "reconcile_eran_backlog",      m0012_reconcile_eran_backlog),
     (13, "job_links",                   m0013_job_links),
     (14, "recheck_unresolved_links",    m0014_recheck_unresolved_links),
+    (15, "plans_and_promotions",        m0015_plans_and_promotions),
 ]
 
 
