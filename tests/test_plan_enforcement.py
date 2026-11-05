@@ -396,3 +396,47 @@ def test_only_admin_sets_plans_and_admin_has_no_plan(stack, users):  # noqa: F81
                                             {"plan": "free"})
     assert st == 400 and json.loads(body)["code"] == "admin_has_no_plan"
     assert users["admin"].post_json("/api/admin/users/999999/plan", {"plan": "free"})[0] == 404
+
+
+# ── Step 6: history older than the plan keeps is hidden, not deleted ───────
+
+def test_old_history_is_hidden_on_free_and_returns_on_upgrade(stack, free_alice):  # noqa: F811
+    db = stack["db"]
+    uid = _uid(db, "alice@example.test")
+    old = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%d")
+    c = db.get_db()
+    for st, title in (("applied", "Old Applied"), ("rejected", "Old Passed"), ("new", "Old New Still Open")):
+        c.execute("INSERT INTO jobs (user_id,title,company,url,status,found_date,applied_date) VALUES (?,?,?,?,?,?,?)",
+                  (uid, title, "Hist Co", "https://hist.example/%s" % st, st, old, old if st == "applied" else None))
+    c.execute("INSERT INTO activity_log (user_id,event_type,details,created_date) VALUES (?,?,?,?)",
+              (uid, "jobs_searched", "Old activity line", old + " 10:00:00"))
+    c.commit()
+    c.close()
+    try:
+        seen = lambda s: {j["title"] for j in json.loads(free_alice.get("/api/jobs?status=%s" % s)[2])}
+        assert "Old Applied" not in seen("applied") and "Old Passed" not in seen("rejected")
+        assert "Old Applied" not in seen("all")
+        assert "Old New Still Open" in seen("new")                                  # the open queue is never history
+        assert "Old activity line" not in free_alice.get("/api/activity")[2].decode()
+        _plan(db, "alice@example.test", "premium")                                  # 12 months
+        assert "Old Applied" in seen("applied") and "Old Passed" in seen("rejected")
+        assert "Old activity line" in free_alice.get("/api/activity")[2].decode()
+        c = db.get_db()
+        try:                                                                         # hidden, never deleted
+            assert c.execute("SELECT COUNT(*) FROM jobs WHERE company='Hist Co'").fetchone()[0] == 3
+        finally:
+            c.close()
+    finally:
+        c = db.get_db()
+        c.execute("DELETE FROM jobs WHERE company='Hist Co'")
+        c.execute("DELETE FROM activity_log WHERE details='Old activity line'")
+        c.commit()
+        c.close()
+
+
+def test_history_cutoffs_follow_the_matrix():
+    now = datetime(2026, 11, 5, 12, tzinfo=timezone.utc)
+    assert entitlements.history_cutoff({"role": "user", "plan": "free"}, now) == "2026-10-06"
+    assert entitlements.history_cutoff({"role": "user", "plan": "premium"}, now) == "2025-11-05"
+    assert entitlements.history_cutoff({"role": "user", "plan": "expert"}, now) is None
+    assert entitlements.history_cutoff({"role": "admin", "plan": "free"}, now) is None

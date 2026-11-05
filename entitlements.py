@@ -407,3 +407,23 @@ def locked_summary(conn, user_id: int) -> dict:
 def is_locked(conn, user_id: int, job_id: int) -> bool:
     row = conn.execute("SELECT status FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
     return bool(row) and row[0] == "locked"
+
+
+# ── history kept (Step 6, Eran 2026-11-05: hidden, not deleted) ───────────
+#
+# Free keeps 30 days of history, Premium 12 months, Expert and admin all of it.
+# Older history is HIDDEN at read time - nothing is deleted, so an upgrade
+# brings it straight back and the export still holds everything. History means
+# jobs already dealt with (applied, passed, deferred, expired) and the activity
+# log; the open queue (new, approved) is current, never history.
+
+HISTORY_STATUSES = ("applied", "rejected", "deferred", "expired")
+HISTORY_DATE_SQL = "COALESCE(NULLIF(applied_date, ''), found_date, '')"
+
+
+def history_cutoff(user, now: datetime | None = None):
+    """'YYYY-MM-DD' - history older than this is hidden; None = keep all."""
+    days = limit(user, "history_days")
+    if days is None:
+        return None
+    return ((now or _utcnow()) - timedelta(days=days)).astimezone(_LOCAL).strftime("%Y-%m-%d")
