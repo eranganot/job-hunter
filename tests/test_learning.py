@@ -120,3 +120,47 @@ def test_with_no_stated_locations_the_old_behaviour_stands():
     job = {"company": "Acme", "title": "VP Product", "location": "Tel Aviv, Israel"}
     penalty, _r = compute_feedback_penalty(job, _loc_signals({"tel aviv"}), {"locations": None})
     assert penalty == 10
+
+
+class TestAppliedElsewhere:
+    """Eran, 2026-11-05: "if I click on already applied elsewhere -> learn that
+    this company interests me and do not pass on this company"."""
+
+    def test_it_is_interest_not_a_pass(self, uid):
+        for _ in range(3):
+            _add(uid, "Wix", title="Senior Product Manager", notes="Already applied elsewhere",
+                 location="Tel Aviv", age_days=1)
+        sig = _signals(uid)
+        assert "wix" in sig["interested_companies"]
+        assert "wix" not in sig["passed_companies"]
+        assert not sig["disliked_title_tokens"]
+        assert not sig["examples"]
+
+    def test_the_company_is_never_demoted_even_after_real_passes(self, uid):
+        _add(uid, "Wix", notes="Not a good fit", age_days=1)
+        _add(uid, "Wix", notes="Not a good fit", age_days=1)
+        pen, why = compute_feedback_penalty({"company": "Wix", "title": "PM"}, _signals(uid))
+        assert pen == 20 and "passed on this company" in why          # the old behaviour
+        _add(uid, "Wix", notes="Already applied elsewhere", age_days=1)
+        pen, why = compute_feedback_penalty({"company": "Wix", "title": "PM"}, _signals(uid))
+        assert pen == 0 and "passed" not in why
+
+    def test_bad_company_still_wins(self, uid):
+        _add(uid, "Acme", notes="Already applied elsewhere", age_days=1)
+        _add(uid, "Acme", notes="Bad company", age_days=1)
+        pen, _ = compute_feedback_penalty({"company": "Acme", "title": "PM"}, _signals(uid))
+        assert pen == 45
+
+    def test_the_ai_is_told_it_is_a_company_he_wants(self, uid):
+        from ai_analysis import _feedback_notes
+        _add(uid, "Wix", notes="Already applied elsewhere", age_days=1)
+        conn = database.get_db()
+        try:
+            database.record_pass_reason_stat(conn, uid, "Already applied elsewhere")
+        finally:
+            conn.close()
+        sig = _signals(uid)
+        assert "Already applied elsewhere" not in sig["reason_counts"]
+        notes = _feedback_notes(sig)
+        assert "applied to on their own" in notes and "wix" in notes
+        assert "rejected: " not in notes

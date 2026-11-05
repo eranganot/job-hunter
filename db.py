@@ -380,7 +380,13 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         # and their origin is unknowable, but the overwhelming majority of
         # passes are his, and leaving them out understated the denominator by
         # more than including them overstates it.
-        "passed_by_user":    _n("AND status='rejected' AND rejected_by='user'"),
+        # "Already applied elsewhere": he applied on his own, so it is neither a
+        # pass nor an application the app made. Counted apart from both, and
+        # passed_by_user excludes it (Eran, 2026-11-05).
+        "applied_elsewhere": _n("AND status='rejected' AND rejected_by='user' "
+                                "AND LOWER(COALESCE(notes,'')) LIKE '%applied elsewhere%'"),
+        "passed_by_user":    _n("AND status='rejected' AND rejected_by='user' "
+                                "AND LOWER(COALESCE(notes,'')) NOT LIKE '%applied elsewhere%'"),
         "passed_by_system":  _n("AND status='rejected' AND rejected_by='system'"),
         "passed_unknown":    _n("AND status='rejected' AND rejected_by IS NULL"),
         "rejected_archived": archived_count,
@@ -615,6 +621,17 @@ def get_pass_reason_stats(conn: sqlite3.Connection, user_id: int) -> dict:
     return {row[0]: row[1] for row in rows}
 
 
+APPLIED_ELSEWHERE = "applied elsewhere"
+
+
+def is_applied_elsewhere(note) -> bool:
+    """The "Already applied elsewhere" removal reason. The job leaves the queue as
+    rejected, but it is NOT a pass on the company - he applied there himself.
+    Eran, 2026-11-05: learn that the company interests him, never demote it, and
+    keep it out of the "actually applied" rate (the app did not apply)."""
+    return APPLIED_ELSEWHERE in (note or "").lower()
+
+
 def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
     """Aggregate a user's pass/reject history into structured learning signals.
 
@@ -624,6 +641,8 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
     Returns a dict:
       bad_companies          set[str]      - companies passed with a "Bad company" reason (lowercased)
       passed_companies       dict[str,int] - every passed company -> times passed (lowercased)
+      interested_companies   set[str]      - companies he applied to himself ("Already applied
+                                             elsewhere"): never demoted, a positive hint for the AI
       disliked_title_tokens  set[str]      - title words (len>3) seen in >=2 distinct passed roles
       reason_counts          dict[str,int] - pass_reason_stats {reason: count}
       examples               list[dict]    - up to 12 recent {company,title,reason} for AI context
@@ -648,6 +667,7 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
         return 0.5 ** (age / 90.0)
 
     bad_companies: set = set()
+    interested_companies: set = set()
     passed_companies: dict = {}
     tok_weight: dict = {}
     loc_weight: dict = {}
@@ -666,6 +686,11 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
         except Exception:
             created = None
         w = _weight(created)
+        if is_applied_elsewhere(note):
+            # A positive signal: not a pass on the company, the title or the city.
+            if comp:
+                interested_companies.add(comp)
+            continue
         if comp:
             passed_companies[comp] = passed_companies.get(comp, 0.0) + w
             if "bad company" in note.lower():
@@ -689,9 +714,11 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
 
     return {
         "bad_companies":         bad_companies,
+        "interested_companies":  interested_companies,
         "passed_companies":      passed_companies,
         "disliked_title_tokens": disliked_title_tokens,
         "disliked_locations":    disliked_locations,
-        "reason_counts":         get_pass_reason_stats(conn, user_id),
+        "reason_counts":         {k: v for k, v in get_pass_reason_stats(conn, user_id).items()
+                                  if not is_applied_elsewhere(k)},
         "examples":              examples,
     }

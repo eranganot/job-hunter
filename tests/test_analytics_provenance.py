@@ -66,7 +66,7 @@ def aged(tmp_path):
     add(1,  "applied", None,        "")                                       # no evidence at all
 
     add(30, "rejected", None, "Not a good fit")            # his pass
-    add(12, "rejected", None, "Already applied elsewhere")  # his pass, the reason he named
+    add(12, "rejected", None, "Already applied elsewhere")  # his decision, but NOT a pass (2026-11-05)
     for r in conn.execute("SELECT company, title FROM jobs WHERE status='rejected'").fetchall():
         conn.execute("INSERT INTO rejected_patterns (user_id,company,title,notes,created_date) "
                      "VALUES (?,?,?,?,datetime('now'))", (uid, r["company"], r["title"], "pass"))
@@ -101,7 +101,10 @@ def test_the_bulk_note_does_not_steal_the_hand_marked_rows(aged):
 
 
 def test_the_backfill_separates_his_passes_from_the_systems(aged):
-    assert aged["passed_by_user"] == 42
+    # 42 decisions of his: 30 passes, and 12 removed because he applied
+    # elsewhere - counted apart, never as passes (Eran, 2026-11-05).
+    assert aged["passed_by_user"] == 30
+    assert aged["applied_elsewhere"] == 12
     assert aged["passed_by_system"] == 200
     assert aged["passed_unknown"] == 3
 
@@ -116,7 +119,7 @@ def test_a_row_with_no_evidence_is_left_unknown_not_guessed(aged):
 def test_the_breakdown_adds_up_to_the_totals(aged):
     assert (aged["applied_engine"] + aged["applied_manual"] + aged["applied_bulk"]
             + aged["applied_no_url"] + aged["applied_unknown"]) == aged["applied"]
-    assert (aged["passed_by_user"] + aged["passed_by_system"]
+    assert (aged["passed_by_user"] + aged["applied_elsewhere"] + aged["passed_by_system"]
             + aged["passed_unknown"] + aged["rejected_archived"]) == aged["rejected"]
 
 
@@ -134,6 +137,24 @@ def test_a_pass_is_a_pass_whatever_reason_is_chosen(stack, users):
         assert row["status"] == "rejected", f"{reason!r} did not produce a pass"
         assert row["rejected_by"] == "user"
         assert row["applied_via"] is None, f"{reason!r} leaked into the applied count"
+
+
+def test_applied_elsewhere_is_counted_apart_never_as_applied_or_passed(stack, users):
+    """Eran, 2026-11-05: the job leaves the queue as rejected, but it is not a
+    pass and the app did not apply. /api/stats counts it on its own line."""
+    import json as _json
+    uid = _user_id(stack["db"], "alice@example.test")
+    _s, _l, raw = users["a"].get("/api/stats")
+    before = _json.loads(raw)
+    for reason in ("Already applied elsewhere", "Not a good fit"):
+        job_id = _new_job(stack["db"], uid)
+        users["a"].post_json(f"/api/jobs/{job_id}/reject", {"reason": reason})
+    _s, _l, raw = users["a"].get("/api/stats")
+    after = _json.loads(raw)
+    assert after["applied_elsewhere"] - before["applied_elsewhere"] == 1
+    assert after["passed_by_user"] - before["passed_by_user"] == 1
+    assert after["applied_manual"] == before["applied_manual"]
+    assert after["applied_engine"] == before["applied_engine"]
 
 
 def test_marking_a_job_applied_by_hand_says_so(stack, users):
@@ -164,7 +185,7 @@ def test_the_stats_endpoint_serves_the_breakdown(stack, users):
     assert status == 200
     body = _json.loads(raw)
     for key in ("applied_engine", "applied_manual", "applied_bulk", "applied_no_url",
-                "applied_unknown", "passed_by_user", "passed_by_system",
+                "applied_unknown", "applied_elsewhere", "passed_by_user", "passed_by_system",
                 "passed_unknown", "rejected_archived"):
         assert key in body, f"/api/stats no longer sends {key}"
 
