@@ -90,9 +90,14 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirect)
 
 
-def get(url, timeout=30):
-    """Status + Location + body, never following redirects, never raising on 3xx-5xx."""
-    req = urllib.request.Request(url, headers={"User-Agent": "job-hunter-smoke/1.0"})
+def get(url, timeout=30, anonymous=False):
+    """Status + Location + body, never following redirects, never raising on 3xx-5xx.
+    /api/health is asked for its full (keyed) view when JH_HEALTH_KEY is set
+    (JH-1), unless anonymous=True."""
+    hdrs = {"User-Agent": "job-hunter-smoke/1.0"}
+    if not anonymous and "/api/health" in url and os.environ.get("JH_HEALTH_KEY"):
+        hdrs["X-Health-Key"] = os.environ["JH_HEALTH_KEY"]
+    req = urllib.request.Request(url, headers=hdrs)
     t0 = time.monotonic()
     try:
         resp = _opener.open(req, timeout=timeout)
@@ -104,6 +109,7 @@ def get(url, timeout=30):
         "location": (headers.get("Location") if headers else "") or "",
         "body": body.decode("utf-8", errors="replace"),
         "seconds": round(time.monotonic() - t0, 2),
+        "headers": {k.lower(): v for k, v in (headers.items() if headers else [])},
     }
 
 
@@ -151,6 +157,10 @@ def boot_local(commit):
         "JH_SESSION_SECRET": "smoke-local-only",
         "PYTHONUNBUFFERED": "1",
     })
+    # JH-1: the booted box and this script share one health key, so the detail
+    # checks run against the keyed view exactly as they do against Railway.
+    os.environ.setdefault("JH_HEALTH_KEY", "smoke-local-only")
+    env["JH_HEALTH_KEY"] = os.environ["JH_HEALTH_KEY"]
     log = open(os.path.join(tmp, "app.log"), "w")
     proc = subprocess.Popen([sys.executable, "app.py"], cwd=str(REPO_ROOT), env=env,
                             stdout=log, stderr=subprocess.STDOUT)
@@ -240,6 +250,9 @@ def run(args):
                  YELLOW)
 
     # Reachability
+    if not os.environ.get("JH_HEALTH_KEY"):
+        note("JH_HEALTH_KEY is not set: since JH-1 the detail checks below need it "
+             "(the anonymous /api/health is trimmed). Export the same value the box has.", YELLOW)
     section("reachability")
     state = {"health": None}
 
@@ -459,6 +472,24 @@ def run(args):
             return "response contained an email address"
         return True
     s.check("GET /api/admin/users leaks nothing anonymously", _admin_users)
+
+    def _health_public():
+        r = get(base + "/api/health", anonymous=True)
+        try:
+            h = json.loads(r["body"])
+        except ValueError:
+            return f"status {r['code']}, not JSON"
+        leaked = [k for k in ("active_users", "total_jobs", "last_apply", "credentials_key",
+                              "llm", "llm_history", "db_pool", "scheduler_lock") if k in h]
+        return True if not leaked and h.get("detail") == "public" else f"anonymous health shows {leaked}"
+    s.check("anonymous /api/health shows no internals (JH-1)", _health_public)
+
+    def _security_headers():
+        hdr = get(base + "/login")["headers"]
+        missing = [k for k in ("strict-transport-security", "x-frame-options", "content-security-policy",
+                               "x-content-type-options", "referrer-policy") if k not in hdr]
+        return True if not missing else f"missing {missing}"
+    s.check("/login carries the security headers (JH-1)", _security_headers)
 
     # Database and worker
     section("database and worker")

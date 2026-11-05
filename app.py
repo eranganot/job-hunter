@@ -10,6 +10,7 @@ Cloud (Railway):
     Run relay.py on your Mac to bridge scheduled tasks to the cloud.
 """
 
+import hmac
 import json
 import os
 import re
@@ -676,8 +677,32 @@ def _plan_search_schedule(freq, s_dow, plan_row):
     return freq, s_dow
 
 
+def israel_now(now_utc=None):
+    """Israel wall-clock time, DST-aware. The scheduler used a fixed GMT+3, which
+    is only right in summer: from the last Sunday of October Israel is GMT+2, so
+    every scheduled search and apply ran an hour early all winter. Falls back to
+    the old fixed offset only if the box has no tz database."""
+    import datetime as _dt
+    now_utc = now_utc or _dt.datetime.now(_dt.timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        return now_utc.astimezone(ZoneInfo("Asia/Jerusalem"))
+    except Exception:
+        return now_utc.astimezone(_dt.timezone(_dt.timedelta(hours=3)))
+
+
+def scheduler_enabled() -> bool:
+    """JH-7 (2026-11-05): JH_SCHEDULER_ENABLED=0 turns the clock off on this box.
+    Staging runs on a seeded copy of production's users, so its scheduler ran
+    every user's daily search and spent Gemini at production's rate (~120 calls,
+    ~1.5M tokens a day) on data nobody reads. Default on: production unchanged."""
+    return os.environ.get("JH_SCHEDULER_ENABLED", "1").strip().lower() not in ("0", "false", "off", "no")
+
+
 def _check_scheduled_jobs() -> None:
     """Auto-trigger search/apply for each active user when their scheduled hour arrives."""
+    if not scheduler_enabled():
+        return
     # Only one instance may decide that a scheduled run is due. The queue's
     # one-run-per-user rule stops a duplicate SEARCH, but the scheduler is what
     # decides a run happens at all - two instances both seeing the same minute
@@ -685,7 +710,7 @@ def _check_scheduled_jobs() -> None:
     if not schedlock.acquire(database.get_db, database.backend()):
         return
     try:
-        now = datetime.now(__import__("datetime").timezone(__import__("datetime").timedelta(hours=3)))  # Israel time (GMT+3)
+        now = israel_now()
         today = now.strftime('%Y-%m-%d')
         current_hour = now.hour
         conn = database.get_db()
@@ -3116,6 +3141,39 @@ def _link_verdict(url: str, timeout: int = 10):
     return ("dead" if verdict in ("dead", "generic") else verdict), reason
 
 
+# JH-1 (2026-11-05): /api/health is public, and until now it published the user
+# count, job count, the last applied job and company, the credentials-key
+# fingerprint, the Gemini ledger and the Postgres host. Anonymous callers now get
+# only what an outside check needs to tell "up and doing its job" from "up and
+# idle"; the full payload needs an admin session or the X-Health-Key header
+# matching JH_HEALTH_KEY (scripts/smoke.py sends it from the same env var).
+HEALTH_PUBLIC_KEYS = (
+    "status", "uptime_info", "scheduler", "schema_version", "commit", "db_backend",
+    "credentials_encrypted", "error_reporting", "sources", "queue", "db_check",
+    "worker", "db_backend_refused", "last_search",
+)
+
+
+def public_health(payload: dict) -> dict:
+    """The anonymous view of /api/health: an allowlist, so a field added later
+    stays private until someone decides otherwise."""
+    out = {k: payload[k] for k in HEALTH_PUBLIC_KEYS if k in payload}
+    out["detail"] = "public"
+    return out
+
+
+# Sent on every response (JH-1). No script-src CSP yet: the pages carry inline
+# scripts; frame-ancestors alone stops clickjacking without touching them.
+SECURITY_HEADERS = (
+    ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
+    ("X-Frame-Options", "DENY"),
+    ("Content-Security-Policy", "frame-ancestors 'none'"),
+    ("X-Content-Type-Options", "nosniff"),
+    ("Referrer-Policy", "strict-origin-when-cross-origin"),
+)
+
+
+
 class Handler(BaseHTTPRequestHandler):
 
     # BaseHTTPRequestHandler's own access line, superseded by the one log.end()
@@ -3165,6 +3223,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
+
+    def end_headers(self):
+        for _name, _value in SECURITY_HEADERS:
+            self.send_header(_name, _value)
+        super().end_headers()
+
+    def _health_detail_allowed(self) -> bool:
+        """Full /api/health for the smoke key holder or an admin session."""
+        key = os.environ.get("JH_HEALTH_KEY", "")
+        sent = self.headers.get("X-Health-Key", "") if self.headers else ""
+        if key and sent and hmac.compare_digest(key.encode(), sent.encode()):
+            return True
+        try:
+            user = self.get_user()
+        except Exception:
+            return False
+        return bool(user) and user.get("role") == "admin"
 
     def send_json(self, data, code: int = 200):
         body = json.dumps(data, default=str).encode()
@@ -3535,7 +3610,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 conn = database.get_db()
             except Exception as _dbe:
-                self.send_json({
+                _down = {
                     "status": "db_unavailable",
                     "error": str(_dbe)[:200],
                     "db_backend": database.backend(),
@@ -3543,7 +3618,10 @@ class Handler(BaseHTTPRequestHandler):
                     "db_leaks_reclaimed": dbdriver.reclaimed_stats(),
                     "scheduler_lock": schedlock.status(),
                     "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7],
-                }, 503)
+                }
+                if not self._health_detail_allowed():
+                    _down = {k: _down[k] for k in ("status", "db_backend", "commit")}
+                self.send_json(_down, 503)
                 return
             try:
                 user_count = conn.execute("SELECT COUNT(*) FROM users WHERE is_active=1").fetchone()[0]
@@ -3563,14 +3641,15 @@ class Handler(BaseHTTPRequestHandler):
                     _schema_version = 0
             finally:
                 conn.close()
-            self.send_json({
+            _health = {
                 "status": "ok",
                 "uptime_info": "server running",
                 "active_users": user_count,
                 "total_jobs": job_count,
                 "last_search": {"detail": repair_mojibake(last_search[0]) if last_search else None, "date": last_search[1] if last_search else None},
                 "last_apply": {"detail": repair_mojibake(last_apply[0]) if last_apply else None, "date": last_apply[1] if last_apply else None},
-                "scheduler": "active (checks every 60s)",
+                "scheduler": "active (checks every 60s)" if scheduler_enabled()
+                             else "disabled (JH_SCHEDULER_ENABLED=0)",
                 # Phase 2a: lets a deploy be verified from outside - the smoke
                 # script asserts the migrations actually ran on the box.
                 "schema_version": _schema_version,
@@ -3626,7 +3705,8 @@ class Handler(BaseHTTPRequestHandler):
                 # back at the end of the request/tick. Should stay 0; a rising
                 # count names a route that needs a try/finally.
                 "db_leaks_reclaimed": dbdriver.reclaimed_stats(),
-            })
+            }
+            self.send_json(_health if self._health_detail_allowed() else public_health(_health))
             return
 
         # API routes (all require auth)

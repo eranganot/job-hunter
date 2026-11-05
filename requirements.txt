@@ -34,3 +34,7 @@ psycopg[binary,pool]==3.3.5
 # no-ops when JH_SENTRY_DSN is unset, so a failed install loses reporting,
 # not serving.
 sentry-sdk==2.19.2
+
+# Scheduler clock (app.israel_now): zoneinfo needs an IANA database and a slim
+# image is not guaranteed to ship one; this is the fallback zoneinfo uses.
+tzdata==2025.2

@@ -269,8 +269,14 @@ def test_health_is_public_and_reports_shape(stack):
     status, _, body = Client(stack["port"]).get("/api/health")
     assert status == 200
     payload = json.loads(body)
-    for key in ("status", "active_users", "total_jobs", "scheduler", "schema_version"):
+    for key in ("status", "scheduler", "schema_version", "commit", "sources", "queue", "worker"):
         assert key in payload
+    # JH-1: the anonymous view no longer publishes counts, the last applied job,
+    # the key fingerprint, the Gemini ledger or the database host.
+    for key in ("active_users", "total_jobs", "last_apply", "credentials_key", "llm",
+                "llm_history", "db_pool", "scheduler_lock", "rate_limit"):
+        assert key not in payload, key
+    assert payload["detail"] == "public"
     # Phase 2a: health must report the applied schema version so a deploy can be
     # verified from outside. 0 would mean the migrations never ran on that box.
     import migrations as _m

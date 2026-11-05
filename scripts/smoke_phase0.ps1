@@ -42,7 +42,7 @@ if ($BaseUrl -match "[<>]") {
 try { $null = [System.Uri]::new($BaseUrl) } catch {
     Write-Host ""
     Write-Host "FAIL: -BaseUrl is not a valid URL: $BaseUrl" -ForegroundColor Red
-    Write-Host "      Expected something like https://job-hunter-staging.up.railway.app" -ForegroundColor DarkGray
+    Write-Host "      Expected something like https://web-staging-8e79.up.railway.app" -ForegroundColor DarkGray
     Write-Host ""
     exit 2
 }

@@ -89,10 +89,13 @@ def test_the_days_argument_bounds_the_scan(stack):
     assert len(gemini.history(2)) == 2
 
 
-def test_health_carries_the_history(stack):
-    """The number has to be where it is already looked at, or it is not evidence."""
+def test_health_carries_the_history(stack, monkeypatch):
+    """The number has to be where it is already looked at, or it is not evidence.
+    Since JH-1 that is the keyed (smoke / admin) view of health."""
     _write(stack["app"], "2026-07-04", 1, 7, 42)
-    status, _loc, body = Client(stack["port"]).get("/api/health")
+    monkeypatch.setenv("JH_HEALTH_KEY", "health-key-for-tests")
+    status, _loc, body = Client(stack["port"]).get(
+        "/api/health", extra_headers={"X-Health-Key": "health-key-for-tests"})
     assert status == 200
     payload = json.loads(body)
     assert "llm_history" in payload, "the ceiling evidence is not on health"
