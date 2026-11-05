@@ -10,7 +10,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 
 | Step | Item | Pri | Value | Effort | State (2026-11-05) |
 |---|---|---|---|---|---|
-| 1 | **Direct company links** — remaining: Workday fallback, known careers-site map, agree the direct-link target | P1 | High | M | 1a/1b/1c (learned boards + Comeet)/1d shipped (#3–#5, #9, #12); Gemini search tried, 0 of 18, not wired (#13, #15) |
+| 1 | **Direct company links** — remaining: known careers-site map, agree the direct-link target | P1 | High | M | 1a/1b/1c (learned boards + Comeet + **Workday**)/1d shipped (#3–#5, #9, #12, #17); Gemini search tried, 0 of 18, not wired (#13, #15) |
 | 2 | Link checker — remaining: nothing planned; the title-on-page rule was rejected on evidence | P1 | High | — | 2a/2b shipped (#7, #8); bot-challenge pages `unknown` (#15) |
 | 4 | **Plans, quotas, entitlements (Phase 5)** — waits for the approved tier matrix | P1 | High | L | Not started |
 | 5 | Email verification + password reset — needs the custom domain | P1 | High | M | Not started (`/forgot-password` 404) |
