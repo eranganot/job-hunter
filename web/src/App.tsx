@@ -7,7 +7,7 @@ import {
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
 } from "lucide-react";
-import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult } from "./api/client";
+import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
 
 type View = "swipe" | "dashboard";
@@ -67,10 +67,16 @@ export function SwipeFlow() {
   const [approvedJobs, setApprovedJobs] = useState<UiJob[]>([]);
   const [appliedJobs, setAppliedJobs] = useState<UiJob[]>([]);
   const [deferredJobs, setDeferredJobs] = useState<UiJob[]>([]);
+  // How many matches the plan is holding back (Phase 5). A count, never jobs.
+  const [locked, setLocked] = useState<LockedMatches | null>(null);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState<"left" | "right" | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  // Which Settings tab to open on: "Upgrade plan" opens Plan (billing is dark
+  // until Step 11, so that tab is where an upgrade starts for now).
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
+  const openUpgrade = () => { setSettingsTab("plan"); setShowSettings(true); };
   // Set the moment onboarding finishes, so the next render leaves the flow even
   // though /api/me has not come back yet. Without it the wizard reappears for
   // one frame on top of the dashboard.
@@ -125,6 +131,7 @@ export function SwipeFlow() {
         api.jobs("new", "match"), api.jobs("approved", "match"), api.jobs("applied", "date"), api.jobs("deferred", "date"),
       ]);
       setMe(meRes); setStats(statsRes);
+      api.lockedMatches().then(setLocked).catch(() => setLocked(null));
       setNewJobs(nw.map(toUiJob)); setApprovedJobs(ap.map(toUiJob)); setAppliedJobs(ad.map(toUiJob)); setDeferredJobs(df.map(toUiJob));
       setCurrentIndex(0); setRejectedDelta(0); setUndo(null);
       // First load only: land on swipe if there are new jobs, else the dashboard.
@@ -204,8 +211,11 @@ export function SwipeFlow() {
     catch (e: any) { setSearchMsg(e?.message || "Couldn't start a search right now."); }
   };
 
+  // "Decide later" is a plan feature (Free: no). Hidden rather than refused
+  // after the card has already moved; the server refuses it either way.
+  const canDefer = planLimit(me, "deferred_list") !== false;
   const handleDefer = () => {
-    const job = currentJob; if (!job || pendingReject) return;
+    const job = currentJob; if (!job || pendingReject || !canDefer) return;
     setDirection(null);
     setDeferredJobs((p) => [{ ...job, status: "deferred" }, ...p]);
     persistAction(api.later(job.id), "defer");
@@ -274,11 +284,12 @@ export function SwipeFlow() {
   // Gated by finishedSwiping so opening Swipe later (with an already-empty
   // stack) shows the "All done / Run a new search" screen instead of bouncing.
   useEffect(() => {
-    if (view === "swipe" && !loading && !pendingReject && finishedSwiping.current && currentIndex >= reviewJobs.length) {
+    if (view === "swipe" && !loading && !pendingReject && finishedSwiping.current && currentIndex >= reviewJobs.length
+        && !(locked && locked.count > 0)) {
       finishedSwiping.current = false;
       setView("dashboard"); setDashboardTab("queue");
     }
-  }, [view, loading, pendingReject, currentIndex, reviewJobs.length]);
+  }, [view, loading, pendingReject, currentIndex, reviewJobs.length, locked]);
 
   if (loading) return <CenterState icon={<Loader2 className="w-10 h-10 text-indigo-400 animate-spin" />} title="Loading your jobs…" />;
   if (error) return <CenterState icon={<AlertCircle className="w-10 h-10 text-red-400" />} title={error} action={{ label: "Retry", onClick: loadAll }} />;
@@ -303,8 +314,19 @@ export function SwipeFlow() {
         approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} stats={stats}
         selectedJob={selectedJob} setSelectedJob={setSelectedJob}
         onOpenSettings={() => setShowSettings(true)} showSettings={showSettings} onCloseSettings={() => setShowSettings(false)}
-        onReload={loadAll}
+        onReload={loadAll} locked={locked}
       />
+    );
+  }
+
+  if (currentIndex >= reviewJobs.length && locked && locked.count > 0) {
+    return (
+      <>
+        <LockedSwipeEnd locked={locked} me={me} reviewed={reviewJobs.length}
+          onUpgrade={openUpgrade} onDashboard={() => { setView("dashboard"); setDashboardTab("queue"); }} />
+        <AnimatePresence>{showSettings && me && <SettingsModal me={me} initialTab={settingsTab} onClose={() => { setShowSettings(false); setSettingsTab(undefined); }} />}</AnimatePresence>
+        <AnimatePresence>{pendingReject && <RejectReasonSheet job={pendingReject} onPick={finalizeReject} onUndo={undoPass} />}</AnimatePresence>
+      </>
     );
   }
 
@@ -312,8 +334,9 @@ export function SwipeFlow() {
     return (
       <>
         <AllDoneScreen approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount}
-          onViewDashboard={() => setView("dashboard")} onStartNew={loadAll} empty={newJobs.length === 0} />
-        <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={() => setShowSettings(false)} />}</AnimatePresence>
+          onViewDashboard={() => setView("dashboard")} onStartNew={loadAll} empty={newJobs.length === 0}
+          locked={locked} me={me} />
+        <AnimatePresence>{showSettings && me && <SettingsModal me={me} initialTab={settingsTab} onClose={() => { setShowSettings(false); setSettingsTab(undefined); }} />}</AnimatePresence>
         <AnimatePresence>{pendingReject && <RejectReasonSheet job={pendingReject} onPick={finalizeReject} onUndo={undoPass} />}</AnimatePresence>
       </>
     );
@@ -350,7 +373,8 @@ export function SwipeFlow() {
         <div className={`${SHELL} px-5 lg:px-8 py-3`}>
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-gray-300">{remainingCount} job{remainingCount !== 1 ? "s" : ""} to review</span>
-            <span className="text-sm text-gray-400">{currentIndex + 1} / {reviewJobs.length}</span>
+            <span className="text-sm text-gray-400">{currentIndex + 1} / {reviewJobs.length}
+              {locked && locked.count > 0 && <span className="ml-2 inline-flex items-center gap-1 text-indigo-300" title={`${locked.count} more match${locked.count === 1 ? "" : "es"} on a higher plan`}><Lock className="w-3.5 h-3.5" />+{locked.count}</span>}</span>
           </div>
           <div className="h-2 bg-gray-700 rounded-full overflow-hidden"><motion.div className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700" initial={{ width: 0 }} animate={{ width: `${((currentIndex + 1) / reviewJobs.length) * 100}%` }} transition={{ duration: 0.3 }} /></div>
         </div>
@@ -366,12 +390,12 @@ export function SwipeFlow() {
 
       <div className="relative z-10 mx-auto w-full max-w-xl lg:max-w-5xl px-5 lg:px-8 py-6 pb-10">
         <AnimatePresence mode="wait">
-          {currentJob && <SwipeCard key={currentJob.id} job={currentJob} direction={direction} onApprove={handleApprove} onPass={handlePass} onDefer={handleDefer} />}
+          {currentJob && <SwipeCard key={currentJob.id} job={currentJob} direction={direction} onApprove={handleApprove} onPass={handlePass} onDefer={canDefer ? handleDefer : undefined} />}
         </AnimatePresence>
       </div>
 
       <AnimatePresence>{undo && !pendingReject && <UndoToast undo={undo} onUndo={doUndo} />}</AnimatePresence>
-      <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={() => setShowSettings(false)} />}</AnimatePresence>
+      <AnimatePresence>{showSettings && me && <SettingsModal me={me} initialTab={settingsTab} onClose={() => { setShowSettings(false); setSettingsTab(undefined); }} />}</AnimatePresence>
       <AnimatePresence>{pendingReject && <RejectReasonSheet job={pendingReject} onPick={finalizeReject} onUndo={undoPass} />}</AnimatePresence>
     </div>
   );
@@ -468,7 +492,7 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
             <motion.button whileTap={{ scale: 0.95 }} onClick={onPass} className="flex-1 py-4 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><X className="w-5 h-5" />Pass</motion.button>
             <motion.button whileTap={{ scale: 0.95 }} onClick={onApprove} className="flex-1 py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><Check className="w-5 h-5" />Approve</motion.button>
           </div>
-          <motion.button whileTap={{ scale: 0.98 }} onClick={onDefer} className="w-full py-3 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-2xl font-medium flex items-center justify-center gap-2"><Clock className="w-4 h-4" />Decide Later</motion.button>
+          {onDefer && <motion.button whileTap={{ scale: 0.98 }} onClick={onDefer} className="w-full py-3 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-2xl font-medium flex items-center justify-center gap-2"><Clock className="w-4 h-4" />Decide Later</motion.button>}
         </div>
       </div>
     </motion.div>
@@ -616,6 +640,7 @@ function DashboardView(p: any) {
             </select>
           </div>
         )}
+        {p.locked?.count > 0 && activeTab === "queue" && <div className="mb-4"><LockedMatchesCard locked={p.locked} me={me} compact /></div>}
         <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
           {activeTab === "queue" && <QueueTab me={me} jobs={sortJobs(approvedJobs)} onSelectJob={setSelectedJob} onMarkApplied={onMarkApplied} onRemove={(j: UiJob) => setRemoveTarget(j)} onReload={onReload} />}
           {activeTab === "applied" && <ListTab jobs={sortJobs(appliedJobs)} onSelectJob={setSelectedJob} showStatus stages onReload={onReload} emptyIcon={Rocket} emptyTitle="Nothing applied yet" emptySub="Submitted applications appear here" heading={`${appliedJobs.length} applications submitted`} />}
@@ -627,7 +652,7 @@ function DashboardView(p: any) {
         </div>
       </div>
       </div>
-      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} isAdmin={isAdmin} />}
+      {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} isAdmin={isAdmin} me={me} />}
       <AnimatePresence>{removeTarget && <RejectReasonSheet job={removeTarget} onPick={(k) => { onRemoveQueued(removeTarget, k ? (REJECT_REASONS[k] || k) : "Removed from queue"); setRemoveTarget(null); }} onUndo={() => setRemoveTarget(null)} />}</AnimatePresence>
       <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={onCloseSettings} />}</AnimatePresence>
     </div>
@@ -679,7 +704,92 @@ function ApplyBadge({ job }: { job: UiJob }) {
 export function mayAutoApply(me: any): boolean {
   if (!me) return false;
   if (me.role === "admin" || me.is_admin) return true;
-  return ["premium", "expert"].includes(String(me.plan || "free").toLowerCase());
+  // Auto-apply is not sold while it is parked (approved matrix, 2026-11-05);
+  // the server's can_auto_apply() says the same, and the plan row carries it.
+  return !!me.plan_info?.limits?.auto_apply;
+}
+
+/** A plan limit from /api/me. undefined = the server did not say (an older
+ *  deploy): callers then show the control and let the server decide. */
+export function planLimit(me: any, key: string): any {
+  const lim = me?.plan_info?.limits;
+  return lim && key in lim ? lim[key] : undefined;
+}
+
+/** "5 Dec" from the server's UTC 'YYYY-MM-DD HH:MM:SS'. */
+export function fmtPlanDate(s: string | null | undefined): string {
+  if (!s) return "";
+  const d = new Date(s.replace(" ", "T") + "Z");
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+/* The end of the swipe deck when the plan is holding matches back: one more
+   card, blurred, that cannot be swiped - no drag, no approve or pass - and an
+   upgrade button in place of the actions. Like LockedMatchesCard, it is a
+   skeleton: the held-back jobs never reach the browser. */
+function LockedSwipeEnd({ locked, me, reviewed, onUpgrade, onDashboard }:
+  { locked: LockedMatches; me: any; reviewed: number; onUpgrade: () => void; onDashboard: () => void }) {
+  const n = locked.count;
+  const label = me?.plan_info?.label || "current";
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex flex-col items-center justify-center px-5 py-8">
+      <p className="text-sm text-gray-400 mb-4">{reviewed > 0 ? `You've reviewed all ${reviewed} match${reviewed === 1 ? "" : "es"} your plan shows` : "Your plan shows no more matches from this search"}</p>
+      <div className="relative w-full max-w-md">
+        <div aria-hidden className="absolute inset-x-6 -bottom-3 h-full rounded-3xl bg-gray-800/60 border border-gray-700" />
+        <div className="relative rounded-3xl bg-gray-800 border border-indigo-500/40 shadow-2xl overflow-hidden select-none" style={{ touchAction: "none" }}>
+          <div aria-hidden className="p-6 space-y-4 blur-[5px] opacity-60 pointer-events-none">
+            <div className="h-6 w-3/4 rounded bg-gray-500/60" />
+            <div className="h-4 w-1/2 rounded bg-gray-500/40" />
+            <div className="h-4 w-1/3 rounded bg-gray-500/30" />
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="h-20 rounded-2xl bg-indigo-500/25" /><div className="h-20 rounded-2xl bg-green-500/20" />
+            </div>
+            <div className="space-y-2 pt-2">{[1, 0.9, 0.95, 0.7].map((w, i) => <div key={i} className="h-3 rounded bg-gray-500/30" style={{ width: `${w * 100}%` }} />)}</div>
+            <div className="grid grid-cols-2 gap-3 pt-4"><div className="h-12 rounded-2xl bg-red-500/20" /><div className="h-12 rounded-2xl bg-green-500/25" /></div>
+          </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-8 bg-gray-900/30">
+            <div className="w-14 h-14 rounded-full bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center mb-3"><Lock className="w-7 h-7 text-indigo-300" /></div>
+            <p className="text-xl font-bold text-white">{n} more match{n === 1 ? "" : "es"} found for you</p>
+            <p className="text-sm text-gray-300 mt-2">Your {label} plan shows {locked.matches_per_search ?? "all"} per search. Upgrade to see {n === 1 ? "it" : "them"} and keep swiping.</p>
+          </div>
+        </div>
+      </div>
+      <div className="w-full max-w-md mt-8 space-y-3">
+        <button onClick={onUpgrade} className="w-full py-4 bg-gradient-to-r from-indigo-500 to-indigo-700 text-white rounded-2xl font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"><Sparkles className="w-5 h-5" />Upgrade plan</button>
+        <button onClick={onDashboard} className="w-full py-3.5 bg-gray-800 border border-gray-700 text-gray-200 rounded-2xl font-medium flex items-center justify-center gap-2"><LayoutGrid className="w-5 h-5" />Go to dashboard</button>
+      </div>
+    </div>
+  );
+}
+
+/* Matches the plan is holding back. The browser never receives them - only the
+   count - so these are skeletons behind a blur, not blurred job cards: there
+   is nothing in the page to un-blur. */
+function LockedMatchesCard({ locked, me, compact }: { locked: LockedMatches | null; me: any; compact?: boolean }) {
+  if (!locked || !locked.count) return null;
+  const per = locked.matches_per_search;
+  const label = me?.plan_info?.label || "current";
+  const n = locked.count;
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-indigo-500/30 bg-gray-800 min-h-[168px]">
+      <div aria-hidden className="p-4 space-y-3 blur-[3px] select-none pointer-events-none opacity-60">
+        {Array.from({ length: compact ? 2 : Math.max(2, Math.min(n, 3)) }).map((_, i) => (
+          <div key={i} className="rounded-xl bg-gray-700/70 p-3 space-y-2">
+            <div className="h-3.5 w-2/3 rounded bg-gray-500/60" />
+            <div className="h-3 w-1/3 rounded bg-gray-500/40" />
+            <div className="flex gap-2"><div className="h-5 w-12 rounded-full bg-indigo-400/30" /><div className="h-5 w-16 rounded-full bg-green-400/20" /></div>
+          </div>
+        ))}
+      </div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-5 bg-gray-900/40">
+        <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center mb-2"><Lock className="w-5 h-5 text-indigo-300" /></div>
+        <p className="font-semibold text-white">{n} more match{n === 1 ? "" : "es"} found for you</p>
+        <p className="text-xs text-gray-300 mt-1 max-w-xs">
+          Your {label} plan shows {per ?? "all"} per search. Upgrade to see {n === 1 ? "it" : "them"} — upgrade options open soon.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: any) {
@@ -1377,7 +1487,12 @@ function StatusPill({ s }: { s: string }) {
 /* "Is this posting still open?" and the cover letter both lived only in the
    legacy dashboard. check-status turned out to have no implementation at all
    (it answered a bare 404), so this is its first working home. */
-function JobDetailModal({ job, onClose, onRetry, isAdmin }: { job: UiJob; onClose: () => void; onRetry?: (j: UiJob) => void; isAdmin?: boolean }) {
+function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; onClose: () => void; onRetry?: (j: UiJob) => void; isAdmin?: boolean; me?: any }) {
+  // Cover letters follow the plan (Free none, Premium 10 / month, Expert 30),
+  // not the admin role as they did before Phase 5. The server counts and refuses.
+  const clLimit = planLimit(me, "cover_letter");
+  const canCoverLetter = isAdmin || (clLimit === undefined ? false : clLimit !== 0);
+  const clUse = me?.usage?.cover_letter;
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState("");
   const [checkOpen, setCheckOpen] = useState<boolean | null>(
@@ -1450,10 +1565,11 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin }: { job: UiJob; onClos
               )}
             </div>
           )}
-          {isAdmin && (
+          {canCoverLetter && (
             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
               <h4 className="font-semibold text-white text-sm mb-1">Cover letter</h4>
-              <p className="text-xs text-gray-400 mb-2">Written by the model from your CV and this posting. Read it before it goes anywhere.</p>
+              <p className="text-xs text-gray-400 mb-2">Written by the model from your CV and this posting. Read it before it goes anywhere.
+                {clUse && clUse.limit !== null && <> {Math.max(0, clUse.limit - clUse.used)} of {clUse.limit} left this month.</>}</p>
               <textarea value={letter} onChange={(e) => setLetter(e.target.value)} rows={8}
                         placeholder="Nothing yet — generate a draft, or write your own."
                         className="w-full px-3 py-2 border border-gray-500 rounded-xl bg-gray-900 text-white text-sm leading-relaxed" />
@@ -1489,6 +1605,46 @@ function TagInput({ value, onChange, noun = "role", example = "VP Product" }:
       </div>
       <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><button onClick={add} className="px-3.5 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl flex items-center justify-center"><Plus className="w-5 h-5" /></button></div>
       <p className="text-xs text-gray-400 mt-1.5">Press Enter to add each {noun}.</p>
+    </div>
+  );
+}
+
+/* Admin: set a user's plan - permanently, or as a promotion that ends after N
+   days and falls back to Free. The server records every change (plan_events)
+   and unlocks held-back matches on an upgrade. */
+function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
+  const [plan, setPlan] = useState<string>(u.plan || "free");
+  const [days, setDays] = useState<string>("perm");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const promo = u.plan_until && u.plan_source === "promotion";
+  const apply = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const r = await api.adminSetPlan(u.id, plan, days === "perm" ? null : parseInt(days, 10));
+      setMsg(`Set to ${r.plan}${r.plan_until ? ` until ${fmtPlanDate(r.plan_until)}` : ""}${r.locked ? ` · ${r.locked} match(es) still held back` : ""}`);
+      onDone();
+    } catch (e: any) { setMsg(e?.message || "Couldn't change the plan"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-2.5 pt-2.5 border-t border-gray-700">
+      <p className="text-xs text-gray-300">
+        Plan: <b className="text-white capitalize">{u.plan || "free"}</b>
+        {promo && <> until {fmtPlanDate(u.plan_until)}, then <span className="capitalize">{u.plan_after || "free"}</span></>}
+        {u.stats_locked > 0 && <span className="text-amber-300"> · {u.stats_locked} held back</span>}
+      </p>
+      <div className="flex flex-wrap items-center gap-2 mt-2">
+        <select value={plan} onChange={(e) => setPlan(e.target.value)} className="px-2 py-1.5 border border-gray-600 rounded-lg bg-gray-700 text-white text-xs">
+          <option value="free">Free</option><option value="premium">Premium</option><option value="expert">Expert</option>
+        </select>
+        <select value={days} onChange={(e) => setDays(e.target.value)} className="px-2 py-1.5 border border-gray-600 rounded-lg bg-gray-700 text-white text-xs">
+          <option value="perm">Permanent</option>
+          {[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d} days, then Free</option>)}
+        </select>
+        <button onClick={apply} disabled={busy} className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">{busy ? "…" : "Apply"}</button>
+      </div>
+      {msg && <p className="text-[11px] text-gray-400 mt-1.5">{msg}</p>}
     </div>
   );
 }
@@ -1633,6 +1789,7 @@ function AdminPanel({ me }: any) {
                       {u.id === myId && <span className="text-[10px] text-gray-400">you</span>}
                     </div>
                   </div>
+                  {u.role !== "admin" && <UserPlanControl u={u} onDone={() => api.adminUsers().then((x) => setUsers(Array.isArray(x) ? x : [])).catch(() => {})} />}
                   <div className="grid grid-cols-4 gap-2 mt-2.5 pt-2.5 border-t border-gray-700 text-center">
                     <div><div className="text-sm font-bold text-white">{u.stats_new || 0}</div><div className="text-[10px] text-gray-400">New</div></div>
                     <div><div className="text-sm font-bold text-green-400">{u.stats_approved || 0}</div><div className="text-[10px] text-gray-400">Queue</div></div>
@@ -1738,7 +1895,7 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
         await api.saveProfile({ job_titles: titles, keywords, locations });
       }
       await api.saveSchedule({
-        schedule_frequency: freq,
+        schedule_frequency: planLimit(me, "search_cadence") === "weekly" ? "weekly" : freq,
         search_hour: parseInt(searchHour, 10),
         // Only meaningful weekly, but always sent: leaving it unset meant a
         // weekly user silently inherited whatever day the column happened to
@@ -2087,16 +2244,69 @@ function ChangePassword() {
   );
 }
 
-type SettingsTab = "profile" | "prefs" | "cv" | "alerts";
+type SettingsTab = "profile" | "prefs" | "cv" | "alerts" | "plan";
 /* Four tabs, not five. "Profile" and "Account" were the same question asked
    twice - who am I and how do I sign in - and splitting them meant your name
    lived one tab away from your password. */
 const SETTINGS_TABS: [SettingsTab, string, any][] = [
   ["profile", "Profile", Users], ["prefs", "Job preferences", Briefcase],
   ["cv", "Resume / CV", FileText], ["alerts", "Alerts & schedule", Bell],
+  ["plan", "Plan", Sparkles],
 ];
 
-function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
+const METER_LABELS: Record<string, string> = {
+  on_demand_search: "Searches you start",
+  cover_letter: "Cover letters",
+  cv_review: "CV reviews",
+};
+
+/* What the plan includes and how much is used. Read-only: the numbers are the
+   server's (plans.py via /api/me), and upgrades open with billing (Step 11). */
+function PlanPanel({ me }: { me: any }) {
+  const info = me?.plan_info;
+  if (!info) return <p className="text-sm text-gray-400">Plan details are not available yet.</p>;
+  const promo = info.plan_until && info.plan_source === "promotion";
+  const lim = info.limits || {};
+  const usage = me?.usage || {};
+  const fmt = (v: any) => (v === null ? "Unlimited" : v === 0 || v === false ? "Not included" : String(v));
+  return (<>
+    <div className="bg-gradient-to-br from-indigo-600/20 to-gray-800 rounded-2xl border border-indigo-500/30 p-5">
+      <p className="text-xs uppercase tracking-wide text-indigo-300">Your plan</p>
+      <p className="text-2xl font-bold text-white mt-1">{info.label}</p>
+      {promo && <p className="text-sm text-gray-300 mt-2">Free Premium until <b>{fmtPlanDate(info.plan_until)}</b>
+        {info.days_left != null && <> ({info.days_left} day{info.days_left === 1 ? "" : "s"} left)</>}.
+        After that you move to the {String(info.plan_after || "free").replace(/^./, (c: string) => c.toUpperCase())} plan.</p>}
+      {info.tier !== "admin" && <p className="text-xs text-gray-400 mt-3">Upgrade options open soon.</p>}
+    </div>
+    <div>
+      <h3 className="font-semibold text-white mb-3">Usage</h3>
+      <div className="space-y-2">
+        {Object.entries(METER_LABELS).map(([k, label]) => {
+          const u = usage[k]; if (!u) return null;
+          const pct = u.limit ? Math.min(100, Math.round((u.used / u.limit) * 100)) : 0;
+          return (
+            <div key={k} className="p-3.5 bg-gray-800 rounded-xl border border-gray-700">
+              <div className="flex justify-between text-sm"><span className="text-white">{label}</span>
+                <span className="text-gray-300">{u.limit === null ? `${u.used} · unlimited` : u.limit === 0 ? "Not included" : `${u.used} of ${u.limit}`}
+                  <span className="text-gray-400"> {u.period === "day" ? "today" : "this month"}</span></span></div>
+              {u.limit ? <div className="h-1.5 bg-gray-700 rounded-full mt-2 overflow-hidden"><div className={`h-full rounded-full ${pct >= 100 ? "bg-amber-400" : "bg-indigo-500"}`} style={{ width: `${pct}%` }} /></div> : null}
+            </div>);
+        })}
+      </div>
+    </div>
+    <div>
+      <h3 className="font-semibold text-white mb-3">Included</h3>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        {[["Matches per search", fmt(lim.matches_per_search)], ["Automatic search", lim.search_cadence === "weekly" ? "Weekly" : "Daily"],
+          ["Save for later", lim.deferred_list ? "Yes" : "Not included"], ["AI calls per day", fmt(lim.ai_calls_per_day)]].map(([k, v]) => (
+          <div key={k} className="p-3 bg-gray-800 rounded-xl border border-gray-700"><p className="text-xs text-gray-400">{k}</p><p className="text-white font-medium">{v}</p></div>
+        ))}
+      </div>
+    </div>
+  </>);
+}
+
+function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () => void; initialTab?: SettingsTab }) {
   const parseTitles = (v: any): string[] => { if (!v) return []; if (Array.isArray(v)) return v; try { const a = JSON.parse(v); return Array.isArray(a) ? a : String(v).split(",").map((s) => s.trim()).filter(Boolean); } catch { return String(v).split(",").map((s) => s.trim()).filter(Boolean); } };
   const [titles, setTitles] = useState<string[]>(parseTitles(me.job_titles));
   const [keywords, setKeywords] = useState<string[]>(parseTitles(me.keywords));
@@ -2119,7 +2329,7 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
   const [cvName, setCvName] = useState<string>(me.cv_filename || (me.cv_path ? String(me.cv_path).split("/").pop() || "" : ""));
   const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
   const [cvMsg, setCvMsg] = useState("");
-  const [tab, setTab] = useState<SettingsTab>("profile");
+  const [tab, setTab] = useState<SettingsTab>(initialTab || "profile");
   const [analyzing, setAnalyzing] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractMsg, setExtractMsg] = useState("");
@@ -2163,7 +2373,11 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
     try {
       await api.saveProfile({ name: fullName, phone, linkedin_url: linkedin, job_titles: titles, keywords, locations });
       await api.saveSchedule({
-        schedule_frequency: freq,
+        // What the plan allows: a downgraded Free user keeps 'daily' in their
+        // profile, and re-sending it would make the server refuse the whole
+        // save (402) and lose the edits beside it. The scheduler runs weekly
+        // for them either way.
+        schedule_frequency: planLimit(me, "search_cadence") === "weekly" ? "weekly" : freq,
         // Only sent when it is allowed to be on. Sending 1 from an account
         // without the entitlement makes the whole save 403, which would lose
         // the schedule edits sitting next to it.
@@ -2259,13 +2473,15 @@ function SettingsModal({ me, onClose }: { me: Me & any; onClose: () => void }) {
             {cvAnalysis && <CvAnalysisPanel data={cvAnalysis} fmtDate={fmtDate} />}
           </div>
           </>)}
+          {tab === "plan" && <PlanPanel me={me} />}
           {tab === "alerts" && (<>
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Clock className="w-5 h-5 text-indigo-400" />Automatic schedule</h3>
             <div className="space-y-3">
               <Field label="How often" sub={freq === "weekly" ? "Runs once a week, on the days you pick" : "Runs every day"}>
                 <select value={freq} onChange={(e) => setFreq(e.target.value)} className="px-3 py-2 border border-gray-500 rounded-lg bg-gray-700 text-white text-sm shrink-0">
-                  <option value="daily">Daily</option>
+                  <option value="daily" disabled={planLimit(me, "search_cadence") === "weekly" && freq !== "daily"}>
+                    {planLimit(me, "search_cadence") === "weekly" ? "Daily (Premium)" : "Daily"}</option>
                   <option value="weekly">Weekly</option>
                 </select>
               </Field>
@@ -2378,7 +2594,7 @@ function DayPicker({ label, value, onChange }: { label: string; value: number; o
 function Field({ label, sub, children }: any) { return (<div className="flex items-center justify-between gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700"><div className="min-w-0"><p className="font-medium text-white text-sm">{label}</p><p className="text-xs text-gray-400">{sub}</p></div>{children}</div>); }
 function Select({ value, onChange, options, fmt }: { value: string; onChange: (v: string) => void; options: number[]; fmt: (n: number) => string }) { return (<select value={value} onChange={(e) => onChange(e.target.value)} className="px-3 py-2 border border-gray-500 rounded-lg bg-gray-700 text-white text-sm shrink-0">{options.map((o) => <option key={o} value={o}>{fmt(o)}</option>)}</select>); }
 
-function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty }: any) {
+function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty, locked, me }: any) {
   const [searchMsg, setSearchMsg] = useState("");
   const runSearch = async () => { setSearchMsg("Starting search…"); try { await api.runSearch(); setSearchMsg("Search started — new jobs will appear in a few minutes. Pull to refresh."); } catch (e: any) { setSearchMsg(e?.message || "Couldn't start search."); } };
   return (
@@ -2387,6 +2603,7 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring" }} className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg shadow-indigo-500/20"><Briefcase className="w-10 h-10 text-white" /></motion.div>
         <h2 className="text-2xl font-bold text-white mb-2">{empty ? "No new jobs right now" : "All done!"}</h2>
         <p className="text-gray-400 mb-5">{empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs."}</p>
+        {locked?.count > 0 && <div className="mb-5 text-left"><LockedMatchesCard locked={locked} me={me} /></div>}
         {!empty && (<div className="bg-gray-800 rounded-2xl p-5 mb-5 border border-gray-700 grid grid-cols-3 gap-4"><div><div className="text-2xl font-bold text-green-400 mb-0.5">{approvedCount}</div><div className="text-xs text-gray-400">Approved</div></div><div><div className="text-2xl font-bold text-red-400 mb-0.5">{rejectedCount}</div><div className="text-xs text-gray-400">Passed</div></div><div><div className="text-2xl font-bold text-amber-400 mb-0.5">{deferredCount}</div><div className="text-xs text-gray-400">Deferred</div></div></div>)}
         <div className="space-y-3">
           <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>

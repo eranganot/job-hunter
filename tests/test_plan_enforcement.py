@@ -355,3 +355,44 @@ def test_a_free_search_shows_3_and_says_how_many_more(stack, free_alice, monkeyp
     st, _l, body = free_alice.get("/api/jobs?status=new&sort=match")
     titles = [j["title"] for j in json.loads(body) if j["title"].startswith("Run PM")]
     assert titles == ["Run PM 0", "Run PM 1", "Run PM 2"]
+
+
+# ── Phase 5c: admin sets plans ─────────────────────────────────────────────
+
+def test_admin_sets_a_promotion_and_the_upgrade_unlocks_held_back_matches(stack, free_alice, locked_job, users):  # noqa: F811
+    db = stack["db"]
+    uid = _uid(db, "alice@example.test")
+    st, _l, body = users["admin"].post_json("/api/admin/users/%d/plan" % uid, {"plan": "expert", "days": 14})
+    out = json.loads(body)
+    assert st == 200 and out["plan"] == "expert" and out["plan_until"] and out["locked"] == 0
+    c = db.get_db()
+    try:
+        assert c.execute("SELECT status FROM jobs WHERE id=?", (locked_job,)).fetchone()[0] == "new"
+        ev = c.execute("SELECT reason, by_user_id FROM plan_events WHERE user_id=? ORDER BY id DESC LIMIT 1",
+                       (uid,)).fetchone()
+        assert ev[0] == "admin" and ev[1] == _uid(db, "admin@example.test")
+    finally:
+        c.close()
+    st, _l, body = users["admin"].get("/api/admin/users")
+    row = [u for u in json.loads(body) if u["id"] == uid][0]
+    assert row["plan"] == "expert" and row["plan_source"] == "promotion" and "stats_locked" in row
+
+
+@pytest.mark.parametrize("payload, code", [
+    ({"plan": "beta"}, 400), ({"plan": "premium", "days": 0}, 400),
+    ({"plan": "premium", "days": 999}, 400), ({"plan": "premium", "after": "gold", "days": 3}, 400)])
+def test_admin_plan_input_is_validated(stack, users, payload, code):  # noqa: F811
+    uid = _uid(stack["db"], "bob@example.test")
+    assert users["admin"].post_json("/api/admin/users/%d/plan" % uid, payload)[0] == code
+
+
+def test_only_admin_sets_plans_and_admin_has_no_plan(stack, users):  # noqa: F811
+    db = stack["db"]
+    bob = _uid(db, "bob@example.test")
+    assert users["a"].post_json("/api/admin/users/%d/plan" % bob, {"plan": "expert"})[0] == 403
+    assert users["a"].post_json("/api/admin/users/%d/plan" % _uid(db, "alice@example.test"),
+                                {"plan": "expert"})[0] == 403                     # not even yourself
+    st, _l, body = users["admin"].post_json("/api/admin/users/%d/plan" % _uid(db, "admin@example.test"),
+                                            {"plan": "free"})
+    assert st == 400 and json.loads(body)["code"] == "admin_has_no_plan"
+    assert users["admin"].post_json("/api/admin/users/999999/plan", {"plan": "free"})[0] == 404
