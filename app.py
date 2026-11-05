@@ -750,6 +750,17 @@ def file_watcher():
         database.import_applied_updates(BASE_DIR)
         _check_scheduled_jobs()
         _tick += 1
+        if _tick % 60 == 1:  # ~hourly, first one a minute after boot
+            # Plan lifecycle: promotion-end pushes, then expired promotions moved
+            # to their fallback plan. Only the scheduler-lock holder runs it, so
+            # a second instance never sends a second push.
+            try:
+                if schedlock.acquire(database.get_db, database.backend()):
+                    _pl = entitlements.run_lifecycle(database.get_db, send_web_push_to_user)
+                    if _pl["notices"] or _pl["moved"]:
+                        print(f"[plans] notices sent: {_pl['notices']}; promotions ended: {_pl['moved']}")
+            except Exception as _ple:
+                print(f"[plans] ERROR plan lifecycle sweep failed: {_ple}")
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -6390,7 +6401,17 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user:
                 return
-            self.send_json(user)
+            out = dict(user)
+            try:
+                out["plan_info"] = entitlements.plan_info(user)
+                _pc = database.get_db()
+                try:
+                    out["usage"] = entitlements.usage_summary(_pc, user)
+                finally:
+                    _pc.close()
+            except Exception as _pe:      # /api/me must never fail over a statistic
+                print(f"[plans] WARNING plan info for user {user.get('id')}: {_pe}")
+            self.send_json(out)
             return
 
         if path == "/api/cv":

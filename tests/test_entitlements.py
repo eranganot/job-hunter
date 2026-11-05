@@ -24,12 +24,12 @@ from tests.test_routes import (Client, _new_job, _job_row, _user_id,  # noqa: F4
 @pytest.mark.parametrize("user, expected", [
     ({"role": "admin", "plan": "free"},    True),   # admin never depends on a plan row
     ({"role": "admin", "plan": None},      True),
-    ({"role": "user",  "plan": "premium"}, True),
-    ({"role": "user",  "plan": "expert"},  True),
+    ({"role": "user",  "plan": "premium"}, False),  # not sold while parked (2026-11-05)
+    ({"role": "user",  "plan": "expert"},  False),
     ({"role": "user",  "plan": "free"},    False),
     ({"role": "user",  "plan": ""},        False),
     ({"role": "user",  "plan": None},      False),
-    ({"role": "user",  "plan": "  Premium "}, True),   # stored casing must not decide
+    ({"role": "user",  "plan": "  Premium "}, False),  # casing normalised; still parked
     ({"role": "user",  "plan": "gold"},    False),     # unknown plan fails CLOSED
     ({"role": "",      "plan": "free"},    False),
     (None,                                 False),
@@ -74,12 +74,21 @@ def test_a_free_user_cannot_switch_auto_apply_on(stack, users):
     assert not _auto_apply_flag(stack["db"], "alice@example.test")
 
 
-def test_a_paid_user_can(stack, users):
+def test_a_paid_user_cannot_while_auto_apply_is_parked(stack, users):
+    """Approved matrix (2026-11-05): auto-apply is not sold while parked."""
     _set_plan(stack["db"], "alice@example.test", "premium")
     status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
-    assert status == 200
-    assert _auto_apply_flag(stack["db"], "alice@example.test")
+    assert status == 403
+    assert not _auto_apply_flag(stack["db"], "alice@example.test")
     _set_plan(stack["db"], "alice@example.test", "free")
+
+
+def _set_flag(database, email, on):
+    conn = database.get_db()
+    conn.execute("UPDATE user_profiles SET auto_apply_enabled=? WHERE user_id="
+                 "(SELECT id FROM users WHERE email=?)", (1 if on else 0, email))
+    conn.commit()
+    conn.close()
 
 
 def test_admin_can_without_a_paid_plan(stack, users):
@@ -92,8 +101,7 @@ def test_admin_can_without_a_paid_plan(stack, users):
 def test_turning_it_off_is_never_gated(stack, users):
     """Nobody should need a subscription to stop the robot. A downgraded user
     who could not switch it off would be the worst possible failure here."""
-    _set_plan(stack["db"], "alice@example.test", "premium")
-    users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
+    _set_flag(stack["db"], "alice@example.test", True)        # set while it was allowed
     _set_plan(stack["db"], "alice@example.test", "free")      # subscription lapses
     status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 0})
     assert status == 200, "a downgraded user was trapped with auto-apply ON"
@@ -118,8 +126,7 @@ def test_a_stale_flag_does_not_make_the_app_apply(stack, users):
     """A row set while the user was paying, or before this gate existed, must
     not still trigger an application after a downgrade. The flag is checked at
     the point of use, not only at the point of setting."""
-    _set_plan(stack["db"], "alice@example.test", "premium")
-    users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
+    _set_flag(stack["db"], "alice@example.test", True)        # set while it was allowed
     _set_plan(stack["db"], "alice@example.test", "free")
 
     fired = []

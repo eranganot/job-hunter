@@ -82,6 +82,19 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
+def _start_promotion(conn, user_id, role):
+    """Every new account starts on Premium free for 30 days (plans.py). Admin is
+    a role and never needs a plan. A failure here must not fail the signup: the
+    account is created on Free and the error is logged loudly."""
+    if role == "admin":
+        return
+    try:
+        import entitlements
+        entitlements.start_new_user_promotion(conn, user_id)
+    except Exception as e:
+        print("[plans] ERROR could not start the new-user promotion for user %s: %s" % (user_id, e))
+
+
 def create_user(name: str, email: str, password: str):
     """Returns (user_id, error_message). error_message is None on success."""
     normalized_email = email.strip().lower()
@@ -101,6 +114,7 @@ def create_user(name: str, email: str, password: str):
             "INSERT INTO user_profiles (user_id, schedule_frequency) VALUES (?,?)",
             (user_id, default_frequency)
         )
+        _start_promotion(conn, user_id, role)
         conn.commit()
         return user_id, None
     except Exception as e:
@@ -247,6 +261,7 @@ def get_session_user(token: str):
     try:
         row = conn.execute("""
         SELECT u.id, u.name, u.email, u.created_date, u.role, u.plan,
+               u.plan_until, u.plan_after, u.plan_source,
                p.cv_path, p.cv_analyzed, p.cv_summary,
                p.cv_filename, p.cv_uploaded_date, p.cv_optimizer_date,
                p.job_titles, p.keywords, p.locations,
@@ -406,6 +421,7 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
             "INSERT INTO user_profiles (user_id, schedule_frequency) VALUES (?,?)",
             (user_id, default_frequency)
         )
+        _start_promotion(conn, user_id, role)
         conn.commit()
         created = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         return dict(created), True, None

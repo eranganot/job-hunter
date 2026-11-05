@@ -936,16 +936,16 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     to close - so the route is asserted to go through the queue, not to start
     a thread."""
     import jobqueue
-    # Applying to the whole queue at once is a paid feature (2026-09-20). Alice
-    # is on the 'free' default, so without this the route answers 403 and the
-    # assertions below would be testing the price, not the plumbing.
-    _set_plan(stack["db"], "alice@example.test", "premium")
+    # Applying to the whole queue at once is gated: while auto-apply is parked
+    # only the admin role may (plans.py, 2026-11-05). Without an entitled user
+    # the route answers 403 and the assertions below would test the gate, not
+    # the plumbing.
     seen = []
     real = jobqueue.enqueue
     monkeypatch.setattr(jobqueue, "enqueue",
                         lambda uid, kind, *a, **kw: (seen.append((uid, kind)),
                                                      real(uid, kind, *a, **kw))[1])
-    status, _loc, body = users["a"].post_json("/api/run-apply", {},
+    status, _loc, body = users["admin"].post_json("/api/run-apply", {},
                                               {"Sec-Fetch-Site": "same-origin"})
     assert status == 200
     assert any(k == "apply" for _u, k in seen), \
