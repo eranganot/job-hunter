@@ -123,3 +123,19 @@ def test_source_health_remembers_each_source():
     h = integ.source_health()
     assert h["google"]["kept"] == 3 and h["google"]["last_jobs_at"]
     assert h["apple"]["status"] == "error" and h["apple"]["last_ok_at"] is None
+
+
+def test_meta_is_not_a_source():
+    """Meta was removed on 2026-11-05: metacareers.com/robots.txt prohibits
+    automated collection without written permission and the site answers
+    scripted requests 400/429. Before removal it never declared `required_env`,
+    so its silent `return []` was reported as status OK, fetched 0, on every run
+    - the documented `skipped_no_creds` never happened. Re-adding a Meta source
+    needs Meta's permission first, not a doc_id."""
+    import ingestion.adapters as adapters
+    from ingestion.registry import ALL_ADAPTERS, build_adapters
+    assert not hasattr(adapters, "MetaAdapter")
+    assert all("meta" not in cls.__name__.lower() for cls in ALL_ADAPTERS)
+    names = {a.name.value for a in build_adapters("admin")}
+    assert "meta" not in names
+    assert {"google", "apple", "microsoft", "amazon"} <= names

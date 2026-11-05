@@ -19,7 +19,7 @@ from .proxies import ProxyManager
 from .credits import CreditManager
 from .adapters import (
     SourceAdapter,
-    MicrosoftAdapter, GoogleAdapter, MetaAdapter, AmazonAdapter, AppleAdapter,
+    MicrosoftAdapter, GoogleAdapter, AmazonAdapter, AppleAdapter,
     TheirStackAdapter, AdzunaAdapter, CoresignalAdapter,
     ApifyAdapter, JobSpyAdapter,
     SecretJobsAdapter,
@@ -28,7 +28,7 @@ from .adapters import (
 # Every adapter class the pipeline knows about.
 ALL_ADAPTERS: list[type[SourceAdapter]] = [
     # FREE — Big Tech (the existing ATS/board sources still live in app.py)
-    MicrosoftAdapter, GoogleAdapter, MetaAdapter, AmazonAdapter, AppleAdapter,
+    MicrosoftAdapter, GoogleAdapter, AmazonAdapter, AppleAdapter,
     # PAID — aggregators
     TheirStackAdapter, AdzunaAdapter, CoresignalAdapter,
     # PAID — managed scraping
