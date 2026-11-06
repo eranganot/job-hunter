@@ -3972,8 +3972,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({
                         "note": "Pick a job_id, then open ?job_id=<id> for a DRY RUN, "
                                 "and ?job_id=<id>&mode=live to actually submit that one job.",
+                        # direct_ats: whether the engine can submit there at all
+                        # (job boards are manual_required by design).
                         "jobs": [{"id": r["id"], "status": r["status"], "title": r["title"],
-                                  "company": r["company"], "url": r["url"]} for r in _lrows],
+                                  "company": r["company"], "url": r["url"],
+                                  "direct_ats": _ae._is_direct_ats(r["url"] or "")} for r in _lrows],
                     })
                     return
                 finally:
@@ -3990,7 +3993,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": f"job {_jid} not found for this user"}, 404)
                     return
                 _cv_text = (prof["cv_summary"] or "") if prof else ""
-                _cv_path = (prof["cv_path"] or None) if prof else None
+                # Step 8.1 (2026-11-06): the same resolver as every other apply
+                # path. The raw cv_path names the cached file, which a fresh
+                # container does not have - the CV itself is in the database
+                # (Phase 2d) - so this route alone would have submitted without one.
+                _cv_path = _cv_file(user["id"], (prof["cv_path"] or "") if prof else "") or None
                 applicant = _ae.extract_applicant_data(_cv_text, user.get("email", ""))
                 _jloc = (job["location"] if "location" in job.keys() else "") or ""
 
@@ -4012,7 +4019,7 @@ class Handler(BaseHTTPRequestHandler):
                     "is_direct_ats": _ae._is_direct_ats(_target),
                     "applicant_ready": bool(applicant.get("full_name") or applicant.get("first_name")),
                     "applicant_name": applicant.get("full_name", ""),
-                    "cv_present": bool(_cv_path and os.path.exists(_cv_path)),
+                    "cv_present": bool(_cv_path),
                 }
                 if _mode != "live":
                     out["note"] = "DRY RUN — nothing submitted. Add &mode=live to actually submit this ONE job."
@@ -4074,8 +4081,10 @@ class Handler(BaseHTTPRequestHandler):
                 "playwright_importable": bool(getattr(_ae, "PLAYWRIGHT_AVAILABLE", False)),
                 "apply_engine_enabled_env": os.environ.get("APPLY_ENGINE_ENABLED", "(unset)"),
                 "gemini_key_present": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
-                "db_file": DB_FILE,
-                "db_exists": os.path.exists(DB_FILE),
+                # db_file/db_exists named the SQLite file on the volume, which
+                # production stopped using at the 2026-09-21 cutover (STATUS
+                # 2026-10-07 said to ignore them). Report the database in use.
+                "db_backend": database.backend(),
                 "uploads_dir": UPLOADS_DIR,
                 "uploads_exists": os.path.isdir(UPLOADS_DIR),
             }
@@ -4085,8 +4094,10 @@ class Handler(BaseHTTPRequestHandler):
                     _pr = _c.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (user["id"],)).fetchone()
                     _c.close()
                     _cvp = (_pr["cv_path"] if _pr else "") or ""
-                    diag["cv_path"] = _cvp
-                    diag["cv_exists"] = bool(_cvp and os.path.exists(_cvp))
+                    diag["cv_in_database"] = bool(storage.meta(user["id"]))
+                    _cvf = _cv_file(user["id"], _cvp)
+                    diag["cv_path"] = _cvf or _cvp
+                    diag["cv_exists"] = bool(_cvf)    # rebuilt from the database if the cache was cold
                 finally:
                     _c.close()
             except Exception as _e:

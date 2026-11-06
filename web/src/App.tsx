@@ -1658,6 +1658,115 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
   );
 }
 
+
+/* Step 8.2 of EXECUTION_PLAN_NEXT: one live, supervised submit on one of your
+   own approved jobs, without setting APPLY_ENGINE_ENABLED for everyone. The
+   dry run comes first and is the only way to reach the real submit, so you
+   always see the target URL, the CV and the applicant details before anything
+   is sent. Admin only (the server checks), same-origin only for the live run. */
+function SupervisedApply() {
+  const [jobs, setJobs] = useState<any[] | null>(null);
+  const [busy, setBusy] = useState<string>("");
+  const [err, setErr] = useState("");
+  const [dry, setDry] = useState<any>(null);
+  const [live, setLive] = useState<any>(null);
+
+  const list = async () => {
+    setBusy("list"); setErr(""); setDry(null); setLive(null);
+    try {
+      const r = await api.adminApplyCandidates();
+      const approved = (r.jobs || []).filter((j) => j.status === "approved");
+      approved.sort((a, b) => Number(b.direct_ats) - Number(a.direct_ats));
+      setJobs(approved);
+    } catch (e: any) { setErr(e?.message || "Could not load your queue"); }
+    finally { setBusy(""); }
+  };
+  const runDry = async (j: any) => {
+    setBusy(`dry-${j.id}`); setErr(""); setLive(null);
+    try { setDry(await api.adminApplyTest(j.id)); }
+    catch (e: any) { setErr(e?.message || "Dry run failed"); }
+    finally { setBusy(""); }
+  };
+  const runLive = async () => {
+    if (!dry?.job) return;
+    if (!confirm(`Submit a REAL application to ${dry.job.company} for "${dry.job.title}"?\n\n` +
+                 `Target: ${dry.target_url}\n\nThis sends your CV and details to the employer. It cannot be undone.`)) return;
+    setBusy("live"); setErr("");
+    try { setLive(await api.adminApplyTest(dry.job.id, true)); }
+    catch (e: any) { setErr(e?.message || "The submit failed to run"); }
+    finally { setBusy(""); }
+  };
+  const ready = dry && dry.is_direct_ats && dry.cv_present && dry.applicant_ready;
+  const Field = ({ k, v, ok }: { k: string; v: any; ok?: boolean }) => (
+    <div className="flex items-start justify-between gap-3 text-xs">
+      <span className="text-gray-400 shrink-0">{k}</span>
+      <span className={`min-w-0 break-all text-right font-medium ${ok === false ? "text-amber-300" : ok ? "text-green-300" : "text-gray-200"}`}>{String(v ?? "")}</span>
+    </div>
+  );
+  const r = live?.result;
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-indigo-400" />Supervised apply</h3>
+      <p className="text-xs text-gray-400 mb-3">
+        Submit ONE of your approved jobs for real, with auto-apply still off for everyone else.
+        A dry run comes first and sends nothing.
+      </p>
+      <button onClick={list} disabled={!!busy}
+        className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
+        {busy === "list" ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <RefreshCw className="w-5 h-5 text-gray-300 shrink-0" />}
+        <span className="block text-sm font-medium text-gray-200">{jobs ? "Reload my approved jobs" : "Pick an approved job"}</span>
+      </button>
+      {jobs && jobs.length === 0 && <p className="text-xs text-gray-400 mt-2">Your queue has no approved jobs.</p>}
+      {jobs && jobs.length > 0 && !dry && (
+        <div className="mt-2 space-y-1.5">
+          {jobs.map((j) => (
+            <button key={j.id} onClick={() => runDry(j)} disabled={!!busy}
+              className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
+              <span className="min-w-0">
+                <span className="block text-sm text-gray-200 truncate">{j.title}</span>
+                <span className="block text-xs text-gray-400 truncate">{j.company}</span>
+              </span>
+              <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full ${j.direct_ats ? "bg-green-500/20 text-green-300" : "bg-gray-700 text-gray-300"}`}>
+                {busy === `dry-${j.id}` ? "\u2026" : j.direct_ats ? "Company site" : "Job board"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {dry && (
+        <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5 space-y-1.5">
+          <p className="text-sm text-white font-medium">{dry.job?.title} <span className="text-gray-400 font-normal">at {dry.job?.company}</span></p>
+          <Field k="Submits to" v={dry.target_url} />
+          <Field k="Company site (can submit)" v={dry.is_direct_ats ? "yes" : "no"} ok={!!dry.is_direct_ats} />
+          <Field k="CV" v={dry.cv_present ? "found" : "missing"} ok={!!dry.cv_present} />
+          <Field k="Applicant" v={dry.applicant_name || (dry.applicant_ready ? "ready" : "no name found")} ok={!!dry.applicant_ready} />
+          {!live && (
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => setDry(null)} disabled={!!busy}
+                className="flex-1 py-2 rounded-lg border border-gray-600 text-sm text-gray-300 disabled:opacity-60">Back</button>
+              <button onClick={runLive} disabled={!!busy || !ready}
+                className="flex-1 py-2 rounded-lg bg-red-600 text-white text-sm font-medium disabled:opacity-40">
+                {busy === "live" ? "Submitting\u2026 (up to 2\u00bd min)" : "Submit for real"}
+              </button>
+            </div>
+          )}
+          {!ready && !live && <p className="text-xs text-amber-300">Not submittable: {!dry.is_direct_ats ? "a job-board listing (apply there yourself)" : !dry.cv_present ? "no CV found" : "no applicant name in your CV"}.</p>}
+          {r && (
+            <div className="pt-2 border-t border-gray-700 space-y-1.5">
+              <Field k="Result" v={r.status} ok={r.status === "confirmed" || r.status === "submitted"} />
+              {r.resolved_url && <Field k="Submitted at" v={r.resolved_url} />}
+              {r.confirmation_text && <Field k="Confirmation" v={r.confirmation_text} />}
+              {r.error && <Field k="Error" v={r.error} ok={false} />}
+              {r.apply_failure_type && <Field k="Failure" v={`${r.apply_failure_type}${r.apply_failure_detail ? ": " + r.apply_failure_detail : ""}`} ok={false} />}
+            </div>
+          )}
+        </div>
+      )}
+      {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+    </div>
+  );
+}
+
 function AdminPanel({ me }: any) {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
@@ -1773,6 +1882,7 @@ function AdminPanel({ me }: any) {
               </div>
             )}
           </div>
+          <SupervisedApply />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length})</span></h3>
             <div className="space-y-2">
