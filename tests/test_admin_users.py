@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from tests.test_routes import (Client, stack, users, _user_id)  # noqa: F401
+from tests.test_routes import (Client, stack, users, _user_id, _new_job)  # noqa: F401
 
 
 def _active(db, email):
@@ -147,3 +147,82 @@ def test_apply_test_reports_a_missing_job_as_not_found(stack, users):
     """The same TypeError sat on this path: a bad job_id 500'd instead of 404."""
     status, _loc, _b = users["admin"].get("/api/admin/apply-test?job_id=999999")
     assert status == 404, "expected 404 for an unknown job, got %s" % status
+
+
+# ── Step 8.1: the probes read the CV where it really lives ──────────────────
+
+@pytest.fixture
+def _offline_apply(monkeypatch):
+    """apply-test resolves a career page and reads the CV with Gemini - both
+    network calls. Stubbed so these tests stay offline and inside the client's
+    10 s timeout (a full run timed out on the live lookup, 2026-11-06)."""
+    import apply_engine
+    monkeypatch.setattr(apply_engine, "resolve_ats_application", lambda *a, **k: None)
+    monkeypatch.setattr(apply_engine, "extract_applicant_data",
+                        lambda *a, **k: {"full_name": "Test Person"})
+
+
+def _cold_cv(stack, email):
+    """The state of a fresh container: the CV is in the database (Phase 2d),
+    the cached file is gone, and user_profiles.cv_path still names it."""
+    import os
+    import storage
+    uid = _user_id(stack["db"], email)
+    storage.put(uid, b"%PDF-1.4 test cv", "cv.pdf")
+    cached = storage.cache_path(uid)
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE user_profiles SET cv_path=? WHERE user_id=?", (cached, uid))
+    conn.commit()
+    conn.close()
+    os.remove(cached)
+    return uid
+
+
+def test_apply_test_finds_a_cv_that_is_only_in_the_database(stack, users, _offline_apply):
+    uid = _cold_cv(stack, "admin@example.test")
+    job_id = _new_job(stack["db"], uid)
+    status, _loc, body = users["admin"].get("/api/admin/apply-test?job_id=%d" % job_id)
+    assert status == 200
+    assert json.loads(body)["cv_present"] is True, "dry run says no CV while the database holds one"
+
+
+def test_a_supervised_submit_hands_the_browser_a_real_cv_file(stack, users, monkeypatch, _offline_apply):
+    import os
+    import apply_engine
+    seen = {}
+
+    def fake_submit(url, title, company, applicant, cv_path, *a, **k):
+        seen["cv"] = cv_path
+        seen["readable"] = bool(cv_path and os.path.exists(cv_path))
+        return {"status": "failed", "success": False, "error": "stub"}
+    monkeypatch.setattr(apply_engine, "submit_application", fake_submit)
+    uid = _cold_cv(stack, "admin@example.test")
+    job_id = _new_job(stack["db"], uid)
+    status, _loc, _b = users["admin"].get("/api/admin/apply-test?job_id=%d&mode=live" % job_id)
+    assert status == 200
+    assert seen.get("readable"), "the live submit got %r, which does not exist" % seen.get("cv")
+
+
+def test_the_selftest_reports_the_live_database_and_the_stored_cv(stack, users):
+    _cold_cv(stack, "admin@example.test")
+    status, _loc, body = users["admin"].get("/api/admin/apply-selftest")
+    diag = json.loads(body)
+    assert "db_file" not in diag and "db_exists" not in diag, "still reports the pre-Postgres SQLite file"
+    assert diag["db_backend"] in ("sqlite", "postgres")
+    assert diag["cv_in_database"] is True
+    assert diag["cv_exists"] is True
+
+
+def test_the_candidate_list_says_which_jobs_the_engine_can_submit_to(stack, users):
+    """The Admin picker sorts and labels by this; a job board is manual by design."""
+    uid = _user_id(stack["db"], "admin@example.test")
+    conn = stack["db"].get_db()
+    for url in ("https://boards.greenhouse.io/acme/jobs/123", "https://www.linkedin.com/jobs/view/1"):
+        conn.execute("INSERT INTO jobs (user_id,title,company,url,status) VALUES (?,?,?,?,?)",
+                     (uid, "PM", "Acme", url, "approved"))
+    conn.commit()
+    conn.close()
+    status, _loc, body = users["admin"].get("/api/admin/apply-test")
+    by_url = {j["url"]: j for j in json.loads(body)["jobs"]}
+    assert by_url["https://boards.greenhouse.io/acme/jobs/123"]["direct_ats"] is True
+    assert by_url["https://www.linkedin.com/jobs/view/1"]["direct_ats"] is False

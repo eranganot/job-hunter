@@ -320,6 +320,14 @@ export const api = {
       `/api/admin/users/${id}/toggle`, "POST", {}),
   // Read-only diagnosis of the apply runtime. Submits nothing.
   adminApplySelftest: () => request<Record<string, any>>("/api/admin/apply-selftest"),
+  // Step 8.2: one supervised submit. No job id lists candidates; a job id alone
+  // is a DRY RUN (resolves the target, checks CV and applicant, submits
+  // nothing); live=true submits that ONE job past the kill switch.
+  adminApplyCandidates: () =>
+    request<{ jobs: { id: number; status: string; title: string; company: string; url: string; direct_ats: boolean }[] }>(
+      "/api/admin/apply-test"),
+  adminApplyTest: (jobId: number, live = false) =>
+    request<Record<string, any>>(`/api/admin/apply-test?job_id=${jobId}${live ? "&mode=live" : ""}`),
 };
 
 import { timeAgo } from "../lib/format";
