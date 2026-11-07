@@ -295,4 +295,26 @@ def test_the_applicant_is_read_from_the_cv_file_not_the_summary(stack, monkeypat
                            "A product leader with 15 years of experience.")
     assert "Eran Ganot" in seen["prompt"] and "+972-50-000-0000" in seen["prompt"], \
         "the extraction did not get the CV's text"
-    assert got["full_name"] == "Eran Ganot"
+    assert got["full_name"] == "Admin"          # the account name wins (Profile page)
+
+
+def test_the_profile_page_wins_over_the_cv(stack, monkeypatch):
+    """Eran, 2026-11-07: 'You have everything you need in my profile page'."""
+    import app as A
+    import apply_engine
+    uid = _user_id(stack["db"], "admin@example.test")
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE user_profiles SET phone=?, linkedin_url=? WHERE user_id=?",
+                 ("054-0000000", "https://www.linkedin.com/in/example/", uid))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(apply_engine, "GEMINI_KEY", "k")
+    monkeypatch.setattr(apply_engine, "_claude_json", lambda *a, **k: {
+        "full_name": "Someone Else", "phone": "+1 555 0100", "linkedin_url": "",
+        "current_title": "Head of Product"})
+    got = A._applicant_for(uid, "me@example.test", "Eran Ganot", "", "A product leader " * 10)
+    assert (got["full_name"], got["first_name"], got["last_name"]) == ("Eran Ganot", "Eran", "Ganot")
+    assert got["phone"] == "054-0000000"
+    assert got["linkedin_url"] == "https://www.linkedin.com/in/example/"
+    assert got["email"] == "me@example.test"
+    assert got["current_title"] == "Head of Product"   # the CV still fills what the profile lacks
