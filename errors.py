@@ -104,7 +104,7 @@ def capture(exc: BaseException, *, where: str = "", path: str = "", user_id=None
     if _client is None:
         return False
     try:
-        with _client.push_scope() as scope:
+        with _client.new_scope() as scope:   # push_scope is deprecated in sentry-sdk 2.x
             if where:
                 scope.set_tag("where", where)
             if path:

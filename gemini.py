@@ -158,9 +158,12 @@ def limits() -> dict:
     """Current ceilings. 0 means unlimited, so a limit can be switched off
     without a code change if one of them turns out to be wrong in production."""
     return {
-        "global_calls":   _limit("GLOBAL_CALLS", 50000),
+        # JH-5 (2026-11-05): defaults = production's measured settings (4,000 /
+        # 300; peak day 242 calls). They were 50,000 / 1,500, which is what an
+        # environment WITHOUT the variables - staging - actually ran with.
+        "global_calls":   _limit("GLOBAL_CALLS", 4000),
         "global_tokens":  _limit("GLOBAL_TOKENS", 0),
-        "user_calls":     _limit("USER_CALLS", 1500),
+        "user_calls":     _limit("USER_CALLS", 300),
         "user_tokens":    _limit("USER_TOKENS", 0),
         "enforce":        _limit("ENFORCE", 1),
     }
