@@ -326,6 +326,10 @@ export const api = {
   adminApplyCandidates: () =>
     request<{ jobs: { id: number; status: string; title: string; company: string; url: string; direct_ats: boolean }[] }>(
       "/api/admin/apply-test"),
+  // Step 1a: the open queue's links, and how many the resolver could fix.
+  // Read-only; up to ~60 s for sample=50.
+  adminLinkReport: (scope: "me" | "all" = "all", sample = 50) =>
+    request<Record<string, any>>(`/api/admin/link-report?scope=${scope}&sample=${sample}`),
   adminApplyTest: (jobId: number, live = false) =>
     request<Record<string, any>>(`/api/admin/apply-test?job_id=${jobId}${live ? "&mode=live" : ""}`),
 };

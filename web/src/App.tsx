@@ -1659,6 +1659,57 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
 }
 
 
+
+/* Step 1a: the link report, one button instead of a raw /api URL that needs
+   the signed-in browser session (2026-11-07: the raw link "is not working").
+   Read-only - shows the headline numbers and copies the full JSON to paste. */
+function LinkReport() {
+  const [rep, setRep] = useState<Record<string, any> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+  const run = async () => {
+    setBusy(true); setErr(""); setCopied(false);
+    try { setRep(await api.adminLinkReport("all", 50)); }
+    catch (e: any) { setErr(e?.message || "The report failed to run"); }
+    finally { setBusy(false); }
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(rep, null, 2)); setCopied(true); }
+    catch { setErr("Copy failed - select the text below instead"); }
+  };
+  const d = rep?.dry_run || {};
+  const Row = ({ k, v }: { k: string; v: any }) => (
+    <div className="flex justify-between gap-3 text-xs"><span className="text-gray-400">{k}</span><span className="text-gray-200 font-medium text-right">{String(v ?? "-")}</span></div>
+  );
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Link2 className="w-5 h-5 text-indigo-400" />Link report</h3>
+      <p className="text-xs text-gray-400 mb-3">Where every open job links to, and how many the resolver could point at the company's own posting. Read-only, about a minute.</p>
+      <button onClick={run} disabled={busy}
+        className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
+        {busy ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <Link2 className="w-5 h-5 text-gray-300 shrink-0" />}
+        <span className="block text-sm font-medium text-gray-200">{busy ? "Running (up to a minute)\u2026" : rep ? "Run again" : "Run link report (all users)"}</span>
+      </button>
+      {rep && (
+        <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5 space-y-1.5">
+          <Row k="Open jobs" v={rep.open_jobs} />
+          <Row k="Already direct (company site / ATS)" v={rep.direct_share != null ? `${rep.direct_share}%` : "-"} />
+          <Row k="Need a direct link" v={rep.needing_a_direct_link} />
+          <Row k="Sampled / resolved" v={`${d.tried ?? 0} / ${d.resolved ?? 0}${d.hit_rate != null ? ` (${d.hit_rate}%)` : ""}`} />
+          {d.incomplete > 0 && <Row k="Lookups that did not answer" v={d.incomplete} />}
+          {d.by_ats && Object.keys(d.by_ats).length > 0 && <Row k="Resolved to" v={Object.entries(d.by_ats).map(([a, n]) => `${a} ${n}`).join(", ")} />}
+          <Row k="Took" v={d.seconds != null ? `${d.seconds}s` : "-"} />
+          <button onClick={copy} className="w-full mt-2 py-2 rounded-lg border border-gray-600 text-sm text-gray-200">
+            {copied ? "Copied - paste it to Claude" : "Copy full report"}
+          </button>
+        </div>
+      )}
+      {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+    </div>
+  );
+}
+
 /* Step 8.2 of EXECUTION_PLAN_NEXT: one live, supervised submit on one of your
    own approved jobs, without setting APPLY_ENGINE_ENABLED for everyone. The
    dry run comes first and is the only way to reach the real submit, so you
@@ -1883,6 +1934,7 @@ function AdminPanel({ me }: any) {
             )}
           </div>
           <SupervisedApply />
+          <LinkReport />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length})</span></h3>
             <div className="space-y-2">

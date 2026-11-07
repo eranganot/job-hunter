@@ -437,13 +437,74 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         result["error"] = f"Lever handler error: {e}"
         return result
 
+def _workday_account_wall(page):
+    """Open Workday's application and report its account wall, or None.
+
+    Observed 2026-11-06 on Applied Materials, NVIDIA and Intel (the first live
+    supervised submit, STATUS): the posting page has a single "Apply" button
+    (data-automation-id="adventureButton"), which offers "Autofill with Resume"
+    / "Apply Manually" / "Use My Last Application". "Apply Manually" opens
+    step 1 of 6, "Create Account/Sign In" - an email and password on that
+    company's own Workday site. Without an account there, nothing can be
+    submitted. These clicks only open the form; nothing is filled or sent.
+    """
+    def _settle():
+        try:
+            page.wait_for_load_state("networkidle", timeout=6_000)
+        except Exception as exc:          # a busy page is not an error here
+            print(f"[apply-engine] Workday: page still busy ({type(exc).__name__})")
+        page.wait_for_timeout(1_500)
+
+    def _wait_for(sel, ms):
+        # Workday renders in React: right after the page loads the Apply button
+        # does not exist yet (it appeared ~1 s later, 2026-11-06), so wait for
+        # each element rather than sample the page once.
+        try:
+            return page.wait_for_selector(sel, state="visible", timeout=ms)
+        except Exception as exc:
+            print(f"[apply-engine] Workday: {sel} not shown ({type(exc).__name__})")
+            return None
+
+    apply_btn = _wait_for('[data-automation-id="adventureButton"]', 15_000)
+    if apply_btn:
+        apply_btn.click()
+        _settle()
+        manual = _wait_for('[data-automation-id="applyManually"]', 8_000)
+        if manual:
+            manual.click()
+            _settle()
+            _wait_for('[data-automation-id="createAccountSubmitButton"],'
+                      '[data-automation-id="signInSubmitButton"],'
+                      '[data-automation-id="signInLink"]', 10_000)
+    text = (page.evaluate("document.body.innerText") or "")
+    if ("create account/sign in" in text.lower()
+            or page.query_selector('[data-automation-id="createAccountSubmitButton"]')
+            or page.query_selector('[data-automation-id="signInSubmitButton"]')):
+        m = re.search(r"step 1 of (\d+)", text, re.I)
+        return ("Workday needs an account on this company's site before it accepts an "
+                "application (step 1%s is Create Account/Sign In)"
+                % (" of %s" % m.group(1) if m else ""))
+    return None
+
+
 def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
     """Handle Workday multi-page application wizard.
 
     Workday uses a step-by-step form (up to ~10 pages). We fill whatever
     fields we can on each page, then click Next until we hit Submit.
+    In practice step 1 is always an account wall (see _workday_account_wall),
+    which is reported as manual_required instead of a failure.
     """
     result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+
+    try:
+        wall = _workday_account_wall(page)
+    except Exception as e:
+        print(f"[apply-engine] Workday: could not open the application: {type(e).__name__}: {e}")
+        wall = None
+    if wall:
+        result.update(status="manual_required", error=wall)
+        return result
 
     # Automation IDs used by Workday's React components
     _NEXT_SELS = [
@@ -551,7 +612,11 @@ def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
                     continue
 
             if not advanced:
-                break  # no next / submit found — give up
+                # It used to fall through to "after 12 pages" from here too,
+                # which is how a stop on page 1 read as 12 pages (2026-11-06).
+                result["error"] = ("Workday: no Next or Submit button on page %d (%s)"
+                                   % (page_num + 1, page.url[:120]))
+                return result
 
         result["error"] = "Workday: could not complete multi-page form after 12 pages"
         return result
