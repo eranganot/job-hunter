@@ -2364,7 +2364,17 @@ def run_link_resolve(user_id: int):
     # crowd out their scoring. JH_LINKS_LLM=1 turns them on once the link
     # report shows they earn their cost.
     use_llm = (os.environ.get("JH_LINKS_LLM", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
-    counts = _links.resolve_open_jobs(database.get_db, user_id, use_llm=use_llm)
+    # Option 3, the web search for the posting (Eran, 2026-11-07). Per run: a
+    # tenth of the user's daily AI calls, at most JH_LINKS_WEBSEARCH_PER_RUN
+    # (default 30) - a Free plan's 30 calls a day must still score its jobs.
+    try:
+        _ws_max = int(os.environ.get("JH_LINKS_WEBSEARCH_PER_RUN", "30") or 0)
+    except ValueError:
+        _ws_max = 30
+    _ai = _plan_ai_cap(user_id)
+    _ws_cap = _ws_max if _ai is None or _ai >= 10 * _ws_max else max(0, min(_ws_max, int(_ai) // 10))
+    counts = _links.resolve_open_jobs(database.get_db, user_id, use_llm=use_llm,
+                                      searcher=_links.search_company_posting, search_cap=_ws_cap)
     detail = _links.run_detail(counts)
     print(f"[links] user {user_id}: {detail}")
     if counts.get("left_for_next_run"):

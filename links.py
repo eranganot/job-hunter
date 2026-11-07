@@ -278,7 +278,8 @@ def _utc_stamp(dt=None) -> str:
 
 
 def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
-                      limit: int = BATCH_LIMIT, budget_s: float = RUN_BUDGET_S, now=None) -> dict:
+                      limit: int = BATCH_LIMIT, budget_s: float = RUN_BUDGET_S, now=None,
+                      searcher=None, search_cap: int = 0) -> dict:
     """Give the user's open jobs (New + Approved) a direct link where one exists.
 
     Touches only status new/approved rows of `user_id` - applied, passed and
@@ -292,6 +293,12 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
         open). On a miss the type is recorded and link_attempts goes up.
     A hit already stored on another row of the same user is NOT written
     (UNIQUE(user_id, url)); the reason goes in link_note.
+
+    searcher / search_cap (option 3, on since 2026-11-07 - Eran: "sure why not"
+    after a 30-job trial verified 2 for ~1 cent): when the free lookups miss,
+    up to `search_cap` jobs per run are searched with Gemini + Google Search
+    and only a link that passes verify_found_posting is written. Each job is
+    searched at most once (link_attempts == 0): weekly retries stay free.
 
     Returns counts for the run detail line. Opens and closes its own
     connections, one short one per write, so a slow ATS never holds a
@@ -310,7 +317,8 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     conn = get_db()
     try:
         rows = [dict(r) for r in conn.execute(
-            "SELECT id, title, company, location, url, link_type, link_resolved_at FROM jobs "
+            "SELECT id, title, company, location, url, link_type, link_resolved_at, "
+            "COALESCE(link_attempts,0) AS link_attempts FROM jobs "
             "WHERE user_id=? AND status IN ('new','approved') AND ("
             "  link_resolved_at IS NULL OR link_type='company' OR "
             "  (link_type IN ('board','aggregator','redirect','none') AND link_resolved_at < ?)"
@@ -325,7 +333,7 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     rows = [r for r in rows if not (r.get("link_type") == "company" and classify(r.get("url")) == "company")]
 
     out = {"examined": 0, "already_direct": 0, "resolved": 0, "unresolved": 0, "incomplete": 0,
-           "duplicate": 0, "left_for_next_run": 0}
+           "duplicate": 0, "left_for_next_run": 0, "web_searched": 0, "web_found": 0}
     started = time.monotonic()
     for i, r in enumerate(rows[:max(0, limit)]):
         if time.monotonic() - started > budget_s:
@@ -347,6 +355,18 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
             hit = None
             _ae._mark_lookup_failure()     # an exception is not an answer either
         new_url = (hit or {}).get("url") or ""
+        if (not new_url and searcher is not None and out["web_searched"] < max(0, search_cap)
+                and not r.get("link_attempts") and not _ae.lookup_incomplete()):
+            out["web_searched"] += 1
+            try:
+                found = searcher(r.get("company") or "", r.get("title") or "", r.get("location") or "")
+            except Exception as exc:
+                print("[links] web search failed for job %s (%s): %s" % (r["id"], r.get("company"), exc))
+                found = None
+            if (found or {}).get("url"):
+                out["web_found"] += 1
+                new_url = found["url"]
+                hit = {"url": new_url, "ats": "web search", "score": "verified"}
         if new_url:
             conn = get_db()
             try:
@@ -423,7 +443,9 @@ def run_detail(counts: dict) -> str:
     c = {"incomplete": 0, **counts}
     return ("links: %(examined)d examined, %(resolved)d resolved, %(already_direct)d already direct, "
             "%(unresolved)d unresolved, %(incomplete)d incomplete, %(duplicate)d duplicate, "
-            "%(left_for_next_run)d left for next run" % c)
+            "%(left_for_next_run)d left for next run" % c
+            + (", web search %d found of %d" % (c.get("web_found", 0), c["web_searched"])
+               if c.get("web_searched") else ""))
 
 
 def _lookup_incomplete() -> bool:
