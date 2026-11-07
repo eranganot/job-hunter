@@ -156,7 +156,10 @@ _SCRIPT = textwrap.dedent(r'''
     tmp = tempfile.mkdtemp()
     os.environ.update(DATABASE_PATH=os.path.join(tmp, "t.db"),
                       UPLOADS_DIR=os.path.join(tmp, "up"),
-                      ADMIN_EMAIL="admin@example.test", JH_SCHED_LOCK="0")
+                      ADMIN_EMAIL="admin@example.test", JH_SCHED_LOCK="0",
+                      # JH-1 (PR #30): pool details are shown to the health-key
+                      # holder or an admin only; this test reads them.
+                      JH_HEALTH_KEY="pool-test-key")
     os.makedirs(os.environ["UPLOADS_DIR"], exist_ok=True)
     import db as database
     import app as A, dbdriver
@@ -212,14 +215,14 @@ _SCRIPT = textwrap.dedent(r'''
             out["leaky"].append([s, round(time.time() - t, 2)])
         out["reclaimed_after_leaky"] = dbdriver.reclaimed_stats()["count"]
         t = time.time()
-        s, _, body = c.get("/api/health")
+        s, _, body = c.get("/api/health", {"X-Health-Key": "pool-test-key"})
         out["health"] = [s, round(time.time() - t, 2), json.loads(body)]
     elif mode == "exhausted":
         # Hold every slot, as the leaked connections did in production.
         held = [dbdriver.connect_postgres(database.DATABASE_URL or os.environ["DATABASE_URL"]).detach()
                 for _ in range(int(os.environ["JH_PG_POOL_MAX"]))]
         t = time.time()
-        s, _, body = c.get("/api/health")
+        s, _, body = c.get("/api/health", {"X-Health-Key": "pool-test-key"})
         out["health"] = [s, round(time.time() - t, 2), json.loads(body)]
         for h in held:
             h.close()
