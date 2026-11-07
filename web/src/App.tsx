@@ -1724,6 +1724,68 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
 
 
 
+
+/* Step 12: are the learning rules earning their place? Read-only. */
+function LearningCheck() {
+  const [rep, setRep] = useState<Record<string, any> | null>(null);
+  const [scope, setScope] = useState<"me" | "all">("me");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const run = async (sc: "me" | "all") => {
+    setScope(sc); setBusy(true); setErr("");
+    try { setRep(await api.adminLearningReport(sc)); }
+    catch (e: any) { setErr(e?.message || "The report failed"); }
+    finally { setBusy(false); }
+  };
+  const Table = ({ title, rows }: { title: string; rows: any[] }) => (
+    <div className="mt-3">
+      <p className="text-xs font-semibold text-gray-300 mb-1">{title}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="text-gray-400 text-left">
+            <th className="font-medium py-1 pr-2">Group</th><th className="font-medium py-1 px-1 text-right">Decided</th>
+            <th className="font-medium py-1 px-1 text-right">Approved</th><th className="font-medium py-1 pl-1 text-right">Applied</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.group} className="border-t border-gray-700/60">
+                <td className="py-1 pr-2 text-gray-200">{r.group}{r.small_sample ? <span className="text-gray-400"> *</span> : null}</td>
+                <td className="py-1 px-1 text-right text-gray-300">{r.decided}</td>
+                <td className="py-1 px-1 text-right text-gray-100">{r.approval_rate == null ? "-" : `${r.approval_rate}%`}</td>
+                <td className="py-1 pl-1 text-right text-gray-300">{r.apply_rate == null ? "-" : `${r.apply_rate}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-400" />Learning check</h3>
+      <p className="text-xs text-gray-400 mb-3">Are demoted jobs really passed more? Does the AI score predict what you approve? Read-only.</p>
+      <div className="grid grid-cols-2 gap-2">
+        {(["me", "all"] as const).map((sc) => (
+          <button key={sc} onClick={() => run(sc)} disabled={busy}
+            className={`p-3 rounded-xl border text-sm font-medium disabled:opacity-60 ${rep && scope === sc ? "bg-indigo-600/20 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-200"}`}>
+            {busy && scope === sc ? "Checking\u2026" : sc === "me" ? "My decisions" : "All users"}
+          </button>
+        ))}
+      </div>
+      {rep && (
+        <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5">
+          <p className="text-sm text-white font-medium">{rep.verdict}</p>
+          <p className="text-xs text-gray-400 mt-1">{rep.decided} decided · {rep.approval_rate ?? "-"}% approved · {rep.apply_rate ?? "-"}% of approved applied</p>
+          <Table title="Demoted or not" rows={rep.by_penalty || []} />
+          <Table title="By demotion reason" rows={rep.by_reason || []} />
+          <Table title="By AI match score" rows={rep.by_score || []} />
+          <p className="text-[11px] text-gray-400 mt-3">* fewer than 20 decisions. {rep.caveat}</p>
+        </div>
+      )}
+      {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
+    </div>
+  );
+}
+
 /* Step 1a: the link report, one button instead of a raw /api URL that needs
    the signed-in browser session (2026-11-07: the raw link "is not working").
    Read-only - shows the headline numbers and copies the full JSON to paste. */
@@ -2050,6 +2112,7 @@ function AdminPanel({ me }: any) {
           </div>
           <SupervisedApply />
           <LinkReport />
+          <LearningCheck />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length})</span></h3>
             <div className="space-y-2">
