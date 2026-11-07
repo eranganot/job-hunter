@@ -1726,9 +1726,11 @@ function SupervisedApply() {
     setBusy("list"); setErr(""); setDry(null); setLive(null);
     try {
       const r = await api.adminApplyCandidates();
-      const approved = (r.jobs || []).filter((j) => j.status === "approved");
-      approved.sort((a, b) => Number(b.direct_ats) - Number(a.direct_ats));
-      setJobs(approved);
+      const rank = { submittable: 0, account_needed: 1, job_board: 2 } as Record<string, number>;
+      const all = (r.jobs || []).slice();
+      all.sort((a, b) => Number(a.status !== "approved") - Number(b.status !== "approved")
+                         || (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3));
+      setJobs(all);
     } catch (e: any) { setErr(e?.message || "Could not load your queue"); }
     finally { setBusy(""); }
   };
@@ -1747,7 +1749,7 @@ function SupervisedApply() {
     catch (e: any) { setErr(e?.message || "The submit failed to run"); }
     finally { setBusy(""); }
   };
-  const ready = dry && dry.is_direct_ats && dry.cv_present && dry.applicant_ready;
+  const ready = dry && dry.is_direct_ats && !dry.account_needed && dry.cv_present && dry.applicant_ready;
   const Field = ({ k, v, ok }: { k: string; v: any; ok?: boolean }) => (
     <div className="flex items-start justify-between gap-3 text-xs">
       <span className="text-gray-400 shrink-0">{k}</span>
@@ -1759,28 +1761,35 @@ function SupervisedApply() {
     <div>
       <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-indigo-400" />Supervised apply</h3>
       <p className="text-xs text-gray-400 mb-3">
-        Submit ONE of your approved jobs for real, with auto-apply still off for everyone else.
+        Submit ONE job for real, with auto-apply still off for everyone else.
         A dry run comes first and sends nothing.
       </p>
       <button onClick={list} disabled={!!busy}
         className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
         {busy === "list" ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <RefreshCw className="w-5 h-5 text-gray-300 shrink-0" />}
-        <span className="block text-sm font-medium text-gray-200">{jobs ? "Reload my approved jobs" : "Pick an approved job"}</span>
+        <span className="block text-sm font-medium text-gray-200">{jobs ? "Reload jobs" : "Pick a job"}</span>
       </button>
-      {jobs && jobs.length === 0 && <p className="text-xs text-gray-400 mt-2">Your queue has no approved jobs.</p>}
+      {jobs && jobs.length === 0 && <p className="text-xs text-gray-400 mt-2">No approved jobs, and none in your queue on a site the engine can submit to.</p>}
       {jobs && jobs.length > 0 && !dry && (
         <div className="mt-2 space-y-1.5">
-          {jobs.map((j) => (
-            <button key={j.id} onClick={() => runDry(j)} disabled={!!busy}
+          {jobs.map((j, i) => (
+            <div key={j.id}>
+            {(i === 0 || jobs[i - 1].status !== j.status) && (
+              <p className="text-[11px] uppercase tracking-wide text-gray-400 pt-2 pb-1">
+                {j.status === "approved" ? "Approved" : "Not approved yet \u2013 the engine can submit these"}
+              </p>
+            )}
+            <button onClick={() => runDry(j)} disabled={!!busy}
               className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
               <span className="min-w-0">
                 <span className="block text-sm text-gray-200 truncate">{j.title}</span>
                 <span className="block text-xs text-gray-400 truncate">{j.company}</span>
               </span>
-              <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full ${j.direct_ats ? "bg-green-500/20 text-green-300" : "bg-gray-700 text-gray-300"}`}>
-                {busy === `dry-${j.id}` ? "\u2026" : j.direct_ats ? "Company site" : "Job board"}
+              <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full ${j.kind === "submittable" ? "bg-green-500/20 text-green-300" : j.kind === "account_needed" ? "bg-amber-500/20 text-amber-300" : "bg-gray-700 text-gray-300"}`}>
+                {busy === `dry-${j.id}` ? "\u2026" : j.kind === "submittable" ? "Can submit" : j.kind === "account_needed" ? "Account needed" : "Job board"}
               </span>
             </button>
+            </div>
           ))}
         </div>
       )}
@@ -1801,7 +1810,7 @@ function SupervisedApply() {
               </button>
             </div>
           )}
-          {!ready && !live && <p className="text-xs text-amber-300">Not submittable: {!dry.is_direct_ats ? "a job-board listing (apply there yourself)" : !dry.cv_present ? "no CV found" : "no applicant name in your CV"}.</p>}
+          {!ready && !live && <p className="text-xs text-amber-300">Not submittable: {!dry.is_direct_ats ? "a job-board listing (apply there yourself)" : dry.account_needed ? "Workday asks for an account on the company's site first (apply there yourself)" : !dry.cv_present ? "no CV found" : "no applicant name in your CV"}.</p>}
           {r && (
             <div className="pt-2 border-t border-gray-700 space-y-1.5">
               <Field k="Result" v={r.status} ok={r.status === "confirmed" || r.status === "submitted"} />

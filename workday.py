@@ -123,7 +123,14 @@ def _post(ref: str, text: str, limit: int, timeout: int):
         try:
             with gate:
                 with urllib.request.urlopen(req, timeout=t) as r:
-                    return json.loads(r.read().decode("utf-8", "replace"))
+                    raw = r.read().decode("utf-8", "replace")
+            if "workday is currently unavailable" in raw[:4000].lower():
+                # Observed 2026-11-07: during a Workday service interruption every
+                # tenant on the affected cluster (wd1: Intel, PayPal, AMAT, Marvell,
+                # Mastercard, Cadence, Autodesk) answers 200 with this HTML page.
+                last = "Workday outage on %s (\"Workday is currently unavailable\")" % wd
+                break
+            return json.loads(raw)
         except urllib.error.HTTPError as e:
             last = "HTTP %s" % e.code
             if e.code == 429:
