@@ -3077,6 +3077,11 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     out = _ae_ap.extract_applicant_data(text, email or "", fallback_name=name or "")
     out["cv_excerpt"] = (text or "")[:2500]          # material for open questions
     out["answer_bank"] = _answer_bank(user_id)
+    _sa = _standing_answers(user_id)
+    out["notice_period"] = "%d days" % _sa["notice_period_days"]
+    if _sa["salary_expectation_min"]:
+        out["salary_expectation"] = "at least %s %s gross per month" % (
+            format(_sa["salary_expectation_min"], ","), _sa["salary_expectation_currency"])
     # The Profile page is the source of truth for who is applying (Eran,
     # 2026-11-07: "You have everything you need in my profile page"): its
     # name, email, phone and LinkedIn win over anything read from the CV; the
@@ -3110,6 +3115,29 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
         out["phone"] = _ae_ap.intl_phone(out["phone"], out.get("home_country") or "Israel")
     if linkedin:
         out["linkedin_url"] = linkedin
+    return out
+
+
+def _standing_answers(user_id) -> dict:
+    """application_answers for the user, with Eran's defaults: notice period 30
+    days, currency ILS."""
+    out = {"salary_expectation_min": None, "salary_expectation_currency": "ILS", "notice_period_days": 30}
+    try:
+        c = database.get_db()
+        try:
+            r = c.execute("SELECT salary_expectation_min, salary_expectation_currency, notice_period_days "
+                          "FROM application_answers WHERE user_id=?", (user_id,)).fetchone()
+        finally:
+            c.close()
+        if r:
+            if r["salary_expectation_min"]:
+                out["salary_expectation_min"] = int(r["salary_expectation_min"])
+            if r["salary_expectation_currency"]:
+                out["salary_expectation_currency"] = r["salary_expectation_currency"]
+            if r["notice_period_days"] is not None:
+                out["notice_period_days"] = int(r["notice_period_days"])
+    except Exception as exc:
+        print(f"[apply] WARNING could not read application answers for user {user_id}: {exc}")
     return out
 
 
@@ -4421,6 +4449,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(report)
             return
 
+        if path == "/api/application-answers":
+            user = self.require_auth()
+            if not user:
+                return
+            self.send_json(_standing_answers(user["id"]))
+            return
+
         if path == "/api/admin/link-search-trial":
             # Step 1c option 3, MEASUREMENT ONLY: for open LinkedIn/aggregator
             # jobs the free lookups miss, ask Gemini (Google Search grounding)
@@ -4939,6 +4974,55 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         # ── Save profile ──
+        # ── Standing answers for application forms (2026-11-07) ──
+        # The application_answers table existed since the baseline schema and
+        # nothing used it. Salary expectation (minimum, gross per month) and
+        # notice period (default 30 days - Eran) feed the question answerer.
+        if path == "/api/application-answers":
+            data = self.read_json() or {}
+            vals = {}
+            if "salary_expectation_min" in data:
+                v = data["salary_expectation_min"]
+                try:
+                    v = None if v in (None, "") else int(float(str(v).replace(",", "")))
+                except ValueError:
+                    self.send_json({"error": "salary_expectation_min must be a number"}, 400)
+                    return
+                if v is not None and not (0 < v < 10_000_000):
+                    self.send_json({"error": "salary_expectation_min is out of range"}, 400)
+                    return
+                vals["salary_expectation_min"] = v
+            if "salary_expectation_currency" in data:
+                cur = str(data["salary_expectation_currency"] or "ILS").upper()
+                if cur not in ("ILS", "USD", "EUR", "GBP"):
+                    self.send_json({"error": "currency must be ILS, USD, EUR or GBP"}, 400)
+                    return
+                vals["salary_expectation_currency"] = cur
+            if "notice_period_days" in data:
+                try:
+                    n = int(data["notice_period_days"])
+                except (TypeError, ValueError):
+                    self.send_json({"error": "notice_period_days must be a whole number"}, 400)
+                    return
+                if not 0 <= n <= 365:
+                    self.send_json({"error": "notice_period_days must be 0-365"}, 400)
+                    return
+                vals["notice_period_days"] = n
+            if vals:
+                cols = ", ".join(vals)
+                conn = database.get_db()
+                try:
+                    conn.execute(
+                        "INSERT INTO application_answers (user_id, %s, updated_date) VALUES (?, %s, ?) "
+                        "ON CONFLICT (user_id) DO UPDATE SET %s, updated_date=excluded.updated_date"
+                        % (cols, ", ".join("?" for _ in vals), ", ".join("%s=excluded.%s" % (c, c) for c in vals)),
+                        (user_id, *vals.values(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                    conn.commit()
+                finally:
+                    conn.close()
+            self.send_json({"success": True, **_standing_answers(user_id)})
+            return
+
         if path == "/api/save-profile":
             data = self.read_json()
             kwargs = {}

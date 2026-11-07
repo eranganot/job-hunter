@@ -2644,6 +2644,16 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   const [phone, setPhone] = useState(me.phone || "");
   /* Blank = not answered, read as "no" by the apply engine (Eran, 2026-11-07). */
   const [sponsorLocal, setSponsorLocal] = useState<string>((me.sponsorship_local || "no").toLowerCase());
+  const [salaryMin, setSalaryMin] = useState<string>("");
+  const [salaryCur, setSalaryCur] = useState<string>("ILS");
+  const [noticeDays, setNoticeDays] = useState<string>("30");
+  useEffect(() => {
+    api.applicationAnswers().then((a) => {
+      if (a.salary_expectation_min) setSalaryMin(String(a.salary_expectation_min));
+      if (a.salary_expectation_currency) setSalaryCur(a.salary_expectation_currency);
+      if (a.notice_period_days !== undefined && a.notice_period_days !== null) setNoticeDays(String(a.notice_period_days));
+    }).catch(() => {});
+  }, []);
   const [sponsorAbroad, setSponsorAbroad] = useState<string>((me.sponsorship_abroad || "no").toLowerCase());
   const [email, setEmail] = useState(me.email_address || me.email || "");
   const [freq, setFreq] = useState<string>(me.schedule_frequency || "daily");
@@ -2704,6 +2714,11 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
     try {
       await api.saveProfile({ name: fullName, phone, linkedin_url: linkedin, job_titles: titles, keywords, locations,
                               sponsorship_local: sponsorLocal, sponsorship_abroad: sponsorAbroad });
+      await api.saveApplicationAnswers({
+        salary_expectation_min: salaryMin.trim() ? Number(salaryMin.replace(/,/g, "")) : null,
+        salary_expectation_currency: salaryCur,
+        notice_period_days: Math.max(0, Math.min(365, parseInt(noticeDays || "30", 10) || 0)),
+      });
       await api.saveSchedule({
         // What the plan allows: a downgraded Free user keeps 'daily' in their
         // profile, and re-sending it would make the server refuse the whole
@@ -2765,6 +2780,20 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
               <LabelledInput label="Email" value={email} onChange={setEmail} placeholder="email@example.com" type="email" />
               <LabelledInput label="Phone" value={phone} onChange={setPhone} placeholder="+972 50 000 0000" type="tel" />
               <LabelledInput label="LinkedIn URL" value={linkedin} onChange={setLinkedin} placeholder="https://linkedin.com/in/you" />
+            </div>
+          </div>
+          <div>
+            <h3 className="font-semibold text-white mb-1">Application answers</h3>
+            <p className="text-xs text-gray-400 mb-3">Used when a form asks about salary or availability.</p>
+            <div className="grid gap-3 grid-cols-[1fr_auto] items-end">
+              <LabelledInput label="Minimum salary expectation (gross, per month)" value={salaryMin} onChange={setSalaryMin} placeholder="e.g. 45,000" />
+              <select value={salaryCur} onChange={(e) => setSalaryCur(e.target.value)} aria-label="Currency"
+                className="h-[42px] px-3 bg-gray-800 border border-gray-700 rounded-xl text-sm text-gray-100">
+                {["ILS", "USD", "EUR", "GBP"].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="mt-3 max-w-[12rem]">
+              <LabelledInput label="Notice period (days)" value={noticeDays} onChange={setNoticeDays} placeholder="30" />
             </div>
           </div>
           <div>
