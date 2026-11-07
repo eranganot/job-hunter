@@ -412,3 +412,84 @@ def test_force_bypasses_killswitch(monkeypatch):
     r = ae.submit_application("https://x/y", "T", "C", {}, None, force=True)
     assert "disabled" not in (r.get("error") or "").lower()
     assert "playwright" in (r.get("error") or "").lower()
+
+
+# ── Workday: the account wall (observed 2026-11-06 on AMAT, NVIDIA, Intel) ──
+
+class _WorkdayPage:
+    """The three states recorded live: the posting (one Apply button), the
+    Apply menu, and step 1 of 6 - Create Account/Sign In."""
+    POSTING, MENU, ACCOUNT = range(3)
+
+    def __init__(self, wall=True):
+        self.state, self.wall, self.clicked = self.POSTING, wall, []
+        self.url = "https://amat.wd1.myworkdayjobs.com/External/job/RehovotISR/AI_R2630808"
+
+    def query_selector(self, sel):
+        ids = {self.POSTING: ["adventureButton"],
+               self.MENU: ["adventureButton", "autofillWithResume", "applyManually"],
+               self.ACCOUNT: ["createAccountSubmitButton", "signInLink"] if self.wall else []}[self.state]
+        for i in ids:
+            if f'"{i}"' in sel:
+                return _WorkdayButton(self, i)
+        return None
+
+    def evaluate(self, _js):
+        if self.state == self.ACCOUNT and self.wall:
+            return "AI Transformation Product Manager\ncurrent step 1 of 6\nCreate Account/Sign In\nstep 2 of 6"
+        return "AI Transformation Product Manager\nApply\nlocations\nRehovot,ISR"
+
+    def wait_for_load_state(self, *a, **k):
+        pass
+
+    def wait_for_timeout(self, *_a):
+        pass
+
+    def query_selector_all(self, _sel):
+        return []
+
+    def wait_for_selector(self, sel, **_k):
+        for part in sel.split(","):
+            hit = self.query_selector(part)
+            if hit:
+                return hit
+        raise TimeoutError(sel)
+
+    def set_input_files(self, *a, **k):
+        raise RuntimeError("no file input")
+
+
+class _WorkdayButton:
+    def __init__(self, page, aid):
+        self.page, self.aid = page, aid
+
+    def is_visible(self):
+        return True
+
+    def is_enabled(self):
+        return True
+
+    def click(self):
+        self.page.clicked.append(self.aid)
+        if self.aid == "adventureButton":
+            self.page.state = self.page.MENU
+        elif self.aid == "applyManually":
+            self.page.state = self.page.ACCOUNT
+        elif "submit" in self.aid.lower() or "account" in self.aid.lower():
+            raise AssertionError("must never press %s" % self.aid)
+
+
+def test_workday_account_wall_is_manual_required_not_a_failure():
+    page = _WorkdayPage()
+    res = ae._apply_workday(page, {"first_name": "Eran"}, None)
+    assert res["status"] == "manual_required", res
+    assert "account" in res["error"].lower() and "step 1 of 6" in res["error"]
+    assert page.clicked == ["adventureButton", "applyManually"]      # opened, nothing sent
+
+
+def test_a_stop_on_page_one_no_longer_reads_as_twelve_pages():
+    page = _WorkdayPage(wall=False)
+    page.state = page.ACCOUNT                 # a page with no Apply, Next or Submit
+    res = ae._apply_workday(page, {}, None)
+    assert res["status"] == "failed"
+    assert "12 pages" not in res["error"] and "page 1" in res["error"], res["error"]
