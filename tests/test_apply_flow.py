@@ -31,7 +31,7 @@ def env(tmp_path, monkeypatch):
     conn.execute("UPDATE users SET role='admin' WHERE id=?", (uid,))
     conn.commit()
     conn.close()
-    monkeypatch.setattr(apply_engine, "extract_applicant_data", lambda cv, em: {"email": em})
+    monkeypatch.setattr(apply_engine, "extract_applicant_data", lambda cv, em, **_k: {"email": em})
     monkeypatch.setenv("APPLY_ENGINE_ENABLED", "1")  # exercise the apply path; kill-switch tested separately
     return app, uid
 

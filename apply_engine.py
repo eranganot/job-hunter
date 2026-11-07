@@ -759,15 +759,48 @@ def _claude_json(prompt: str, max_tokens: int = 1024, timeout: int = 90,
 
 # ── Applicant data extraction ─────────────────────────────────────────────────
 
-def extract_applicant_data(cv_text: str, email: str) -> dict:
-    """Extract structured applicant data from CV text using Claude."""
+# The example values in the extraction prompt below. The model echoes them when
+# the text has nothing to extract - observed 2026-11-07: the supervised dry run
+# showed applicant "First Last", because every apply path passed the profile's
+# cv_summary (2-3 AI sentences, no name, no phone) instead of the CV itself.
+_TEMPLATE_VALUES = {"first last", "first", "last", "phone or empty", "linkedin url or empty",
+                    "city, country", "latest job title", "latest employer",
+                    "2-3 sentence professional summary"}
+
+
+def _scrub_template(result: dict) -> dict:
+    for k, v in list(result.items()):
+        if isinstance(v, str) and v.strip().lower() in _TEMPLATE_VALUES:
+            result[k] = ""
+    return result
+
+
+def _with_name_fallback(result: dict, fallback_name: str) -> dict:
+    """The account name when the CV gave none - never a placeholder."""
+    name = (fallback_name or "").strip()
+    if name and not (result.get("full_name") or "").strip():
+        parts = name.split()
+        result["full_name"] = name
+        result.setdefault("first_name", "")
+        result.setdefault("last_name", "")
+        if not result["first_name"]:
+            result["first_name"] = parts[0]
+        if not result["last_name"] and len(parts) > 1:
+            result["last_name"] = " ".join(parts[1:])
+    return result
+
+
+def extract_applicant_data(cv_text: str, email: str, fallback_name: str = "") -> dict:
+    """Extract structured applicant data from the CV's TEXT (not its summary).
+    Placeholder values the model copies from the prompt are blanked, and the
+    account name fills a missing name."""
     empty = {
         "email": email, "full_name": "", "first_name": "", "last_name": "",
         "phone": "", "linkedin_url": "", "location": "", "current_title": "",
         "current_company": "", "years_experience": 0, "summary": "",
     }
     if not cv_text or not GEMINI_KEY:
-        return empty
+        return _with_name_fallback(empty, fallback_name)
     try:
         result = _claude_json(
             f'Extract the applicant info from this CV. Return ONLY valid JSON:\n'
@@ -779,10 +812,10 @@ def extract_applicant_data(cv_text: str, email: str) -> dict:
             max_tokens=512,
         )
         result["email"] = email
-        return result
+        return _with_name_fallback(_scrub_template(result), fallback_name)
     except Exception as e:
         print(f"[apply-engine] extract_applicant_data error: {e}")
-        return empty
+        return _with_name_fallback(empty, fallback_name)
 
 # ── URL alive check ───────────────────────────────────────────────────────────
 
