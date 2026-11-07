@@ -5367,12 +5367,21 @@ class Handler(BaseHTTPRequestHandler):
                          "user" if action == "reject" else None, job_id))
 
                 if action == "reject":
+                    # Step 13: "Salary too low" keeps the job's salary when its
+                    # text states one, so the floor can be learned from it.
+                    _sal = None
+                    if "salary" in (reason or "").lower():
+                        import salary as _salary
+                        _sal = _salary.parse(" ".join(str(job[k] or "") for k in ("title", "description")
+                                                      if k in job.keys()))
                     conn.execute(
-                        "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date) VALUES (?,?,?,?,?,?)",
+                        "INSERT INTO rejected_patterns (user_id,company,title,notes,location,created_date,"
+                        "salary_monthly,salary_currency) VALUES (?,?,?,?,?,?,?,?)",
                         (user_id, job["company"], job["title"],
                          reason or "No reason given",
                          (job["location"] if "location" in job.keys() else None),
-                         datetime.now().isoformat())
+                         datetime.now().isoformat(),
+                         _sal["monthly_max"] if _sal else None, _sal["currency"] if _sal else None)
                     )
                     detail = f"Passed on {job['title']} at {job['company']}"
                     if reason:

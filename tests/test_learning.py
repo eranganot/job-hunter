@@ -164,3 +164,47 @@ class TestAppliedElsewhere:
         notes = _feedback_notes(sig)
         assert "applied to on their own" in notes and "wix" in notes
         assert "rejected: " not in notes
+
+
+class TestSalaryAtPass:
+    """Step 13: "Salary too low" keeps the job's stated salary; jobs paying no
+    more than that (same currency) are demoted. Unstated salaries: no effect."""
+
+    def _pass_with_salary(self, uid, monthly, currency, age_days=1, notes="Salary too low"):
+        created = (_dt.datetime.now() - _dt.timedelta(days=age_days)).isoformat()
+        conn = database.get_db()
+        conn.execute("INSERT INTO rejected_patterns (user_id,company,title,notes,created_date,"
+                     "salary_monthly,salary_currency) VALUES (?,?,?,?,?,?,?)",
+                     (uid, "LowPay", "PM", notes, created, monthly, currency))
+        conn.commit()
+        conn.close()
+
+    def test_the_floor_demotes_jobs_paying_no_more(self, uid):
+        self._pass_with_salary(uid, 28000, "ILS")
+        sig = _signals(uid)
+        assert sig["salary_floor"] == {"ILS": 28000.0}
+        low = {"company": "Acme", "title": "PM", "description": "Salary ₪25,000-27,000 per month"}
+        high = {"company": "Acme", "title": "PM", "description": "Salary ₪40,000-45,000 per month"}
+        none = {"company": "Acme", "title": "PM", "description": "Great team, Tel Aviv"}
+        usd = {"company": "Acme", "title": "PM", "description": "Salary $5,000 - $6,000 per month"}
+        assert compute_feedback_penalty(low, sig) == (15, "Pays below your salary floor")
+        assert compute_feedback_penalty(high, sig)[0] == 0
+        assert compute_feedback_penalty(none, sig)[0] == 0
+        assert compute_feedback_penalty(usd, sig)[0] == 0          # other currency: not compared
+
+    def test_old_and_other_reasons_do_not_set_a_floor(self, uid):
+        self._pass_with_salary(uid, 28000, "ILS", age_days=400)
+        self._pass_with_salary(uid, 50000, "ILS", notes="Not a good fit")
+        assert _signals(uid)["salary_floor"] == {}
+
+    def test_the_profile_minimum_is_a_floor_too(self, uid):
+        conn = database.get_db()
+        conn.execute("INSERT INTO application_answers (user_id, salary_expectation_min, "
+                     "salary_expectation_currency) VALUES (?,?,?)", (uid, 45000, "ILS"))
+        conn.commit()
+        conn.close()
+        sig = _signals(uid)
+        job = {"company": "Acme", "title": "PM", "description": "Salary ₪40,000-44,000 per month"}
+        at_min = {"company": "Acme", "title": "PM", "description": "Salary ₪40,000-45,000 per month"}
+        assert compute_feedback_penalty(job, sig)[0] == 15
+        assert compute_feedback_penalty(at_min, sig)[0] == 0         # reaches his minimum

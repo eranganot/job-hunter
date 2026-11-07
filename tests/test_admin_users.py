@@ -406,3 +406,20 @@ def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users
                 {"salary_expectation_min": "lots"}):
         st, _l, _b = users["admin"].post_json("/api/application-answers", bad)
         assert st == 400, bad
+
+
+def test_a_salary_too_low_pass_keeps_the_jobs_salary(stack, users):
+    uid = _user_id(stack["db"], "admin@example.test")
+    job_id = _new_job(stack["db"], uid)
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE jobs SET description=? WHERE id=?",
+                 ("About the role... Salary: ₪25,000-28,000 per month.", job_id))
+    conn.commit()
+    conn.close()
+    st, _l, _b = users["admin"].post_json("/api/jobs/%d/reject" % job_id, {"reason": "Salary too low"})
+    assert st == 200
+    conn = stack["db"].get_db()
+    row = conn.execute("SELECT salary_monthly, salary_currency FROM rejected_patterns "
+                       "WHERE user_id=? ORDER BY rowid DESC LIMIT 1", (uid,)).fetchone()
+    conn.close()
+    assert (row["salary_monthly"], row["salary_currency"]) == (28000, "ILS")

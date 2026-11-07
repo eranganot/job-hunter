@@ -213,6 +213,17 @@ def compute_feedback_penalty(
         elif w >= 0.5:
             penalty += 8
 
+    # Step 13: a stated salary at or below what he passed on as too low (or
+    # below his Profile minimum), in the same currency. Unstated: no effect.
+    floor = signals.get("salary_floor") or {}
+    if floor:
+        import salary as _salary
+        s = _salary.parse(" ".join(str(job.get(k) or "") for k in ("title", "description")))
+        if s and s["currency"] in floor and s["monthly_max"] <= floor[s["currency"]]:
+            penalty += 15
+            if not reason:
+                reason = "Pays below your salary floor"
+
     # Similar-title penalty - exclude the user's own target-title tokens so we
     # never penalize the exact roles they're hunting for.
     disliked = set(signals.get("disliked_title_tokens") or set())

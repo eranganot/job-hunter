@@ -885,6 +885,15 @@ def m0019_application_answers(conn):
     conn.commit()
 
 
+def m0020_salary_at_pass(conn):
+    """Step 13: the job's salary, when its text states one, kept with a "Salary
+    too low" pass - monthly, top of the range, in the stated currency."""
+    for col, typ in (("salary_monthly", "REAL"), ("salary_currency", "TEXT")):
+        if not _has_column(conn, "rejected_patterns", col):
+            conn.execute("ALTER TABLE rejected_patterns ADD COLUMN %s %s" % (col, typ))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -905,6 +914,7 @@ MIGRATIONS = [
     (17, "account_deletion",            m0017_account_deletion),
     (18, "sponsorship",                 m0018_sponsorship),
     (19, "application_answers",         m0019_application_answers),
+    (20, "salary_at_pass",              m0020_salary_at_pass),
 ]
 
 

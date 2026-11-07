@@ -651,7 +651,8 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
     from datetime import datetime as _dt
 
     rows = conn.execute(
-        "SELECT company, title, notes, location, created_date FROM rejected_patterns "
+        "SELECT company, title, notes, location, created_date, salary_monthly, salary_currency "
+        "FROM rejected_patterns "
         "WHERE user_id=? ORDER BY created_date DESC",
         (user_id,)
     ).fetchall()
@@ -672,6 +673,9 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
     tok_weight: dict = {}
     loc_weight: dict = {}
     examples: list = []
+    # Step 13: per currency, the highest monthly salary he passed on as too low,
+    # over the last 180 days; his Profile minimum (application_answers) too.
+    salary_floor: dict = {}
 
     for r in rows:
         comp = (r["company"] or "").strip().lower()
@@ -686,6 +690,12 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
         except Exception:
             created = None
         w = _weight(created)
+        try:
+            sal, cur = r["salary_monthly"], r["salary_currency"]
+        except (KeyError, IndexError):
+            sal = cur = None
+        if sal and cur and "salary" in note.lower() and w >= 0.25:     # ~180 days
+            salary_floor[cur] = max(salary_floor.get(cur, 0.0), float(sal))
         if is_applied_elsewhere(note):
             # A positive signal: not a pass on the company, the title or the city.
             if comp:
@@ -709,6 +719,16 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
                 "reason":  note,
             })
 
+    try:
+        _sa = conn.execute("SELECT salary_expectation_min, salary_expectation_currency "
+                           "FROM application_answers WHERE user_id=?", (user_id,)).fetchone()
+        if _sa and _sa["salary_expectation_min"]:
+            _c = (_sa["salary_expectation_currency"] or "ILS").upper()
+            # Below his stated minimum = too low, so the floor is just under it.
+            salary_floor[_c] = max(salary_floor.get(_c, 0.0), float(_sa["salary_expectation_min"]) - 1)
+    except Exception as exc:
+        print(f"[feedback] WARNING could not read the salary minimum for user {user_id}: {exc}")
+
     disliked_title_tokens = {t for t, wv in tok_weight.items() if wv >= 1.5}
     disliked_locations = {l for l, wv in loc_weight.items() if wv >= 1.0}
 
@@ -718,6 +738,7 @@ def get_feedback_signals(conn: sqlite3.Connection, user_id: int) -> dict:
         "passed_companies":      passed_companies,
         "disliked_title_tokens": disliked_title_tokens,
         "disliked_locations":    disliked_locations,
+        "salary_floor":          salary_floor,
         "reason_counts":         {k: v for k, v in get_pass_reason_stats(conn, user_id).items()
                                   if not is_applied_elsewhere(k)},
         "examples":              examples,
