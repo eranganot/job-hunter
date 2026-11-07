@@ -2570,6 +2570,9 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   const [fullName, setFullName] = useState(me.name || "");
   const [linkedin, setLinkedin] = useState(me.linkedin_url || "");
   const [phone, setPhone] = useState(me.phone || "");
+  /* Blank = not answered, read as "no" by the apply engine (Eran, 2026-11-07). */
+  const [sponsorLocal, setSponsorLocal] = useState<string>((me.sponsorship_local || "no").toLowerCase());
+  const [sponsorAbroad, setSponsorAbroad] = useState<string>((me.sponsorship_abroad || "no").toLowerCase());
   const [email, setEmail] = useState(me.email_address || me.email || "");
   const [freq, setFreq] = useState<string>(me.schedule_frequency || "daily");
   const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
@@ -2627,7 +2630,8 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   const save = async () => {
     setSaving(true); setSaved(false);
     try {
-      await api.saveProfile({ name: fullName, phone, linkedin_url: linkedin, job_titles: titles, keywords, locations });
+      await api.saveProfile({ name: fullName, phone, linkedin_url: linkedin, job_titles: titles, keywords, locations,
+                              sponsorship_local: sponsorLocal, sponsorship_abroad: sponsorAbroad });
       await api.saveSchedule({
         // What the plan allows: a downgraded Free user keeps 'daily' in their
         // profile, and re-sending it would make the server refuse the whole
@@ -2689,6 +2693,26 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
               <LabelledInput label="Email" value={email} onChange={setEmail} placeholder="email@example.com" type="email" />
               <LabelledInput label="Phone" value={phone} onChange={setPhone} placeholder="+972 50 000 0000" type="tel" />
               <LabelledInput label="LinkedIn URL" value={linkedin} onChange={setLinkedin} placeholder="https://linkedin.com/in/you" />
+            </div>
+          </div>
+          <div>
+            <h3 className="font-semibold text-white mb-1">Work authorization</h3>
+            <p className="text-xs text-gray-400 mb-3">Used to answer visa questions on application forms.</p>
+            <div className="space-y-3">
+              {([["Do you need visa sponsorship to work in Israel?", sponsorLocal, setSponsorLocal],
+                 ["Do you need visa sponsorship to work abroad (e.g. US, EU)?", sponsorAbroad, setSponsorAbroad]] as const).map(([q, v, set]) => (
+                <div key={q} className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-gray-200">{q}</span>
+                  <div className="flex shrink-0 rounded-lg border border-gray-700 overflow-hidden" role="group" aria-label={q}>
+                    {["no", "yes"].map((opt) => (
+                      <button key={opt} type="button" onClick={() => set(opt)} aria-pressed={v === opt}
+                        className={`px-3 py-1.5 text-sm ${v === opt ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-300"}`}>
+                        {opt === "yes" ? "Yes" : "No"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
           <div className="pt-1 border-t border-gray-700" />

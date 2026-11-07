@@ -279,6 +279,7 @@ def get_session_user(token: str):
                p.job_titles, p.keywords, p.locations,
                p.salary_min, p.salary_max, p.experience_years, p.seniority,
                p.linkedin_url, p.phone,
+               p.sponsorship_local, p.sponsorship_abroad,
                p.notification_channel,
                p.telegram_token, p.telegram_chat_id,
                p.twilio_account_sid, p.twilio_auth_token, p.whatsapp_number,

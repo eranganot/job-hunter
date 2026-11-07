@@ -318,3 +318,24 @@ def test_the_profile_page_wins_over_the_cv(stack, monkeypatch):
     assert got["linkedin_url"] == "https://www.linkedin.com/in/example/"
     assert got["email"] == "me@example.test"
     assert got["current_title"] == "Head of Product"   # the CV still fills what the profile lacks
+
+
+def test_sponsorship_is_saved_and_reaches_the_applicant(stack, users, monkeypatch):
+    """Eran, 2026-11-07: assume no sponsorship for now, but let the profile say
+    it for home (Israel) and abroad."""
+    import app as A
+    import apply_engine
+    uid = _user_id(stack["db"], "admin@example.test")
+    monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
+    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    assert got["needs_sponsorship_in_home_country"] is False      # not answered = no
+    assert got["needs_sponsorship_abroad"] is False
+    st, _l, _b = users["admin"].post_json("/api/save-profile", {"sponsorship_local": "no", "sponsorship_abroad": "yes"})
+    assert st == 200
+    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    assert got["needs_sponsorship_abroad"] is True and got["needs_sponsorship_in_home_country"] is False
+    assert got["home_country"] == "Israel"
+    st, _l, _b = users["admin"].post_json("/api/save-profile", {"sponsorship_abroad": "maybe"})
+    assert st == 400
+    _s, _l, body = users["admin"].get("/api/me")
+    assert json.loads(body).get("sponsorship_abroad") == "yes"
