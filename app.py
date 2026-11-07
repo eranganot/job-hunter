@@ -4449,6 +4449,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(report)
             return
 
+        if path == "/api/admin/learning-report":
+            # Step 12: does the learning work? Read-only, ?scope=me|all.
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import learningreport
+            _scope = (qs.get("scope", ["me"])[0] or "me").strip().lower()
+            conn = database.get_db()
+            try:
+                self.send_json(learningreport.report(conn, None if _scope == "all" else user["id"]))
+            finally:
+                conn.close()
+            return
+
         if path == "/api/application-answers":
             user = self.require_auth()
             if not user:

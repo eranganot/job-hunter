@@ -423,3 +423,10 @@ def test_a_salary_too_low_pass_keeps_the_jobs_salary(stack, users):
                        "WHERE user_id=? ORDER BY rowid DESC LIMIT 1", (uid,)).fetchone()
     conn.close()
     assert (row["salary_monthly"], row["salary_currency"]) == (28000, "ILS")
+
+
+def test_the_learning_report_is_admin_only_and_answers(stack, users):
+    st, _l, body = users["admin"].get("/api/admin/learning-report?scope=all")
+    assert st == 200 and "verdict" in json.loads(body)
+    st, _l, _b = users["a"].get("/api/admin/learning-report")
+    assert st == 403

@@ -343,6 +343,9 @@ export const api = {
   // every link verified on the page; writes nothing. ~1 cent for 30 (2026-11-07).
   adminLinkSearchTrial: (n = 30) =>
     request<Record<string, any>>(`/api/admin/link-search-trial?scope=all&n=${n}`),
+  // Step 12: approval and apply rates by demotion, demotion reason and AI score.
+  adminLearningReport: (scope: "me" | "all" = "me") =>
+    request<Record<string, any>>(`/api/admin/learning-report?scope=${scope}`),
   // Standing answers for application forms: minimum salary (gross / month) and notice period.
   applicationAnswers: () =>
     request<{ salary_expectation_min: number | null; salary_expectation_currency: string; notice_period_days: number }>("/api/application-answers"),
