@@ -142,9 +142,12 @@ Rules:
   to say" option, confidence "high"; if none exists, leave the question out.
 - Consent / acknowledgement / terms checkboxes: agree, "high".
 - "How did you hear about us": "Company website" or the closest option, "high".
+- Salary expectations: use salary_expectation from the applicant data (state it as that
+  minimum, in the form's format), confidence "high". Notice period / availability: use
+  notice_period, "high". If either is absent from the applicant data, confidence "low".
 - confidence "low" whenever you are guessing or the answer depends on facts not given
-  (salary expectations, notice period, start date, relocation, citizenship of another
-  country, specific years of a skill not in the CV)."""
+  (start date beyond the notice period, relocation, citizenship of another country,
+  specific years of a skill not in the CV)."""
 
 
 def _fill(frame, q, value) -> bool:

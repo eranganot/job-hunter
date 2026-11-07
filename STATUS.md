@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-07 by Claude (the engine answers every form question; unsure required ones hold the application for Eran; schema 19)._
+_Last updated: 2026-11-07 by Claude (Profile → Application answers: minimum salary, notice period 30 days)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,7 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-07 — **Profile → Application answers: minimum salary expectation and notice period.** Eran: *"Add salary expectations section (or minimum salary expectations). Notice period - assume it's 30 days."* The `application_answers` table had been in the baseline schema, unused (`salary_expectation_min`, `salary_expectation_currency`, `notice_period_days`, `available_start_date`, `willing_to_relocate`, `how_heard`...). No migration was needed. `GET/POST /api/application-answers` (minimum salary as gross per month, an amount and ILS/USD/EUR/GBP; notice period 0–365 days, **default 30**; anything else → 400; upsert per user). `_applicant_for` adds `notice_period` ("30 days") and, when set, `salary_expectation` ("at least 45,000 ILS gross per month"). The question prompt answers salary and notice-period questions from those with high confidence, and still holds the application when they are missing. The Profile tab section is loaded on open and saved with the existing Save. Test: defaults → save → applicant → update → invalid values refused. Checked in a real browser at phone width.
 - 2026-11-07 — **The apply engine answers every form question on Eran's behalf, and holds the application when it is unsure (schema 19).** Eran: *"For any 'not ordinary' questions like open questions or multiple answer questions - you should answer on my behalf. If you are not sure - show me the questions and I'll guide you."* **`questions.py`:**
   - `collect` returns every unanswered question: text, textarea, `<select>`, `role="combobox"` (with its own options), and radio/checkbox **groups** with their option labels. Required = the `required`/`aria-required` attribute **or** `*`/`✱` in the label. Identity fields and files are the handlers' job and are excluded. A React-select combobox counts as answered when its container `--has-value`: its text box stays empty after a choice, and Greenhouse's Country, set from the phone's +972, was read as unanswered.
   - `answer` uses the user's saved answers first, then **one** Gemini call with the profile, a CV excerpt (2,500 chars), the sponsorship flags and the job's page text. Every answer carries a confidence. Open questions get 2–4 sentences in the first person. Demographic questions get "decline". Consent gets agree. Anything that depends on facts not given (salary, notice period, start date, other citizenships) is low confidence.

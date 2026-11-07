@@ -343,6 +343,11 @@ export const api = {
   // every link verified on the page; writes nothing. ~1 cent for 30 (2026-11-07).
   adminLinkSearchTrial: (n = 30) =>
     request<Record<string, any>>(`/api/admin/link-search-trial?scope=all&n=${n}`),
+  // Standing answers for application forms: minimum salary (gross / month) and notice period.
+  applicationAnswers: () =>
+    request<{ salary_expectation_min: number | null; salary_expectation_currency: string; notice_period_days: number }>("/api/application-answers"),
+  saveApplicationAnswers: (body: { salary_expectation_min: number | null; salary_expectation_currency: string; notice_period_days: number }) =>
+    request<any>("/api/application-answers", "POST", body),
   // Answers to the questions an application is held on; saved for reuse.
   answerQuestions: (jobId: number | string, answers: { key: string; label: string; answer: string | string[] }[]) =>
     request<{ success: boolean; saved: number }>(`/api/jobs/${jobId}/answers`, "POST", { answers }),

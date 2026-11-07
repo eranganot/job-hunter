@@ -380,3 +380,29 @@ def test_a_held_supervised_submit_puts_its_questions_on_the_job(stack, users, mo
     row = conn.execute("SELECT apply_status, apply_questions FROM jobs WHERE id=?", (job_id,)).fetchone()
     conn.close()
     assert row["apply_status"] == "needs_answers" and json.loads(row["apply_questions"]) == held
+
+
+def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users, monkeypatch):
+    """Eran, 2026-11-07: a salary expectation section, and notice period 30 days."""
+    import app as A
+    import apply_engine
+    monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
+    uid = _user_id(stack["db"], "admin@example.test")
+    _s, _l, body = users["admin"].get("/api/application-answers")
+    assert json.loads(body) == {"salary_expectation_min": None, "salary_expectation_currency": "ILS",
+                                "notice_period_days": 30}                      # defaults
+    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    assert got["notice_period"] == "30 days" and "salary_expectation" not in got
+    st, _l, body = users["admin"].post_json("/api/application-answers", {
+        "salary_expectation_min": "45,000", "salary_expectation_currency": "ils", "notice_period_days": 30})
+    assert st == 200 and json.loads(body)["salary_expectation_min"] == 45000
+    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    assert got["salary_expectation"] == "at least 45,000 ILS gross per month"
+    st, _l, _b = users["admin"].post_json("/api/application-answers", {"notice_period_days": 30,
+                                                                       "salary_expectation_min": 50000})
+    assert st == 200                                                            # the upsert path
+    assert A._standing_answers(uid)["salary_expectation_min"] == 50000
+    for bad in ({"salary_expectation_currency": "BTC"}, {"notice_period_days": 999},
+                {"salary_expectation_min": "lots"}):
+        st, _l, _b = users["admin"].post_json("/api/application-answers", bad)
+        assert st == 400, bad
