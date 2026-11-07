@@ -217,7 +217,8 @@ def test_resolve_rewrites_board_links_of_open_jobs_and_keeps_the_original():
     assert rows[3]["link_type"] == "board" and rows[3]["link_attempts"] == 1
     assert rows[6]["link_type"] == "aggregator" and rows[6]["link_attempts"] == 1
     assert counts == {"examined": 6, "already_direct": 2, "resolved": 1, "unresolved": 2,
-                      "incomplete": 0, "duplicate": 1, "left_for_next_run": 0}
+                      "incomplete": 0, "duplicate": 1, "left_for_next_run": 0,
+                      "web_searched": 0, "web_found": 0}
 
 
 def test_resolve_never_touches_history_or_other_users():
@@ -700,3 +701,46 @@ def test_the_resolver_threshold_cannot_be_passed_by_position():
     import apply_engine as ae
     with pytest.raises(TypeError):
         ae.resolve_ats_application("Acme", "PM", "Israel", False)
+
+
+
+# ── option 3 after each search (Eran, 2026-11-07) ──────────────────────────
+
+def _searcher(found):
+    calls = []
+
+    def search(company, title, location=""):
+        calls.append(company)
+        return {"url": found.get(company, ""), "reason": "verified" if company in found else "no url returned"}
+    return search, calls
+
+
+def test_a_free_miss_is_web_searched_once_and_a_verified_link_is_written():
+    get_db = _file_db(ROWS)
+    resolver, _ = _stub({})
+    search, calls = _searcher({"Nowhere Ltd": "https://www.comeet.com/jobs/nowhere/1.2/head-of-product/ABC"})
+    t0 = datetime(2026, 11, 7, 12, 0, tzinfo=timezone.utc)
+    counts = links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0, searcher=search, search_cap=30)
+    row = _rows(get_db)[3]                         # Nowhere Ltd, approved, LinkedIn
+    assert row["url"] == "https://www.comeet.com/jobs/nowhere/1.2/head-of-product/ABC"
+    assert row["source_url"] == "https://il.linkedin.com/jobs/view/2"
+    assert row["link_note"] == "web search match verified" and row["url_verified"] == 1
+    assert "Gong" not in calls                      # applied history is never searched
+    assert counts["web_found"] == 1 and counts["web_searched"] == len(calls)
+    # a week later the misses are retried for free, but never searched again
+    before = len(calls)
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, now=t0 + timedelta(days=8),
+                            searcher=search, search_cap=30)
+    assert len(calls) == before, "a job was web-searched twice"
+
+
+def test_the_web_search_cap_is_respected_and_zero_means_off():
+    get_db = _file_db(ROWS)
+    resolver, _ = _stub({})
+    search, calls = _searcher({})
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, searcher=search, search_cap=1)
+    assert len(calls) == 1
+    get_db = _file_db(ROWS)
+    search, calls = _searcher({})
+    links.resolve_open_jobs(get_db, 1, resolver=resolver, searcher=search, search_cap=0)
+    assert calls == []
