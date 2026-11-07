@@ -692,3 +692,11 @@ def test_the_report_tells_a_refusal_from_a_company_without_a_board(monkeypatch):
     answers = ae.ats_answers()
     assert answers["boards-api.greenhouse.io 403"] == 1
     assert answers["api.ashbyhq.com 200 not-JSON"] == 1
+
+
+def test_the_resolver_threshold_cannot_be_passed_by_position():
+    """resolve_ats_application(c, t, "Israel", False) once meant threshold=0."""
+    import pytest
+    import apply_engine as ae
+    with pytest.raises(TypeError):
+        ae.resolve_ats_application("Acme", "PM", "Israel", False)

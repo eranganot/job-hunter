@@ -1253,12 +1253,18 @@ _ATS_BOARD_MAP = {
 }
 
 
-def resolve_ats_application(company: str, job_title: str, location: str = "",
+def resolve_ats_application(company: str, job_title: str, location: str = "", *,
                             threshold: float = 82.0, use_llm: bool = True) -> "dict | None":
     """Resolve company + title to a direct-ATS application URL. Returns
     {url, ats, matched_title, score, location} or None. Tries name-derived slugs
     first (free), then Gemini-suggested slugs (verified against the live ATS API).
-    Best-effort; no Google scraping."""
+    Best-effort; no Google scraping.
+
+    threshold and use_llm are keyword-only (2026-11-07): a replay that called
+    resolve_ats_application(company, title, "Israel", False) put False into
+    threshold, i.e. 0, and "resolved" Performance Marketing Manager to a
+    Developer posting (score 26) - three such false hits looked like evidence
+    that production was missing jobs it could find."""
     if not company or not job_title:
         return None
     best = {"v": None, "key": (-1, -1.0)}   # rank by (location_match, title_score)
