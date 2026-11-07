@@ -314,7 +314,7 @@ def test_the_profile_page_wins_over_the_cv(stack, monkeypatch):
         "current_title": "Head of Product"})
     got = A._applicant_for(uid, "me@example.test", "Eran Ganot", "", "A product leader " * 10)
     assert (got["full_name"], got["first_name"], got["last_name"]) == ("Eran Ganot", "Eran", "Ganot")
-    assert got["phone"] == "054-0000000"
+    assert got["phone"] == "+972 540000000"           # international: pickers default to US +1
     assert got["linkedin_url"] == "https://www.linkedin.com/in/example/"
     assert got["email"] == "me@example.test"
     assert got["current_title"] == "Head of Product"   # the CV still fills what the profile lacks

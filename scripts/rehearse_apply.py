@@ -24,7 +24,9 @@ import apply_engine as ae
 URL = sys.argv[1]
 OUT = sys.argv[2]
 CAPTURED, SHOTS = [], []
-ALLOW_WRITE = ("google.com/recaptcha", "recaptcha.net", "gstatic.com")
+# Captcha and bot-check services, not the employer: the form cannot submit without them.
+ALLOW_WRITE = ("google.com/recaptcha", "recaptcha.net", "gstatic.com", "hcaptcha.com",
+               "/cdn-cgi/challenge-platform/")
 
 def guard(route, req):
     if req.method == "POST" and "s3.amazonaws.com" in req.url and os.environ.get("FAKE_S3"):
@@ -33,6 +35,10 @@ def guard(route, req):
         key = "rehearsal/cv.pdf"
         return route.fulfill(status=201, headers={"Content-Type": "application/xml", "Access-Control-Allow-Origin": "*"},
             body="<PostResponse><Location>%s%s</Location><Bucket>b</Bucket><Key>%s</Key><ETag>\"x\"</ETag></PostResponse>" % (req.url, key, key))
+    if req.method == "POST" and req.url.endswith("/parseResume") and os.environ.get("FAKE_S3"):
+        # Lever parses the attached CV before submit; answer as an empty parse.
+        CAPTURED.append({"method": "POST(fake-ok)", "url": req.url, "bytes": len(req.post_data_buffer or b""), "body_head": ""})
+        return route.fulfill(status=200, content_type="application/json", body="{}")
     if req.method != "GET" and not any(h in req.url for h in ALLOW_WRITE):
         try: body = req.post_data_buffer or b""
         except Exception: body = b""
@@ -71,7 +77,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 from test_admin_users import _tiny_pdf
 open(cv, "wb").write(_tiny_pdf(["Rehearsal Test", "rehearsal@example.com", "Test CV for an apply-engine rehearsal. " * 3]))
 applicant = {"full_name": "Rehearsal Test", "first_name": "Rehearsal", "last_name": "Test",
-             "email": "rehearsal@example.com", "phone": "+972 50 000 0000",
+             "email": "rehearsal@example.com", "phone": ae.intl_phone("050-0000000"),
              "linkedin_url": "https://www.linkedin.com/in/rehearsal-example/", "location": "Tel Aviv, Israel"}
 
 # Screenshot the page at the moment the engine finalises.
@@ -96,7 +102,8 @@ if os.environ.get("STUB_GEMINI"):
         acts = []
         for f in fields:
             lab = (f.get("label") or "").lower(); sel = f.get("selector"); opts = f.get("options") or []
-            if "city" in lab: acts.append({"selector": sel, "action": "fill", "value": "Tel Aviv, Israel"})
+            if "city" in lab or "location" in lab: acts.append({"selector": sel, "action": "fill", "value": "Tel Aviv, Israel"})
+            elif f.get("type") == "checkbox" and "english" in lab: acts.append({"selector": sel, "action": "check", "value": ""})
             elif "visa" in lab or "sponsor" in lab:
                 v = next((o for o in opts if str(o).lower().startswith("yes")), "Yes")
                 acts.append({"selector": sel, "action": "select" if opts else "fill", "value": v})

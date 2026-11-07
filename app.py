@@ -3094,6 +3094,9 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
         out["email"] = email
     if phone:
         out["phone"] = phone
+    if out.get("phone"):
+        # Phone pickers default to US +1; a local 054-... must go international.
+        out["phone"] = _ae_ap.intl_phone(out["phone"], out.get("home_country") or "Israel")
     if linkedin:
         out["linkedin_url"] = linkedin
     return out
