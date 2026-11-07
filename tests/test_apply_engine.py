@@ -194,6 +194,8 @@ class _FakePage:
         self.selected[sel] = value if value is not None else label
     def check(self, sel):
         self.checked.append(sel)
+    def query_selector(self, sel):
+        return None            # a plain field, not a combobox
 
 
 def test_collect_unfilled_required_dedups_and_caps():
