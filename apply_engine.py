@@ -333,9 +333,10 @@ def _answer_and_fill_required(page, fields, applicant) -> int:
         '{"selector": "...", "action": "fill|select|check", "value": "..."}.\n'
         "Rules:\n"
         "- Answer truthfully from the applicant data.\n"
-        "- Work authorization: assume the applicant IS authorized to work in the "
-        "posting's country and does NOT require visa sponsorship, unless the "
-        "applicant data clearly says otherwise.\n"
+        "- Work authorization / visa sponsorship: if posting_location is in the "
+        "applicant's home_country, answer from needs_sponsorship_in_home_country; "
+        "otherwise from needs_sponsorship_abroad. If those fields are absent, assume "
+        "the applicant IS authorized and does NOT require sponsorship.\n"
         "- Demographic / EEO / gender / race / veteran / disability questions: pick a "
         '"decline to self-identify" / "prefer not to say" option when one exists.\n'
         "- Yes/No eligibility questions: choose the answer that keeps the application valid.\n"
@@ -1514,6 +1515,10 @@ def submit_application(
                     "apply_failure_detail": "No direct ATS match found; job-board listing requires manual application",
                     "error": "Job-board listing — apply manually on the source site"}
     _base["resolved_url"] = actual_url
+    # Where the job is, so the required-question step can tell a home-country
+    # sponsorship question from one about working abroad (2026-11-07).
+    if job_location and isinstance(applicant, dict):
+        applicant = {**applicant, "posting_location": job_location}
 
     try:
         with sync_playwright() as pw:

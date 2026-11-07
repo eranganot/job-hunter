@@ -861,6 +861,16 @@ def m0017_account_deletion(conn):
     conn.commit()
 
 
+def m0018_sponsorship(conn):
+    """Profile: does the applicant need visa sponsorship at home (Israel) and
+    abroad? '' = not answered, read as 'no' (Eran, 2026-11-07: "for now assume
+    I don't need sponsorship"); 'no' / 'yes' once set on the Profile page."""
+    for col in ("sponsorship_local", "sponsorship_abroad"):
+        if not _has_column(conn, "user_profiles", col):
+            conn.execute("ALTER TABLE user_profiles ADD COLUMN %s TEXT DEFAULT ''" % col)
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -879,6 +889,7 @@ MIGRATIONS = [
     (15, "plans_and_promotions",        m0015_plans_and_promotions),
     (16, "enforcement_launch",          m0016_enforcement_launch),
     (17, "account_deletion",            m0017_account_deletion),
+    (18, "sponsorship",                 m0018_sponsorship),
 ]
 
 

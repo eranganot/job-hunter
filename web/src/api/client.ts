@@ -115,6 +115,8 @@ export type Me = {
   usage?: Record<string, { used: number; limit: number | null; period: "day" | "month" }>;
   auto_apply_enabled?: number | null;
   phone?: string | null;
+  sponsorship_local?: string | null;
+  sponsorship_abroad?: string | null;
   email_address?: string | null;
   schedule_frequency?: string | null;
   search_hour?: number | null;

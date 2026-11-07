@@ -3064,12 +3064,16 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     try:
         _c = database.get_db()
         try:
-            _r = _c.execute("SELECT phone, linkedin_url FROM user_profiles WHERE user_id=?",
-                            (user_id,)).fetchone()
+            _r = _c.execute("SELECT phone, linkedin_url, sponsorship_local, sponsorship_abroad "
+                            "FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
         finally:
             _c.close()
         if _r:
             phone, linkedin = (_r["phone"] or "").strip(), (_r["linkedin_url"] or "").strip()
+            # Not answered = no sponsorship needed (Eran, 2026-11-07).
+            out["home_country"] = "Israel"
+            out["needs_sponsorship_in_home_country"] = (_r["sponsorship_local"] or "").lower() == "yes"
+            out["needs_sponsorship_abroad"] = (_r["sponsorship_abroad"] or "").lower() == "yes"
     except Exception as _pe:
         print(f"[apply] WARNING could not read the profile for user {user_id}: {_pe}")
     nm = (name or "").strip()
@@ -4904,6 +4908,13 @@ class Handler(BaseHTTPRequestHandler):
                     kwargs[field] = int(data[field])
             if "seniority" in data:
                 kwargs["seniority"] = data["seniority"]
+            for field in ("sponsorship_local", "sponsorship_abroad"):
+                if field in data:
+                    val = str(data[field] or "").strip().lower()
+                    if val not in ("", "no", "yes"):
+                        self.send_json({"error": f"{field} must be yes or no"}, 400)
+                        return
+                    kwargs[field] = val
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
             database.write_users_config(BASE_DIR)
