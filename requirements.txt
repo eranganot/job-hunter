@@ -35,6 +35,13 @@ psycopg[binary,pool]==3.3.8
 # not serving.
 sentry-sdk==2.74.0
 
+# Reading the CV's text (app._extract_cv_text): the applicant's name and phone
+# for application forms, and the CV optimizer. Missing until 2026-11-07, so
+# every caller silently fell back to the 2-3 sentence cv_summary - the
+# supervised dry run showed the applicant as "First Last".
+pypdf==6.17.0
+python-docx==1.2.0
+
 # Scheduler clock (app.israel_now): zoneinfo needs an IANA database and a slim
 # image is not guaranteed to ship one; this is the fallback zoneinfo uses.
 tzdata==2025.2

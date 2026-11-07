@@ -2524,9 +2524,10 @@ def run_job_apply(user_id: int) -> int:
                 ).fetchone()
                 conn.close()
 
-                cv_text   = (profile["cv_summary"] or "") if profile else ""
                 email     = user["email"] if user else ""
-                applicant = apply_engine.extract_applicant_data(cv_text, email)
+                applicant = _applicant_for(user_id, email, (user["name"] if user else ""),
+                                           (profile["cv_path"] if profile else ""),
+                                           (profile["cv_summary"] if profile else ""))
 
                 # The apply engine hands this path to a browser file input, so the file
                 # has to exist on disk - rebuilt from the database if the volume is cold.
@@ -2703,9 +2704,10 @@ def _trigger_apply_bg(user_id: int, job_id: int):
                 ).fetchone()
                 conn.close()
 
-                cv_text   = (profile["cv_summary"] or "") if profile else ""
                 email     = user["email"] if user else ""
-                applicant = apply_engine.extract_applicant_data(cv_text, email)
+                applicant = _applicant_for(user_id, email, (user["name"] if user else ""),
+                                           (profile["cv_path"] if profile else ""),
+                                           (profile["cv_summary"] if profile else ""))
                 cv_path   = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
 
                 res = _submit_application_guarded(
@@ -3045,6 +3047,17 @@ def _cv_file(user_id, recorded_path=""):
     return ""
 
 
+def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
+    """Applicant details for a form, from the CV itself (rebuilt from the
+    database when the cache is cold), falling back to the summary only when the
+    file has no text, and to the account name for a missing name. Every apply
+    path used cv_summary alone - 2-3 sentences with no name or phone - so the
+    model returned its prompt's example, "First Last" (2026-11-07)."""
+    import apply_engine as _ae_ap
+    text = _extract_cv_text(_cv_file(user_id, cv_path_raw or ""), cv_summary)
+    return _ae_ap.extract_applicant_data(text, email or "", fallback_name=name or "")
+
+
 def _extract_cv_text(cv_path, cv_summary):
     if cv_path and os.path.exists(cv_path):
         try:
@@ -3055,16 +3068,18 @@ def _extract_cv_text(cv_path, cv_summary):
                     _t = '\n'.join(p.extract_text() or '' for p in _pages)
                     if len(_t.strip()) > 100:
                         return _t
-                except Exception:
-                    pass
+                except Exception as _pdf_e:
+                    # It was `pass`: pypdf was not even installed in production,
+                    # and nothing said so (2026-11-07).
+                    print(f"[cv] WARNING could not read the CV PDF, using the summary: {_pdf_e!r}")
             elif cv_path.lower().endswith(('.docx', '.doc')):
                 try:
                     from docx import Document as _Docx
                     _t = '\n'.join(p.text for p in _Docx(cv_path).paragraphs)
                     if len(_t.strip()) > 100:
                         return _t
-                except Exception:
-                    pass
+                except Exception as _docx_e:
+                    print(f"[cv] WARNING could not read the CV document, using the summary: {_docx_e!r}")
         except Exception:
             pass
     return cv_summary or ''
@@ -4060,7 +4075,8 @@ class Handler(BaseHTTPRequestHandler):
                 # container does not have - the CV itself is in the database
                 # (Phase 2d) - so this route alone would have submitted without one.
                 _cv_path = _cv_file(user["id"], (prof["cv_path"] or "") if prof else "") or None
-                applicant = _ae.extract_applicant_data(_cv_text, user.get("email", ""))
+                applicant = _applicant_for(user["id"], user.get("email", ""), user.get("name", ""),
+                                           (prof["cv_path"] if prof else ""), _cv_text)
                 _jloc = (job["location"] if "location" in job.keys() else "") or ""
 
                 resolved = None
@@ -4990,7 +5006,9 @@ class Handler(BaseHTTPRequestHandler):
                                 self.send_json(_res); return
                         except Exception:
                             pass
-                    _cv_path = _prof['cv_path'] or ''
+                    # Through _cv_file: the raw path is a cache a fresh container
+                    # does not have; the CV is in the database (Phase 2d).
+                    _cv_path = _cv_file(user_id, _prof['cv_path'] or '') or ''
                     _cv_text = _extract_cv_text(_cv_path, _prof['cv_summary'])
                     if not _cv_path and (not _cv_text or len(_cv_text.strip()) < 30):
                         self.send_json({'error': 'No CV found. Please upload your CV first.'}); return

@@ -248,3 +248,51 @@ def test_the_picker_offers_submittable_jobs_he_has_not_approved_yet(stack, users
     assert by_url["https://www.linkedin.com/jobs/view/9"]["kind"] == "job_board"
     assert by_url["https://boards.greenhouse.io/acme/jobs/555"]["kind"] == "submittable"
     assert "https://www.linkedin.com/jobs/view/10" not in by_url      # a new board job is not offered
+
+
+def _tiny_pdf(lines):
+    """A real one-page PDF whose text pypdf can read (no extra dependency)."""
+    ops = "BT /F1 11 Tf 50 750 Td 14 TL " + " ".join(
+        "(%s) Tj T*" % l.replace("(", "[").replace(")", "]") for l in lines) + " ET"
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Length %d >>\nstream\n%s\nendstream" % (len(ops), ops)]
+    out, offs = "%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += "%d 0 obj\n%s\nendobj\n" % (i, o)
+    xref = len(out)
+    out += "xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += "".join("%010d 00000 n \n" % o for o in offs)
+    out += "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return out.encode("latin-1")
+
+
+def test_the_applicant_is_read_from_the_cv_file_not_the_summary(stack, monkeypatch):
+    """Every apply path passed cv_summary (2-3 sentences, no name) to the
+    extraction, and pypdf was not even installed in production (2026-11-07)."""
+    import app as A
+    import apply_engine
+    import storage
+    uid = _user_id(stack["db"], "admin@example.test")
+    pdf = _tiny_pdf(["Eran Ganot", "+972-50-000-0000 | Tel Aviv",
+                     "Head of Product for Personalization, 15 years in consumer products.",
+                     "Led recommendation and personalization across web, mobile and TV."])
+    storage.put(uid, pdf, "cv.pdf")
+    import os
+    os.remove(storage.cache_path(uid))          # a fresh container: only the database has it
+    seen = {}
+
+    def fake_json(prompt, **_k):
+        seen["prompt"] = prompt
+        return {"full_name": "Eran Ganot", "phone": "+972-50-000-0000"}
+    monkeypatch.setattr(apply_engine, "GEMINI_KEY", "k")
+    monkeypatch.setattr(apply_engine, "_claude_json", fake_json)
+    got = A._applicant_for(uid, "admin@example.test", "Admin", storage.cache_path(uid),
+                           "A product leader with 15 years of experience.")
+    assert "Eran Ganot" in seen["prompt"] and "+972-50-000-0000" in seen["prompt"], \
+        "the extraction did not get the CV's text"
+    assert got["full_name"] == "Eran Ganot"

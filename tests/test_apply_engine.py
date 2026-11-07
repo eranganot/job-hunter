@@ -493,3 +493,24 @@ def test_a_stop_on_page_one_no_longer_reads_as_twelve_pages():
     res = ae._apply_workday(page, {}, None)
     assert res["status"] == "failed"
     assert "12 pages" not in res["error"] and "page 1" in res["error"], res["error"]
+
+
+# ── the applicant comes from the CV, never from the prompt's example ───────
+
+def test_placeholders_copied_from_the_prompt_are_blanked_and_the_account_name_fills_in(monkeypatch):
+    """2026-11-07: the dry run showed applicant "First Last" - the prompt's own
+    example, returned because the text had no name in it."""
+    monkeypatch.setattr(ae, "GEMINI_KEY", "k")
+    monkeypatch.setattr(ae, "_claude_json", lambda *a, **k: {
+        "full_name": "First Last", "first_name": "First", "last_name": "Last",
+        "phone": "phone or empty", "location": "City, Country", "current_title": "VP Product"})
+    got = ae.extract_applicant_data("Head of Product with 15 years ...", "e@x.test", fallback_name="Eran Ganot")
+    assert got["full_name"] == "Eran Ganot" and got["first_name"] == "Eran" and got["last_name"] == "Ganot"
+    assert got["phone"] == "" and got["location"] == ""
+    assert got["current_title"] == "VP Product"          # real values survive
+
+
+def test_no_key_still_gives_the_account_name_not_an_empty_applicant(monkeypatch):
+    monkeypatch.setattr(ae, "GEMINI_KEY", "")
+    got = ae.extract_applicant_data("anything", "e@x.test", fallback_name="Dana Levi")
+    assert got["full_name"] == "Dana Levi"
