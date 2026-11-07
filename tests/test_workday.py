@@ -170,3 +170,26 @@ def _empty_db():
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, company TEXT, url TEXT)")
     return conn
+
+
+def test_workdays_outage_page_is_named_not_reported_as_not_json(monkeypatch):
+    """Sentry 2026-11-07: '14 of 16 tenants failed: not JSON'. Every wd1 tenant
+    answered 200 with Workday's 'currently unavailable' page."""
+    import io
+    import workday as wdm
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    page = (b"<!DOCTYPE html><html><head><title>Workday is currently unavailable.</title></head>"
+            b"<body>We are experiencing a service interruption.</body></html>")
+    monkeypatch.setattr(wdm.urllib.request, "urlopen", lambda *a, **k: _Resp(page))
+    try:
+        wdm._post("intel.wd1/External", "PM", 20, 5)
+    except wdm.WorkdayError as e:
+        assert "Workday outage on wd1" in str(e) and "not JSON" not in str(e)
+    else:
+        raise AssertionError("an outage page must raise")

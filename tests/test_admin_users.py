@@ -226,3 +226,25 @@ def test_the_candidate_list_says_which_jobs_the_engine_can_submit_to(stack, user
     by_url = {j["url"]: j for j in json.loads(body)["jobs"]}
     assert by_url["https://boards.greenhouse.io/acme/jobs/123"]["direct_ats"] is True
     assert by_url["https://www.linkedin.com/jobs/view/1"]["direct_ats"] is False
+
+
+def test_the_picker_offers_submittable_jobs_he_has_not_approved_yet(stack, users):
+    """2026-11-07: his three approved jobs were 2 Workday + 1 board, so the
+    supervised test had nothing it could submit."""
+    uid = _user_id(stack["db"], "admin@example.test")
+    conn = stack["db"].get_db()
+    rows = [("https://amat.wd1.myworkdayjobs.com/External/job/X_R1", "approved"),
+            ("https://www.linkedin.com/jobs/view/9", "approved"),
+            ("https://boards.greenhouse.io/acme/jobs/555", "new"),
+            ("https://www.linkedin.com/jobs/view/10", "new")]
+    for url, st in rows:
+        conn.execute("INSERT INTO jobs (user_id,title,company,url,status) VALUES (?,?,?,?,?)",
+                     (uid, "PM", "Acme", url, st))
+    conn.commit()
+    conn.close()
+    _s, _l, body = users["admin"].get("/api/admin/apply-test")
+    by_url = {j["url"]: j for j in json.loads(body)["jobs"]}
+    assert by_url["https://amat.wd1.myworkdayjobs.com/External/job/X_R1"]["kind"] == "account_needed"
+    assert by_url["https://www.linkedin.com/jobs/view/9"]["kind"] == "job_board"
+    assert by_url["https://boards.greenhouse.io/acme/jobs/555"]["kind"] == "submittable"
+    assert "https://www.linkedin.com/jobs/view/10" not in by_url      # a new board job is not offered

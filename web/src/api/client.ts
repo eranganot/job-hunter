@@ -324,7 +324,8 @@ export const api = {
   // is a DRY RUN (resolves the target, checks CV and applicant, submits
   // nothing); live=true submits that ONE job past the kill switch.
   adminApplyCandidates: () =>
-    request<{ jobs: { id: number; status: string; title: string; company: string; url: string; direct_ats: boolean }[] }>(
+    request<{ jobs: { id: number; status: string; title: string; company: string; url: string; direct_ats: boolean;
+                kind: "submittable" | "account_needed" | "job_board" }[] }>(
       "/api/admin/apply-test"),
   // Step 1a: the open queue's links, and how many the resolver could fix.
   // Read-only; up to ~60 s for sample=50.

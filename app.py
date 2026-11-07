@@ -1323,49 +1323,11 @@ def run_job_search(user_id: int):
                     #    exact request, every run, behind `except Exception: pass`. Comeet's
                     #    API is not addressable by company name (STATUS 2026-10-25); Comeet
                     #    postings come through links.learned_boards with real company ids.
-                    print(f"[search] Comeet + SpeakNow queries done")
-
-                    # -- SpeakNow careers --
-                    try:
-                        _sn_req = _ur2.Request('https://speaknow.co/careers/', headers={"User-Agent": "JobHunter/1.0"})
-                        with _ur2.urlopen(_sn_req, timeout=12) as _sn_resp:
-                            _sn_html = _sn_resp.read().decode('utf-8', errors='replace')
-                        import re as _re_sn
-                        # Find job links on the careers page
-                        _sn_links = _re_sn.findall(r'href=["\'](https?://[^"\'>]*(?:career|job|position|apply)[^"\'>]*)["\'\s>]', _sn_html, _re_sn.IGNORECASE)
-                        for _sn_url in set(_sn_links[:10]):
-                            all_raw.append({"job_title": "SpeakNow Career Opportunity", "company": "SpeakNow",
-                                            "location": "Israel", "url": _sn_url,
-                                            "description": "Career opportunity at SpeakNow", "source": "speaknow"})
-                    except Exception as _sne:
-                        print(f"[search] SpeakNow error: {_sne}")
-
-                    # -- Sparkhire careers (best-effort) --
-                    _SPARKHIRE_COMPANIES = [
-                        ('hibob', 'HiBob'), ('monday', 'monday.com'), ('fiverr', 'Fiverr'),
-                        ('rapyd', 'Rapyd'), ('gong', 'Gong'), ('lemonade', 'Lemonade'),
-                    ]
-                    _sparkhire_count = 0
-                    _sh_tally = _SourceTally("sparkhire")
-                    for _sh_slug, _sh_name in _SPARKHIRE_COMPANIES:
-                        try:
-                            _sh_req = _ur2.Request(f"https://candidate.sparkhire.com/users/{_sh_slug}/jobs", headers={"User-Agent": "Mozilla/5.0 JobHunter/1.0"})
-                            with _ur2.urlopen(_sh_req, timeout=10) as _sh_resp:
-                                _sh_html = _sh_resp.read().decode('utf-8', errors='replace')
-                            import re as _re_sh
-                            _sh_jobs = _re_sh.findall(r'<a[^>]+href="([^"]+)"[^>]*>\s*<[^>]+>([^<]{5,120})</[^>]+>\s*</a>', _sh_html)
-                            _sh_tally.ok(len(_sh_jobs))
-                            for _sh_href, _sh_title in _sh_jobs[:15]:
-                                _t = _sh_title.strip()
-                                if _title_match(_t):
-                                    _u = _sh_href if _sh_href.startswith('http') else f"https://candidate.sparkhire.com{_sh_href}"
-                                    all_raw.append({"title": _t, "company": _sh_name, "location": "", "url": _u, "description": "", "source": "sparkhire"})
-                                    _sparkhire_count += 1
-                        except Exception as _sh_e:
-                            _sh_tally.fail(_sh_e)
-                    _sh_tally.kept = _sparkhire_count
-                    _sh_tally.done()
-                    print(f"[search] Sparkhire: {_sparkhire_count} jobs matched")
+                    
+                    # -- SpeakNow and SparkHire: REMOVED 2026-11-07 (Sentry). speaknow.co/careers
+                    #    answers 500 to any client, and the scraper only ever added untitled
+                    #    "SpeakNow Career Opportunity" placeholders; candidate.sparkhire.com no
+                    #    longer exists in DNS (no A record), so all six company pages failed.
 
                     # -- Workday tenants (workday.py: verified tenants, Israel only, failures reported) --
                     _workday_count = 0
@@ -1427,29 +1389,9 @@ def run_job_search(user_id: int):
                     _li_tally.done()
                     print(f"[search] LinkedIn guest: {_linkedin_count} jobs matched")
 
-                    # -- Indeed (best-effort) --
-                    _indeed_count = 0
-                    _in_tally = _SourceTally("indeed")
-                    for _in_kw in titles_[:3]:
-                        try:
-                            _in_q = _urp2.quote(_in_kw)
-                            _in_url = f"https://il.indeed.com/jobs?q={_in_q}&l=Israel&fromage=7&sort=date"
-                            _in_req = _ur2.Request(_in_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
-                            with _ur2.urlopen(_in_req, timeout=12) as _in_resp:
-                                _in_html = _in_resp.read().decode('utf-8', errors='replace')
-                            import re as _re_in
-                            _in_items = _re_in.findall(r'data-jk="([a-z0-9]+)"[^>]*>[\s\S]{0,2000}?title="([^"]{5,200})"', _in_html)
-                            _in_tally.ok(len(_in_items))
-                            for _in_jk, _in_tt in _in_items[:15]:
-                                _in_t = _in_tt.strip()
-                                if _title_match(_in_t):
-                                    all_raw.append({"title": _in_t, "company": "", "location": "", "url": f"https://il.indeed.com/viewjob?jk={_in_jk}", "description": "", "source": "indeed"})
-                                    _indeed_count += 1
-                        except Exception as _in_e:
-                            _in_tally.fail(_in_e)
-                    _in_tally.kept = _indeed_count
-                    _in_tally.done()
-                    print(f"[search] Indeed: {_indeed_count} jobs matched")
+                    # -- Indeed HTML scrape: REMOVED 2026-11-07. il.indeed.com answers 403
+                    #    from Cloudflare's bot wall (401 earlier) on every request, so it never
+                    #    returned a job; Indeed reaches us through JobSpy when that is installed.
 
                     # ── Multi-source ingestion + cross-platform fuzzy dedup ──────────
                     # New pipeline (ingestion/): pulls Big-Tech internal endpoints (free,
@@ -1825,7 +1767,17 @@ def run_job_search(user_id: int):
                                 }).encode('utf-8')
                                 _ws_data = _js2.loads(_gemini_generate(
                                     _ws_body, timeout=60, purpose="web_search", user_id=user_id))
-                                _ws_text = _ws_data['candidates'][0]['content']['parts'][0]['text'].strip()
+                                _ws_cand = (_ws_data.get('candidates') or [{}])[0]
+                                _ws_parts = (_ws_cand.get('content') or {}).get('parts') or []
+                                if not _ws_parts:
+                                    # Sentry 2026-11-07: this was a bare KeyError 'content'.
+                                    # Gemini ends some grounded searches with no text (a
+                                    # safety or recitation stop, or nothing found); say which.
+                                    print(f"[search] Web search for '{query_hint_}' returned no text "
+                                          f"(finishReason={_ws_cand.get('finishReason') or 'none'}, "
+                                          f"blockReason={(_ws_data.get('promptFeedback') or {}).get('blockReason') or 'none'})")
+                                    return []
+                                _ws_text = (_ws_parts[0].get('text') or '').strip()
                                 _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
                                 if _ws_si >= 0 and _ws_ei > _ws_si:
                                     return [j for j in _js2.loads(_ws_text[_ws_si:_ws_ei+1])
@@ -3967,8 +3919,22 @@ class Handler(BaseHTTPRequestHandler):
                     _lrows = _lc.execute(
                         "SELECT id, status, title, company, url FROM jobs "
                         "WHERE user_id=? AND status IN ('new','approved') "
-                        "ORDER BY status, id DESC LIMIT 50", (user["id"],)).fetchall()
+                        "ORDER BY status, id DESC LIMIT 1000", (user["id"],)).fetchall()
                     _lc.close()
+
+                    def _kind(u):
+                        # Workday: step 1 is an account on the company's site (2026-11-07),
+                        # so it is direct but not submittable; boards are manual by design.
+                        if not _ae._is_direct_ats(u or ""):
+                            return "job_board"
+                        return "account_needed" if _ae._is_workday(u or "") else "submittable"
+                    # Every approved job, then the newest NOT-yet-approved jobs the engine can
+                    # submit to: his first approved three were 2 Workday + 1 board (2026-11-07),
+                    # leaving the supervised test nothing to run on.
+                    _appr = [r for r in _lrows if r["status"] == "approved"]
+                    _sub = [r for r in _lrows if r["status"] == "new"
+                            and _kind(r["url"]) == "submittable"][:30]
+                    _lrows = _appr + _sub
                     self.send_json({
                         "note": "Pick a job_id, then open ?job_id=<id> for a DRY RUN, "
                                 "and ?job_id=<id>&mode=live to actually submit that one job.",
@@ -3976,7 +3942,8 @@ class Handler(BaseHTTPRequestHandler):
                         # (job boards are manual_required by design).
                         "jobs": [{"id": r["id"], "status": r["status"], "title": r["title"],
                                   "company": r["company"], "url": r["url"],
-                                  "direct_ats": _ae._is_direct_ats(r["url"] or "")} for r in _lrows],
+                                  "direct_ats": _ae._is_direct_ats(r["url"] or ""),
+                                  "kind": _kind(r["url"])} for r in _lrows],
                     })
                     return
                 finally:
@@ -4017,6 +3984,7 @@ class Handler(BaseHTTPRequestHandler):
                     "resolved": resolved,
                     "target_url": _target,
                     "is_direct_ats": _ae._is_direct_ats(_target),
+                    "account_needed": _ae._is_workday(_target),   # Workday: 2026-11-07
                     "applicant_ready": bool(applicant.get("full_name") or applicant.get("first_name")),
                     "applicant_name": applicant.get("full_name", ""),
                     "cv_present": bool(_cv_path),
