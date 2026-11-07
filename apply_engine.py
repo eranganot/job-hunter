@@ -272,6 +272,11 @@ def _collect_unfilled_required(page):
     return out[:15]
 
 
+def _keyboard(page):
+    """A Frame has no keyboard of its own; its page does."""
+    return getattr(page, "keyboard", None) or page.page.keyboard
+
+
 def _combobox_options(page, sel) -> list:
     """The option texts of a JavaScript dropdown (role="combobox"). Greenhouse's
     current form renders every custom choice question this way (visa, relocation,
@@ -281,7 +286,7 @@ def _combobox_options(page, sel) -> list:
         page.click(sel, timeout=3_000)
         page.wait_for_timeout(400)
         opts = [(o.inner_text() or "").strip() for o in _listbox_options(page, sel)]
-        page.keyboard.press("Escape")
+        _keyboard(page).press("Escape")
         page.wait_for_timeout(150)
         return [o for o in dict.fromkeys(opts) if o][:25]
     except Exception as e:
@@ -316,7 +321,7 @@ def _choose_combobox(page, sel, value: str) -> bool:
     pick = next((o for o in opts if (o.inner_text() or "").strip().lower() == want), None) \
         or next((o for o in opts if (o.inner_text() or "").strip().lower().startswith(want)), None)
     if not pick:
-        page.keyboard.press("Escape")
+        _keyboard(page).press("Escape")
         return False
     pick.click()
     return True
@@ -436,6 +441,35 @@ def _finalize_after_submit(page, applicant, submit_selectors) -> dict:
     return res
 
 
+def _answer_form(frame, applicant: dict) -> dict:
+    """Answer every remaining question (questions.py). Returns its result; a
+    non-empty 'unsure' means the caller must NOT submit (Eran, 2026-11-07:
+    "if you are not sure - show me the questions and I'll guide you")."""
+    import questions
+    job = dict((applicant or {}).get("_job") or {})
+    try:
+        job["description"] = (frame.evaluate("document.body.innerText") or "")[:3000]
+    except Exception as exc:
+        print(f"[apply-engine] job text unavailable: {exc}")
+    llm = None
+    if GEMINI_KEY:
+        def llm(prompt):
+            return _claude_json(prompt, max_tokens=2048, timeout=_APPLY_LLM_TIMEOUT)
+    res = questions.answer(frame, applicant, job, llm)
+    print(f"[apply-engine] questions: {res['questions']} found, {res['filled']} answered, "
+          f"{len(res['unsure'])} need the applicant")
+    return res
+
+
+def _needs_answers(unsure: list) -> dict:
+    """The application is held, not sent: required questions without a sure answer."""
+    names = "; ".join(q["label"][:80] for q in unsure[:4])
+    return {"success": False, "status": "needs_answers", "confirmation_text": "",
+            "questions": unsure, "apply_failure_type": "needs_answers",
+            "apply_failure_detail": f"{len(unsure)} question(s) need your answer: {names}"[:300],
+            "error": f"{len(unsure)} question(s) need your answer"}
+
+
 def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
     """Handle Greenhouse application forms with known structure."""
     result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
@@ -469,6 +503,10 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
                     break
                 except Exception:
                     continue
+
+        qa = _answer_form(page, applicant)
+        if qa["unsure"]:
+            return _needs_answers(qa["unsure"])
 
         # Submit
         submitted = False
@@ -537,6 +575,9 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
             except Exception as exc:
                 result["error"] = f"Comeet: could not attach the CV: {exc}"
                 return result
+        qa = _answer_form(frame, applicant)
+        if qa["unsure"]:
+            return _needs_answers(qa["unsure"])
         frame.click('button:has-text("SUBMIT APPLICATION")', timeout=5_000)
 
         # Comeet-specific verdict. _verify_submission would call a page without
@@ -608,6 +649,10 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
                     break
                 except Exception:
                     continue
+
+        qa = _answer_form(page, applicant)
+        if qa["unsure"]:
+            return _needs_answers(qa["unsure"])
 
         # Submit
         submitted = False
@@ -1628,8 +1673,9 @@ def submit_application(
     _base["resolved_url"] = actual_url
     # Where the job is, so the required-question step can tell a home-country
     # sponsorship question from one about working abroad (2026-11-07).
-    if job_location and isinstance(applicant, dict):
-        applicant = {**applicant, "posting_location": job_location}
+    if isinstance(applicant, dict):
+        applicant = {**applicant, "posting_location": job_location or "",
+                     "_job": {"title": job_title, "company": company, "location": job_location or ""}}
 
     try:
         with sync_playwright() as pw:

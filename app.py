@@ -2431,6 +2431,8 @@ def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
     import apply_engine as _ae
     if engine_status == "manual_required":
         return ("manual_required", None)
+    if engine_status == "needs_answers":
+        return ("needs_answers", None)        # held for the user, never retried on its own
     action, backoff = _ae.retry_decision(failure_type, attempts_after)
     if action == "manual":
         return ("manual_required", None)
@@ -2503,7 +2505,7 @@ def run_job_apply(user_id: int) -> int:
                 jobs = conn.execute(
                     "SELECT id, title, company, url, COALESCE(apply_attempts,0) AS attempts "
                     "FROM jobs WHERE user_id=? AND status='approved' "
-                    "AND COALESCE(apply_status,'') != 'manual_required' "
+                    "AND COALESCE(apply_status,'') NOT IN ('manual_required','needs_answers') "
                     "AND COALESCE(apply_attempts,0) < ? "
                     "AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?)",
                     (user_id, apply_engine.MAX_APPLY_ATTEMPTS, datetime.now().isoformat())
@@ -2549,6 +2551,7 @@ def run_job_apply(user_id: int) -> int:
 
                 for j in jobs:
                     job_url = j["url"] or ""
+                    res = {}                 # the no-URL branch below has no engine result
                     if job_url:
                         res = _submit_application_guarded(
                             job_url, j["title"], j["company"],
@@ -2592,9 +2595,12 @@ def run_job_apply(user_id: int) -> int:
                                 "UPDATE jobs SET notes=?, "
                                 "apply_status=?, apply_error=?, "
                                 "apply_failure_type=?, apply_failure_detail=?, "
-                                "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
+                                "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=?, "
+                                "apply_questions=? "
                                 "WHERE id=? AND user_id=?",
-                                (notes, _fstatus, apply_error, apply_failure_type, apply_failure_detail, _next_at, j["id"], user_id)
+                                (notes, _fstatus, apply_error, apply_failure_type, apply_failure_detail, _next_at,
+                                 json.dumps(res.get("questions")) if res.get("questions") else None,
+                                 j["id"], user_id)
                             )
                         c2.commit()
                         c2.close()
@@ -2759,10 +2765,13 @@ def _trigger_apply_bg(user_id: int, job_id: int):
                         c2.execute(
                             "UPDATE jobs SET apply_status=?, apply_error=?, "
                             "apply_failure_type=?, apply_failure_detail=?, "
-                            "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=? "
+                            "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=?, "
+                            "apply_questions=? "
                             "WHERE id=? AND user_id=?",
                             (_fstatus, apply_error, apply_failure_type,
-                             apply_failure_detail, _next_at, job_id, user_id)
+                             apply_failure_detail, _next_at,
+                             json.dumps(res.get("questions")) if res.get("questions") else None,
+                             job_id, user_id)
                         )
                     c2.commit()
                     c2.close()
@@ -3066,6 +3075,8 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     import apply_engine as _ae_ap
     text = _extract_cv_text(_cv_file(user_id, cv_path_raw or ""), cv_summary)
     out = _ae_ap.extract_applicant_data(text, email or "", fallback_name=name or "")
+    out["cv_excerpt"] = (text or "")[:2500]          # material for open questions
+    out["answer_bank"] = _answer_bank(user_id)
     # The Profile page is the source of truth for who is applying (Eran,
     # 2026-11-07: "You have everything you need in my profile page"): its
     # name, email, phone and LinkedIn win over anything read from the CV; the
@@ -3100,6 +3111,26 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     if linkedin:
         out["linkedin_url"] = linkedin
     return out
+
+
+def _answer_bank(user_id) -> dict:
+    """{question key: answer} the user gave before (application_qa)."""
+    try:
+        c = database.get_db()
+        try:
+            rows = c.execute("SELECT qkey, answer FROM application_qa WHERE user_id=?", (user_id,)).fetchall()
+        finally:
+            c.close()
+        out = {}
+        for r in rows:
+            try:
+                out[r["qkey"]] = json.loads(r["answer"])
+            except ValueError:
+                out[r["qkey"]] = r["answer"]
+        return out
+    except Exception as exc:
+        print(f"[apply] WARNING could not read saved answers for user {user_id}: {exc}")
+        return {}
 
 
 def _extract_cv_text(cv_path, cv_summary):
@@ -4161,6 +4192,7 @@ class Handler(BaseHTTPRequestHandler):
                     "error": (res.get("error") or "")[:500],
                     "apply_failure_type": res.get("apply_failure_type"),
                     "apply_failure_detail": (res.get("apply_failure_detail") or "")[:500],
+                    "questions": res.get("questions") or [],
                 }
                 try:
                     _st = res.get("status")
@@ -4174,10 +4206,13 @@ class Handler(BaseHTTPRequestHandler):
                                 (datetime.now().strftime('%Y-%m-%d'), _st,
                                  (res.get('confirmation_text') or '')[:1000], job["id"], user["id"]))
                         else:
+                            # The held questions go on the job, where the Queue shows them.
                             c3.execute(
-                                "UPDATE jobs SET apply_status=?, apply_error=?, "
+                                "UPDATE jobs SET apply_status=?, apply_error=?, apply_questions=?, "
                                 "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
-                                (_st, (res.get('error') or '')[:500], job["id"], user["id"]))
+                                (_st, (res.get('error') or '')[:500],
+                                 json.dumps(res["questions"]) if res.get("questions") else None,
+                                 job["id"], user["id"]))
                         c3.commit(); c3.close()
                         out["persisted"] = True
                     finally:
@@ -5300,6 +5335,52 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         # ── Manual "Apply Now" trigger (also used by Retry) ─────────────────
+        # ── Answers to the questions an application was held on (2026-11-07) ──
+        #   {"answers": [{"key", "label", "answer"}]}  answer: text, or a list
+        # Saved for reuse (application_qa) and the job released for the next
+        # apply run: apply_status cleared, attempts reset.
+        m = re.match(r"^/api/jobs/(\d+)/answers$", path)
+        if m:
+            import questions as _qmod
+            job_id = int(m.group(1))
+            data = self.read_json() or {}
+            items = data.get("answers")
+            if not isinstance(items, list) or not items:
+                self.send_json({"error": "answers must be a non-empty list"}, 400)
+                return
+            conn = database.get_db()
+            try:
+                job = conn.execute("SELECT id FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
+                if not job:
+                    self.send_json({"error": "Not found"}, 404)
+                    return
+                now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                saved = 0
+                for it in items[:40]:
+                    if not isinstance(it, dict):
+                        continue
+                    label = str(it.get("label") or it.get("key") or "")[:500]
+                    k = _qmod.key(it.get("key") or label)
+                    ans = it.get("answer")
+                    if not k or ans in (None, "", []):
+                        continue
+                    conn.execute(
+                        "INSERT INTO application_qa (user_id, qkey, question, answer, updated_at) VALUES (?,?,?,?,?) "
+                        "ON CONFLICT (user_id, qkey) DO UPDATE SET answer=excluded.answer, "
+                        "question=excluded.question, updated_at=excluded.updated_at",
+                        (user_id, k, label, json.dumps(ans) if isinstance(ans, list) else str(ans)[:4000], now))
+                    saved += 1
+                conn.execute("UPDATE jobs SET apply_status=NULL, apply_questions=NULL, apply_attempts=0, "
+                             "apply_next_attempt_at=NULL, apply_error=NULL, apply_failure_type=NULL, "
+                             "apply_failure_detail=NULL WHERE id=? AND user_id=? AND apply_status='needs_answers'",
+                             (job_id, user_id))
+                conn.commit()
+            finally:
+                conn.close()
+            database.log_activity(user_id, "answers_saved", f"job {job_id}: {saved} answer(s) saved")
+            self.send_json({"success": True, "saved": saved})
+            return
+
         m = re.match(r"^/api/jobs/(\d+)/apply-now$", path)
         if m:
             job_id = int(m.group(1))

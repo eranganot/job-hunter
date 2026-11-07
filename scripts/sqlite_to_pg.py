@@ -68,6 +68,9 @@ TABLE_ORDER = [
     "usage_counters",
     "plan_events",
     "plan_notices",
+    # m0019 (2026-11-07): the user's saved answers to application questions.
+    # No foreign key; only needs to come after users.
+    "application_qa",
     "subscriptions",
     "billing_events",
 ]
