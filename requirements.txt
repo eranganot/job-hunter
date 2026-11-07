@@ -23,7 +23,7 @@ pydantic>=2.5,<3
 # Clean HTTP with proxy rotation + retries for the source adapters
 httpx>=0.27
 # C-accelerated fuzzy matching for cross-platform deduplication
-rapidfuzz>=3.6
+rapidfuzz>=3.14.6
 # OPTIONAL (admin/JobSpy adapter; pulls pandas — install only if you want it):
 #   pip install python-jobspy
 
