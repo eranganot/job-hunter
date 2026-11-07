@@ -331,6 +331,10 @@ export const api = {
   // Read-only; up to ~60 s for sample=50.
   adminLinkReport: (scope: "me" | "all" = "all", sample = 50) =>
     request<Record<string, any>>(`/api/admin/link-report?scope=${scope}&sample=${sample}`),
+  // Step 1c option 3 trial: Gemini + Google Search for up to n board jobs,
+  // every link verified on the page; writes nothing. ~1 cent for 30 (2026-11-07).
+  adminLinkSearchTrial: (n = 30) =>
+    request<Record<string, any>>(`/api/admin/link-search-trial?scope=all&n=${n}`),
   adminApplyTest: (jobId: number, live = false) =>
     request<Record<string, any>>(`/api/admin/apply-test?job_id=${jobId}${live ? "&mode=live" : ""}`),
 };

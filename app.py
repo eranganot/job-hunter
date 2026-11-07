@@ -3055,7 +3055,34 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     model returned its prompt's example, "First Last" (2026-11-07)."""
     import apply_engine as _ae_ap
     text = _extract_cv_text(_cv_file(user_id, cv_path_raw or ""), cv_summary)
-    return _ae_ap.extract_applicant_data(text, email or "", fallback_name=name or "")
+    out = _ae_ap.extract_applicant_data(text, email or "", fallback_name=name or "")
+    # The Profile page is the source of truth for who is applying (Eran,
+    # 2026-11-07: "You have everything you need in my profile page"): its
+    # name, email, phone and LinkedIn win over anything read from the CV; the
+    # CV only fills what the profile does not hold (title, location, summary).
+    phone = linkedin = ""
+    try:
+        _c = database.get_db()
+        try:
+            _r = _c.execute("SELECT phone, linkedin_url FROM user_profiles WHERE user_id=?",
+                            (user_id,)).fetchone()
+        finally:
+            _c.close()
+        if _r:
+            phone, linkedin = (_r["phone"] or "").strip(), (_r["linkedin_url"] or "").strip()
+    except Exception as _pe:
+        print(f"[apply] WARNING could not read the profile for user {user_id}: {_pe}")
+    nm = (name or "").strip()
+    if nm:
+        parts = nm.split()
+        out.update(full_name=nm, first_name=parts[0], last_name=" ".join(parts[1:]))
+    if email:
+        out["email"] = email
+    if phone:
+        out["phone"] = phone
+    if linkedin:
+        out["linkedin_url"] = linkedin
+    return out
 
 
 def _extract_cv_text(cv_path, cv_summary):

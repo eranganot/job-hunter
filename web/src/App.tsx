@@ -4,7 +4,7 @@ import {
   Briefcase, X, MapPin, TrendingUp, Settings, BarChart3, Clock,
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
-  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, FileText, Info,
+  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
 } from "lucide-react";
 import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
@@ -1674,8 +1674,19 @@ function LinkReport() {
     catch (e: any) { setErr(e?.message || "The report failed to run"); }
     finally { setBusy(false); }
   };
+  const [trial, setTrial] = useState<Record<string, any> | null>(null);
+  const [trialBusy, setTrialBusy] = useState(false);
+  const runTrial = async () => {
+    if (!confirm("Ask Gemini + Google Search to find up to 30 job-board jobs on the company's own site?\n\n" +
+                 "Estimated cost: about 1 cent (searches are inside Google's free daily allowance). " +
+                 "Every link is checked on the page. Nothing is changed in anyone's queue.")) return;
+    setTrialBusy(true); setErr("");
+    try { setTrial(await api.adminLinkSearchTrial(30)); }
+    catch (e: any) { setErr(e?.message || "The trial failed to run"); }
+    finally { setTrialBusy(false); }
+  };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(JSON.stringify(rep, null, 2)); setCopied(true); }
+    try { await navigator.clipboard.writeText(JSON.stringify(trial || rep, null, 2)); setCopied(true); }
     catch { setErr("Copy failed - select the text below instead"); }
   };
   const d = rep?.dry_run || {};
@@ -1705,8 +1716,27 @@ function LinkReport() {
             <Row k="Board answers" v={Object.entries(d.ats_answers).slice(0, 8).map(([k, n]) => `${k.replace(/^(boards-api\.|api\.)/, "")}: ${n}`).join(" \u00b7 ")} />
           )}
           <button onClick={copy} className="w-full mt-2 py-2 rounded-lg border border-gray-600 text-sm text-gray-200">
-            {copied ? "Copied - paste it to Claude" : "Copy full report"}
+            {copied ? "Copied - paste it to Claude" : trial ? "Copy trial result" : "Copy full report"}
           </button>
+        </div>
+      )}
+      <button onClick={runTrial} disabled={trialBusy || busy}
+        className="w-full mt-2 flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
+        {trialBusy ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <Search className="w-5 h-5 text-gray-300 shrink-0" />}
+        <span>
+          <span className="block text-sm font-medium text-gray-200">{trialBusy ? "Searching (up to a minute)\u2026" : "Try web search on 30 jobs"}</span>
+          <span className="block text-xs text-gray-400">Gemini + Google Search, about 1 cent, read-only</span>
+        </span>
+      </button>
+      {trial && (
+        <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5 space-y-1.5">
+          <Row k="Jobs tried" v={`${trial.done ?? 0} of ${trial.pairs ?? 0}`} />
+          <Row k="Found free (no search)" v={trial.free_hits} />
+          <Row k="Searched / verified links" v={`${trial.searched ?? 0} / ${trial.search_hits ?? 0}${trial.search_hit_rate != null ? ` (${trial.search_hit_rate}%)` : ""}`} />
+          <Row k="Links found but rejected" v={trial.candidates_rejected} />
+          <Row k="Gemini calls / tokens" v={`${trial.gemini_calls ?? 0} / ${trial.gemini_tokens ?? 0}`} />
+          <Row k="Took" v={trial.seconds != null ? `${trial.seconds}s` : "-"} />
+          {!copied && <button onClick={copy} className="w-full mt-2 py-2 rounded-lg border border-gray-600 text-sm text-gray-200">Copy trial result</button>}
         </div>
       )}
       {err && <p className="text-sm text-red-300 mt-2">{err}</p>}
