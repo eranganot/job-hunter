@@ -125,8 +125,39 @@ def _read_rows(db, sql, args):
 OPEN_STATUSES = ("new", "approved")
 
 
+# Boards confirmed to hold jobs on 2026-11-07 (from the workspace): if THIS host
+# gets nothing from them, the misses are refusals, not companies without a board.
+REACH_CONTROLS = (
+    ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/echo/jobs?content=false"),
+    ("ashby", "https://api.ashbyhq.com/posting-api/job-board/hud?includeCompensation=false"),
+    ("smartrecruiters", "https://api.smartrecruiters.com/v1/companies/tenengroup/postings?limit=100"),
+    ("lever", "https://api.lever.co/v0/postings/palantir?mode=json"),
+)
+
+
+def reach_check(get=None) -> dict:
+    """{ats: number of postings this host got from a board known to have some,
+    or the reason it got none}. Read-only, four requests."""
+    import apply_engine as _ae
+    get = get or _ae._ats_get
+    out = {}
+    for ats, url in REACH_CONTROLS:
+        before = _ae.ats_answers()
+        data = get(url)
+        if isinstance(data, dict):
+            n = len(data.get("jobs") or data.get("content") or [])
+        elif isinstance(data, list):
+            n = len(data)
+        else:
+            after = _ae.ats_answers()
+            new = [k.split(" ", 1)[1] for k in after if after[k] != before.get(k, 0)]
+            n = "none (%s)" % ", ".join(new) if new else "none"
+        out[ats] = n
+    return out
+
+
 def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
-                use_llm: bool = False, resolver=None) -> dict:
+                use_llm: bool = False, resolver=None, check_reach: bool = False) -> dict:
     """What the open queue links to, and how much of it the existing resolver
     could fix. Read-only: nothing is written, no job's URL changes.
 
@@ -173,6 +204,8 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
         seen.add(key)
         pairs.append(r)
 
+    import apply_engine as _ae
+    _ae.ats_answers(reset=True)
     started = time.monotonic()
     tried, resolved, unresolved, by_ats, incomplete = 0, [], [], {}, 0
     for r in pairs[:max(0, sample)]:
@@ -222,6 +255,10 @@ def link_report(conn, user_id=None, sample: int = 25, budget_s: float = 45.0,
             "incomplete": incomplete,
             "by_ats": by_ats,
             "seconds": round(time.monotonic() - started, 1),
+            # Every board-API answer during this run, e.g. "boards-api.greenhouse.io 404":
+            # 404 is a normal "no board under that name"; 403 / not-JSON / errors are not.
+            "ats_answers": dict(sorted(_ae.ats_answers().items(), key=lambda kv: -kv[1])),
+            "reach": reach_check() if check_reach else None,
             "resolved_examples": resolved[:20],
             "unresolved": unresolved[:40],
         },

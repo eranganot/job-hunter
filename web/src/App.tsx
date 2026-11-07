@@ -1700,6 +1700,10 @@ function LinkReport() {
           {d.incomplete > 0 && <Row k="Lookups that did not answer" v={d.incomplete} />}
           {d.by_ats && Object.keys(d.by_ats).length > 0 && <Row k="Resolved to" v={Object.entries(d.by_ats).map(([a, n]) => `${a} ${n}`).join(", ")} />}
           <Row k="Took" v={d.seconds != null ? `${d.seconds}s` : "-"} />
+          {d.reach && <Row k="Reach (known boards)" v={Object.entries(d.reach).map(([a, n]) => `${a} ${n}`).join(", ")} />}
+          {d.ats_answers && Object.keys(d.ats_answers).length > 0 && (
+            <Row k="Board answers" v={Object.entries(d.ats_answers).slice(0, 8).map(([k, n]) => `${k.replace(/^(boards-api\.|api\.)/, "")}: ${n}`).join(" \u00b7 ")} />
+          )}
           <button onClick={copy} className="w-full mt-2 py-2 rounded-lg border border-gray-600 text-sm text-gray-200">
             {copied ? "Copied - paste it to Claude" : "Copy full report"}
           </button>

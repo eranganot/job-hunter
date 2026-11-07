@@ -657,3 +657,38 @@ def test_search_trial_searches_only_what_the_free_lookup_misses_and_writes_nothi
     assert r["free_hits"] == 1 and r["searched"] == 2 and r["search_hits"] == 1
     assert r["jobs"][0]["result"] == "search hit"
     assert [tuple(x) for x in conn.execute("SELECT * FROM jobs ORDER BY id")] == before
+
+
+def test_the_report_tells_a_refusal_from_a_company_without_a_board(monkeypatch):
+    """2026-11-07: production resolved 0 of 44 while the same pairs gave 3 from
+    the workspace. _ats_get reads a 403 or an HTML page as 'no board', so the
+    report now counts every answer by host and status."""
+    import io
+    import urllib.error
+    import apply_engine as ae
+
+    class _R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake(req, timeout=0):
+        u = req.full_url
+        if "greenhouse" in u:
+            raise urllib.error.HTTPError(u, 403, "Forbidden", {}, None)
+        if "ashbyhq" in u:
+            return _R(b"<html>blocked</html>")
+        if "lever" in u:
+            return _R(b"[]")
+        raise urllib.error.HTTPError(u, 404, "Not Found", {}, None)
+    monkeypatch.setattr(ae.urllib.request, "urlopen", fake)
+    ae.ats_answers(reset=True)
+    reach = links.reach_check()
+    assert reach["greenhouse"] == "none (403)"
+    assert reach["ashby"] == "none (200 not-JSON)"
+    assert reach["lever"] == 0
+    answers = ae.ats_answers()
+    assert answers["boards-api.greenhouse.io 403"] == 1
+    assert answers["api.ashbyhq.com 200 not-JSON"] == 1

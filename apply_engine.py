@@ -1037,19 +1037,47 @@ def _mark_lookup_failure() -> None:
     _LOOKUP.failures = getattr(_LOOKUP, "failures", 0) + 1
 
 
+# Every answer the board APIs gave, by "host status" (Step 1, 2026-11-07). The
+# link report resolved 0 of 44 in production while the same 40 pairs gave 3
+# hits from the workspace; _ats_get reads any 4xx and any non-JSON page as "no
+# such board", so a refusal (a bot wall, an outage page) would look exactly
+# like a company without a board. This tally is how the report tells them apart.
+_ATS_ANSWERS: dict = {}
+_ATS_ANSWERS_LOCK = _threading.Lock()
+
+
+def _ats_note(url: str, outcome: str) -> None:
+    host = urllib.parse.urlsplit(url).hostname or "?"
+    with _ATS_ANSWERS_LOCK:
+        k = "%s %s" % (host, outcome)
+        _ATS_ANSWERS[k] = _ATS_ANSWERS.get(k, 0) + 1
+
+
+def ats_answers(reset: bool = False) -> dict:
+    with _ATS_ANSWERS_LOCK:
+        out = dict(_ATS_ANSWERS)
+        if reset:
+            _ATS_ANSWERS.clear()
+    return out
+
+
 def _ats_get(url: str, timeout: int = 6):
     for attempt, t in enumerate((timeout, max(timeout, 12))):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": _UA})
             with urllib.request.urlopen(req, timeout=t) as r:
-                return json.loads(r.read().decode("utf-8", "ignore"))
+                data = json.loads(r.read().decode("utf-8", "ignore"))
+            _ats_note(url, "200")
+            return data
         except urllib.error.HTTPError as e:
+            _ats_note(url, str(e.code))
             if 400 <= e.code < 500 and e.code not in (408, 429):
                 return None                      # definitive: no such board
         except ValueError:
+            _ats_note(url, "200 not-JSON")
             return None                          # answered, but not JSON: no board here
-        except Exception:
-            pass                                 # timeout / network: no answer
+        except Exception as e:
+            _ats_note(url, type(e).__name__)     # timeout / network: no answer
     _mark_lookup_failure()
     return None
 
