@@ -871,6 +871,20 @@ def m0018_sponsorship(conn):
     conn.commit()
 
 
+def m0019_application_answers(conn):
+    """Answering form questions on the applicant's behalf (2026-11-07).
+    application_qa: answers the user gave (or corrected), reused for the same
+    question next time - qkey is questions.key(label). jobs.apply_questions: the
+    required questions an application is held on (apply_status 'needs_answers')."""
+    if not _has_column(conn, "jobs", "apply_questions"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN apply_questions TEXT")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS application_qa ("
+        " user_id INTEGER NOT NULL, qkey TEXT NOT NULL, question TEXT, answer TEXT NOT NULL,"
+        " updated_at TEXT, PRIMARY KEY (user_id, qkey))")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -890,6 +904,7 @@ MIGRATIONS = [
     (16, "enforcement_launch",          m0016_enforcement_launch),
     (17, "account_deletion",            m0017_account_deletion),
     (18, "sponsorship",                 m0018_sponsorship),
+    (19, "application_answers",         m0019_application_answers),
 ]
 
 

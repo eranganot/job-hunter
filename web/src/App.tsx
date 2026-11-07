@@ -4,7 +4,7 @@ import {
   Briefcase, X, MapPin, TrendingUp, Settings, BarChart3, Clock,
   CheckCircle, XCircle, AlertCircle, Sparkles, Building2, ExternalLink,
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
-  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, FileText, Info,
+  Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, MessageSquare, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
 } from "lucide-react";
 import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
@@ -686,11 +686,72 @@ function LinkBadge({ job }: { job: UiJob }) {
   );
 }
 
+
+/* The questions an application was held on (2026-11-07). Eran: "if you are
+   not sure - show me the questions and I'll guide you". Drafts are prefilled;
+   answers are saved and reused for the same question on later applications. */
+function AnswerQuestions({ job, onDone }: { job: UiJob; onDone: () => void }) {
+  const [vals, setVals] = useState<Record<string, string | string[]>>(
+    () => Object.fromEntries(job.applyQuestions.map((q) => [q.key, q.draft ?? (q.type === "checkbox" ? [] : "")])));
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState("");
+  const set = (k: string, v: string | string[]) => setVals((p) => ({ ...p, [k]: v }));
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try {
+      const answers = job.applyQuestions.map((q) => ({ key: q.key, label: q.label, answer: vals[q.key] }))
+        .filter((a) => (Array.isArray(a.answer) ? a.answer.length : String(a.answer || "").trim()));
+      if (answers.length < job.applyQuestions.length) { setMsg("Please answer every question."); return; }
+      await api.answerQuestions(job.id, answers);
+      setMsg("Saved. The application will go out on the next apply run, and these answers are reused next time.");
+      setTimeout(onDone, 1800);
+    } catch (e: any) { setMsg(e?.message || "Could not save"); }
+    finally { setBusy(false); }
+  };
+  const field = "w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-sm text-gray-100";
+  return (
+    <div className="mt-3 space-y-3">
+      <p className="text-sm text-gray-300">The application was held because these questions need you. My draft is filled in where I had one.</p>
+      {job.applyQuestions.map((q) => (
+        <div key={q.key}>
+          <label className="block text-sm text-gray-200 mb-1">{q.label.replace(/[*✱]\s*$/, "")}</label>
+          {q.options.length > 0 && q.type !== "checkbox" ? (
+            <select value={String(vals[q.key] || "")} onChange={(e) => set(q.key, e.target.value)} className={field}>
+              <option value="">Choose…</option>
+              {q.options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          ) : q.type === "checkbox" && q.options.length > 0 ? (
+            <div className="space-y-1">
+              {q.options.map((o) => {
+                const cur = Array.isArray(vals[q.key]) ? (vals[q.key] as string[]) : [];
+                return (
+                  <label key={o} className="flex items-center gap-2 text-sm text-gray-200">
+                    <input type="checkbox" checked={cur.includes(o)}
+                      onChange={(e) => set(q.key, e.target.checked ? [...cur, o] : cur.filter((x) => x !== o))} />{o}
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <textarea rows={q.type === "textarea" ? 4 : 2} value={String(vals[q.key] || "")}
+              onChange={(e) => set(q.key, e.target.value)} className={field} />
+          )}
+        </div>
+      ))}
+      <button onClick={save} disabled={busy}
+        className="px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium disabled:opacity-60">
+        {busy ? "Saving…" : "Save answers"}
+      </button>
+      {msg && <p className="text-sm text-gray-300">{msg}</p>}
+    </div>
+  );
+}
+
 function ApplyBadge({ job }: { job: UiJob }) {
   const s = job.applyStatus;
   if (!s || s === "queued") return <span className="text-xs text-gray-400">Queued · ready to apply</span>;
   if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying…</span>;
   if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
+  if (s === "needs_answers") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><MessageSquare className="w-3 h-3" />Needs your answers ({job.applyQuestions.length})</span>;
   if (s === "failed") return <span className="inline-flex items-center gap-1 text-xs text-red-300"><XCircle className="w-3 h-3" />Apply failed{job.applyFailureType ? ` (${job.applyFailureType})` : ""}</span>;
   if (s === "confirmed") return <span className="inline-flex items-center gap-1 text-xs text-green-300"><CheckCircle className="w-3 h-3" />Confirmed</span>;
   if (s === "submitted" || s === "applied") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><CheckCircle className="w-3 h-3" />Submitted</span>;
@@ -1546,6 +1607,9 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
               <ApplyBadge job={job} />
               {job.applyConfirmation && <p className="text-sm text-gray-300 mt-2 whitespace-pre-line">{job.applyConfirmation}</p>}
               {!job.applyConfirmation && job.applyError && <p className="text-sm text-red-300 mt-2 break-words">{job.applyError}</p>}
+              {job.applyStatus === "needs_answers" && job.applyQuestions.length > 0 && (
+                <AnswerQuestions job={job} onDone={onClose} />
+              )}
               {(job.applyStatus === "failed" || job.applyStatus === "manual_required") && onRetry && (
                 <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />Retry application</button>
               )}
@@ -1852,6 +1916,14 @@ function SupervisedApply() {
               {r.confirmation_text && <Field k="Confirmation" v={r.confirmation_text} />}
               {r.error && <Field k="Error" v={r.error} ok={false} />}
               {r.apply_failure_type && <Field k="Failure" v={`${r.apply_failure_type}${r.apply_failure_detail ? ": " + r.apply_failure_detail : ""}`} ok={false} />}
+              {r.status === "needs_answers" && Array.isArray(r.questions) && (
+                <div className="pt-1">
+                  <p className="text-xs text-amber-300 mb-1">Held, not sent. Answer these in the job's details (Queue), then submit again:</p>
+                  <ul className="list-disc pl-5 text-xs text-gray-300 space-y-0.5">
+                    {r.questions.map((q: any) => <li key={q.key}>{q.label}{q.draft ? <span className="text-gray-400"> (draft: {String(q.draft)})</span> : null}</li>)}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>

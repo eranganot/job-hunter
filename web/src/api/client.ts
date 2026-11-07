@@ -42,11 +42,16 @@ export type ApiJob = {
   apply_confirmation?: string | null;
   apply_error?: string | null;
   apply_failure_type?: string | null;
+  // JSON list of {key,label,type,options,draft}: the required questions an
+  // application is held on (apply_status 'needs_answers', 2026-11-07).
+  apply_questions?: string | null;
   applied_date?: string | null;
   cover_letter?: string | null;
   status_check?: string | null;
   status_checked_date?: string | null;
 };
+
+export interface FormQuestion { key: string; label: string; type: string; options: string[]; draft?: string | string[] }
 
 export type UiJob = {
   id: number;
@@ -80,6 +85,7 @@ export type UiJob = {
   applyConfirmation: string;
   applyError: string;
   applyFailureType: string;
+  applyQuestions: FormQuestion[];
   foundDate: string | null;
   coverLetter: string;
   /** 'open' | 'closed' | '' - the last manual "is this still open?" check */
@@ -337,6 +343,9 @@ export const api = {
   // every link verified on the page; writes nothing. ~1 cent for 30 (2026-11-07).
   adminLinkSearchTrial: (n = 30) =>
     request<Record<string, any>>(`/api/admin/link-search-trial?scope=all&n=${n}`),
+  // Answers to the questions an application is held on; saved for reuse.
+  answerQuestions: (jobId: number | string, answers: { key: string; label: string; answer: string | string[] }[]) =>
+    request<{ success: boolean; saved: number }>(`/api/jobs/${jobId}/answers`, "POST", { answers }),
   adminApplyTest: (jobId: number, live = false) =>
     request<Record<string, any>>(`/api/admin/apply-test?job_id=${jobId}${live ? "&mode=live" : ""}`),
 };
@@ -369,6 +378,7 @@ export function toUiJob(j: ApiJob): UiJob {
     applyConfirmation: j.apply_confirmation || "",
     applyError: j.apply_error || "",
     applyFailureType: j.apply_failure_type || "",
+    applyQuestions: (() => { try { const q = JSON.parse(j.apply_questions || "[]"); return Array.isArray(q) ? q : []; } catch { return []; } })(),
     foundDate: j.found_date ?? null,
     coverLetter: j.cover_letter || "",
     statusCheck: j.status_check || "",

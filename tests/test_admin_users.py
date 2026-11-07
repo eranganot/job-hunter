@@ -339,3 +339,44 @@ def test_sponsorship_is_saved_and_reaches_the_applicant(stack, users, monkeypatc
     assert st == 400
     _s, _l, body = users["admin"].get("/api/me")
     assert json.loads(body).get("sponsorship_abroad") == "yes"
+
+
+def test_answers_are_saved_for_reuse_and_release_the_held_job(stack, users):
+    import app as A
+    uid = _user_id(stack["db"], "admin@example.test")
+    job_id = _new_job(stack["db"], uid)
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE jobs SET status='approved', apply_status='needs_answers', apply_attempts=2, "
+                 "apply_questions=? WHERE id=?",
+                 (json.dumps([{"key": "salary expectations", "label": "Salary expectations *",
+                               "type": "text", "options": [], "draft": ""}]), job_id))
+    conn.commit()
+    conn.close()
+    st, _l, body = users["admin"].post_json("/api/jobs/%d/answers" % job_id, {"answers": [
+        {"key": "salary expectations", "label": "Salary expectations *", "answer": "Open to discuss"}]})
+    assert st == 200 and json.loads(body)["saved"] == 1
+    conn = stack["db"].get_db()
+    row = conn.execute("SELECT apply_status, apply_questions, apply_attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    assert row["apply_status"] is None and row["apply_questions"] is None and row["apply_attempts"] == 0
+    assert A._answer_bank(uid)["salary expectations"] == "Open to discuss"
+    st, _l, _b = users["admin"].post_json("/api/jobs/%d/answers" % job_id, {"answers": []})
+    assert st == 400
+    assert A._apply_failure_fields("needs_answers", 1, "needs_answers") == ("needs_answers", None)
+
+
+def test_a_held_supervised_submit_puts_its_questions_on_the_job(stack, users, monkeypatch, _offline_apply):
+    import apply_engine
+    held = [{"key": "salary expectations", "label": "Salary expectations *", "type": "text",
+             "options": [], "draft": "40k"}]
+    monkeypatch.setattr(apply_engine, "submit_application", lambda *a, **k: {
+        "success": False, "status": "needs_answers", "questions": held,
+        "error": "1 question(s) need your answer", "apply_failure_type": "needs_answers"})
+    uid = _user_id(stack["db"], "admin@example.test")
+    job_id = _new_job(stack["db"], uid)
+    st, _l, body = users["admin"].get("/api/admin/apply-test?job_id=%d&mode=live" % job_id)
+    assert st == 200 and json.loads(body)["result"]["questions"] == held
+    conn = stack["db"].get_db()
+    row = conn.execute("SELECT apply_status, apply_questions FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    assert row["apply_status"] == "needs_answers" and json.loads(row["apply_questions"]) == held

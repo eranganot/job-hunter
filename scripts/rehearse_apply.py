@@ -93,20 +93,34 @@ FIELDS_SEEN = []
 if os.environ.get("STUB_GEMINI"):
     ae.GEMINI_KEY = "stub"
     def stub(prompt, **k):
-        # Stand-in for Gemini on the required-field step only: answer from the
-        # fields the engine collected, as the real prompt asks.
-        if "REQUIRED fields" not in prompt:
-            raise RuntimeError("stub: not a required-field prompt")
-        fields = json.loads(prompt.split("Fields (JSON array):\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
-        FIELDS_SEEN.extend(fields)
+        # A stand-in for Gemini on the question step (questions.py's prompt):
+        # sure about the obvious, deliberately UNSURE about citizenship, so a
+        # rehearsal shows both the fill path and the hold-for-the-applicant path.
+        if "ON BEHALF" in prompt:
+            qs = json.loads(prompt.split("Questions (JSON array): ", 1)[1].split("\n\nReturn ONLY", 1)[0])
+        elif "REQUIRED fields" in prompt:
+            qs = json.loads(prompt.split("Fields (JSON array):\n", 1)[1].split("\n\nReturn ONLY", 1)[0])
+        else:
+            raise RuntimeError("stub: unexpected prompt")
+        FIELDS_SEEN.extend(qs)
         acts = []
-        for f in fields:
+        for f in qs:
             lab = (f.get("label") or "").lower(); sel = f.get("selector"); opts = f.get("options") or []
-            if "city" in lab or "location" in lab: acts.append({"selector": sel, "action": "fill", "value": "Tel Aviv, Israel"})
-            elif f.get("type") == "checkbox" and "english" in lab: acts.append({"selector": sel, "action": "check", "value": ""})
-            elif "visa" in lab or "sponsor" in lab:
-                v = next((o for o in opts if str(o).lower().startswith("yes")), "Yes")
-                acts.append({"selector": sel, "action": "select" if opts else "fill", "value": v})
+            pick = lambda *w: next((o for o in opts if any(x in str(o).lower() for x in w)), None)
+            if "city" in lab or "location" in lab:
+                acts.append({"selector": sel, "value": "Tel Aviv, Israel", "confidence": "high", "action": "fill"})
+            elif "sponsor" in lab or "visa" in lab:
+                acts.append({"selector": sel, "value": pick("no") or "No", "confidence": "high", "action": "select"})
+            elif "authorized" in lab:
+                acts.append({"selector": sel, "value": pick("yes") or "Yes", "confidence": "high", "action": "select"})
+            elif "hear" in lab and opts:
+                acts.append({"selector": sel, "value": pick("website", "career") or opts[0], "confidence": "high"})
+            elif "consent" in " ".join(map(str, opts)).lower():
+                acts.append({"selector": sel, "value": pick("yes") or opts[0], "confidence": "high"})
+            elif f.get("type") == "checkbox" and pick("english"):
+                acts.append({"selector": sel, "value": [pick("english")], "confidence": "high"})
+            elif sel:
+                acts.append({"selector": sel, "value": (opts[0] if opts else "draft answer"), "confidence": "low"})
         return acts
     ae._claude_json = stub
 

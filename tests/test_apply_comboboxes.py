@@ -123,3 +123,72 @@ def test_hidden_error_templates_are_not_reported_as_the_reason(page):
     res = ae._verify_submission(page)
     assert res["status"] == "failed"
     assert "Phone is required" in res["error"] and "100MB" not in res["error"]
+
+
+# ── answering every question; holding for the applicant when unsure ────────
+
+import questions  # noqa: E402
+
+FORM_QS = """<!doctype html><html><body><form>
+<div class="application-question"><div class="application-label">Current location ✱</div>
+  <input name="location" id="loc" type="text"></div>
+<div class="application-question"><div class="application-label">Are you legally authorized to work in Israel? ✱</div>
+  <label><input type="radio" name="auth" value="a1">Yes</label><label><input type="radio" name="auth" value="a2">No</label></div>
+<div class="application-question"><div class="application-label">Languages ✱</div>
+  <label><input type="checkbox" name="lang" value="en">English</label><label><input type="checkbox" name="lang" value="he">Hebrew</label></div>
+<label for="heard">How did you hear about us? *</label>
+<select id="heard" required><option value="">Select...</option><option value="w">Company website</option><option value="l">LinkedIn</option></select>
+<label for="why">Why do you want to work here?</label><textarea id="why"></textarea>
+<label for="salary">Salary expectations *</label><input id="salary" required>
+<label for="first_name">First Name</label><input id="first_name" value="Eran">
+</form></body></html>"""
+
+
+def test_the_collector_sees_every_unanswered_question(page):
+    page.set_content(FORM_QS)
+    got = {q["label"]: q for q in questions.collect(page)}
+    assert got["Are you legally authorized to work in Israel? ✱"]["type"] == "radio"
+    assert got["Are you legally authorized to work in Israel? ✱"]["options"] == ["Yes", "No"]
+    assert got["Languages ✱"]["options"] == ["English", "Hebrew"] and got["Languages ✱"]["required"]
+    assert got["How did you hear about us? *"]["options"] == ["Company website", "LinkedIn"]
+    assert got["Why do you want to work here?"]["required"] is False
+    assert not any("first name" in k.lower() for k in got)        # identity fields are the handler's
+
+
+def test_sure_answers_are_filled_and_an_unsure_required_one_holds_the_application(page):
+    page.set_content(FORM_QS)
+    sel = {q["label"]: q["selector"] for q in questions.collect(page)}
+
+    def llm(prompt):
+        assert "ON BEHALF" in prompt
+        return [{"selector": sel["Current location ✱"], "value": "Tel Aviv, Israel", "confidence": "high"},
+                {"selector": sel["Are you legally authorized to work in Israel? ✱"], "value": "Yes", "confidence": "high"},
+                {"selector": sel["Languages ✱"], "value": ["English", "Hebrew"], "confidence": "high"},
+                {"selector": sel["How did you hear about us? *"], "value": "Company website", "confidence": "high"},
+                {"selector": sel["Why do you want to work here?"], "value": "Because...", "confidence": "low"},
+                {"selector": sel["Salary expectations *"], "value": "40,000 ILS", "confidence": "low"}]
+    res = questions.answer(page, {"full_name": "Eran Ganot"}, {"title": "PM"}, llm)
+    assert page.input_value("#loc") == "Tel Aviv, Israel"
+    assert page.is_checked('input[name="auth"][value="a1"]')
+    assert page.is_checked('input[value="en"]') and page.is_checked('input[value="he"]')
+    assert page.eval_on_selector("#heard", "e => e.options[e.selectedIndex].text") == "Company website"
+    assert page.input_value("#why") == ""                        # optional + unsure: left blank
+    assert [u["label"] for u in res["unsure"]] == ["Salary expectations *"]
+    assert res["unsure"][0]["draft"] == "40,000 ILS"
+
+
+def test_a_saved_answer_is_used_without_asking_the_model(page):
+    page.set_content(FORM_QS)
+    bank = {questions.key("Salary expectations *"): "As discussed in interview"}
+    res = questions.answer(page, {"answer_bank": bank}, {}, llm=None)
+    assert page.input_value("#salary") == "As discussed in interview"
+    assert "Salary expectations *" not in [u["label"] for u in res["unsure"]]
+
+
+def test_a_react_select_with_a_chosen_value_counts_as_answered(page):
+    page.set_content("""<label id="country-label">Country*</label>
+      <div class="select__value-container select__value-container--has-value">
+        <div class="select__single-value">+972</div>
+        <input id="country" role="combobox" aria-required="true" aria-labelledby="country-label" value="">
+      </div>""")
+    assert [q for q in questions.collect(page) if q["label"].startswith("Country")] == []
