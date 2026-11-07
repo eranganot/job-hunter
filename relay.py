@@ -40,25 +40,21 @@ def load_config() -> dict:
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-def _post(url: str, payload: list | dict, api_key: str) -> dict:
-    """POST JSON payload to url, authenticated with api_key. Returns response dict."""
+def _post(url: str, payload: dict, api_key: str) -> dict:
+    """POST a JSON object to url. JH-2: the key goes in the X-Sync-Key header
+    (a query-string key was written to Railway's access log)."""
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{url}?api_key={api_key}",
-        data=body,
-        method="POST"
-    )
+    req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
+    req.add_header("X-Sync-Key", api_key)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
 
 
 def _get(url: str, api_key: str) -> list | dict:
-    """GET url authenticated with api_key. Returns parsed JSON."""
-    req = urllib.request.Request(
-        f"{url}?api_key={api_key}",
-        method="GET"
-    )
+    """GET url, authenticated with the X-Sync-Key header."""
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("X-Sync-Key", api_key)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
 
@@ -74,7 +70,7 @@ def sync_pending_jobs(base_dir: str, railway_url: str, api_key: str):
         if not jobs:
             os.remove(path)
             return
-        result = _post(f"{railway_url}/api/sync/jobs", jobs, api_key)
+        result = _post(f"{railway_url}/api/sync/jobs", {"jobs": jobs}, api_key)
         print(f"[relay] ✓ pending_jobs → Railway: {result}")
         os.remove(path)
     except Exception as e:
@@ -91,7 +87,7 @@ def sync_applied_updates(base_dir: str, railway_url: str, api_key: str):
         if not updates:
             os.remove(path)
             return
-        result = _post(f"{railway_url}/api/sync/updates", updates, api_key)
+        result = _post(f"{railway_url}/api/sync/updates", {"updates": updates}, api_key)
         print(f"[relay] ✓ applied_updates → Railway: {result}")
         os.remove(path)
     except Exception as e:

@@ -67,7 +67,7 @@ def test_a_query_string_is_never_sent():
         def set_user(self, u): sent["user"] = u
 
     class Fake:
-        def push_scope(self):
+        def new_scope(self):
             import contextlib
             return contextlib.nullcontext(Scope())
         def capture_exception(self, e): sent["exc"] = e

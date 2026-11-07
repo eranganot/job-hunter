@@ -368,11 +368,23 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
             new_type = classify(new_url)
             if new_type not in ("direct_ats", "company"):
                 new_type = "direct_ats"
-            _write(get_db, "UPDATE jobs SET source_url=COALESCE(source_url, url), url=?, link_type=?, "
-                           "link_resolved_at=?, url_verified=1, link_note=? "
-                           "WHERE id=? AND user_id=? AND url=?",
-                   (new_url, new_type, stamp, "%s match %s" % (hit.get("ats") or "ats", hit.get("score")),
-                    r["id"], user_id, r.get("url")))
+            try:
+                _write(get_db, "UPDATE jobs SET source_url=COALESCE(source_url, url), url=?, link_type=?, "
+                               "link_resolved_at=?, url_verified=1, link_note=? "
+                               "WHERE id=? AND user_id=? AND url=?",
+                       (new_url, new_type, stamp, "%s match %s" % (hit.get("ats") or "ats", hit.get("score")),
+                        r["id"], user_id, r.get("url")))
+            except Exception as e:  # noqa: BLE001
+                # JH-4 / B4: another run stored the same URL on another job
+                # between the clash check above and this UPDATE. UNIQUE(user_id,
+                # url) refuses it; that is the duplicate case, not a failed run.
+                if not _is_unique_violation(e):
+                    raise
+                _write(get_db, "UPDATE jobs SET link_type=?, link_resolved_at=?, link_note=? "
+                               "WHERE id=? AND user_id=?",
+                       (t, stamp, "direct link already on another job", r["id"], user_id))
+                out["duplicate"] += 1
+                continue
             out["resolved"] += 1
         elif _lookup_incomplete():
             # A board did not answer (timeout / 5xx / 429): this is not a
@@ -389,6 +401,13 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     if not out["left_for_next_run"]:
         out["left_for_next_run"] = max(0, len(rows) - max(0, limit))
     return out
+
+
+def _is_unique_violation(e: Exception) -> bool:
+    """sqlite3.IntegrityError or psycopg's UniqueViolation, without importing either."""
+    name = type(e).__name__
+    return name in ("IntegrityError", "UniqueViolation") or "UNIQUE constraint" in str(e) \
+        or getattr(e, "sqlstate", None) == "23505"
 
 
 def _write(get_db, sql, args):
@@ -711,7 +730,11 @@ def resolve_from_learned(company, title, location, learned, fetch=None, threshol
                 continue
             # A Workday search spans the whole company worldwide: an Israeli
             # job must not be pointed at the same title in another country.
-            if ats == "workday" and _israeli(location) and not workday.is_israel(p.get("location")):
+            # JH-4 / B7: a blank location counts as Israel - every search this
+            # app runs is Israel-scoped, and "" would otherwise match the same
+            # title in any country.
+            if ats == "workday" and (_israeli(location) or not (location or "").strip()) \
+                    and not workday.is_israel(p.get("location")):
                 continue
             key = (_ae._loc_match(p.get("location") or "", location or ""), score)
             if key > best_key:

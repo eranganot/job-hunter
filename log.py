@@ -84,6 +84,14 @@ _CONFIGURED = False
 _QUIET_PREFIXES = ("/app/", "/static/", "/favicon", "/sw.js", "/manifest")
 
 
+
+_SECRET_PARAM = re.compile(r"(?i)\b(api_key|key|token|access_token|password|secret)=[^&#\s]*")
+
+
+def redact_path(path: str) -> str:
+    """JH-2: query-string credentials never reach the log ("api_key=***")."""
+    return _SECRET_PARAM.sub(lambda m: m.group(1) + "=***", path or "")
+
 class Request:
     __slots__ = ("rid", "user_id", "method", "path", "ip", "started", "status")
 
@@ -91,7 +99,7 @@ class Request:
         self.rid = secrets.token_hex(3)      # short on purpose: it is read by eye
         self.user_id = None
         self.method = method
-        self.path = path
+        self.path = redact_path(path)
         self.ip = ip
         self.started = time.time()
         self.status = None

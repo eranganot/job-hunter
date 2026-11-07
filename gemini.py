@@ -158,9 +158,12 @@ def limits() -> dict:
     """Current ceilings. 0 means unlimited, so a limit can be switched off
     without a code change if one of them turns out to be wrong in production."""
     return {
-        "global_calls":   _limit("GLOBAL_CALLS", 50000),
+        # JH-5 (2026-11-05): defaults = production's measured settings (4,000 /
+        # 300; peak day 242 calls). They were 50,000 / 1,500, which is what an
+        # environment WITHOUT the variables - staging - actually ran with.
+        "global_calls":   _limit("GLOBAL_CALLS", 4000),
         "global_tokens":  _limit("GLOBAL_TOKENS", 0),
-        "user_calls":     _limit("USER_CALLS", 1500),
+        "user_calls":     _limit("USER_CALLS", 300),
         "user_tokens":    _limit("USER_TOKENS", 0),
         "enforce":        _limit("ENFORCE", 1),
     }
@@ -542,14 +545,16 @@ def generate(body, *, purpose: str, user_id: int | None = None,
         data = bytes(body)
     else:
         data = json.dumps(body).encode("utf-8")
-    url = "%s/%s:generateContent?key=%s" % (API_BASE, model, k)
+    # JH-2: the key travels in the x-goog-api-key header, not ?key= - a URL
+    # lands in exception messages and Sentry's http breadcrumbs.
+    url = "%s/%s:generateContent" % (API_BASE, model)
 
     last = None
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(
                 url, data=data, method="POST",
-                headers={"Content-Type": "application/json"})
+                headers={"Content-Type": "application/json", "x-goog-api-key": k})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
             p, o, t = _usage_from(result)
