@@ -2,7 +2,7 @@
 # Core modules (http.server, sqlite3, json, urllib) are stdlib - no install needed.
 
 # Browser automation for job application submission
-playwright==1.49.1
+playwright==1.64.1
 
 # Email sending via Resend
 resend==2.52.0
