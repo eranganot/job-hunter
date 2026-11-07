@@ -222,7 +222,7 @@ def _verify_submission(page) -> dict:
                       + (f" [shot: {_shot}]" if _shot else ""))}
 
 
-COLLECT_REQUIRED_JS = '() => {\n  const out = [];\n  const seen = new Set();\n  const els = document.querySelectorAll(\'input, select, textarea\');\n  for (const el of els) {\n    const type = (el.type || el.tagName).toLowerCase();\n    if (type === \'hidden\' || el.disabled || el.readOnly) continue;\n    const required = el.required || el.getAttribute(\'aria-required\') === \'true\';\n    const invalid = el.getAttribute(\'aria-invalid\') === \'true\';\n    const empty = !el.value || String(el.value).trim() === \'\';\n    const isChoice = (type === \'radio\' || type === \'checkbox\');\n    if (!invalid && !(required && (empty || isChoice))) continue;\n    let label = \'\';\n    if (el.id) { const l = document.querySelector(\'label[for="\' + CSS.escape(el.id) + \'"]\'); if (l) label = l.innerText; }\n    if (!label && el.closest(\'label\')) label = el.closest(\'label\').innerText;\n    if (!label) label = el.getAttribute(\'aria-label\') || el.name || el.placeholder || \'\';\n    label = (label || \'\').replace(/\\s+/g, \' \').trim().slice(0, 140);\n    let sel = \'\';\n    if (el.id) sel = \'#\' + CSS.escape(el.id);\n    else if (el.name) sel = el.tagName.toLowerCase() + \'[name="\' + el.name + \'"]\';\n    else continue;\n    const key = sel + \'|\' + (el.value || \'\');\n    if (seen.has(key)) continue; seen.add(key);\n    let options = [];\n    if (el.tagName === \'SELECT\') options = [...el.options].map(o => o.value || o.text).filter(Boolean).slice(0, 25);\n    if (type === \'radio\') { const g = document.getElementsByName(el.name); options = [...g].map(r => r.value).filter(Boolean).slice(0, 25); }\n    out.push({ selector: sel, label: label, type: type, options: options });\n    if (out.length >= 15) break;\n  }\n  return out;\n}'
+COLLECT_REQUIRED_JS = '() => {\n  const out = [];\n  const seen = new Set();\n  const els = document.querySelectorAll(\'input, select, textarea\');\n  for (const el of els) {\n    const type = el.getAttribute(\'role\') === \'combobox\' ? \'combobox\' : (el.type || el.tagName).toLowerCase();\n    if (type === \'hidden\' || el.disabled || el.readOnly) continue;\n    const required = el.required || el.getAttribute(\'aria-required\') === \'true\';\n    const invalid = el.getAttribute(\'aria-invalid\') === \'true\';\n    const empty = !el.value || String(el.value).trim() === \'\';\n    const isChoice = (type === \'radio\' || type === \'checkbox\');\n    if (!invalid && !(required && (empty || isChoice))) continue;\n    let label = \'\';\n    if (el.id) { const l = document.querySelector(\'label[for="\' + CSS.escape(el.id) + \'"]\'); if (l) label = l.innerText; }\n    if (!label && el.closest(\'label\')) label = el.closest(\'label\').innerText;\n    if (!label) label = el.getAttribute(\'aria-label\') || el.name || el.placeholder || \'\';\n    label = (label || \'\').replace(/\\s+/g, \' \').trim().slice(0, 140);\n    let sel = \'\';\n    if (el.id) sel = \'#\' + CSS.escape(el.id);\n    else if (el.name) sel = el.tagName.toLowerCase() + \'[name="\' + el.name + \'"]\';\n    else continue;\n    const key = sel + \'|\' + (el.value || \'\');\n    if (seen.has(key)) continue; seen.add(key);\n    let options = [];\n    if (el.tagName === \'SELECT\') options = [...el.options].map(o => o.value || o.text).filter(Boolean).slice(0, 25);\n    if (type === \'radio\') { const g = document.getElementsByName(el.name); options = [...g].map(r => r.value).filter(Boolean).slice(0, 25); }\n    out.push({ selector: sel, label: label, type: type, options: options });\n    if (out.length >= 15) break;\n  }\n  return out;\n}'
 
 
 def _collect_unfilled_required(page):
@@ -239,8 +239,84 @@ def _collect_unfilled_required(page):
         if not sel or sel in seen:
             continue
         seen.add(sel)
+        if fdef.get("type") == "combobox" and not fdef.get("options"):
+            fdef["options"] = _combobox_options(page, sel)
         out.append(fdef)
     return out[:15]
+
+
+def _combobox_options(page, sel) -> list:
+    """The option texts of a JavaScript dropdown (role="combobox"). Greenhouse's
+    current form renders every custom choice question this way (visa, relocation,
+    EEO); the engine saw them as option-less text boxes, typed into them and the
+    submit stayed blocked (rehearsal, 2026-11-07). Opens it, reads, closes it."""
+    try:
+        page.click(sel, timeout=3_000)
+        page.wait_for_timeout(400)
+        opts = [(o.inner_text() or "").strip() for o in _listbox_options(page, sel)]
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+        return [o for o in dict.fromkeys(opts) if o][:25]
+    except Exception as e:
+        print(f"[apply-engine] combobox options {sel}: {e}")
+        return []
+
+
+def _listbox_options(page, sel) -> list:
+    """Options of THIS combobox only: its aria-controls / aria-owns listbox.
+    Reading every [role=option] on the page gave the visa question the country
+    picker's list (rehearsal 3, 2026-11-07)."""
+    try:
+        el = page.query_selector(sel)
+        lid = el and (el.get_attribute("aria-controls") or el.get_attribute("aria-owns"))
+        if lid:
+            box = page.query_selector('[id="%s"]' % lid.replace('"', ''))
+            if box:
+                return box.query_selector_all('[role="option"]')
+    except Exception as e:
+        print(f"[apply-engine] listbox of {sel}: {e}")
+    return [o for o in page.query_selector_all('[role="option"]') if o.is_visible()]
+
+
+def _choose_combobox(page, sel, value: str) -> bool:
+    """Pick `value` in a role="combobox" dropdown: open it, type to filter, click
+    the option whose text matches (exactly, then by prefix)."""
+    page.click(sel, timeout=3_000)
+    page.fill(sel, value)
+    page.wait_for_timeout(400)
+    want = value.strip().lower()
+    opts = _listbox_options(page, sel)
+    pick = next((o for o in opts if (o.inner_text() or "").strip().lower() == want), None) \
+        or next((o for o in opts if (o.inner_text() or "").strip().lower().startswith(want)), None)
+    if not pick:
+        page.keyboard.press("Escape")
+        return False
+    pick.click()
+    return True
+
+
+def _fill_by_label(page, words, value: str) -> bool:
+    """Fill the empty text input whose visible label contains one of `words`.
+    The current Greenhouse form names its LinkedIn box question_<id>, so
+    name*="linkedin" never matched and the profile's LinkedIn was left out."""
+    if not value:
+        return False
+    try:
+        sel = page.evaluate("""(words) => {
+          for (const l of document.querySelectorAll('label')) {
+            const t = (l.innerText || '').toLowerCase();
+            if (!words.some(w => t.includes(w))) continue;
+            const el = l.htmlFor ? document.getElementById(l.htmlFor) : l.querySelector('input');
+            if (el && el.tagName === 'INPUT' && !el.value && el.id) return '#' + CSS.escape(el.id);
+          }
+          return '';
+        }""", [w.lower() for w in words])
+        if sel:
+            page.fill(sel, value)
+            return True
+    except Exception as e:
+        print(f"[apply-engine] fill by label {words}: {e}")
+    return False
 
 
 def _answer_and_fill_required(page, fields, applicant) -> int:
@@ -263,7 +339,7 @@ def _answer_and_fill_required(page, fields, applicant) -> int:
         "- Demographic / EEO / gender / race / veteran / disability questions: pick a "
         '"decline to self-identify" / "prefer not to say" option when one exists.\n'
         "- Yes/No eligibility questions: choose the answer that keeps the application valid.\n"
-        "- For select/radio, value MUST exactly match one of the provided options.\n"
+        "- For select/radio/combobox, value MUST exactly match one of the provided options.\n"
         "- Only include fields you can answer confidently. No prose, JSON only."
     )
     try:
@@ -281,7 +357,12 @@ def _answer_and_fill_required(page, fields, applicant) -> int:
         if not sel:
             continue
         try:
-            if act == "select":
+            el = page.query_selector(sel)
+            if el is not None and el.get_attribute("role") == "combobox":
+                if not _choose_combobox(page, sel, val):
+                    print(f"[apply-engine] required-field {sel}: no option matching {val!r}")
+                    continue
+            elif act == "select":
                 try:
                     page.select_option(sel, value=val)
                 except Exception:
@@ -348,6 +429,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         _gh_fill(page, '#email', applicant.get('email', ''))
         _gh_fill(page, '#phone', applicant.get('phone', ''))
         _gh_fill(page, 'input[name*="linkedin"], input[autocomplete*="url"]', applicant.get('linkedin_url', ''))
+        _fill_by_label(page, ["linkedin"], applicant.get('linkedin_url', ''))
         _gh_fill(page, 'input[name*="location"], input[name*="city"]', applicant.get('location', ''))
 
         # Upload CV
