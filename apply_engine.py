@@ -41,6 +41,27 @@ def _is_lever(url: str) -> bool:
     """Check if URL is a Lever job board."""
     return bool(re.search(r'jobs\.lever\.co|lever\.co/.*?/[a-f0-9-]+', url))
 
+def _is_comeet(url: str) -> bool:
+    """A Comeet-hosted posting (comeet.com/jobs/<company>/<uid>/<slug>/<pos>)."""
+    return bool(re.search(r'(?:www\.)?comeet\.(?:com|co)/jobs/', url or ""))
+
+
+def intl_phone(phone: str, home_country: str = "Israel") -> str:
+    """'054-6912084' -> '+972 546912084' for an Israeli applicant. Phone pickers
+    on Greenhouse and Comeet default to United States +1, so a local number
+    would be read as a US one (Comeet rehearsal, 2026-11-07). A number that
+    already starts with + is left alone."""
+    p = (phone or "").strip()
+    if not p or p.startswith("+"):
+        return p
+    digits = re.sub(r"\D", "", p)
+    if (home_country or "").lower() == "israel" and digits.startswith("0") and 9 <= len(digits) <= 10:
+        return "+972 " + digits[1:]
+    if digits.startswith("00"):
+        return "+" + digits[2:]
+    return p
+
+
 def _is_workday(url: str) -> bool:
     """Check if URL is a Workday job board."""
     return bool(re.search(r'myworkdayjobs\.com|\.myworkday\.com/.*?/job/', url))
@@ -196,7 +217,13 @@ def _verify_submission(page) -> dict:
     for sel in ('[aria-invalid="true"]', '.field_with_errors', '.error',
                 '[class*="error"]', '[role="alert"]'):
         try:
-            for e in (page.query_selector_all(sel) or [])[:6]:
+            for e in (page.query_selector_all(sel) or [])[:12]:
+                # Visible errors only: Lever ships a hidden "File exceeds the
+                # maximum upload size of 100MB" template on every untouched
+                # form, which read as the reason every Lever submit failed
+                # (rehearsal, 2026-11-07).
+                if not e.is_visible():
+                    continue
                 t = (e.inner_text() or "").strip()
                 if t and len(t) < 140:
                     errs.append(t)
@@ -464,6 +491,90 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
     except Exception as e:
         result["error"] = f"Greenhouse handler error: {e}"
         return result
+
+def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
+    """Comeet (rehearsal against a live Cyera posting, 2026-11-07): the posting
+    page has no form; "APPLY FOR THIS JOB" loads one in an iframe from
+    comeet.co/jobs/<company>/<pos>/apply?token=... with firstName, lastName,
+    email, phone (country picker defaulting to US +1), cv (file, required),
+    websiteUrl, comment and a "SUBMIT APPLICATION" button behind reCAPTCHA.
+    The generic path sends Gemini the main page's HTML, which never contains
+    that iframe, so every Comeet application failed."""
+    result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
+    try:
+        for sel in ['text=APPLY FOR THIS JOB', 'a:has-text("Apply")', 'button:has-text("Apply")']:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    break
+            except Exception as exc:
+                print(f"[apply-engine] Comeet: apply button {sel}: {exc}")
+        frame, waited = None, 0
+        while frame is None and waited < 15_000:
+            frame = next((f for f in page.frames if "/apply?token" in (f.url or "")), None)
+            if frame is None:
+                page.wait_for_timeout(500)
+                waited += 500
+        if frame is None:
+            result["error"] = "Comeet: the application form did not open"
+            return result
+        try:
+            frame.wait_for_selector('input[name="firstName"]', timeout=10_000)
+        except Exception as exc:
+            result["error"] = "Comeet: the application form did not load (%s)" % type(exc).__name__
+            return result
+
+        _gh_fill(frame, 'input[name="firstName"]', applicant.get("first_name", ""))
+        _gh_fill(frame, 'input[name="lastName"]', applicant.get("last_name", ""))
+        _gh_fill(frame, 'input[name="email"]', applicant.get("email", ""))
+        _gh_fill(frame, 'input[name="phone"]', applicant.get("phone", ""))
+        # Comeet has no LinkedIn field; "Personal website" is where it goes.
+        _gh_fill(frame, 'input[name="websiteUrl"]', applicant.get("linkedin_url", ""))
+        if cv_path:
+            try:
+                frame.set_input_files('input[name="cv"]', cv_path)
+            except Exception as exc:
+                result["error"] = f"Comeet: could not attach the CV: {exc}"
+                return result
+        frame.click('button:has-text("SUBMIT APPLICATION")', timeout=5_000)
+
+        # Comeet-specific verdict. _verify_submission would call a page without
+        # a visible error and without a <form> "submitted"; here success needs
+        # an actual confirmation, anywhere on the page or in the frame.
+        deadline = 15_000
+        while deadline > 0:
+            texts = []
+            for f in [frame, page]:
+                try:
+                    texts.append((f.evaluate("document.body.innerText") or "").lower())
+                except Exception as exc:   # the frame can navigate away on success
+                    print(f"[apply-engine] Comeet: frame text unavailable ({type(exc).__name__})")
+                    texts.append("")
+            joined = " ".join(texts)
+            if any(p in joined for p in _CONFIRMATION_PHRASES):
+                return {"success": True, "status": "confirmed",
+                        "confirmation_text": joined[:500], "error": ""}
+            page.wait_for_timeout(1_000)
+            deadline -= 1_000
+        errs = []
+        try:
+            for e in frame.query_selector_all('[aria-invalid="true"], [class*="error"], [role="alert"]')[:6]:
+                t = (e.inner_text() or "").strip()
+                if t and len(t) < 140:
+                    errs.append(t)
+            for e in frame.query_selector_all("input[required]"):
+                if not (e.input_value() or "").strip() and e.get_attribute("type") != "file":
+                    errs.append("%s is empty" % (e.get_attribute("aria-label") or e.get_attribute("name")))
+        except Exception as exc:
+            print(f"[apply-engine] Comeet: reading the form after submit: {exc}")
+        result["error"] = ("Comeet: submit blocked: " + "; ".join(dict.fromkeys(errs))) if errs \
+            else "Comeet: no confirmation after submit - needs manual review"
+        return result
+    except Exception as e:
+        result["error"] = f"Comeet handler error: {e}"
+        return result
+
 
 def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
     """Handle Lever application forms with known structure."""
@@ -1559,6 +1670,13 @@ def submit_application(
             if _is_greenhouse(actual_url):
                 print(f"[apply-engine] Detected Greenhouse ATS")
                 res = _apply_greenhouse(page, applicant, cv_path)
+                browser.close()
+                res["resolved_url"] = actual_url
+                return _add_failure_type(res)
+
+            if _is_comeet(actual_url):
+                print(f"[apply-engine] Detected Comeet ATS")
+                res = _apply_comeet(page, applicant, cv_path)
                 browser.close()
                 res["resolved_url"] = actual_url
                 return _add_failure_type(res)

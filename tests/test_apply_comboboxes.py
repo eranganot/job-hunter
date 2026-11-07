@@ -57,3 +57,69 @@ def test_an_answer_picks_the_option_not_typed_text(page):
 def test_linkedin_is_found_by_its_label(page):
     assert ae._fill_by_label(page, ["linkedin"], "https://www.linkedin.com/in/x/")
     assert page.input_value("#question_1") == "https://www.linkedin.com/in/x/"
+
+
+# ── Comeet: the form lives in an iframe opened by "APPLY FOR THIS JOB" ──────
+
+POSTING = """<!doctype html><html><body><h1>Head of Product</h1>
+<a href="#" id="apply" onclick="document.getElementById('f').src='https://www.comeet.co/jobs/1.2/3.4/apply?token=t';return false">APPLY FOR THIS JOB</a>
+<iframe id="f" style="width:600px;height:500px"></iframe></body></html>"""
+
+FORM = """<!doctype html><html><body>
+<input name="firstName" required aria-label="First name"><input name="lastName" required aria-label="Last name">
+<input name="email" type="email" required aria-label="Email"><input name="phone" type="tel" required aria-label="Phone">
+<input name="cv" id="cv" type="file" required style="display:none"><input name="websiteUrl" type="url">
+<button onclick="%s">SUBMIT APPLICATION</button><div id="out"></div>
+<script>window.sent = null;</script></body></html>"""
+
+
+def _comeet_run(on_submit):
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(executable_path=CHROME, headless=True, args=["--no-sandbox"])
+        ctx = b.new_context()
+        ctx.route("https://www.comeet.com/**", lambda r: r.fulfill(status=200, content_type="text/html", body=POSTING))
+        ctx.route("https://www.comeet.co/**", lambda r: r.fulfill(status=200, content_type="text/html",
+                                                                  body=FORM % on_submit))
+        page = ctx.new_page()
+        page.goto("https://www.comeet.com/jobs/acme/1.2/head-of-product/3.4")
+        res = ae._apply_comeet(page, {"first_name": "Eran", "last_name": "Ganot", "email": "e@x.test",
+                                      "phone": ae.intl_phone("054-6912084"),
+                                      "linkedin_url": "https://www.linkedin.com/in/x/"}, None)
+        frame = next(f for f in page.frames if "/apply?token" in f.url)
+        values = {n: frame.input_value('input[name="%s"]' % n)
+                  for n in ("firstName", "lastName", "email", "phone", "websiteUrl")}
+        b.close()
+    return res, values
+
+
+def test_comeet_fills_the_iframe_form_and_needs_a_real_confirmation():
+    res, values = _comeet_run("document.getElementById('out').innerText='Thank you for applying!'")
+    assert res["status"] == "confirmed", res
+    assert values == {"firstName": "Eran", "lastName": "Ganot", "email": "e@x.test",
+                      "phone": "+972 546912084", "websiteUrl": "https://www.linkedin.com/in/x/"}
+
+
+def test_comeet_without_a_confirmation_is_not_counted_as_submitted():
+    res, _ = _comeet_run("void 0")      # the button does nothing visible
+    assert res["status"] == "failed" and "no confirmation" in res["error"], res
+
+
+def test_local_israeli_numbers_become_international():
+    assert ae.intl_phone("054-6912084") == "+972 546912084"
+    assert ae.intl_phone("+44 20 7946 0000") == "+44 20 7946 0000"
+    assert ae.intl_phone("0044 20 7946 0000") == "+442079460000"
+    assert ae.intl_phone("") == ""
+    assert ae._is_comeet("https://www.comeet.com/jobs/cyera/17.008/head-of-product-security/7D.379")
+    assert not ae._is_comeet("https://boards.greenhouse.io/x/jobs/1")
+
+
+def test_hidden_error_templates_are_not_reported_as_the_reason(page):
+    """Lever keeps 'File exceeds the maximum upload size of 100MB' hidden in
+    every form; it was reported as why each submit failed."""
+    page.set_content('<form><input name="x"><div class="error-message" style="display:none">'
+                     'File exceeds the maximum upload size of 100MB.</div>'
+                     '<div class="error" >Phone is required</div></form>')
+    res = ae._verify_submission(page)
+    assert res["status"] == "failed"
+    assert "Phone is required" in res["error"] and "100MB" not in res["error"]
