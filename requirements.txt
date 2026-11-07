@@ -44,4 +44,4 @@ python-docx==1.2.0
 
 # Scheduler clock (app.israel_now): zoneinfo needs an IANA database and a slim
 # image is not guaranteed to ship one; this is the fallback zoneinfo uses.
-tzdata==2025.2
+tzdata==2026.6
