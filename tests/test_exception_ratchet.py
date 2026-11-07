@@ -23,7 +23,7 @@ LOGGY = ("print", "log", "warning", "error", "exception", "capture", "info", "de
 
 BASELINE = {
     "app.py": 38,
-    "apply_engine.py": 28,
+    "apply_engine.py": 27,
     "db.py": 10,
     "dbdriver.py": 5,
     "ingestion/models.py": 4,

@@ -4201,7 +4201,7 @@ class Handler(BaseHTTPRequestHandler):
                 _sample = 25
             _llm = (qs.get("llm", ["0"])[0] or "0").strip() in ("1", "true", "yes")
             report = _links.link_report(database.get_db, None if _scope == "all" else user["id"],
-                                        sample=_sample, use_llm=_llm)
+                                        sample=_sample, use_llm=_llm, check_reach=True)
             self.send_json(report)
             return
 
