@@ -387,6 +387,35 @@ def _tailored_cv_row(user_id, job_id):
     return out
 
 
+def _tailored_cv_checked(user_id, job_id, user):
+    """The stored tailored CV, with every CV role guaranteed (tailor.restore_roles)
+    - also for drafts saved before that check existed (Eran still saw no DAZN
+    on one, 2026-11-08). A draft the user edited is left as they made it.
+    A repaired draft is saved back. No model call."""
+    got = _tailored_cv_row(user_id, job_id)
+    if not got or got.get("edited"):
+        return got
+    try:
+        import tailor as _tl
+        cv_text, _n, _c = _tailor_inputs(user_id, user)
+        roles = _tl.cv_roles(cv_text)
+        if roles and _tl.missing_roles(got["cv"], roles):
+            got.setdefault("flags", [])
+            _tl.restore_roles(got, roles)
+            c = database.get_db()
+            try:
+                c.execute("UPDATE tailored_cvs SET content=? WHERE user_id=? AND job_id=?",
+                          (json.dumps({"cv": got["cv"], "removed": got.get("removed", []),
+                                       "flags": got["flags"]}), user_id, job_id))
+                c.commit()
+            finally:
+                c.close()
+            print(f"[tailor] user {user_id} job {job_id}: restored roles missing from a saved draft")
+    except Exception as exc:
+        print(f"[tailor] WARNING role check on a saved draft failed: {exc}")
+    return got
+
+
 def _clean_cv(cv) -> dict:
     """The user's edited CV, shape-checked and size-capped. Not fact-checked:
     the user is the author of their own edits."""
@@ -411,7 +440,12 @@ def _cv_for_apply(user_id, job_id, default_path):
     if job_id is None:
         return default_path
     try:
-        got = _tailored_cv_row(user_id, job_id)
+        c0 = database.get_db()
+        try:
+            u0 = c0.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        finally:
+            c0.close()
+        got = _tailored_cv_checked(user_id, job_id, dict(u0) if u0 else {})
         if not got or got.get("use") != "tailored":
             return default_path
         import tailor as _tl
@@ -4303,7 +4337,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 return
             _job_id = int(_tm.group(1))
-            got = _tailored_cv_row(user["id"], _job_id)
+            got = _tailored_cv_checked(user["id"], _job_id, user)
             if not got:
                 self.send_json({"error": "No tailored CV for this job yet"}, 404)
                 return
@@ -6179,7 +6213,9 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[tailor] user {user_id} job {job_id}: {gen_err}")
                 self.send_json({"error": str(gen_err)[:300]}, 502)
                 return
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # UTC, explicitly: the page shows it in the viewer's local time.
+            from datetime import timezone as _tzu
+            now = datetime.now(_tzu.utc).strftime("%Y-%m-%d %H:%M:%S")
             c2 = database.get_db()
             try:
                 entitlements.try_consume(c2, user, "tailored_cv")

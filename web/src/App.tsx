@@ -1625,6 +1625,12 @@ function StatusPill({ s }: { s: string }) {
 /* Step 14: the user's CV rewritten for this job. The server checks the
    model's version against the original CV and removes any line with a number,
    employer or skill the CV doesn't have; what it removed is shown here. */
+/** "8 Nov, 16:52" in the viewer's time, from the server's UTC 'YYYY-MM-DD HH:MM:SS'. */
+function fmtWhen(s: string): string {
+  const d = new Date((s || "").replace(" ", "T") + "Z");
+  return isNaN(d.getTime()) ? s : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: boolean }) {
   const lim = planLimit(me, "tailored_cv");
   const use = me?.usage?.tailored_cv;
@@ -1675,6 +1681,7 @@ function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: bool
           {cv && <a href={`/api/jobs/${job.id}/tailored-cv.docx`} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 inline-flex items-center gap-1"><Download className="w-3.5 h-3.5" />Download (Word)</a>}
         </div>
       )}
+      {res?.created_at && !draft && <p className="text-[11px] text-gray-400 mt-2">Tailored {fmtWhen(res.created_at)}{res.edited ? " \u00b7 edited by you" : ""}</p>}
       {msg && <p className="text-xs text-gray-300 mt-2">{msg}</p>}
       {draft && (
         <div className="mt-2 space-y-2">
@@ -1787,7 +1794,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
-      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] overflow-y-auto no-scrollbar border border-gray-700">
+      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-2xl lg:max-w-5xl w-full max-h-[88vh] sm:max-h-[94vh] overflow-y-auto no-scrollbar border border-gray-700">
         <div className="sticky top-0 bg-gray-900 border-b border-gray-700 p-5 flex items-center justify-between z-10"><h2 className="text-lg font-bold text-white">Job Details</h2><button onClick={onClose} className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button></div>
         <div className="p-5 space-y-5">
           <div className="flex items-start gap-4"><div className="w-16 h-16 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-2xl flex items-center justify-center shrink-0"><Building2 className="w-8 h-8 text-indigo-400" /></div><div className="flex-1 min-w-0"><h3 className="text-xl font-bold text-white mb-0.5">{job.title}</h3><p className="text-lg text-indigo-400 font-semibold mb-1">{job.company}</p><div className="flex items-center gap-4 text-gray-400 flex-wrap">{job.location && <div className="flex items-center gap-1"><MapPin className="w-4 h-4" /><span className="text-sm">{job.location}</span></div>}{job.timeAgo && <div className="flex items-center gap-1"><Clock className="w-4 h-4" /><span className="text-sm">{job.timeAgo}</span></div>}</div></div></div>
@@ -1845,7 +1852,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
               <h4 className="font-semibold text-white text-sm mb-1">Cover letter</h4>
               <p className="text-xs text-gray-400 mb-2">Written by the model from your CV and this posting. Read it before it goes anywhere.
                 {clUse && clUse.limit !== null && <> {Math.max(0, clUse.limit - clUse.used)} of {clUse.limit} left this month.</>}</p>
-              <textarea value={letter} onChange={(e) => setLetter(e.target.value)} rows={8}
+              <textarea value={letter} onChange={(e) => setLetter(e.target.value)} rows={8} style={{ minHeight: "12rem" }}
                         placeholder="Nothing yet — generate a draft, or write your own."
                         className="w-full px-3 py-2 border border-gray-500 rounded-xl bg-gray-900 text-white text-sm leading-relaxed" />
               <div className="flex gap-2 mt-2">

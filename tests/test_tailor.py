@@ -203,3 +203,32 @@ def test_an_employer_with_the_models_extra_words_is_kept_under_the_cvs_name():
     res = tailor.tailor(CV2, _job2(), llm=lambda p: out)
     assert [r["company"] for r in res["cv"]["experience"]] == ["NOVA TLV, Israel", "Orbit Games"]
     assert any(r["what"] == "role" and "Google" in r["text"] for r in res["removed"])
+
+
+def test_a_saved_draft_without_a_cv_role_gets_it_back_when_opened(stack, users, monkeypatch):
+    """Eran, 2026-11-08: still no DAZN - on a draft saved before the role check."""
+    import app as A
+    monkeypatch.setattr(A, "_tailor_inputs", lambda uid, user: (CV2, "Dana", ["d@example.test"]))
+    uid = _user_id(stack["db"], "alice@example.test")
+    job_id = _new_job(stack["db"], uid, title="Chief Product Officer", company="OTI")
+    old = {"cv": {"headline": "", "summary": "", "skills": [], "education": [], "other": [], "changes": [],
+                  "experience": [{"title": "Product Group Lead", "company": "ORBIT GAMES TLV, Israel",
+                                  "dates": "2023-2025", "bullets": []}]}, "removed": [], "flags": []}
+    conn = stack["db"].get_db()
+    conn.execute("INSERT INTO tailored_cvs (user_id, job_id, content, created_at) VALUES (?,?,?,?)",
+                 (uid, job_id, json.dumps(old), "2026-11-08 14:50:00"))
+    conn.commit()
+    conn.close()
+    st, _l, body = users["a"].get("/api/jobs/%d/tailored-cv" % job_id)
+    got = json.loads(body)
+    assert st == 200 and [r["company"] for r in got["cv"]["experience"]] == ["NOVA TLV, Israel", "ORBIT GAMES TLV, Israel"]
+    assert any("back" in f for f in got["flags"])
+    assert "NOVA" in A._tailored_cv_row(uid, job_id)["cv"]["experience"][0]["company"]   # saved back
+    # A draft the user edited is theirs: not touched.
+    edited = {**old, "cv": {**old["cv"], "experience": old["cv"]["experience"]}}
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE tailored_cvs SET content=?, edited=1 WHERE user_id=? AND job_id=?", (json.dumps(edited), uid, job_id))
+    conn.commit()
+    conn.close()
+    st, _l, body = users["a"].get("/api/jobs/%d/tailored-cv" % job_id)
+    assert [r["company"] for r in json.loads(body)["cv"]["experience"]] == ["ORBIT GAMES TLV, Israel"]
