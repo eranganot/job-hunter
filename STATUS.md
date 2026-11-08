@@ -81,6 +81,16 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Step 16a: board-first search, and the search's source labels made true.**
+  - **Board-first** (`boardsearch.py`, called in the search after the fixed board lists):
+    - **Which boards:** every board behind a direct link stored for any user (Comeet, Greenhouse, Lever, Ashby, SmartRecruiters) plus every board the careers-map found (`company_boards`); Workday is left to `workday.py`.
+    - **Filtered before scoring:** the postings are filtered by the user's titles (the search's own 4-pass `_title_match`) and an Israel location *before* scoring, so hundreds of boards cost HTTP requests, not AI calls.
+    - **Limits:** each board is cached 3 h across users; a board that didn't answer isn't cached as empty; a 75 s budget, with boards not reached counted. Results carry `source = board-<ats>` and a `boards` line in `/api/health` sources.
+    - **Measured live:** 138 real boards answered in 4.7 s, 3,866 postings → 39 Israeli product roles, every one a direct link.
+  - **Found on the way, fixed:** the scorer returns jobs without their source, and "greenhouse/lever" was stamped on all of them. 1,076 of 1,378 open jobs (11-07 report), LinkedIn and aggregators included, carried that label, so the by-source split measured nothing. `_keep_source` restores each job's source by URL after scoring, which Step 16's measurement needs.
+  - **Also found, not changed:** the fixed board lists send every posting to the scorer unfiltered, capped at the first 300 by whichever board answers first. Board-first jobs skip URLs those lists already returned.
+  - **Resolve-before-show:** already effectively in place. The link pass is queued the moment a search finishes, as its own worker run; holding jobs back until it finishes would delay every search for a few points of links. Board-first jobs arrive direct anyway.
+  - **Next (16b):** a week of production data from the link report's by-source split (now true), then Eran sets the target and the LinkedIn-only rule.
 - 2026-11-08 — **Step 1c, careers-map: the job board a company's own careers page embeds, found once and kept.**
   - **Measured first,** on the 30 jobs of Eran's 11-07 search trial, where the free lookups found 0 and web search 2:
     - guessing the company's site from its name (full name first, then a shortened form) and reading `/careers`, `careers.` and `/jobs` found the right board for 3: Check Point → SmartRecruiters, FrontStory → Comeet, Echo → Ashby;
