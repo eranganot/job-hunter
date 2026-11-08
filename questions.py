@@ -204,6 +204,24 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
                     continue
             except Exception as exc:
                 print(f"[questions] saved answer did not fit {q['label'][:60]!r}: {exc}")
+        # A LinkedIn question asked as a custom text question ("LinkedIn URL *",
+        # Cloudinary on Lever, 2026-11-08) gets the profile's LinkedIn - it
+        # used to go to the model and, in a rehearsal, held the application.
+        # The same for GitHub, from a github.com address in the applicant's
+        # standing instructions (Eran, 2026-11-08).
+        _profile_link = None
+        if q.get("type") in ("text", "url"):
+            if re.search(r"linked\s*in", q.get("label") or "", re.I):
+                _profile_link = (applicant or {}).get("linkedin_url")
+            elif re.search(r"git\s*hub", q.get("label") or "", re.I):
+                _profile_link = (applicant or {}).get("github_url")
+        if _profile_link:
+            try:
+                if _fill(frame, q, _profile_link):
+                    filled += 1
+                    continue
+            except Exception as exc:
+                print(f"[questions] profile link {q['label'][:60]!r}: {exc}")
         # A required acknowledgement whose only option is "Yes" ("I read and
         # understood the privacy policy*", Payoneer 2026-11-08) is consent to
         # apply at all - filled without asking anyone.

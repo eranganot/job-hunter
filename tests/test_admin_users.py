@@ -474,10 +474,11 @@ def test_standing_instructions_are_kept_on_the_account_and_reach_the_applicant(s
     monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
     uid = _user_id(stack["db"], "admin@example.test")
     assert "standing_instructions" not in A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
-    notes = "Willing to relocate: yes.\nCurrent salary: do not answer."
+    notes = "Willing to relocate: yes.\nCurrent salary: do not answer.\nGitHub: https://github.com/example-user"
     st, _l, body = users["admin"].post_json("/api/application-answers", {"standing_notes": "  " + notes + " "})
     assert st == 200 and json.loads(body)["standing_notes"] == notes
     assert A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")["standing_instructions"] == notes
+    assert A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")["github_url"] == "https://github.com/example-user"
     # Saving the salary section later leaves the instructions alone.
     users["admin"].post_json("/api/application-answers", {"notice_period_days": 30, "salary_expectation_min": None,
                                                           "salary_expectation_currency": "ILS"})

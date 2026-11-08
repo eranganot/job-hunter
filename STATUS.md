@@ -81,6 +81,16 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Lever hCaptcha investigated: NOT determinable from the workspace. Three proven Lever defects fixed; GitHub address filled from the instructions.**
+  - **Rehearsal** (Cloudinary "Head of MIS", writes aborted except hCaptcha's own): with every question answered, Submit sent no application POST in 20–80 s.
+  - **Why hCaptcha can't be judged here:** a direct probe shows the hCaptcha widget's challenge frame reading "Please try again ⚠️" *before* any click, as well as after. hCaptcha does not initialise properly in this workspace, so nothing here says whether it blocks production's browser. I first read that text as "Submit opened a challenge" and wrote a detector on it; the before/after comparison disproved it, and the detector was removed before shipping.
+  - **Settled only by the first real Lever submit from production.** To make that attempt informative, a failed Lever submit records the widget's text in the failure detail ("[anti-bot widget: …]", worded so it is not classified as captcha/manual).
+  - **Proven and fixed:**
+    1. **"Current location"** (required on many Lever forms) was never filled: it is an autocomplete whose hidden `selectedLocation` stays empty when you only type. `_lever_location` types the applicant's city and picks Lever's first suggestion ("Tel Aviv, ISR"; verified live).
+    2. **Submit clicked `button[type=submit]` first,** which resolves to Lever's hidden `#hcaptchaSubmitBtn`: a 5 s timeout per application before falling through to the visible button (Playwright log). The visible button is now first.
+    3. **A LinkedIn link asked as a custom question** ("LinkedIn URL ✱", Cloudinary) went to the model; it is now filled from the profile.
+  - **GitHub (Eran: "if the application asks for my GH url - give it to them"):** a `github.com/...` address in the Application instructions becomes `applicant.github_url`. It fills Lever's `urls[GitHub]`, Greenhouse's GitHub field by label, and any "GitHub" question, with no model call. The address lives in his instructions, never in code.
+  - **Rehearsal harness:** `STUB_ANSWER_ALL=1` answers every question so a rehearsal reaches Submit.
 - 2026-11-08 — **Step 16a: board-first search, and the search's source labels made true.**
   - **Board-first** (`boardsearch.py`, called in the search after the fixed board lists):
     - **Which boards:** every board behind a direct link stored for any user (Comeet, Greenhouse, Lever, Ashby, SmartRecruiters) plus every board the careers-map found (`company_boards`); Workday is left to `workday.py`.

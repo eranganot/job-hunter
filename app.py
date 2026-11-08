@@ -3562,6 +3562,12 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     out["notice_period"] = "%d days" % _sa["notice_period_days"]
     if _sa["standing_notes"].strip():
         out["standing_instructions"] = _sa["standing_notes"].strip()
+        # A GitHub address in the instructions fills GitHub fields directly
+        # (Eran, 2026-11-08: "if the application asks for my GH url - give it
+        # to them"); kept in his instructions, never in the code.
+        _gh = re.search(r"https?://(?:www\.)?github\.com/[A-Za-z0-9_.-]+", out["standing_instructions"])
+        if _gh:
+            out["github_url"] = _gh.group(0)
     if _sa["salary_expectation_min"]:
         out["salary_expectation"] = "at least %s %s gross per month" % (
             format(_sa["salary_expectation_min"], ","), _sa["salary_expectation_currency"])

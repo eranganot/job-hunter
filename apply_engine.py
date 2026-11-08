@@ -751,6 +751,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
             print(f"[apply-engine] GH: country picker: {exc}")
         _gh_fill(form, 'input[name*="linkedin"], input[autocomplete*="url"]', applicant.get('linkedin_url', ''))
         _fill_by_label(form, ["linkedin"], applicant.get('linkedin_url', ''))
+        _fill_by_label(form, ["github"], applicant.get('github_url', ''))
         _gh_fill(form, 'input[name*="location"], input[name*="city"]', applicant.get('location', ''))
 
         # Upload CV. On the embed this must come after the form has taken over
@@ -881,6 +882,57 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
         return result
 
 
+def _lever_location(page, applicant: dict) -> bool:
+    """Lever's "Current location" (required on many forms) is an autocomplete:
+    typed text alone leaves its hidden selectedLocation empty and the form
+    unsendable. Type the applicant's city and pick Lever's first suggestion.
+    Rehearsal 2026-11-08 (Cloudinary): the field stayed empty."""
+    try:
+        box = page.query_selector("#location-input")
+        if not box or not box.is_visible() or (box.input_value() or "").strip():
+            return False
+        city = ((applicant or {}).get("location") or "").split(",")[0].strip()
+        if not city:
+            return False
+        page.locator("#location-input").press_sequentially(city, delay=50)
+        page.wait_for_timeout(1500)
+        opt = page.locator(".dropdown-location, .location-dropdown li, [class*=dropdown] [class*=location]").first
+        if opt.count():
+            opt.click()
+        else:
+            _keyboard(page).press("ArrowDown")
+            _keyboard(page).press("Enter")
+        page.wait_for_timeout(400)
+        chosen = page.evaluate("() => (document.querySelector('input[name=selectedLocation]') || {}).value || ''")
+        print(f"[apply-engine] Lever: location {'set' if chosen else 'NOT set'} from {city!r}")
+        return bool(chosen)
+    except Exception as exc:
+        print(f"[apply-engine] Lever: location field: {type(exc).__name__}: {exc}")
+        return False
+
+
+def _antibot_state(page) -> str:
+    """What the page's anti-bot widget frames show, for the failure detail.
+    Rehearsal 2026-11-08 (Cloudinary on Lever): Submit sent nothing, but the
+    widget read "Please try again" BEFORE the click too, so that text is its
+    idle state and proves nothing - the first production failure, with this
+    recorded, is what will say whether the check blocks real submits.
+    Worded without the word that makes the failure "manual" (classify_failure)."""
+    try:
+        seen = []
+        for fr in page.frames:
+            if "hcaptcha" in (fr.url or "") and "frame=challenge" in (fr.url or ""):
+                try:
+                    t = fr.evaluate("() => document.body ? document.body.innerText.trim() : ''")
+                except Exception as exc:
+                    t = "unreadable (%s)" % type(exc).__name__
+                seen.append(re.sub(r"\s+", " ", t)[:60])
+        return "; ".join(dict.fromkeys(seen))
+    except Exception as exc:
+        print(f"[apply-engine] anti-bot state: {type(exc).__name__}")
+        return ""
+
+
 def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
     """Handle Lever application forms with known structure."""
     result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
@@ -903,6 +955,8 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         _gh_fill(page, 'input[name="phone"]', applicant.get('phone', ''))
         _gh_fill(page, 'input[name="org"], input[name*="company"]', applicant.get('current_company', ''))
         _gh_fill(page, 'input[name*="linkedin"], input[name*="urls[LinkedIn]"]', applicant.get('linkedin_url', ''))
+        _gh_fill(page, 'input[name="urls[GitHub]"]', applicant.get('github_url', ''))
+        _lever_location(page, applicant)
 
         # Upload CV
         if cv_path:
@@ -918,10 +972,14 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         if qa["unsure"]:
             return _needs_answers(qa["unsure"])
 
-        # Submit
+        # Submit: the VISIBLE button first. Lever pages carry a hidden
+        # button#hcaptchaSubmitBtn type=submit that hCaptcha presses itself
+        # once its check passes; trying it first cost 5 s per application.
+        lever_submit = ['#btn-submit:visible', 'button:has-text("Submit application"):visible',
+                        'button[type="submit"]:visible', 'button:has-text("Submit")',
+                        'a:has-text("Submit")', '.postings-btn']
         submitted = False
-        for sel in ['button[type="submit"]', 'button:has-text("Submit")',
-                    'a:has-text("Submit")', '.postings-btn']:
+        for sel in lever_submit:
             try:
                 page.click(sel, timeout=5_000)
                 submitted = True
@@ -933,9 +991,12 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
             result["error"] = "Lever: could not find submit button"
             return result
 
-        return _finalize_after_submit(page, applicant,
-            ['button[type="submit"]', 'button:has-text("Submit")',
-             'a:has-text("Submit")', '.postings-btn'])
+        res = _finalize_after_submit(page, applicant, lever_submit)
+        if not res.get("success"):
+            state = _antibot_state(page)
+            if state:
+                res["error"] = ((res.get("error") or "") + " [anti-bot widget: %s]" % state)[:480]
+        return res
     except Exception as e:
         result["error"] = f"Lever handler error: {e}"
         return result
