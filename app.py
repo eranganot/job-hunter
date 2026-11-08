@@ -19,6 +19,7 @@ import socket
 import threading
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -881,6 +882,49 @@ class _SourceTally:
             print(f"[search] WARNING could not record {self.name} health: {e}")
 
 
+def _json_array_from_text(text):
+    """The first JSON array in a model's reply, or [] if there is none.
+
+    Sentry 2026-11-08 ("Web search error ... Expecting value: line 1 column 2"):
+    callers sliced from text.rfind('[') to text.rfind(']'), so any bracket after
+    the array's start - "[Hybrid]" in the last description, or a trailing
+    "see [source]" note - made the slice "[Hybrid]" and the whole reply was
+    thrown away. This decodes from each '[' in order and keeps the first that
+    is a real JSON array."""
+    dec = json.JSONDecoder()
+    i = text.find("[")
+    while i >= 0:
+        try:
+            val, _ = dec.raw_decode(text, i)
+            if isinstance(val, list):
+                return val
+        except ValueError:
+            pass
+        i = text.find("[", i + 1)
+    return []
+
+
+_LI_RETRY_WAITS = (2, 5)   # seconds; LinkedIn's guest search throttles at random
+
+
+def _linkedin_fetch(url, timeout=12, waits=_LI_RETRY_WAITS, _sleep=time.sleep):
+    """GET a LinkedIn guest-search page, retrying HTTP 429.
+
+    Sentry 2026-11-08 ("linkedin: 1 of 5 requests failed: HTTP 429"). Replayed
+    from the workspace: 8 of 15 requests got a 429 on the first try with no
+    Retry-After, spacing them 2 s apart did not help, and every one answered
+    200 after one retry at 2 s or a second at 5 s (8 of 8)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+    for attempt in range(len(waits) + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 or attempt == len(waits):
+                raise
+            _sleep(waits[attempt])
+
+
 def _plan_ai_cap(user_id):
     """gemini.py asks this for a user's daily AI-call cap from their plan."""
     conn = database.get_db()
@@ -1389,9 +1433,7 @@ def run_job_search(user_id: int):
                             _li_q = _urp2.quote(_li_kw)
                             _li_l = _urp2.quote("Israel")
                             _li_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={_li_q}&location={_li_l}&start=0"
-                            _li_req = _ur2.Request(_li_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
-                            with _ur2.urlopen(_li_req, timeout=12) as _li_resp:
-                                _li_html = _li_resp.read().decode('utf-8', errors='replace')
+                            _li_html = _linkedin_fetch(_li_url)
                             import re as _re_li
                             _li_cards = _re_li.findall(r'<a[^>]+class="base-card__full-link[^"]*"[^>]+href="([^"?]+)', _li_html)
                             _li_titles = _re_li.findall(r'<h3[^>]+class="base-search-card__title"[^>]*>\s*([^<]+?)\s*</h3>', _li_html)
@@ -1804,10 +1846,8 @@ def run_job_search(user_id: int):
                                           f"blockReason={(_ws_data.get('promptFeedback') or {}).get('blockReason') or 'none'})")
                                     return []
                                 _ws_text = (_ws_parts[0].get('text') or '').strip()
-                                _ws_si = _ws_text.rfind('['); _ws_ei = _ws_text.rfind(']')
-                                if _ws_si >= 0 and _ws_ei > _ws_si:
-                                    return [j for j in _js2.loads(_ws_text[_ws_si:_ws_ei+1])
-                                            if isinstance(j, dict) and j.get('url')]
+                                return [j for j in _json_array_from_text(_ws_text)
+                                        if isinstance(j, dict) and j.get('url')]
                             except Exception as _wse:
                                 print(f"[search] Web search error for '{query_hint_}': {_wse}")
                             return []
@@ -6080,9 +6120,8 @@ class Handler(BaseHTTPRequestHandler):
                                                    user_id=int(target_uid), key=GEMINI_KEY_RS,
                                                    timeout=90)
                         _text_rs = _data_rs['candidates'][0]['content']['parts'][0]['text'].strip()
-                        si = _text_rs.rfind('['); ei = _text_rs.rfind(']')
-                        if si >= 0 and ei > si:
-                            scored_rs = _js_rs.loads(_text_rs[si:ei+1])
+                        scored_rs = _json_array_from_text(_text_rs)   # same rfind trap as web search
+                        if scored_rs:
                             url_to_score = {j.get('url', ''): j for j in scored_rs if isinstance(j, dict)}
                             conn2 = database.get_db()
                             try:
