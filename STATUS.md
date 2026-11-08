@@ -81,6 +81,23 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Notifications now report what really happened; Admin → Notification check proves each channel live.** This comes before the security-code flow for users, which depends on notifications (Eran: "make sure that the notifications are live").
+  - **Found by reading, then confirmed by tests** (not by a production failure):
+    - `send_telegram` and `send_whatsapp` caught every error and printed it, so `deliver_notification` and the Settings test logged **"Sent OK"** for messages Telegram or Twilio refused.
+    - `send_web_push_to_user` returned None alike for missing keys, a missing library, no device and every failed send. Push outcomes were never logged.
+    - `/api/push/test` answered success regardless.
+    - Production health said nothing about notifications.
+  - **Why silent:** each sender swallowed its own failure, and the callers logged success after the call returned.
+  - **Fix:**
+    - Telegram and WhatsApp raise on refusal.
+    - Push returns `{configured, devices, sent, failed, errors}`, and push outcomes are logged (`[PUSH] Sent OK / FAILED`).
+    - `deliver_notification` returns a per-channel result.
+    - `/api/push/test` reports a real outcome (502 when nothing was sent).
+    - Health carries `push: {keys, library}`.
+    - Admin → **Notification check**: devices, channels, the last 10 logged outcomes, and "Send me a test on every channel" with each channel's real result.
+  - **Known limit:** email only reaches Eran's own address until a domain is verified in Resend (unchanged, shown in the check).
+  - **Tests:** a refused Telegram is logged FAILED and never "Sent OK"; push failure is reported; missing keys are reported; the routes.
+  - **Also fixed, a test flake from #57:** `test_a_supervised_apply_waits_for_the_emailed_security_code` timed out about 1 run in 9. The fixture job is not on a company site, so the live route first ran the real career-page lookup over the network, past the 10 s client timeout. The lookup is now stubbed; 0 failures in 25 runs.
 - 2026-11-08 — **Greenhouse's emailed security code: the supervised apply now waits for it and you paste it (Eran chose option A).** Eran's third Payoneer submit ended "No confirmation after submit (form still present)", and he received an email with a code at the same moment.
   - **Cause:** Greenhouse's anti-bot step. After Submit it greys the button, emails an 8-character code (`no-reply@us.greenhouse-mail.io`, "Security code for your application to …") and shows one box per character. **The application is not sent until the code is entered and the form submitted again.** The engine saw a form still present and called it a failure.
   - **How solid this is:** the step is documented by several automation projects (dkkyai/job-fit-apply-ai #167, markshield07/AI-Agent-Jobs- #30). The email arriving at submit time matches it. Our page after Submit was not captured (no screenshot in production), so the box markup is built from those descriptions plus a fixture, not from Payoneer's page. The first real run is the live test.

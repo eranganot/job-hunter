@@ -188,20 +188,28 @@ auth.set_admin_email(ADMIN_EMAIL)
 # ── Notifications ─────────────────────────────────────────────────────────────
 
 def send_telegram(token: str, chat_id: str, message: str):
+    """Send a Telegram message; RAISES when Telegram does not accept it.
+
+    It used to catch every error and print it, so deliver_notification and the
+    Settings test logged "Sent OK" for a message Telegram refused (bad token,
+    chat not started) - found 2026-11-08 while proving notifications live
+    before the security-code flow depends on them."""
+    if not (token and chat_id):
+        raise RuntimeError("Telegram bot token or chat id missing")
+    url  = f"https://api.telegram.org/bot{token}/sendMessage"
+    clean = re.sub(r"<[^>]+>", "", message)
+    data  = urllib.parse.urlencode({"chat_id": chat_id, "text": clean}).encode()
+    req   = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
-        url  = f"https://api.telegram.org/bot{token}/sendMessage"
-        clean = re.sub(r"<[^>]+>", "", message)
-        data  = urllib.parse.urlencode({"chat_id": chat_id, "text": clean}).encode()
-        req   = urllib.request.Request(url, data=data, method="POST")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.loads(resp.read())
-            if result.get("ok"):
-                print("[telegram] ✅ Sent")
-            else:
-                print(f"[telegram] ⚠️  {result}")
-    except Exception as e:
-        print(f"[telegram] Error: {e}")
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        raise RuntimeError(f"Telegram refused the message: HTTP {e.code} {detail}")
+    if not result.get("ok"):
+        raise RuntimeError(f"Telegram refused the message: {str(result)[:200]}")
+    print("[telegram] ✅ Sent")
 
 
 def repair_mojibake(s: str) -> str:
@@ -233,9 +241,12 @@ def send_whatsapp(account_sid: str, auth_token: str, to_number: str, message: st
             if result.get("sid"):
                 print(f"[whatsapp] ✅ Sent — {result['sid']}")
             else:
-                print(f"[whatsapp] ⚠️  {result}")
+                raise RuntimeError(f"Twilio did not accept the message: {str(result)[:200]}")
+    except RuntimeError:
+        raise
     except Exception as e:
-        print(f'[whatsapp] Error: {e}' + ((' | Twilio: ' + e.read().decode('utf-8','ignore')) if hasattr(e, 'read') else ''))
+        # Raised, not printed: the callers log the failure (it used to read "Sent OK").
+        raise RuntimeError(f'WhatsApp send failed: {e}' + ((' | Twilio: ' + e.read().decode('utf-8', 'ignore')[:200]) if hasattr(e, 'read') else ''))
 
 
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
@@ -310,57 +321,93 @@ def _log_notification(user_id: int, channel: str, status: str, error_msg: str = 
         pass
 
 
-def deliver_notification(user_id: int, message: str, url_suffix: str = ""):
-    """Look up user notification settings and deliver accordingly."""
+def _notify_status(user_id) -> dict:
+    """What can reach this user: server config, their devices and channels,
+    and the last notification outcomes logged for them."""
+    st = {"push": push_configured(), "email_sender_is_sandbox": RESEND_SANDBOX_FROM in RESEND_FROM,
+          "email_key": bool(RESEND_API_KEY), "devices": [], "channels": [], "recent": []}
+    conn = database.get_db()
+    try:
+        for r in conn.execute("SELECT endpoint, created_date FROM push_subscriptions WHERE user_id=?",
+                              (user_id,)).fetchall():
+            host = urllib.parse.urlparse(r["endpoint"] or "").netloc
+            st["devices"].append({"service": {"fcm.googleapis.com": "Chrome / Android",
+                                              "web.push.apple.com": "Safari / iPhone",
+                                              "updates.push.services.mozilla.com": "Firefox"}.get(host, host),
+                                  "since": r["created_date"]})
+        p = conn.execute("SELECT notification_channel FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
+        st["channels"] = [c.strip() for c in ((p["notification_channel"] if p else "") or "none").split(",")
+                          if c.strip() and c.strip() != "none"]
+        st["recent"] = [{"at": r["created_date"], "detail": r["details"]} for r in conn.execute(
+            "SELECT details, created_date FROM activity_log WHERE user_id=? AND event_type='notification' "
+            "ORDER BY id DESC LIMIT 10", (user_id,)).fetchall()]
+    finally:
+        conn.close()
+    return st
+
+
+def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None) -> dict:
+    """Deliver to every channel the user has; return {channel: "sent" | "FAILED: ..." | ...}.
+    Each outcome is also logged (activity_log, type notification)."""
     message = repair_mojibake(message)
+    results = {}
     conn = database.get_db()
     try:
         p = conn.execute(
             "SELECT * FROM user_profiles WHERE user_id=?", (user_id,)
         ).fetchone()
-        conn.close()
-        if not p:
-            print(f"[notify] No profile found for user {user_id}")
-            return
-        # Web push is the primary channel: it fires on EVERY notification, before
-        # (and independent of) the email/Telegram/WhatsApp channels, which remain as
-        # an optional fallback. So a user with no other channel still gets pushed.
-        try:
-            send_web_push_to_user(user_id, message, url_suffix)
-        except Exception as _pe:
-            print(f"[push] deliver error: {_pe}")
-        # Read straight from user_profiles, so it needs decrypting here too.
-        p = crypto.decrypt_row(p)
-        channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",")]
-        if not channels or channels == ["none"]:
-            print(f"[notify] No notification channels configured for user {user_id}")
-            return
-        dashboard_url = f"{MOBILE_URL}{url_suffix}"
-        msg_with_link = message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
-        for channel in channels:
-            try:
-                if channel == "telegram" and p["telegram_token"] and p["telegram_chat_id"]:
-                    send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
-                    _log_notification(user_id, "telegram", "Sent OK")
-                    print(f"[notify] Telegram sent to user {user_id}")
-                elif channel == "whatsapp" and p["twilio_account_sid"] and p["whatsapp_number"]:
-                    send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
-                                  p["whatsapp_number"], msg_with_link)
-                    _log_notification(user_id, "whatsapp", "Sent OK")
-                    print(f"[notify] WhatsApp sent to user {user_id}")
-                elif channel == "email" and p["email_address"]:
-                    send_email(
-                        to_addr=p["email_address"],
-                        subject="Job Hunter Notification",
-                        body=msg_with_link,
-                    )
-                    _log_notification(user_id, "email", "Sent OK")
-                    print(f"[notify] Email sent to user {user_id}")
-            except Exception as _notif_err:
-                _log_notification(user_id, channel, "FAILED", str(_notif_err))
-                print(f"[notify] Error on {channel}: {_notif_err}")
     finally:
         conn.close()
+    # Web push is the primary channel: it fires on EVERY notification, before
+    # (and independent of) the email/Telegram/WhatsApp channels.
+    try:
+        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url)
+        if pr["sent"]:
+            results["push"] = "sent to %d device(s)" % pr["sent"] + (
+                ", %d failed" % pr["failed"] if pr["failed"] else "")
+            _log_notification(user_id, "push", "Sent OK", results["push"])
+        elif pr["devices"] or not pr["configured"]:
+            results["push"] = "FAILED: " + "; ".join(pr["errors"])[:200]
+            _log_notification(user_id, "push", "FAILED", "; ".join(pr["errors"]))
+        else:
+            results["push"] = "no device has notifications on"
+    except Exception as _pe:
+        results["push"] = f"FAILED: {_pe}"
+        print(f"[push] deliver error: {_pe}")
+    if not p:
+        print(f"[notify] No profile found for user {user_id}")
+        return results
+    p = crypto.decrypt_row(p)
+    channels = [ch.strip() for ch in (p["notification_channel"] or "none").split(",") if ch.strip()]
+    if not channels or channels == ["none"]:
+        return results
+    dashboard_url = f"{MOBILE_URL}{url_suffix}"
+    msg_with_link = message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
+    for channel in channels:
+        try:
+            if channel == "telegram":
+                if not (p["telegram_token"] and p["telegram_chat_id"]):
+                    raise RuntimeError("Telegram is selected but the bot token or chat id is missing")
+                send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
+            elif channel == "whatsapp":
+                if not (p["twilio_account_sid"] and p["whatsapp_number"]):
+                    raise RuntimeError("WhatsApp is selected but the Twilio details are missing")
+                send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
+                              p["whatsapp_number"], msg_with_link)
+            elif channel == "email":
+                if not p["email_address"]:
+                    raise RuntimeError("Email is selected but no address is set")
+                send_email(to_addr=p["email_address"], subject="Job Hunter Notification", body=msg_with_link)
+            else:
+                continue
+            results[channel] = "sent"
+            _log_notification(user_id, channel, "Sent OK")
+            print(f"[notify] {channel} sent to user {user_id}")
+        except Exception as _notif_err:
+            results[channel] = f"FAILED: {_notif_err}"[:240]
+            _log_notification(user_id, channel, "FAILED", str(_notif_err))
+            print(f"[notify] Error on {channel}: {_notif_err}")
+    return results
 
 
 def _push_payload_url():
@@ -374,16 +421,31 @@ def _push_link(url_suffix=""):
     return base
 
 
-def send_web_push_to_user(user_id, message, url_suffix=""):
-    """Best-effort Web Push to a user's registered devices. No-op if VAPID keys
-    or pywebpush are unavailable, so the email/telegram path is never affected."""
+def push_configured() -> dict:
+    """Whether web push can send at all: keys set and pywebpush importable."""
+    try:
+        import pywebpush  # noqa: F401
+        lib = True
+    except Exception as exc:
+        print(f"[push] pywebpush unavailable: {exc}")
+        lib = False
+    return {"keys": bool(VAPID_PUBLIC_KEY and VAPID_PRIVATE_PEM_B64), "library": lib}
+
+
+def send_web_push_to_user(user_id, message, url_suffix="", url=None) -> dict:
+    """Web Push to a user's registered devices. Returns what happened -
+    {configured, devices, sent, failed, errors} - instead of nothing: it used
+    to return None on missing keys, a missing library and every failed send
+    alike, so nobody could tell whether push worked (2026-11-08). Never raises."""
+    out = {"configured": False, "devices": 0, "sent": 0, "failed": 0, "errors": []}
     if not (VAPID_PUBLIC_KEY and VAPID_PRIVATE_PEM_B64):
-        return
+        out["errors"].append("VAPID keys not configured on the server")
+        return out
     try:
         from pywebpush import webpush  # noqa
     except Exception as _imp:
-        print(f"[push] pywebpush unavailable: {_imp}")
-        return
+        out["errors"].append(f"pywebpush unavailable: {_imp}")
+        return out
     import base64 as _b64, os as _os, tempfile as _tf
     try:
         pem = _b64.b64decode(VAPID_PRIVATE_PEM_B64).decode("utf-8")
@@ -391,38 +453,44 @@ def send_web_push_to_user(user_id, message, url_suffix=""):
         with open(key_path, "w") as _kf:
             _kf.write(pem)
     except Exception as _pe:
-        print(f"[push] bad VAPID private key: {_pe}")
-        return
+        out["errors"].append(f"bad VAPID private key: {_pe}")
+        return out
+    out["configured"] = True
     conn = database.get_db()
     try:
         rows = conn.execute(
             "SELECT id, subscription FROM push_subscriptions WHERE user_id=?", (user_id,)
         ).fetchall()
-        conn.close()
-        if not rows:
-            return
-        body = (message or "").strip().split("\n")[0][:160]
-        payload = json.dumps({"title": "Job Hunter", "body": body, "url": _push_link(url_suffix)})
-        for r in rows:
-            try:
-                sub = json.loads(r["subscription"])
-                webpush(subscription_info=sub, data=payload,
-                        vapid_private_key=key_path, vapid_claims={"sub": VAPID_SUBJECT})
-            except Exception as _se:
-                emsg = str(_se)
-                if "410" in emsg or "404" in emsg:
-                    try:
-                        c2 = database.get_db()
-                        try:
-                            c2.execute("DELETE FROM push_subscriptions WHERE id=?", (r["id"],))
-                            c2.commit(); c2.close()
-                        finally:
-                            c2.close()
-                    except Exception:
-                        pass
-                print(f"[push] send failed: {emsg}")
     finally:
         conn.close()
+    out["devices"] = len(rows)
+    if not rows:
+        return out
+    body = (message or "").strip().split("\n")[0][:160]
+    payload = json.dumps({"title": "Job Hunter", "body": body, "url": url or _push_link(url_suffix)})
+    for r in rows:
+        try:
+            sub = json.loads(r["subscription"])
+            webpush(subscription_info=sub, data=payload,
+                    vapid_private_key=key_path, vapid_claims={"sub": VAPID_SUBJECT})
+            out["sent"] += 1
+        except Exception as _se:
+            emsg = str(_se)
+            out["failed"] += 1
+            out["errors"].append(emsg[:200])
+            if "410" in emsg or "404" in emsg:
+                # The browser dropped this subscription; it re-registers on the next app open.
+                try:
+                    c2 = database.get_db()
+                    try:
+                        c2.execute("DELETE FROM push_subscriptions WHERE id=?", (r["id"],))
+                        c2.commit()
+                    finally:
+                        c2.close()
+                except Exception as _de:
+                    print(f"[push] could not drop an expired subscription: {_de}")
+            print(f"[push] send failed: {emsg}")
+    return out
 
 
 def notify_admin_new_user(new_user_email: str, new_user_name: str):
@@ -3973,6 +4041,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Pool exhaustion looks like "the app hung" from outside; this
                 # makes it visible. Empty on SQLite.
                 "db_pool": _pool_stats,
+                # Whether web push can send at all (keys + library), 2026-11-08.
+                "push": push_configured(),
                 # Connections a code path borrowed and never closed, handed
                 # back at the end of the request/tick. Should stay 0; a rising
                 # count names a route that needs a try/finally.
@@ -4063,6 +4133,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, no-cache")
             self.end_headers()
             self.wfile.write(_data)
+            return
+
+        if path == "/api/admin/notify-check":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            self.send_json(_notify_status(user["id"]))
             return
 
         if path == "/api/push/public-key":
@@ -4995,8 +5073,22 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/push/test":
-            send_web_push_to_user(user_id, "Test notification from Job Hunter \u2014 push is working!", "/app")
-            self.send_json({"success": True})
+            # Reports what happened; it used to answer success whatever happened.
+            r = send_web_push_to_user(user_id, "Test notification from Job Hunter \u2014 push is working!", "/app")
+            ok = r["sent"] > 0
+            self.send_json({"success": ok, **r, "error": "" if ok else (
+                "; ".join(r["errors"]) or "This account has no device with notifications on")}, 200 if ok else 502)
+            return
+
+        # ── Admin: prove every notification channel live (2026-11-08) ──
+        if path == "/api/admin/notify-check":
+            if (user.get("role") or "") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            res = deliver_notification(
+                user_id, "\U0001F514 Job Hunter notification check \u2014 if you can read this, this channel works.",
+                url_suffix="/app")
+            self.send_json({"results": res or {}, **_notify_status(user_id)})
             return
 
         # ── CV Upload ──
