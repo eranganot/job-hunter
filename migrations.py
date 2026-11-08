@@ -928,6 +928,16 @@ def m0023_tailored_cvs(conn):
     conn.commit()
 
 
+def m0024_company_boards(conn):
+    """Step 1c, careers-map: the job board a company's own careers page embeds
+    (Comeet / Greenhouse / Lever / Ashby / SmartRecruiters / Workday), found
+    once and kept - boards JSON '[]' means looked and found none. Public data,
+    not any user's."""
+    conn.execute("CREATE TABLE IF NOT EXISTS company_boards ("
+                 " company_key TEXT PRIMARY KEY, boards TEXT NOT NULL, page TEXT, checked_at TEXT)")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -952,6 +962,7 @@ MIGRATIONS = [
     (21, "standing_notes",              m0021_standing_notes),
     (22, "auto_apply_fresh_choice",     m0022_auto_apply_fresh_choice),
     (23, "tailored_cvs",                m0023_tailored_cvs),
+    (24, "company_boards",              m0024_company_boards),
 ]
 
 

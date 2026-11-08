@@ -744,3 +744,63 @@ def test_the_web_search_cap_is_respected_and_zero_means_off():
     search, calls = _searcher({})
     links.resolve_open_jobs(get_db, 1, resolver=resolver, searcher=search, search_cap=0)
     assert calls == []
+
+
+# ── 1c careers-map: boards found on the company's own careers page ──────────
+
+def test_boards_are_read_from_a_careers_page():
+    import links
+    page = ('<a href="https://www.comeet.com/jobs/frontstory/04.008">Jobs</a>'
+            '<script src="https://boards.greenhouse.io/embed/job_board/js?for=acme"></script>'
+            '<a href="https://careers.smartrecruiters.com/CheckPointSoftwareTechnologies2">x</a>')
+    assert links.boards_in_page(page) == [("greenhouse", "acme"), ("comeet", "frontstory/04.008"),
+                                          ("smartrecruiters", "checkpointsoftwaretechnologies2")]
+    assert links._site_slugs("Papaya Global")[:2] == ["papayaglobal", "papaya-global"]   # full name first
+
+
+def test_a_discovered_board_resolves_a_job_once_its_title_matches(monkeypatch):
+    import sqlite3
+    import links
+    import apply_engine as ae
+    db = sqlite3.connect(":memory:", check_same_thread=False)
+    db.row_factory = sqlite3.Row
+    db.execute("CREATE TABLE jobs (company TEXT, url TEXT)")
+    db.execute("CREATE TABLE company_boards (company_key TEXT PRIMARY KEY, boards TEXT NOT NULL, page TEXT, checked_at TEXT)")
+
+    class Keep:                                    # a get_db whose close() keeps the in-memory db
+        def __call__(self):
+            return self
+        def execute(self, *a):
+            return db.execute(*a)
+        def commit(self):
+            db.commit()
+        def close(self):
+            pass
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        if url == "https://www.echo.ai/careers":
+            return url, '<a href="https://jobs.ashbyhq.com/echo.ai">Open roles</a>'
+        return None, ""
+    monkeypatch.setattr(ae, "_ats_postings_for_slug", lambda ref: [
+        {"title": "Senior Campaign Marketing Manager", "url": "https://jobs.ashbyhq.com/echo.ai/1", "location": "Tel Aviv"}]
+        if ref == "echo.ai" else [])
+    monkeypatch.setattr(ae, "resolve_ats_application", lambda *a, **k: None)
+
+    class GetDb:
+        def __call__(self):
+            return Keep()
+    r = links.make_resolver(GetDb(), discover_fetch=fake_fetch)
+    hit = r("Echo", "Senior Campaign Marketing Manager", "Tel Aviv", False)
+    assert hit and hit["url"] == "https://jobs.ashbyhq.com/echo.ai/1" and hit["via"].startswith("careers page board")
+    stored = db.execute("SELECT boards FROM company_boards WHERE company_key='echo'").fetchone()
+    assert stored and "echo.ai" in stored[0]                         # kept for every later job at Echo
+    n = len(fetched)
+    r2 = links.make_resolver(GetDb(), discover_fetch=fake_fetch)
+    assert r2("Echo", "Senior Campaign Marketing Manager", "Tel Aviv", False)
+    assert len(fetched) == n                                          # not looked up again
+    assert r2("Echo", "Chief Astronaut", "Tel Aviv", False) is None   # no title match: no link
+    r3 = links.make_resolver(GetDb(), discover_fetch=fake_fetch)
+    assert r3("Nobody Ltd", "PM", "", False) is None
+    assert db.execute("SELECT boards FROM company_boards WHERE company_key='nobody'").fetchone()[0] == "[]"

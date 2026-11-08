@@ -766,19 +766,147 @@ def resolve_from_learned(company, title, location, learned, fetch=None, threshol
     return best
 
 
-def make_resolver(db, fetch=None):
+# ── 1c careers-map: the board a company's own careers page embeds ────────────
+#
+# Measured 2026-11-08 on the 29 companies of Eran's search trial (where Gemini
+# web search found 2): guessing the company's site from its name and reading
+# its careers page found the right board for 3 (Check Point -> SmartRecruiters,
+# FrontStory -> Comeet, Echo -> Ashby) and one WRONG company (Papaya Global ->
+# papaya.com, Papaya Gaming) - which the title match then rejected, as it must.
+# Free, and it compounds: a board found once serves every later job at that
+# company. Nothing is linked unless a live posting on the board matches the
+# job's title (resolve_from_learned, threshold 82).
+
+DISCOVER_PER_RUN = 15              # new companies looked up per resolve run
+DISCOVER_RECHECK_DAYS = 30         # "none found" is tried again after this
+_DROP_WORDS = r"\b(inc|ltd|llc|corp|corporation|software|technology|technologies|israel|group|global|security|networks|labs?|systems|solutions)\b\.?"
+_URL_RX = _re.compile(r"https?://[^\s\"'<>)\\]+", _re.I)
+_GH_EMBED = _re.compile(r"greenhouse\.io/embed/job_board(?:/js)?\?for=([A-Za-z0-9_-]+)", _re.I)
+
+
+def _site_slugs(company: str) -> list:
+    """'Papaya Global' -> ['papayaglobal', 'papaya-global', 'papaya']: the full
+    name first, so a shortened guess is only a fallback."""
+    n = _re.sub(r"\(.*?\)|:.*$", " ", (company or "").lower()).replace(".com", " ")
+    full = _re.sub(r"[^a-z0-9]+", "", n)
+    dashed = _re.sub(r"[^a-z0-9]+", "-", n.strip()).strip("-")
+    short = _re.sub(r"[^a-z0-9]+", "", _re.sub(_DROP_WORDS, " ", n))
+    return [x for x in dict.fromkeys([full, dashed, short]) if len(x) >= 2]
+
+
+def careers_pages(company: str) -> list:
+    out = []
+    for s in _site_slugs(company):
+        for tld in ("com", "io", "ai", "co", "co.il"):
+            out += ["https://www.%s.%s/careers" % (s, tld), "https://careers.%s.%s" % (s, tld),
+                    "https://%s.%s/careers" % (s, tld), "https://www.%s.%s/jobs" % (s, tld)]
+    return out
+
+
+def boards_in_page(body: str, final_url: str = "") -> list:
+    """Every job board the page links to or embeds, as board_of() names them."""
+    found = []
+    for m in _GH_EMBED.finditer(body or ""):
+        found.append(("greenhouse", m.group(1).lower()))
+    for u in [final_url] + _URL_RX.findall(body or ""):
+        u = u.replace("careers.smartrecruiters.com", "jobs.smartrecruiters.com").replace("&amp;", "&")
+        b = board_of(u)
+        if b:
+            found.append(b)
+    return list(dict.fromkeys(found))
+
+
+def discover_boards(company: str, fetch=None, workers: int = 6, timeout: int = 6):
+    """(boards, page) from the first candidate careers page that names a board.
+    boards [] = looked, none found. Pages are fetched in parallel, in order of
+    preference (full company name first)."""
+    import concurrent.futures as _cf
+    import urllib.request
+    import linkcheck
+
+    def get(url):
+        if fetch is not None:
+            return fetch(url)
+        import http.client
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": linkcheck.UA})
+            with linkcheck._OPENER.open(req, timeout=timeout) as r:
+                return r.geturl(), r.read(1_500_000).decode("utf-8", "ignore")
+        except (OSError, ValueError, http.client.HTTPException):
+            # No such site, refused, timed out, bad TLS: the normal case for
+            # most guessed domains - not an error worth reporting.
+            return None, ""
+
+    pages = careers_pages(company)
+    with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        results = list(ex.map(get, pages))
+    for page, (final, body) in zip(pages, results):
+        found = boards_in_page(body, final or "")
+        if found:
+            return found[:3], page
+    return [], ""
+
+
+def _stored_boards(get_db, key: str, now=None):
+    """Boards found earlier for this company, or None when never looked (or a
+    "none found" older than DISCOVER_RECHECK_DAYS)."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    try:
+        rows = _read_rows(get_db, "SELECT boards, checked_at FROM company_boards WHERE company_key=?", (key,))
+    except Exception as exc:              # a database without m0024: look it up, just don't remember it
+        print("[links] WARNING company_boards unreadable (%s): %s" % (type(exc).__name__, exc))
+        return None
+    if not rows:
+        return None
+    boards = [tuple(b) for b in json.loads(rows[0]["boards"] or "[]")]
+    if not boards:
+        old = _utc_stamp((now or datetime.now(timezone.utc)) - timedelta(days=DISCOVER_RECHECK_DAYS))
+        if (rows[0].get("checked_at") or "") < old:
+            return None
+    return boards
+
+
+def _store_boards(get_db, key: str, boards: list, page: str):
+    import json
+    stamp = _utc_stamp()
+    _write(get_db, "INSERT INTO company_boards (company_key, boards, page, checked_at) VALUES (?,?,?,?) "
+                   "ON CONFLICT (company_key) DO UPDATE SET boards=excluded.boards, page=excluded.page, "
+                   "checked_at=excluded.checked_at", (key, json.dumps(boards), page, stamp))
+
+
+def make_resolver(db, fetch=None, discover_fetch=None):
     """The resolver chain Step 1 uses: learned boards first (free, exact board),
     then apply_engine's name-guessing resolver."""
     import apply_engine as _ae
     learned = learned_boards(db)
+
+    budget = {"discovered": 0}
 
     def resolver(company, title, location, use_llm):
         _ae.begin_lookup()
         hit = resolve_from_learned(company, title, location, learned, fetch=fetch)
         if hit:
             return hit
+        # The careers-map: the board the company's own careers page embeds,
+        # looked up once per company and kept (company_boards).
+        key = _norm_company(company)
+        if key and key not in learned:
+            boards = _stored_boards(db, key)
+            if boards is None and budget["discovered"] < DISCOVER_PER_RUN:
+                budget["discovered"] += 1
+                boards, page = discover_boards(company, fetch=discover_fetch)
+                if not hasattr(db, "execute"):        # a report's open connection: measure, don't write
+                    _store_boards(db, key, boards, page)
+            if boards:
+                learned[key] = list(boards)
+                hit = resolve_from_learned(company, title, location, {key: boards}, fetch=fetch)
+                if hit:
+                    hit["via"] = "careers page board " + hit.get("via", "").replace("learned board ", "")
+                    return hit
         return _ae.resolve_ats_application(company, title, location=location, use_llm=use_llm)
     resolver.learned = learned
+    resolver.budget = budget
     return resolver
 
 
