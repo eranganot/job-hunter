@@ -198,6 +198,16 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
                     continue
             except Exception as exc:
                 print(f"[questions] saved answer did not fit {q['label'][:60]!r}: {exc}")
+        # A required acknowledgement whose only option is "Yes" ("I read and
+        # understood the privacy policy*", Payoneer 2026-11-08) is consent to
+        # apply at all - filled without asking anyone.
+        if q.get("required") and [o.strip().lower() for o in (q.get("options") or [])] == ["yes"]:
+            try:
+                if _fill(frame, q, q["options"][0]):
+                    filled += 1
+                    continue
+            except Exception as exc:
+                print(f"[questions] acknowledgement {q['label'][:60]!r}: {exc}")
         ask.append(q)
     answers = {}
     if ask and llm is not None:

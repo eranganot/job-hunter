@@ -83,9 +83,10 @@ applicant = {"full_name": "Rehearsal Test", "first_name": "Rehearsal", "last_nam
 # Screenshot the page at the moment the engine finalises.
 _orig_fin = ae._finalize_after_submit
 def fin(page, applicant, sels):
-    page.screenshot(path=os.path.join(OUT, "after_submit.png"), full_page=True)
+    shot = getattr(page, "screenshot", None) or page.page.screenshot     # a Frame: its page
+    shot(path=os.path.join(OUT, "after_submit.png"), full_page=True)
     r = _orig_fin(page, applicant, sels)
-    page.screenshot(path=os.path.join(OUT, "after_finalize.png"), full_page=True)
+    shot(path=os.path.join(OUT, "after_finalize.png"), full_page=True)
     return r
 ae._finalize_after_submit = fin
 
