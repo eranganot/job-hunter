@@ -355,3 +355,42 @@ def test_a_wrong_security_code_is_reported_not_called_a_success(page):
 def test_an_ordinary_form_has_no_code_step(page):
     page.set_content(PAGE)
     assert ae._code_boxes(page) == 0
+
+
+def test_linkedin_and_github_questions_are_filled_from_the_profile_not_the_model(page):
+    page.set_content("""<form>
+      <label for="q1">LinkedIn URL *</label><input id="q1" type="text" required>
+      <label for="q2">GitHub URL</label><input id="q2" type="text">
+    </form>""")
+    res = questions.answer(page, {"linkedin_url": "https://www.linkedin.com/in/x/",
+                                  "github_url": "https://github.com/example-user"}, {}, llm=None)
+    assert page.input_value("#q1") == "https://www.linkedin.com/in/x/"
+    assert page.input_value("#q2") == "https://github.com/example-user"
+    assert res["unsure"] == []
+
+
+LEVER_LOCATION = """<form>
+<input id="location-input" name="location" type="text">
+<input name="selectedLocation" type="hidden" value="">
+<div id="dd"></div>
+<script>
+(() => {
+const inp = document.getElementById('location-input');
+inp.addEventListener('input', () => {
+  document.getElementById('dd').innerHTML = inp.value.length >= 3
+    ? '<div class="dropdown-location">Tel Aviv, ISR</div><div class="dropdown-location">Tel Aviv-Yafo, ISR</div>' : '';
+  for (const o of document.querySelectorAll('.dropdown-location'))
+    o.onclick = () => { inp.value = o.innerText;
+      document.querySelector('input[name=selectedLocation]').value = JSON.stringify({name: o.innerText}); };
+});
+})();
+</script></form>"""
+
+
+def test_lever_location_is_chosen_from_its_dropdown(page):
+    """Rehearsal 2026-11-08: Lever's required "Current location" stayed empty."""
+    page.set_content(LEVER_LOCATION)
+    assert ae._lever_location(page, {"location": "Tel Aviv, Israel"}) is True
+    assert "Tel Aviv, ISR" in page.eval_on_selector("input[name=selectedLocation]", "e => e.value")
+    page.set_content(LEVER_LOCATION)
+    assert ae._lever_location(page, {}) is False                      # no city known: leave it

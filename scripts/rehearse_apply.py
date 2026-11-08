@@ -121,7 +121,11 @@ if os.environ.get("STUB_GEMINI"):
             elif f.get("type") == "checkbox" and pick("english"):
                 acts.append({"selector": sel, "value": [pick("english")], "confidence": "high"})
             elif sel:
-                acts.append({"selector": sel, "value": (opts[0] if opts else "draft answer"), "confidence": "low"})
+                # STUB_ANSWER_ALL=1: answer everything (first option / placeholder
+                # text) so a rehearsal reaches Submit - e.g. to see what a captcha
+                # does there. Never used for a real application.
+                acts.append({"selector": sel, "value": (opts[0] if opts else "Rehearsal answer"),
+                             "confidence": "high" if os.environ.get("STUB_ANSWER_ALL") else "low"})
         return acts
     ae._claude_json = stub
 
