@@ -915,6 +915,19 @@ def m0022_auto_apply_fresh_choice(conn):
     conn.commit()
 
 
+def m0023_tailored_cvs(conn):
+    """Step 14: a CV rewritten for one job, kept per (user, job) - the checked
+    JSON, plus what the check removed or flagged, shown with it. edited: the
+    user changed the draft; use_for_apply: the user chose it over the original
+    for this job's application (Eran, 2026-11-08) - 0 until they do."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tailored_cvs ("
+        " user_id INTEGER NOT NULL, job_id INTEGER NOT NULL, content TEXT NOT NULL,"
+        " created_at TEXT, edited INTEGER DEFAULT 0, use_for_apply INTEGER DEFAULT 0,"
+        " PRIMARY KEY (user_id, job_id))")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -938,6 +951,7 @@ MIGRATIONS = [
     (20, "salary_at_pass",              m0020_salary_at_pass),
     (21, "standing_notes",              m0021_standing_notes),
     (22, "auto_apply_fresh_choice",     m0022_auto_apply_fresh_choice),
+    (23, "tailored_cvs",                m0023_tailored_cvs),
 ]
 
 

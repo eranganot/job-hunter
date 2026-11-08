@@ -81,6 +81,22 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Step 14: job-tailored CV, fact-checked against the original.** Job details → **Tailored CV**.
+  - **Generation:** one Gemini call (`tailor.py`, JSON) re-orders and re-words the CV for the job's description, under rules: same roles, employers, dates and facts; nothing added.
+  - **The check** (`tailor.verify`, deterministic) then removes:
+    - any summary sentence, bullet, headline or education line with a number, percentage or year that isn't in the CV ("1,200" and "1200" match);
+    - any role whose employer isn't in the CV;
+    - any skill that isn't in the CV.
+    A title whose wording isn't in the CV is kept but flagged. Everything removed is shown with the reason.
+  - **Word download:** `/api/jobs/<id>/tailored-cv.docx`, an editable file whose header comes from the account and profile (name, email, phone, LinkedIn), never from the model.
+  - **Storage and plans:** stored per (user, job) in `tailored_cvs` (m0023; covered by export and deletion through `user_id`). Meter `tailored_cv`: Free 2, Premium 10, Expert 30 a month, admin unmetered; counted only after a success. My default, mirroring CV reviews; Eran can change it.
+  - **Review, edit, choose (Eran, 2026-11-08):**
+    - **Edit** opens every part of the draft (headline, summary, skills, each role's title, company, dates and bullets, education, additional). The user's edits are saved as written and not fact-checked (they are the author); the CV is marked "Edited by you".
+    - "Send with this job's application: My original CV / This tailored CV" (`tailored_cvs.use_for_apply`). It stays on the original until the user picks, and a new draft resets it to the original for review.
+    - `_cv_for_apply` builds the chosen Word file at apply time. It is called in `_submit_application_guarded` (Apply now and scheduled runs) and in the supervised apply. If the tailored file can't be built, the original is sent and the log says so.
+  - **Tests:** an invented number, employer, skill and degree are removed; real facts survive; the title is flagged; the Word file's header; route storage, meter (third on Free → 402) and isolation; edit, choice, the file actually sent, and the reset on a new draft. Phone screenshots of the draft, the edit mode and the choice checked.
+  - **Also:** BACKLOG rows 8 and 12–14 updated; row 15 (Lever hCaptcha) added.
+  - **Fixed, a race from #59:** `_await_code_for` listed the run as waiting before writing `awaiting_code` to the job, so for a moment the app could show the "Finish applying" card while the job had no status. It failed the security-code test on the SQLite smoke run (2 of 2). The order is now: mark the job, list the run, notify. 0 failures in 15 SQLite runs.
 - 2026-11-08 — **Step 8: auto-apply is every user's choice, and the engine's success rate per application system is measured.** The server-wide engine switch (`APPLY_ENGINE_ENABLED`) stays off until Eran turns it on.
   - **Every plan (Eran's choice):** `plans.py` gives `auto_apply` to Free, Premium and Expert; each user turns it on in Settings, off by default. The chokepoint check in `run_job_apply` and on approve stays, for a plan that drops it later. A missing user is never entitled.
   - **Migration 22** sets every non-admin account's flag to off. m0010 had left pre-paywall flags on, and those users would otherwise start auto-applying when the engine is switched on, without having chosen to now.

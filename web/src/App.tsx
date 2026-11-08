@@ -6,6 +6,7 @@ import {
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, MessageSquare, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
+  Download,
 } from "lucide-react";
 import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -1621,6 +1622,126 @@ function StatusPill({ s }: { s: string }) {
   return <span className="px-2.5 py-1 bg-gray-700 text-gray-300 text-xs font-medium rounded-full">{s}</span>;
 }
 
+/* Step 14: the user's CV rewritten for this job. The server checks the
+   model's version against the original CV and removes any line with a number,
+   employer or skill the CV doesn't have; what it removed is shown here. */
+function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: boolean }) {
+  const lim = planLimit(me, "tailored_cv");
+  const use = me?.usage?.tailored_cv;
+  const allowed = isAdmin || lim === undefined || lim === null || lim > 0;
+  const [res, setRes] = useState<Record<string, any> | null>(null);
+  const [busy, setBusy] = useState(""); const [msg, setMsg] = useState("");
+  const [draft, setDraft] = useState<Record<string, any> | null>(null);   // edit mode when set
+  useEffect(() => { api.tailoredCv(job.id).then(setRes).catch(() => {}); }, [job.id]);
+  const act = async (kind: string, fn: () => Promise<any>, ok = "") => {
+    setBusy(kind); setMsg("");
+    try { const r = await fn(); setRes(r); if (ok) setMsg(ok); return true; }
+    catch (e: any) { setMsg(e?.message || "That did not work"); return false; }
+    finally { setBusy(""); }
+  };
+  const lines = (v: any) => (Array.isArray(v) ? v : []).join("\n");
+  const unlines = (t: string) => t.split("\n").map((x) => x.trim()).filter(Boolean);
+  const startEdit = () => {
+    const c = res!.cv;
+    setDraft({ headline: c.headline || "", summary: c.summary || "", skills: (c.skills || []).join(", "),
+      experience: (c.experience || []).map((r: any) => ({ ...r, bullets: lines(r.bullets) })),
+      education: lines(c.education), other: lines(c.other), changes: c.changes || [] });
+  };
+  const saveEdit = async () => {
+    const d = draft!;
+    const cv = { headline: d.headline, summary: d.summary, changes: d.changes,
+      skills: d.skills.split(",").map((x: string) => x.trim()).filter(Boolean),
+      experience: d.experience.map((r: any) => ({ title: r.title, company: r.company, dates: r.dates, bullets: unlines(r.bullets) })),
+      education: unlines(d.education), other: unlines(d.other) };
+    if (await act("save", () => api.saveTailoredCv(job.id, cv), "Saved")) setDraft(null);
+  };
+  const setRole = (i: number, k: string, v: string) =>
+    setDraft((d) => ({ ...d!, experience: d!.experience.map((r: any, j: number) => (j === i ? { ...r, [k]: v } : r)) }));
+  if (!allowed && !res) return null;
+  const cv = res?.cv;
+  const inp = "w-full px-2.5 py-1.5 border border-gray-600 rounded-lg bg-gray-900 text-white text-sm";
+  return (
+    <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
+      <h4 className="font-semibold text-white text-sm mb-1">Tailored CV</h4>
+      <p className="text-xs text-gray-400 mb-2">Your CV, re-ordered and re-worded for this job. Nothing is added: any line with a fact that isn't in your CV is removed and listed below. Review it, edit anything, then choose which CV goes with this application.
+        {use && use.limit !== null && <> {Math.max(0, use.limit - use.used)} of {use.limit} left this month.</>}</p>
+      {!draft && (
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => act("gen", () => api.tailorCv(job.id))} disabled={!!busy || !allowed}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">
+            {busy === "gen" ? "Tailoring… (about 30 s)" : cv ? "Tailor again" : "Tailor my CV for this job"}
+          </button>
+          {cv && <button onClick={startEdit} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-60">Edit</button>}
+          {cv && <a href={`/api/jobs/${job.id}/tailored-cv.docx`} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 inline-flex items-center gap-1"><Download className="w-3.5 h-3.5" />Download (Word)</a>}
+        </div>
+      )}
+      {msg && <p className="text-xs text-gray-300 mt-2">{msg}</p>}
+      {draft && (
+        <div className="mt-2 space-y-2">
+          <label className="block text-xs text-gray-400">Headline<input className={inp} value={draft.headline} onChange={(e) => setDraft({ ...draft, headline: e.target.value })} /></label>
+          <label className="block text-xs text-gray-400">Summary<textarea rows={4} className={inp} value={draft.summary} onChange={(e) => setDraft({ ...draft, summary: e.target.value })} /></label>
+          <label className="block text-xs text-gray-400">Skills (comma separated)<input className={inp} value={draft.skills} onChange={(e) => setDraft({ ...draft, skills: e.target.value })} /></label>
+          {draft.experience.map((r: any, i: number) => (
+            <div key={i} className="p-2.5 rounded-lg border border-gray-700 space-y-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <input className={inp} placeholder="Title" value={r.title} onChange={(e) => setRole(i, "title", e.target.value)} />
+                <input className={inp} placeholder="Company" value={r.company} onChange={(e) => setRole(i, "company", e.target.value)} />
+              </div>
+              <input className={inp} placeholder="Dates" value={r.dates} onChange={(e) => setRole(i, "dates", e.target.value)} />
+              <textarea rows={4} className={inp} placeholder="One bullet per line" value={r.bullets} onChange={(e) => setRole(i, "bullets", e.target.value)} />
+            </div>
+          ))}
+          <label className="block text-xs text-gray-400">Education (one per line)<textarea rows={2} className={inp} value={draft.education} onChange={(e) => setDraft({ ...draft, education: e.target.value })} /></label>
+          <label className="block text-xs text-gray-400">Additional (one per line)<textarea rows={2} className={inp} value={draft.other} onChange={(e) => setDraft({ ...draft, other: e.target.value })} /></label>
+          <div className="flex gap-2">
+            <button onClick={saveEdit} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white disabled:opacity-60">{busy === "save" ? "Saving…" : "Save changes"}</button>
+            <button onClick={() => setDraft(null)} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 text-gray-200">Cancel</button>
+          </div>
+        </div>
+      )}
+      {cv && !draft && (
+        <div className="mt-3 space-y-3 text-sm">
+          {cv.changes?.length > 0 && (
+            <div><p className="text-xs font-semibold text-gray-300 mb-1">What changed for this job</p>
+              <ul className="list-disc pl-5 text-xs text-gray-300 space-y-0.5">{cv.changes.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul></div>
+          )}
+          {res?.flags?.length > 0 && !res?.edited && (
+            <div className="text-xs text-amber-300 space-y-0.5">{res.flags.map((f: string, i: number) => <p key={i}>{f}</p>)}</div>
+          )}
+          <div className="bg-gray-900 rounded-xl p-3 border border-gray-700 space-y-2">
+            {res?.edited && <p className="text-[11px] text-indigo-300">Edited by you</p>}
+            {cv.headline && <p className="text-white font-semibold">{cv.headline}</p>}
+            {cv.summary && <p className="text-gray-300">{cv.summary}</p>}
+            {cv.skills?.length > 0 && <p className="text-xs text-gray-400">{cv.skills.join(" · ")}</p>}
+            {(cv.experience || []).map((r: any, i: number) => (
+              <div key={i}>
+                <p className="text-gray-100 font-medium">{[r.title, r.company].filter(Boolean).join(" – ")}{r.dates && <span className="text-gray-400 font-normal"> {"·"} {r.dates}</span>}</p>
+                <ul className="list-disc pl-5 text-gray-300 space-y-0.5">{(r.bullets || []).map((b: string, k: number) => <li key={k}>{b}</li>)}</ul>
+              </div>
+            ))}
+            {[...(cv.education || []), ...(cv.other || [])].map((l: string, i: number) => <p key={"e" + i} className="text-xs text-gray-400">{l}</p>)}
+          </div>
+          {res?.removed?.length > 0 && (
+            <details><summary className="text-xs text-gray-400 cursor-pointer">Removed by the fact check ({res.removed.length})</summary>
+              <ul className="mt-1 text-xs text-gray-400 space-y-1">{res.removed.map((r: any, i: number) => <li key={i}><span className="text-gray-300">{r.text}</span> {"—"} {r.why}</li>)}</ul>
+            </details>
+          )}
+          <div className="p-3 rounded-xl border border-gray-700">
+            <p className="text-xs font-semibold text-gray-300 mb-1.5">Send with this job's application</p>
+            {(["original", "tailored"] as const).map((k) => (
+              <label key={k} className="flex items-center gap-2 text-sm text-gray-200 py-0.5">
+                <input type="radio" name={`cvuse-${job.id}`} checked={(res?.use || "original") === k} disabled={!!busy}
+                  onChange={() => act("use", () => api.useCv(job.id, k), k === "tailored" ? "This application will send the tailored CV" : "This application will send your original CV")} />
+                {k === "original" ? "My original CV" : "This tailored CV (as a Word file)"}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* "Is this posting still open?" and the cover letter both lived only in the
    legacy dashboard. check-status turned out to have no implementation at all
    (it answered a bare 404), so this is its first working home. */
@@ -1735,6 +1856,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
               </div>
             </div>
           )}
+          <TailoredCv job={job} me={me} isAdmin={isAdmin} />
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-indigo-400 text-sm font-medium">{openLabel(job) === "Open" ? "Open job posting" : openLabel(job)} <ExternalLink className="w-3.5 h-3.5" /></a>}
         </div>
       </motion.div>
@@ -2846,6 +2968,7 @@ const METER_LABELS: Record<string, string> = {
   on_demand_search: "Searches you start",
   cover_letter: "Cover letters",
   cv_review: "CV reviews",
+  tailored_cv: "Tailored CVs",
 };
 
 /* What the plan includes and how much is used. Read-only: the numbers are the
@@ -2888,7 +3011,8 @@ function PlanPanel({ me }: { me: any }) {
         {[["Matches per search", fmt(lim.matches_per_search)], ["Automatic search", lim.search_cadence === "weekly" ? "Weekly" : "Daily"],
           ["Save for later", lim.deferred_list ? "Yes" : "Not included"], ["AI calls per day", fmt(lim.ai_calls_per_day)],
           ["History kept", lim.history_days === null ? "All of it" : lim.history_days >= 365 ? "12 months" : `${lim.history_days} days`],
-          ["Cover letters", lim.cover_letter === null ? "Unlimited" : lim.cover_letter ? `${lim.cover_letter} / month` : "Not included"]].map(([k, v]) => (
+          ["Cover letters", lim.cover_letter === null ? "Unlimited" : lim.cover_letter ? `${lim.cover_letter} / month` : "Not included"],
+          ["Tailored CVs", lim.tailored_cv === null ? "Unlimited" : lim.tailored_cv ? `${lim.tailored_cv} / month` : "Not included"]].map(([k, v]) => (
           <div key={k} className="p-3 bg-gray-800 rounded-xl border border-gray-700"><p className="text-xs text-gray-400">{k}</p><p className="text-white font-medium">{v}</p></div>
         ))}
       </div>

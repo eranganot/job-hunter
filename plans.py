@@ -36,6 +36,7 @@ METERS = {
     "on_demand_search": "day",      # a search the user starts (not the scheduled one)
     "cover_letter": "month",
     "cv_review": "month",           # the CV optimizer: general review, score + tips
+    "tailored_cv": "month",         # Step 14: the CV rewritten for one job
     "paid_source_credit": "month",  # one call to a paid job source
 }
 
@@ -51,6 +52,7 @@ PLANS = {
         "auto_apply": True,
         "cover_letter": 0,
         "cv_review": 2,
+        "tailored_cv": 2,
         "notifications": "all",
         "analytics": "basic",
         "export": False,
@@ -68,6 +70,7 @@ PLANS = {
         "auto_apply": True,             # every plan (2026-11-08)
         "cover_letter": 10,
         "cv_review": 4,
+        "tailored_cv": 10,
         "notifications": "all",
         "analytics": "full",
         "export": False,
@@ -85,6 +88,7 @@ PLANS = {
         "auto_apply": True,             # every plan (2026-11-08)
         "cover_letter": 30,
         "cv_review": UNLIMITED,
+        "tailored_cv": 30,
         "notifications": "all",
         "analytics": "full",
         "export": True,
@@ -104,6 +108,7 @@ ADMIN = {
     "auto_apply": True,                 # "when on" - the engine has its own switch
     "cover_letter": UNLIMITED,
     "cv_review": UNLIMITED,
+    "tailored_cv": UNLIMITED,
     "notifications": "all",
     "analytics": "full",
     "export": True,
