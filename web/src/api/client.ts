@@ -362,6 +362,10 @@ export const api = {
   // Notification check (2026-11-08): what can reach the admin, and a real send on every channel.
   adminNotifyStatus: () => request<Record<string, any>>("/api/admin/notify-check"),
   adminNotifyCheck: () => request<Record<string, any>>("/api/admin/notify-check", "POST", {}),
+  // Applications paused on a security code the site emailed the user.
+  applyRunsWaiting: () => request<{ waiting: { run_id: string; job_id: number; title: string; company: string; code_seconds_left: number }[] }>("/api/apply-runs/waiting"),
+  applyRunCode: (runId: string, code: string) =>
+    request<Record<string, any>>("/api/apply-runs/code", "POST", { run_id: runId, code }),
   adminApplyRun: (runId: string) =>
     request<Record<string, any>>(`/api/admin/apply-run?id=${encodeURIComponent(runId)}`),
   adminApplyCode: (runId: string, code: string) =>

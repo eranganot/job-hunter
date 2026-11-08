@@ -526,3 +526,55 @@ def test_the_notification_check_is_admin_only_and_reports_each_channel(stack, us
     assert st == 200 and json.loads(body)["results"]["push"] == "no device has notifications on"
     st, _l, body = users["admin"].post_json("/api/push/test", {})
     assert st == 502 and json.loads(body)["success"] is False          # it used to say success
+
+
+def test_a_background_apply_waits_for_the_users_code_beyond_the_deadline(stack, users, monkeypatch):
+    """Option 1 (Eran, 2026-11-08): an unattended apply that hits an emailed
+    security code notifies the user and waits; the wait is not deadline time."""
+    import threading as _th
+    import time as _t
+    import app as A
+    import apply_engine
+    monkeypatch.setattr(A, "_APPLY_DEADLINE_S", 1)
+    sent = []
+    monkeypatch.setattr(A, "deliver_notification", lambda uid, msg, **k: sent.append((uid, msg, k)) or {"push": "sent to 1 device(s)"})
+    uid = _user_id(stack["db"], "alice@example.test")
+    job_id = _new_job(stack["db"], uid, title="Director of Product", company="Payoneer")
+
+    def fake_submit(url, title, company, applicant, *a, **k):
+        code = applicant["_await_code"]()
+        return {"success": bool(code), "status": "confirmed" if code == "K7Q2ZP9X" else "needs_code",
+                "confirmation_text": "", "error": "" if code else "no code"}
+    monkeypatch.setattr(apply_engine, "submit_application", fake_submit)
+    out = {}
+    th = _th.Thread(target=lambda: out.update(r=A._submit_application_guarded(
+        "https://boards.greenhouse.io/x/jobs/1", "Director of Product", "Payoneer", {}, None,
+        user_id=uid, job_id=job_id)))
+    th.start()
+    for _ in range(50):
+        st, _l, body = users["a"].get("/api/apply-runs/waiting")
+        waiting = json.loads(body)["waiting"]
+        if waiting:
+            break
+        _t.sleep(0.1)
+    assert waiting and waiting[0]["company"] == "Payoneer" and waiting[0]["job_id"] == job_id
+    conn = stack["db"].get_db()
+    assert conn.execute("SELECT apply_status FROM jobs WHERE id=?", (job_id,)).fetchone()["apply_status"] == "awaiting_code"
+    conn.close()
+    assert sent and "Payoneer emailed you a security code" in sent[0][1]
+    assert "/app?finish=" + waiting[0]["run_id"] in sent[0][2]["push_url"]
+    # Other users see nothing and cannot answer it.
+    st, _l, body = users["admin"].get("/api/apply-runs/waiting")
+    assert json.loads(body)["waiting"] == []
+    st, _l, _b = users["admin"].post_json("/api/apply-runs/code", {"run_id": waiting[0]["run_id"], "code": "K7Q2ZP9X"})
+    assert st == 404
+    _t.sleep(1.5)                                   # past the 1 s deadline while waiting
+    st, _l, _b = users["a"].post_json("/api/apply-runs/code", {"run_id": waiting[0]["run_id"], "code": "K7Q2ZP9X"})
+    assert st == 200
+    th.join(10)
+    assert out["r"]["status"] == "confirmed", out["r"]          # not "Apply exceeded the deadline"
+
+
+def test_a_missed_code_is_held_for_the_user_not_retried(stack):
+    import app as A
+    assert A._apply_failure_fields("other", 1, "needs_code") == ("needs_code", None)

@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { SwipeFlow } from "./App";
+import { SwipeFlow, FinishApplying } from "./App";
 import { InstallPrompt } from "./InstallPrompt";
 import { syncPush } from "./lib/push";
 import "./index.css";
@@ -18,6 +18,7 @@ if ("serviceWorker" in navigator) {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <SwipeFlow />
+    <FinishApplying />
     <InstallPrompt />
   </React.StrictMode>
 );

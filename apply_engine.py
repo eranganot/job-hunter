@@ -1215,6 +1215,9 @@ _CONFIRMATION_PHRASES = [
     "successfully submitted", "application complete",
     "we received your application", "your application has been",
     "we'll be in touch", "we will be in touch",
+    # Payoneer's Greenhouse embed, Eran's first real submit (2026-11-08):
+    # "Thank you for submitting your CV! :)" read as merely "submitted".
+    "thank you for submitting", "thanks for submitting",
 ]
 
 # ── Claude helpers ────────────────────────────────────────────────────────────
