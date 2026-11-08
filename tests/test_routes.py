@@ -947,6 +947,7 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     # only the admin role may (plans.py, 2026-11-05). Without an entitled user
     # the route answers 403 and the assertions below would test the gate, not
     # the plumbing.
+    monkeypatch.setenv("APPLY_ENGINE_ENABLED", "1")     # off, the route refuses (below)
     seen = []
     real = jobqueue.enqueue
     monkeypatch.setattr(jobqueue, "enqueue",
@@ -958,6 +959,18 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     assert any(k == "apply" for _u, k in seen), \
         "/api/run-apply did not enqueue - it is spawning a thread again"
     assert json.loads(body)["status"] in ("queued", "already_running")
+
+
+def test_run_apply_says_so_when_the_engine_is_off(stack, users, monkeypatch):
+    """Eran, 2026-11-08: the button said "Queued" while the engine was off,
+    and every press still spent one of the day's 20 runs."""
+    import jobqueue
+    monkeypatch.delenv("APPLY_ENGINE_ENABLED", raising=False)
+    before = jobqueue.runs_today(_user_id(stack["db"], "admin@example.test"), "apply")
+    status, _loc, body = users["admin"].post_json("/api/run-apply", {}, {"Sec-Fetch-Site": "same-origin"})
+    assert status == 409 and json.loads(body)["status"] == "engine_off"
+    assert "isn't running yet" in json.loads(body)["error"]
+    assert jobqueue.runs_today(_user_id(stack["db"], "admin@example.test"), "apply") == before    # nothing spent
 
 
 def test_run_apply_refuses_a_plan_without_auto_apply_with_an_answer(stack, users, monkeypatch):

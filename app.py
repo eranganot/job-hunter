@@ -863,17 +863,33 @@ def _gemini_generate(body_bytes: bytes, timeout: int = 90, retries: int = 4,
                                       timeout=timeout, retries=retries))
 
 
-def _scheduler_already_ran(user_id: int, event_type: str, today: str) -> bool:
-    """Check activity_log to see if this scheduled job already fired today.
-    DB-backed so it survives server restarts (unlike an in-memory dict).
-    """
+def _israel_day_start_utc(today: str) -> str:
+    """Israel's midnight for `today` (YYYY-MM-DD, Israel date) as the UTC text
+    activity_log stores. Comparing the Israel date straight against UTC
+    timestamps missed anything logged between 00:00 and 02:00/03:00 Israel."""
+    import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        start = _dt.datetime.strptime(today, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Asia/Jerusalem"))
+        return start.astimezone(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as exc:
+        print(f"[scheduler] WARNING day start for {today}: {exc}")
+        return today
+
+
+def _scheduler_already_ran(user_id: int, event_type, today: str) -> bool:
+    """Check activity_log to see if this scheduled job already fired today
+    (Israel day). event_type may be a tuple of types. DB-backed so it survives
+    server restarts (unlike an in-memory dict)."""
+    types = (event_type,) if isinstance(event_type, str) else tuple(event_type)
     try:
         conn = database.get_db()
         try:
             row = conn.execute(
                 "SELECT 1 FROM activity_log "
-                "WHERE user_id=? AND event_type=? AND created_date >= ? LIMIT 1",
-                (user_id, event_type, today)
+                "WHERE user_id=? AND event_type IN (%s) AND created_date >= ? LIMIT 1"
+                % ",".join("?" for _ in types),
+                (user_id, *types, _israel_day_start_utc(today))
             ).fetchone()
             conn.close()
             return row is not None
@@ -971,7 +987,13 @@ def _check_scheduled_jobs() -> None:
                         except jobqueue.DailyCapReached as _cap:
                             print(f'[scheduler] {_cap} (user {uid}); skipped')
                 # Apply: check hour + frequency/day
-                if current_hour == ah and not _scheduler_already_ran(uid, 'job_applied', today):
+                # 'apply_scheduled' is written when the scheduler fires, whatever
+                # the run then does. It used to look for 'job_applied' alone,
+                # which only a real submission writes - so with the engine off, an
+                # empty queue or the cap, it queued a new apply run every minute of
+                # the apply hour and used up the 20-a-day allowance (Eran,
+                # 2026-11-08: "limit reached (20 out of 20)").
+                if current_hour == ah and not _scheduler_already_ran(uid, ('apply_scheduled', 'job_applied'), today):
                     run_apply = True
                     if freq == 'weekly' and a_dow is not None and cur_dow != a_dow:
                         run_apply = False
@@ -989,6 +1011,7 @@ def _check_scheduled_jobs() -> None:
                                 print(f'[scheduler] Apply already in flight for user {uid}; skipped')
                         except jobqueue.DailyCapReached as _cap:
                             print(f'[scheduler] {_cap} (user {uid}); skipped')
+                        database.log_activity(uid, "apply_scheduled", f"Scheduled auto-apply started ({ah:02d}:00 Israel time)")
         finally:
             conn.close()
     except Exception as e:
@@ -6571,6 +6594,15 @@ class Handler(BaseHTTPRequestHandler):
                                 "status": "not_entitled",
                                 "plan": entitlements.plan_of(user)}, 403)
                 return
+            # With the engine off a run ends at once as "apply_engine_disabled"
+            # while the button said "Queued" - and each press still spent one
+            # of the day's 20 runs (Eran, 2026-11-08). Say so instead.
+            if not _engine_on():
+                self.send_json({"error": "Auto-apply isn't running yet, so nothing would be sent. "
+                                         "Apply from the job's page on the company site for now"
+                                         + (", or use Supervised apply in Admin." if user.get("role") == "admin" else "."),
+                                "status": "engine_off"}, 409)
+                return
             # Queued, not spawned. This was the last raw thread left: the
             # scheduler's apply already went through the queue, so a manual
             # apply skipped the one-run-per-user rule AND the daily cap - the
@@ -6578,9 +6610,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 _arun = jobqueue.enqueue(user["id"], "apply")
             except jobqueue.DailyCapReached as _cap:
+                import datetime as _dtm
+                _reset = israel_now((_dtm.datetime.now(_dtm.timezone.utc) + _dtm.timedelta(days=1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0))       # the cap's day is UTC; shown in Israel time
                 self.send_json({"error": f"Daily apply limit reached "
                                          f"({_cap.used} of {_cap.limit} today). "
-                                         f"Resets at midnight UTC.",
+                                         f"Resets at {_reset.strftime('%H:%M')} Israel time.",
                                 "status": "daily_cap"}, 429)
                 return
             self.send_json({"started": bool(_arun),

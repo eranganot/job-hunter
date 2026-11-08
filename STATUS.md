@@ -81,6 +81,18 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **"Daily apply limit reached (20 of 20)" with the engine off: the scheduler queued an apply run every minute of the apply hour.**
+  - **Reproduced locally:** auto-apply on, apply hour = now, engine off, 25 one-minute scheduler ticks with each run finished as the worker does → 20 apply runs, then `enqueue` raises "Daily apply limit reached: 20 of 20", the message Eran saw. His Settings show apply time 4:00 PM, and he hit it at 17:38.
+  - **Root cause:** `_check_scheduled_jobs` treated the day as done only if `activity_log` had a `job_applied` entry, which only a real submission writes. Every other outcome writes nothing: `apply_engine_disabled`, an empty queue, `not_entitled`, `daily_limit_reached`. So the next tick (each minute, `file_watcher`) queued another run. Dedupe stops only concurrent runs, and each ended at once.
+  - **Ruled out:** the search side. It logs `jobs_searched` on results, no results and failure.
+  - **Blast radius:** today, Eran only (m0022 switched every other account's auto-apply off this afternoon). Once the engine is on, every auto-apply user on any day with an empty queue: 20 wasted runs and a blocked button. No AI cost.
+  - **Why silent:** each tick printed one log line; the cap surfaced only on the button.
+  - **Fix:**
+    - The scheduler writes `apply_scheduled` ("Scheduled auto-apply started (16:00 Israel time)") when it fires, whatever the run does, and checks it alongside `job_applied`.
+    - `_scheduler_already_ran` compares against Israel midnight converted to UTC (`_israel_day_start_utc`). It compared the Israel date straight against UTC timestamps, so anything logged between 00:00 and 02:00/03:00 Israel was missed.
+    - The re-run of the reproduction: 1 run in the hour.
+  - **Also:** `/api/run-apply` answered "Queued" while the engine was off (the run ended at once and still used a slot). It now answers 409 `engine_off` with the reason, and "Apply to queue" is shown only when the engine is on (`/api/me.auto_apply_live`). Every user saw that button since #61. The cap message gives the reset in Israel time.
+  - **Tests:** a whole apply hour starts one run; the day boundary in winter and summer; the route refuses without spending a run.
 - 2026-11-08 — **Saved tailored CVs get the role guarantee when opened; wider job pop-up on desktop.**
   - **Still no DAZN after #64:** Eran's 17:05 screenshot shows the same five "What changed" notes, word for word, as his 16:47 one. That is the draft saved before #64, which the role check never ran on (it ran only on new drafts).
   - **Fix:** `_tailored_cv_checked` runs `restore_roles` whenever a stored draft is read (the JSON, the Word download and the file sent with an application) and saves the repair back. No model call. A draft the user edited is left as they made it.
