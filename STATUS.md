@@ -81,6 +81,15 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Cover letters rewritten from the full CV (Eran: "should be written more accurate and in more human way"), and Word CVs read with their tables.**
+  - **Why letters were inaccurate (cause, from the code plus the 11-07 observation):** `generate_cover_letter` built the letter from `profile.cv_summary`, the 2–3 sentence summary with no name or details (STATUS 2026-11-07). A prompt demanding "specific, measurable experience from the CV" had none to use.
+  - **Now `write_cover_letter`:**
+    - the full CV text (`_tailor_inputs`) and the account name;
+    - a natural structure in place of the rigid formula ("bold statement" hook, fixed sentence counts): why this role, two or three matching experiences with the CV's own numbers, a brief close;
+    - plain-voice rules: a list of banned clichés, no em dashes, contractions fine; 180–250 words; temperature 0.6.
+  - **Number check:** a number in neither the CV nor the job description triggers one rewrite naming it; if it survives, that sentence is removed and named in the UI.
+  - **Not seen live:** no Gemini key in the workspace, so the real tone is judged by Eran on the first letter.
+  - **Word CVs:** `_extract_cv_text` read `.paragraphs` only, so tables, headers and nested cells were invisible. Reproduced: a role in a table never reached the reader. `_docx_text` reads the header, body and tables in order. Not the cause of Eran's missing DAZN: his CV is a PDF, and DAZN is in its extracted text (checked with the app's reader on his file); that is investigated separately.
 - 2026-11-08 — **Step 14: job-tailored CV, fact-checked against the original.** Job details → **Tailored CV**.
   - **Generation:** one Gemini call (`tailor.py`, JSON) re-orders and re-words the CV for the job's description, under rules: same roles, employers, dates and facts; nothing added.
   - **The check** (`tailor.verify`, deterministic) then removes:

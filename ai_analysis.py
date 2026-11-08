@@ -563,103 +563,103 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
 
 
 
-def generate_cover_letter(job: dict, profile: dict, api_key: str = "",
-                          user_id: "int | None" = None) -> str:
-    """Generate a personalised cover letter via Gemini 2.5 Flash (Claude Sonnet fallback).
+_LETTER_PROMPT = """Write a cover letter from {name} for the job below. It should read as if {name}
+wrote it: plain, warm, confident and specific - a senior professional writing to a hiring
+manager they respect.
 
-    Raises RuntimeError with the full error message so the UI status bar shows it.
-    """
-    # api_key param accepts either the explicit Gemini key or env-loaded one
+How it goes:
+- Open with why this role makes sense: connect one concrete thing the job description asks for
+  to one concrete thing {name} has done. No grand opening line, no boast.
+- Then one or two short paragraphs: the two or three experiences from the CV that best match
+  what the job needs most. For each, what {name} did and what changed, with the CV's own
+  numbers, and in plain words why it matters for this job.
+- Close briefly: what {name} would like to talk about. Sign off simply.
+
+Accuracy (this matters most):
+- Every fact about {name} - employers, titles, numbers, products, degrees - comes from the CV.
+  Copy numbers exactly as the CV writes them. If the CV doesn't say it, don't say it.
+- Facts about the company come only from the job description. No general praise of the company.
+
+Voice:
+- First person. Natural sentences of different lengths; contractions are fine.
+- Never use: "I am writing to", "I am excited", "thrilled", "passionate", "dynamic",
+  "results-driven", "proven track record", "synergy", "leverage", "spearheaded",
+  "great fit", "perfect fit", "I believe I would". No em dashes.
+- No headers, bullet points, subject line or placeholders like [Company].
+
+Length: 180-250 words in 3-4 paragraphs. Begin with "Dear Hiring Team," unless the job
+description names a person. End with "Best regards," and then {name} on its own line.
+
+JOB: {title} at {company}
+JOB DESCRIPTION:
+{jd}
+
+CV:
+{cv}"""
+
+
+def _letter_text(prompt: str, gemini_key: str, user_id) -> str:
+    body = json.dumps({
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.6, "maxOutputTokens": 1500,
+                             "thinkingConfig": {"thinkingBudget": 0}},
+    }).encode("utf-8")
+    try:
+        gdata = gemini.generate(body, purpose="cover_letter", user_id=user_id, key=gemini_key, timeout=60)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError("Gemini HTTP " + str(e.code) + ": " + e.read().decode("utf-8", errors="replace")[:400])
+    except Exception as e:
+        raise RuntimeError("Gemini exception: " + str(e))
+    cands = gdata.get("candidates", [])
+    if not cands or "content" not in cands[0]:
+        raise RuntimeError("Gemini returned no letter: " + json.dumps(gdata)[:300])
+    return cands[0]["content"]["parts"][0]["text"].strip()
+
+
+def write_cover_letter(job: dict, profile: dict, api_key: str = "", user_id=None,
+                       cv_text: str = "", name: str = "", llm=None) -> dict:
+    """{letter, notes}. Written from the full CV (cv_text); it used to get only
+    the 2-3 sentence profile summary, so a prompt demanding "specific,
+    measurable experience" had none to use (Eran, 2026-11-08: "not good
+    enough"). A number that is in neither the CV nor the job description gets
+    one rewrite with the problem named; if it survives, that sentence is
+    removed and noted."""
+    import tailor
     gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
+    cv = (cv_text or profile.get("cv_summary") or "").strip()[:9000]
+    if not cv:
+        raise RuntimeError("No CV to write from - upload your CV first.")
+    jd = (job.get("full_description") or job.get("description") or job.get("title", ""))[:5000]
+    name = (name or "").strip() or "the candidate"
+    prompt = _LETTER_PROMPT.format(name=name, title=job.get("title", "the role"),
+                                   company=job.get("company", "the company"), jd=jd, cv=cv)
+    if llm is None:
+        if not gemini_key:
+            raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
+        llm = lambda p: _letter_text(p, gemini_key, user_id)
+    allowed = tailor._numbers(cv) | tailor._numbers(jd)
+    letter = llm(prompt)
+    bad = sorted(tailor._numbers(letter) - allowed)
+    if bad:
+        letter = llm(prompt + "\n\nYour previous draft used numbers that are in neither the CV nor the job "
+                     "description: " + ", ".join(bad) + ". Write it again without them; keep the rest.")
+        bad = sorted(tailor._numbers(letter) - allowed)
+    notes = []
+    if bad:
+        kept = []
+        for para in letter.split("\n"):
+            sents = re.split(r"(?<=[.!?])\s+", para)
+            ok = [x for x in sents if not (tailor._numbers(x) - allowed)]
+            notes += ["Removed: \"%s\" (a number not in your CV)" % x.strip() for x in sents if tailor._numbers(x) - allowed]
+            kept.append(" ".join(ok))
+        letter = "\n".join(kept)
+    print("[cover-letter] written (" + str(len(letter)) + " chars, " + str(len(notes)) + " removed)")
+    return {"letter": letter.strip(), "notes": notes}
 
-    cv_block  = (profile.get("cv_summary") or "")[:4000] or "No CV summary on file."
-    jd_text   = (job.get("full_description") or job.get("description") or job.get("title", ""))[:4000]
-    job_title = job.get("title", "Unknown Role")
-    company   = job.get("company", "the company")
 
-    system_instruction = (
-        "You are a senior career coach who writes razor-sharp, highly personalised cover letters "
-        "for senior product and technology professionals. "
-        "You write in a confident, direct, human voice. "
-        "You never use generic filler. Every sentence earns its place."
-    )
-
-    user_prompt = (
-        "Write a complete, three-paragraph cover letter for the job below.\n\n"
-        "=== STRICT RULES ===\n"
-        "1. PARAGRAPH 1 — Opening hook (3 sentences):\n"
-        "   - Sentence 1: Start with a bold statement about a specific achievement from the CV "
-        "     that directly maps to what this role needs. Do NOT start with 'I am writing'.\n"
-        "   - Sentence 2: Name the role and company explicitly.\n"
-        "   - Sentence 3: One more concrete proof point from the CV.\n\n"
-        "2. PARAGRAPH 2 — Specific alignment (4 sentences):\n"
-        "   - Identify the 2-3 most important requirements from the JD.\n"
-        "   - For EACH requirement, cite a specific, measurable experience from the CV "
-        "     (e.g. team size, revenue impact, % improvement, product name, technology used).\n"
-        "   - Be concrete. No vague claims.\n\n"
-        "3. PARAGRAPH 3 — Company fit + CTA (2 sentences):\n"
-        "   - Explain specifically why THIS company (not any company) is the right next step.\n"
-        "   - End with a confident, direct call to action.\n\n"
-        "=== BANNED PHRASES (never use these) ===\n"
-        "- 'I am writing to express my interest'\n"
-        "- 'I am writing to apply'\n"
-        "- 'dynamic', 'results-driven', 'passionate', 'innovative', 'synergy'\n"
-        "- 'I would be a great fit'\n"
-        "- 'I am excited to'\n\n"
-        "=== FORMAT ===\n"
-        "- Plain text only. No markdown. No headers. No bullet points. No subject line.\n"
-        "- Total length: 220-280 words.\n"
-        "- Write ALL THREE paragraphs in full. Do not stop early.\n\n"
-        "=== JOB DETAILS ===\n"
-        f"Role: {job_title}\n"
-        f"Company: {company}\n\n"
-        f"Job Description:\n{jd_text}\n\n"
-        "=== CANDIDATE PROFILE ===\n"
-        f"{cv_block}\n\n"
-        "Now write the complete three-paragraph cover letter:"
-    )
-
-    # ── 1. Gemini 2.5 Flash (primary) ────────────────────────────────────────
-    if gemini_key:
-        gemini_err = None
-        try:
-            body = json.dumps({
-                "systemInstruction": {"parts": [{"text": system_instruction}]},
-                "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 1500,
-                    "thinkingConfig": {"thinkingBudget": 0},
-                },
-            }).encode("utf-8")
-            gdata = gemini.generate(body, purpose="cover_letter", user_id=user_id,
-                                    key=gemini_key, timeout=45)
-
-            candidates = gdata.get("candidates", [])
-            if not candidates:
-                gemini_err = "Gemini returned no candidates: " + json.dumps(gdata)[:300]
-            else:
-                candidate = candidates[0]
-                finish_reason = candidate.get("finishReason", "")
-                if "content" not in candidate:
-                    gemini_err = ("Gemini blocked response (finishReason: "
-                                  + finish_reason + "): " + json.dumps(candidate)[:200])
-                else:
-                    text = candidate["content"]["parts"][0]["text"].strip()
-                    print("[cover-letter] Generated via Gemini 2.5 Flash (" + str(len(text)) + " chars)")
-                    return text
-
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
-            gemini_err = "Gemini HTTP " + str(e.code) + ": " + err_body[:400]
-        except Exception as e:
-            gemini_err = "Gemini exception: " + str(e)
-
-        if gemini_err:
-            print("[cover-letter] " + gemini_err)
-            raise RuntimeError(gemini_err)
-
-    # Anthropic fallback removed — project is Gemini-only per request 2026-05-27.
-    raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
+def generate_cover_letter(job: dict, profile: dict, api_key: str = "",
+                          user_id: "int | None" = None, cv_text: str = "", name: str = "") -> str:
+    """The letter only (older callers). See write_cover_letter."""
+    return write_cover_letter(job, profile, api_key, user_id, cv_text=cv_text, name=name)["letter"]
 
 

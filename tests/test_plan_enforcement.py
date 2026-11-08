@@ -272,7 +272,7 @@ def test_free_cannot_defer_premium_can(free_alice, stack, users):  # noqa: F811
 
 def test_cover_letters_by_plan(free_alice, stack, monkeypatch):  # noqa: F811
     import ai_analysis
-    monkeypatch.setattr(ai_analysis, "generate_cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr(ai_analysis, "write_cover_letter", lambda *a, **k: {"letter": "Dear team,", "notes": []})
     db = stack["db"]
     jid = _visible_job(db, "alice@example.test", "Letter PM")
     st, _l, body = free_alice.post_json("/api/jobs/%d/cover-letter" % jid, {})
