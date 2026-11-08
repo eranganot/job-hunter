@@ -134,3 +134,72 @@ def test_the_user_reviews_edits_and_chooses_which_cv_is_sent(stack, users, monke
     st, _l, body = users["b"].post_json(path, {})                           # a new draft: review again
     assert json.loads(body)["use"] == "original" and json.loads(body)["edited"] is False
     assert A._cv_for_apply(uid, job_id, "/orig.pdf") == "/orig.pdf"
+
+
+# The layout of Eran's real CV (employer line, then "Title 2025-Present"),
+# with made-up content.
+CV2 = """DANA LEVI
+Product Leader
+EXPERIENCE
+NOVA TLV, Israel
+Head of Product 2025-Present
+Own personalization strategy and infrastructure, bridging ML capabilities into
+user-facing journeys
+● Led a move to a personalized experience - boosting engagement +22% and retention
++36%
+● Cut delivery cycles by 30%.
+ORBIT GAMES TLV, Israel
+Product Group Lead 2023-2025
+● Built a product group of 3 PMs and 4 engineering teams
+EDUCATION
+SOME UNIVERSITY NYC, USA
+MBA 2019-2021
+"""
+
+
+def test_roles_are_read_from_the_cv_itself():
+    roles = tailor.cv_roles(CV2)
+    assert [(r["key"], r["title"], r["dates"]) for r in roles] == [
+        ("nova", "Head of Product", "2025-Present"), ("orbit", "Product Group Lead", "2023-2025")]
+    assert roles[0]["bullets"][1] == "Led a move to a personalized experience - boosting engagement +22% and retention +36%"
+    assert len(roles[0]["bullets"]) == 3 and roles[1]["bullets"] == ["Built a product group of 3 PMs and 4 engineering teams"]
+    inline = tailor.cv_roles("EXPERIENCE\nSenior PM - Wix (2016 - 2021)\n- Launched things.\n")
+    assert (inline[0]["title"], inline[0]["company"], inline[0]["dates"]) == ("Senior PM", "Wix", "2016 - 2021")
+
+
+def _job2():
+    return {"title": "Director of Product", "company": "Payoneer", "description": "Lead product for onboarding. " * 6}
+
+
+def test_a_current_role_the_model_drops_gets_a_retry_naming_it():
+    seen = []
+    without = {"headline": "", "summary": "", "skills": [], "education": [], "other": [], "changes": [],
+               "experience": [{"title": "Product Group Lead", "company": "Orbit Games", "dates": "2023-2025",
+                               "bullets": ["Built a product group of 3 PMs and 4 engineering teams"]}]}
+    with_it = {**without, "experience": [{"title": "Head of Product", "company": "Nova", "dates": "2025-Present",
+                                          "bullets": ["Cut delivery cycles by 30%."]}] + without["experience"]}
+    res = tailor.tailor(CV2, _job2(), llm=lambda p: seen.append(p) or (without if len(seen) == 1 else with_it))
+    assert len(seen) == 2 and "Head of Product at NOVA TLV, Israel (2025-Present)" in seen[1]
+    assert [r["company"] for r in res["cv"]["experience"]] == ["Nova", "Orbit Games"]
+
+
+def test_a_role_still_missing_is_put_back_first_from_the_cv():
+    without = {"headline": "", "summary": "", "skills": [], "education": [], "other": [], "changes": [],
+               "experience": [{"title": "Product Group Lead", "company": "Orbit Games", "dates": "2023-2025",
+                               "bullets": ["Built a product group of 3 PMs and 4 engineering teams"]}]}
+    res = tailor.tailor(CV2, _job2(), llm=lambda p: without)
+    first = res["cv"]["experience"][0]
+    assert (first["company"], first["title"], first["dates"]) == ("NOVA TLV, Israel", "Head of Product", "2025-Present")
+    assert "Cut delivery cycles by 30%." in first["bullets"]
+    assert any("NOVA" in f and "back" in f for f in res["flags"])
+
+
+def test_an_employer_with_the_models_extra_words_is_kept_under_the_cvs_name():
+    out = {"headline": "", "summary": "", "skills": [], "education": [], "other": [], "changes": [],
+           "experience": [{"title": "Head of Product", "company": "Nova - sports streaming", "dates": "2025-Present",
+                           "bullets": []},
+                          {"title": "CPO", "company": "Google", "dates": "", "bullets": []},
+                          {"title": "Product Group Lead", "company": "Orbit Games", "dates": "2023-2025", "bullets": []}]}
+    res = tailor.tailor(CV2, _job2(), llm=lambda p: out)
+    assert [r["company"] for r in res["cv"]["experience"]] == ["NOVA TLV, Israel", "Orbit Games"]
+    assert any(r["what"] == "role" and "Google" in r["text"] for r in res["removed"])
