@@ -81,6 +81,18 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Security codes in the users' flow (option 1, Eran): notify, "Finish applying" on every screen, "Needs you" when missed.** This only fires once the engine is on (auto-apply is still parked); "Apply now" and scheduled applies use it then.
+  - **Engine runs:** `_submit_application_guarded(..., user_id, job_id)` (both background paths) creates a run, so the engine can ask for a code.
+  - **When a site asks for a code:**
+    - the job becomes `awaiting_code` ("Waiting for your code");
+    - the user is notified on push and every channel: "Payoneer emailed you a security code for … Open Job Hunter within 10 minutes…"; the push opens `/app?finish=<run>`;
+    - the app shows **Finish applying** on every screen (rendered at the root). It checks when the app comes to the front and every 15 s, since tapping a notification with the app already open only focuses it.
+  - **Deadline:** the 150 s deadline pauses while waiting. Before, the engine would have been abandoned mid-wait and could submit after the job was marked failed. Test: a 1 s deadline, code entered at 1.5 s → confirmed.
+  - **Missed code:** `needs_code`, held and never retried on its own (each retry emails another code). It shows as "Needs you: security code" with **Apply now**. "Apply now" refuses while a code is pending. A restart clears `awaiting_code` like `applying`.
+  - **Routes:** `GET /api/apply-runs/waiting` (own runs only), `POST /api/apply-runs/code` (own run only; the admin path shares it).
+  - **Also:** "Thank you for submitting" now counts as a confirmation (Payoneer's page read as plain "submitted").
+  - **Seen on screen:** the first build placed the prompt in the swipe view only. A local phone-size screenshot showed it missing on the Dashboard, where the app opens, so it moved to the root.
+  - **Known limit:** each waiting application holds one of the 4 apply slots for up to 10 minutes.
 - 2026-11-08 — **Notifications now report what really happened; Admin → Notification check proves each channel live.** This comes before the security-code flow for users, which depends on notifications (Eran: "make sure that the notifications are live").
   - **Found by reading, then confirmed by tests** (not by a production failure):
     - `send_telegram` and `send_whatsapp` caught every error and printed it, so `deliver_notification` and the Settings test logged **"Sent OK"** for messages Telegram or Twilio refused.

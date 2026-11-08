@@ -414,6 +414,71 @@ function UndoToast({ undo, onUndo }: { undo: { type: string; job: UiJob }; onUnd
   );
 }
 
+/* "Finish applying" (2026-11-08): a site (Greenhouse) emailed the user a
+   security code mid-application; the application is sent only once it is
+   pasted. Rendered at the app root (main.tsx) so every screen shows it - it
+   first sat in the swipe view only, and the app opens on the Dashboard. The notification's link opens the app, but
+   a tap on it when the app is already open only focuses it - so this checks
+   whenever the app comes to the front, and every 15 s while it is showing. */
+export function FinishApplying() {
+  const [runs, setRuns] = useState<any[]>([]);
+  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState<Record<string, string>>({});
+  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  const check = useCallback(() => {
+    if (document.visibilityState !== "visible") return;
+    api.applyRunsWaiting().then((r) => setRuns(r.waiting || [])).catch(() => {});
+  }, []);
+  useEffect(() => {
+    check();
+    const t = setInterval(check, 15000);
+    const onVis = () => check();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
+  }, [check]);
+  const send = async (id: string) => {
+    setMsg((m) => ({ ...m, [id]: "" }));
+    try {
+      await api.applyRunCode(id, (codes[id] || "").trim());
+      setHidden((h) => ({ ...h, [id]: true }));
+      setMsg((m) => ({ ...m, [id]: "sent" }));
+    } catch (e: any) { setMsg((m) => ({ ...m, [id]: e?.message || "The code was not accepted" })); }
+  };
+  const showing = runs.filter((r) => !hidden[r.run_id]);
+  const sent = Object.values(msg).includes("sent");
+  if (!showing.length && !sent) return null;
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-50 p-3 lg:p-6 pointer-events-none">
+      <div className="pointer-events-auto mx-auto max-w-md space-y-2">
+        {showing.map((r) => (
+          <div key={r.run_id} className="bg-gray-900 border border-amber-500/50 rounded-2xl p-4 shadow-2xl">
+            <p className="text-sm font-semibold text-white">Finish applying to {r.company || "this job"}</p>
+            <p className="text-xs text-gray-300 mt-1">
+              {r.company || "The employer"} emailed you a security code{r.title ? ` for ${r.title}` : ""}. Your application is sent only once you paste it here.
+              {" "}About {Math.max(1, Math.ceil((r.code_seconds_left || 0) / 60))} min left.
+            </p>
+            <div className="flex gap-2 mt-3">
+              <input value={codes[r.run_id] || ""} onChange={(e) => setCodes((c) => ({ ...c, [r.run_id]: e.target.value }))}
+                placeholder="Code from the email" autoComplete="one-time-code"
+                className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-100 tracking-widest" />
+              <button onClick={() => send(r.run_id)} disabled={(codes[r.run_id] || "").trim().length < 4}
+                className="px-4 py-2 rounded-xl bg-indigo-600 active:bg-indigo-700 text-white text-sm font-medium disabled:opacity-50">Send</button>
+            </div>
+            {msg[r.run_id] && msg[r.run_id] !== "sent" && <p className="text-xs text-red-300 mt-2">{msg[r.run_id]}</p>}
+          </div>
+        ))}
+        {sent && !showing.length && (
+          <div className="bg-gray-900 border border-green-500/40 rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3">
+            <p className="text-sm text-green-300">Code sent - finishing your application. Its status updates in your queue.</p>
+            <button onClick={() => setMsg({})} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NotifyNudge() {
   const [show, setShow] = useState(false);
   const [msg, setMsg] = useState("");
@@ -751,6 +816,8 @@ function ApplyBadge({ job }: { job: UiJob }) {
   if (!s || s === "queued") return <span className="text-xs text-gray-400">Queued · ready to apply</span>;
   if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying…</span>;
   if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
+  if (s === "awaiting_code") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><Bell className="w-3 h-3" />Waiting for your code</span>;
+  if (s === "needs_code") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Needs you: security code</span>;
   if (s === "needs_answers") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><MessageSquare className="w-3 h-3" />Needs your answers ({job.applyQuestions.length})</span>;
   if (s === "failed") return <span className="inline-flex items-center gap-1 text-xs text-red-300"><XCircle className="w-3 h-3" />Apply failed{job.applyFailureType ? ` (${job.applyFailureType})` : ""}</span>;
   if (s === "confirmed") return <span className="inline-flex items-center gap-1 text-xs text-green-300"><CheckCircle className="w-3 h-3" />Confirmed</span>;
@@ -1609,6 +1676,15 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
               {!job.applyConfirmation && job.applyError && <p className="text-sm text-red-300 mt-2 break-words">{job.applyError}</p>}
               {job.applyStatus === "needs_answers" && job.applyQuestions.length > 0 && (
                 <AnswerQuestions job={job} onDone={onClose} />
+              )}
+              {job.applyStatus === "awaiting_code" && (
+                <p className="text-sm text-amber-300 mt-2">The employer emailed you a security code. Paste it in the "Finish applying" box to send this application.</p>
+              )}
+              {job.applyStatus === "needs_code" && (
+                <p className="text-sm text-gray-300 mt-2">This site emails a security code during the application, and it wasn't entered in time, so nothing was sent. Tap Apply now while you can check your email: a new code will arrive within a minute, and you paste it here.</p>
+              )}
+              {job.applyStatus === "needs_code" && onRetry && (
+                <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><Send className="w-4 h-4" />Apply now</button>
               )}
               {(job.applyStatus === "failed" || job.applyStatus === "manual_required") && onRetry && (
                 <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />Retry application</button>

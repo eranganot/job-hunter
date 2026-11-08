@@ -2510,26 +2510,45 @@ _APPLY_POOL = _cf.ThreadPoolExecutor(max_workers=4)
 _APPLY_DEADLINE_S = int(os.environ.get("APPLY_DEADLINE_S", "150"))
 
 
-def _submit_application_guarded(job_url, job_title, company, applicant, cv_path, api_key="", job_location=""):
+def _submit_application_guarded(job_url, job_title, company, applicant, cv_path, api_key="", job_location="",
+                                user_id=None, job_id=None):
     """Run apply_engine.submit_application with a concurrency cap and an overall
-    wall-clock deadline so a single apply can never hang the job forever."""
+    wall-clock deadline so a single apply can never hang the job forever.
+
+    With user_id and job_id the apply can stop for an emailed security code
+    (2026-11-08): the user is notified and has _CODE_WAIT_S to paste it, and
+    that waiting does not count against the deadline - otherwise the engine
+    would be abandoned mid-wait and could still submit after the job was
+    marked failed."""
     import apply_engine  # imported lazily (module is imported locally elsewhere)
-    with _APPLY_SEM:
-        fut = _APPLY_POOL.submit(
-            apply_engine.submit_application,
-            job_url, job_title, company, applicant, cv_path, api_key, job_location,
-        )
-        try:
-            return fut.result(timeout=_APPLY_DEADLINE_S)
-        except _cf.TimeoutError:
-            print(f"[apply] DEADLINE exceeded ({_APPLY_DEADLINE_S}s) for {job_title} @ {company}")
-            return {
-                "success": False, "status": "failed",
-                "confirmation_text": "", "error": f"Apply exceeded {_APPLY_DEADLINE_S}s deadline",
-                "apply_failure_type": "timeout",
-                "apply_failure_detail": f"Overall apply deadline ({_APPLY_DEADLINE_S}s) exceeded",
-                "resolved_url": job_url,
-            }
+    run = None
+    if user_id is not None and job_id is not None:
+        run = _new_apply_run(user_id, job_id, job_title, company)
+        applicant = {**(applicant or {}), "_await_code": _await_code_for(run, notify=True)}
+    try:
+        with _APPLY_SEM:
+            fut = _APPLY_POOL.submit(
+                apply_engine.submit_application,
+                job_url, job_title, company, applicant, cv_path, api_key, job_location,
+            )
+            t0 = time.time()
+            while True:
+                try:
+                    return fut.result(timeout=2)
+                except _cf.TimeoutError:
+                    if time.time() - t0 - (_run_waited(run) if run else 0) <= _APPLY_DEADLINE_S:
+                        continue
+                print(f"[apply] DEADLINE exceeded ({_APPLY_DEADLINE_S}s) for {job_title} @ {company}")
+                return {
+                    "success": False, "status": "failed",
+                    "confirmation_text": "", "error": f"Apply exceeded {_APPLY_DEADLINE_S}s deadline",
+                    "apply_failure_type": "timeout",
+                    "apply_failure_detail": f"Overall apply deadline ({_APPLY_DEADLINE_S}s) exceeded",
+                    "resolved_url": job_url,
+                }
+    finally:
+        if run is not None:
+            run["state"] = "done"
 
 
 def _supervised_live_apply(run, user, job, applicant, _cv_path, _jloc, out):
@@ -2591,11 +2610,12 @@ _APPLY_RUNS_LOCK = threading.Lock()
 _CODE_WAIT_S = int(os.environ.get("APPLY_CODE_WAIT_S", "600"))
 
 
-def _new_apply_run(user_id, job_id) -> dict:
+def _new_apply_run(user_id, job_id, title="", company="") -> dict:
     import secrets as _sec
-    run = {"id": _sec.token_hex(8), "user_id": user_id, "job_id": job_id, "state": "running",
-           "out": None, "code": None, "code_event": threading.Event(), "code_asked_at": None,
-           "started": time.time()}
+    run = {"id": _sec.token_hex(8), "user_id": user_id, "job_id": job_id, "title": title or "",
+           "company": company or "", "state": "running", "out": None, "code": None,
+           "code_event": threading.Event(), "code_asked_at": None, "waited": 0.0,
+           "started": time.time(), "notified": None}
     with _APPLY_RUNS_LOCK:
         for k in [k for k, r in _APPLY_RUNS.items() if time.time() - r["started"] > 3600]:
             _APPLY_RUNS.pop(k, None)
@@ -2603,19 +2623,63 @@ def _new_apply_run(user_id, job_id) -> dict:
     return run
 
 
-def _await_code_for(run):
-    """The engine's applicant["_await_code"]: show the paste box, wait for it."""
+def _set_job_apply_status(run, status, only_if=None):
+    try:
+        c = database.get_db()
+        try:
+            sql = "UPDATE jobs SET apply_status=? WHERE id=? AND user_id=?"
+            args = [status, run["job_id"], run["user_id"]]
+            if only_if:
+                sql += " AND apply_status=?"
+                args.append(only_if)
+            c.execute(sql, tuple(args))
+            c.commit()
+        finally:
+            c.close()
+    except Exception as exc:
+        print(f"[apply] could not mark job {run['job_id']} {status}: {exc}")
+
+
+def _await_code_for(run, notify=False):
+    """The engine's applicant["_await_code"]: a site emailed a security code.
+    Marks the job "awaiting_code", tells the user (push and their channels,
+    with a link that opens the code prompt), waits up to _CODE_WAIT_S for it.
+    The supervised admin run passes notify=False: the admin is on the page."""
     def wait():
         run["code_asked_at"] = time.time()
         run["state"] = "awaiting_code"
+        _set_job_apply_status(run, "awaiting_code")
+        if notify:
+            who = run["company"] or "The employer"
+            what = (" for " + run["title"]) if run["title"] else ""
+            try:
+                run["notified"] = deliver_notification(
+                    run["user_id"],
+                    f"\U0001F510 {who} emailed you a security code{what}. Open Job Hunter within "
+                    f"{_CODE_WAIT_S // 60} minutes and paste it to send your application.",
+                    url_suffix="/app", push_url=MOBILE_URL.rstrip("/") + "/app?finish=" + run["id"])
+            except Exception as exc:
+                print(f"[apply] code notification failed for run {run['id']}: {exc}")
+        t0 = time.time()
         got = run["code_event"].wait(_CODE_WAIT_S)
+        run["waited"] += time.time() - t0
         run["state"] = "running"
+        _set_job_apply_status(run, "applying", only_if="awaiting_code")
         return run["code"] if got else None
     return wait
 
 
+def _run_waited(run) -> float:
+    """Seconds this run has spent waiting for a code (including right now)."""
+    w = run.get("waited", 0.0)
+    if run.get("state") == "awaiting_code" and run.get("code_asked_at"):
+        w += time.time() - run["code_asked_at"]
+    return w
+
+
 def _apply_run_view(run) -> dict:
-    v = {"run_id": run["id"], "state": run["state"], "job_id": run["job_id"]}
+    v = {"run_id": run["id"], "state": run["state"], "job_id": run["job_id"],
+         "title": run.get("title", ""), "company": run.get("company", "")}
     if run["state"] == "awaiting_code":
         v["code_seconds_left"] = max(0, int(_CODE_WAIT_S - (time.time() - (run["code_asked_at"] or time.time()))))
     if run["state"] == "done":
@@ -2633,9 +2697,10 @@ def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
     if engine_status == "needs_answers":
         return ("needs_answers", None)        # held for the user, never retried on its own
     if engine_status == "needs_code":
-        # An emailed security code nobody is there to enter: retrying would only
-        # send more code emails (2026-11-08).
-        return ("manual_required", None)
+        # The site emailed a security code and nobody entered it in time. Held
+        # for the user's "Apply now" - an automatic retry would only send more
+        # code emails (2026-11-08).
+        return ("needs_code", None)
     action, backoff = _ae.retry_decision(failure_type, attempts_after)
     if action == "manual":
         return ("manual_required", None)
@@ -2708,7 +2773,7 @@ def run_job_apply(user_id: int) -> int:
                 jobs = conn.execute(
                     "SELECT id, title, company, url, COALESCE(apply_attempts,0) AS attempts "
                     "FROM jobs WHERE user_id=? AND status='approved' "
-                    "AND COALESCE(apply_status,'') NOT IN ('manual_required','needs_answers') "
+                    "AND COALESCE(apply_status,'') NOT IN ('manual_required','needs_answers','needs_code','awaiting_code') "
                     "AND COALESCE(apply_attempts,0) < ? "
                     "AND (apply_next_attempt_at IS NULL OR apply_next_attempt_at <= ?)",
                     (user_id, apply_engine.MAX_APPLY_ATTEMPTS, datetime.now().isoformat())
@@ -2760,6 +2825,7 @@ def run_job_apply(user_id: int) -> int:
                             job_url, j["title"], j["company"],
                             applicant, cv_path, GEMINI_KEY,
                             (j["location"] if "location" in j.keys() else ""),
+                            user_id=user_id, job_id=j["id"],
                         )
                         apply_status       = res["status"]
                         apply_confirmation = res.get("confirmation_text", "")[:1000]
@@ -2933,6 +2999,7 @@ def _trigger_apply_bg(user_id: int, job_id: int):
                     job["url"], job["title"], job["company"],
                     applicant, cv_path, GEMINI_KEY,
                     (job["location"] if "location" in job.keys() else ""),
+                    user_id=user_id, job_id=job_id,
                 )
 
                 apply_status         = res["status"]
@@ -3000,7 +3067,7 @@ def _trigger_apply_bg(user_id: int, job_id: int):
                 try:
                     c3.execute(
                         "UPDATE jobs SET apply_status='failed', apply_error=? "
-                        "WHERE id=? AND user_id=? AND apply_status='applying'",
+                        "WHERE id=? AND user_id=? AND apply_status IN ('applying','awaiting_code')",
                         (str(e)[:500], job_id, user_id)
                     )
                     c3.commit()
@@ -4427,13 +4494,24 @@ class Handler(BaseHTTPRequestHandler):
 
                 # LIVE: submit exactly this one job, forcing past the kill-switch,
                 # in the background (the page polls; a security code may be asked).
-                run = _new_apply_run(user["id"], job["id"])
+                run = _new_apply_run(user["id"], job["id"], job["title"], job["company"])
                 threading.Thread(target=_supervised_live_apply, daemon=True, name="supervised-apply",
                                  args=(run, dict(user), dict(job), applicant, _cv_path, _jloc, out)).start()
                 self.send_json({**out, **_apply_run_view(run)})
                 return
             finally:
                 conn.close()
+
+        if path == "/api/apply-runs/waiting":
+            # Applications paused on a security code the site emailed this user.
+            user = self.require_auth()
+            if not user:
+                return
+            with _APPLY_RUNS_LOCK:
+                mine = [r for r in _APPLY_RUNS.values()
+                        if r["user_id"] == user["id"] and r["state"] == "awaiting_code"]
+            self.send_json({"waiting": [_apply_run_view(r) for r in mine]})
+            return
 
         if path == "/api/admin/apply-run":
             # Status of a supervised live apply started by apply-test?mode=live.
@@ -5200,10 +5278,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Save profile ──
         # ── The security code a site emailed during a supervised apply ──
-        if path == "/api/admin/apply-run/code":
-            if not user or user.get("role") != "admin":
-                self.send_json({"error": "Forbidden"}, 403)
-                return
+        if path in ("/api/apply-runs/code", "/api/admin/apply-run/code"):
+            # Any user, for their own run (the supervised admin page uses the
+            # second path; same rules).
             data = self.read_json() or {}
             run = _APPLY_RUNS.get(str(data.get("run_id") or ""))
             if not run or run["user_id"] != user_id:
@@ -5740,8 +5817,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     self.send_json({"error": "Not found"}, 404)
                     return
-                if job["apply_status"] == "applying":
-                    self.send_json({"error": "Already applying"}, 409)
+                if job["apply_status"] in ("applying", "awaiting_code"):
+                    self.send_json({"error": "Already applying" if job["apply_status"] == "applying"
+                                    else "This application is waiting for your security code"}, 409)
                     return
                 _trigger_apply_bg(user_id, job_id)
                 self.send_json({"success": True, "message": "Application started"})
@@ -6624,7 +6702,8 @@ if __name__ == "__main__":
             _mconn.execute("UPDATE jobs SET status='approved' WHERE status='applied' AND apply_status='failed' AND COALESCE(apply_attempts,0) < 3")
             # Reset any jobs stuck in 'applying' from a crashed/restarted Playwright run
             _stuck = _mconn.execute(
-                "UPDATE jobs SET apply_status=NULL WHERE apply_status='applying'"
+                # 'awaiting_code' too: a restart loses the waiting run (in memory).
+                "UPDATE jobs SET apply_status=NULL WHERE apply_status IN ('applying','awaiting_code')"
             ).rowcount
             if _stuck:
                 print(f"[startup] Reset {_stuck} job(s) stuck in 'applying' state")
