@@ -355,6 +355,85 @@ def _engine_on() -> bool:
     return os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _tailor_inputs(user_id, user):
+    """(cv_text, name, contact lines) for a tailored CV: the CV itself, and a
+    header from the account and profile - never from the model."""
+    conn = database.get_db()
+    try:
+        prof = conn.execute("SELECT cv_summary, cv_path, phone, linkedin_url FROM user_profiles WHERE user_id=?",
+                            (user_id,)).fetchone()
+    finally:
+        conn.close()
+    cv_text = _extract_cv_text(_cv_file(user_id, (prof["cv_path"] or "") if prof else ""),
+                               (prof["cv_summary"] or "") if prof else "")
+    contact = [user.get("email") or "", (prof["phone"] or "").strip() if prof else "",
+               (prof["linkedin_url"] or "").strip() if prof else ""]
+    return cv_text or "", (user.get("name") or "").strip(), contact
+
+
+def _tailored_cv_row(user_id, job_id):
+    conn = database.get_db()
+    try:
+        r = conn.execute("SELECT content, created_at, edited, use_for_apply FROM tailored_cvs "
+                         "WHERE user_id=? AND job_id=?", (user_id, job_id)).fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return None
+    out = json.loads(r["content"])
+    out["created_at"] = r["created_at"]
+    out["edited"] = bool(r["edited"])
+    out["use"] = "tailored" if r["use_for_apply"] else "original"
+    return out
+
+
+def _clean_cv(cv) -> dict:
+    """The user's edited CV, shape-checked and size-capped. Not fact-checked:
+    the user is the author of their own edits."""
+    if not isinstance(cv, dict):
+        raise ValueError("cv must be an object")
+    s = lambda v, n: str(v or "").strip()[:n]
+    lst = lambda v, n, k: [s(x, n) for x in (v or []) if s(x, n)][:k] if isinstance(v, list) else []
+    roles = []
+    for r in (cv.get("experience") or [])[:30]:
+        if isinstance(r, dict):
+            roles.append({"title": s(r.get("title"), 200), "company": s(r.get("company"), 200),
+                          "dates": s(r.get("dates"), 80), "bullets": lst(r.get("bullets"), 600, 20)})
+    return {"headline": s(cv.get("headline"), 300), "summary": s(cv.get("summary"), 2500),
+            "skills": lst(cv.get("skills"), 120, 60), "experience": roles,
+            "education": lst(cv.get("education"), 400, 15), "other": lst(cv.get("other"), 400, 20),
+            "changes": lst(cv.get("changes"), 300, 6)}
+
+
+def _cv_for_apply(user_id, job_id, default_path):
+    """The CV file to send for this job: the tailored one, as a Word file,
+    only if the user chose it for this job; otherwise the original."""
+    if job_id is None:
+        return default_path
+    try:
+        got = _tailored_cv_row(user_id, job_id)
+        if not got or got.get("use") != "tailored":
+            return default_path
+        import tailor as _tl
+        import tempfile as _tf
+        c = database.get_db()
+        try:
+            u = c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        finally:
+            c.close()
+        _cvt, name, contact = _tailor_inputs(user_id, dict(u) if u else {})
+        d = _tf.mkdtemp(prefix="jh_tcv_")
+        path = os.path.join(d, re.sub(r"[^A-Za-z0-9]+", "_", (name or "CV")).strip("_") + "_CV.docx")
+        with open(path, "wb") as f:
+            f.write(_tl.to_docx(got["cv"], name=name, contact=contact))
+        print(f"[apply] user {user_id} job {job_id}: sending the tailored CV")
+        return path
+    except Exception as exc:
+        # Never send nothing: fall back to the original, and say so in the log.
+        print(f"[apply] WARNING tailored CV for job {job_id} unavailable ({exc}); sending the original")
+        return default_path
+
+
 def _notify_status(user_id) -> dict:
     """What can reach this user: server config, their devices and channels,
     and the last notification outcomes logged for them."""
@@ -2557,6 +2636,7 @@ def _submit_application_guarded(job_url, job_title, company, applicant, cv_path,
     import apply_engine  # imported lazily (module is imported locally elsewhere)
     run = None
     if user_id is not None and job_id is not None:
+        cv_path = _cv_for_apply(user_id, job_id, cv_path)
         run = _new_apply_run(user_id, job_id, job_title, company)
         applicant = {**(applicant or {}), "_await_code": _await_code_for(run, notify=True)}
     try:
@@ -2591,6 +2671,7 @@ def _supervised_live_apply(run, user, job, applicant, _cv_path, _jloc, out):
     import apply_engine as _ae
     try:
         applicant["_await_code"] = _await_code_for(run)
+        _cv_path = _cv_for_apply(user["id"], job["id"], _cv_path)
         res = _ae.submit_application(
             job["url"] or "", job["title"], job["company"], applicant, _cv_path,
             GEMINI_KEY, _jloc, True,   # api_key, job_location, force=True
@@ -4180,6 +4261,37 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(_zip)
+            return
+
+        _tm = re.match(r"^/api/jobs/(\d+)/tailored-cv(\.docx)?$", path)
+        if _tm:
+            # Step 14: the stored tailored CV, as JSON or as a Word file.
+            user = self.require_auth()
+            if not user:
+                return
+            _job_id = int(_tm.group(1))
+            got = _tailored_cv_row(user["id"], _job_id)
+            if not got:
+                self.send_json({"error": "No tailored CV for this job yet"}, 404)
+                return
+            if not _tm.group(2):
+                self.send_json(got)
+                return
+            import tailor as _tl
+            _cvt, _name, _contact = _tailor_inputs(user["id"], user)
+            _c = database.get_db()
+            try:
+                _j = _c.execute("SELECT company FROM jobs WHERE id=? AND user_id=?", (_job_id, user["id"])).fetchone()
+            finally:
+                _c.close()
+            data = _tl.to_docx(got["cv"], name=_name, contact=_contact)
+            fname = re.sub(r"[^A-Za-z0-9]+", "_", "%s CV %s" % (_name or "My", (_j["company"] if _j else "") or "")).strip("_")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            self.send_header("Content-Disposition", 'attachment; filename="%s.docx"' % fname)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
             return
 
         if path == "/api/me":
@@ -5970,6 +6082,85 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         # ── Cover Letter (admin only) ──
+        m = re.match(r"^/api/jobs/(\d+)/tailored-cv$", path)
+        if m:
+            # Step 14: rewrite the CV for this job, then check it against the
+            # original (tailor.verify). Metered like cover letters: checked
+            # first, counted only after a success.
+            job_id = int(m.group(1))
+            _tdata = self.read_json() or {}
+            _act = _tdata.get("action", "generate")
+            if _act in ("save", "use"):
+                # The user's review: edit the draft, and/or choose which CV
+                # goes with this job's application (free - no model call).
+                if not _tailored_cv_row(user_id, job_id):
+                    self.send_json({"error": "Tailor the CV first"}, 404)
+                    return
+                c2 = database.get_db()
+                try:
+                    if _act == "save":
+                        try:
+                            _cv = _clean_cv(_tdata.get("cv"))
+                        except ValueError as _ve:
+                            self.send_json({"error": str(_ve)}, 400)
+                            return
+                        if not _cv["experience"]:
+                            self.send_json({"error": "Keep at least one role"}, 400)
+                            return
+                        _old = _tailored_cv_row(user_id, job_id)
+                        _content = {"cv": _cv, "removed": _old.get("removed", []), "flags": _old.get("flags", [])}
+                        c2.execute("UPDATE tailored_cvs SET content=?, edited=1 WHERE user_id=? AND job_id=?",
+                                   (json.dumps(_content), user_id, job_id))
+                    else:
+                        _use = _tdata.get("use")
+                        if _use not in ("tailored", "original"):
+                            self.send_json({"error": "use must be tailored or original"}, 400)
+                            return
+                        c2.execute("UPDATE tailored_cvs SET use_for_apply=? WHERE user_id=? AND job_id=?",
+                                   (1 if _use == "tailored" else 0, user_id, job_id))
+                    c2.commit()
+                finally:
+                    c2.close()
+                self.send_json({"success": True, **_tailored_cv_row(user_id, job_id)})
+                return
+            conn = database.get_db()
+            try:
+                job = conn.execute("SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
+                if not job:
+                    self.send_json({"error": "Not found"}, 404)
+                    return
+                _ok, _used, _cap = entitlements.allowed(conn, user, "tailored_cv")
+            finally:
+                conn.close()
+            if not _ok:
+                self.send_json(entitlements.upgrade_required(
+                    "tailored_cv_limit", user, used=_used, limit=_cap,
+                    message=("Tailored CVs aren't included in your plan." if not _cap else
+                             "You've used all %d tailored CVs this month." % _cap)), 402)
+                return
+            import tailor as _tl
+            cv_text, _name, _contact = _tailor_inputs(user_id, user)
+            try:
+                res = _tl.tailor(cv_text, dict(job), user_id=user_id, key=GEMINI_KEY)
+            except Exception as gen_err:
+                print(f"[tailor] user {user_id} job {job_id}: {gen_err}")
+                self.send_json({"error": str(gen_err)[:300]}, 502)
+                return
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            c2 = database.get_db()
+            try:
+                entitlements.try_consume(c2, user, "tailored_cv")
+                # A new draft goes back to "original" until the user has reviewed it.
+                c2.execute("INSERT INTO tailored_cvs (user_id, job_id, content, created_at, edited, use_for_apply) "
+                           "VALUES (?,?,?,?,0,0) ON CONFLICT (user_id, job_id) DO UPDATE SET "
+                           "content=excluded.content, created_at=excluded.created_at, edited=0, use_for_apply=0",
+                           (user_id, job_id, json.dumps(res), now))
+                c2.commit()
+            finally:
+                c2.close()
+            self.send_json({"success": True, **res, "created_at": now, "edited": False, "use": "original"})
+            return
+
         m = re.match(r"^/api/jobs/(\d+)/cover-letter$", path)
         if m:
             job_id = int(m.group(1))

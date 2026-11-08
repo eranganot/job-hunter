@@ -264,6 +264,13 @@ export const api = {
   checkStatus: (id: number) =>
     request<{ open?: boolean; message?: string; error?: string }>(
       `/api/jobs/${id}/check-status`, "POST", {}),
+  // Step 14: the CV rewritten for one job, checked against the original.
+  tailoredCv: (id: number) => request<Record<string, any>>(`/api/jobs/${id}/tailored-cv`),
+  tailorCv: (id: number) => request<Record<string, any>>(`/api/jobs/${id}/tailored-cv`, "POST", {}),
+  saveTailoredCv: (id: number, cv: Record<string, any>) =>
+    request<Record<string, any>>(`/api/jobs/${id}/tailored-cv`, "POST", { action: "save", cv }),
+  useCv: (id: number, use: "tailored" | "original") =>
+    request<Record<string, any>>(`/api/jobs/${id}/tailored-cv`, "POST", { action: "use", use }),
   coverLetter: (id: number, action: "generate" | "save", letter?: string) =>
     request<{ letter?: string; success?: boolean; error?: string }>(
       `/api/jobs/${id}/cover-letter`, "POST", letter === undefined ? { action } : { action, letter }),
