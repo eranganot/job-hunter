@@ -827,12 +827,15 @@ def discover_boards(company: str, fetch=None, workers: int = 6, timeout: int = 6
     def get(url):
         if fetch is not None:
             return fetch(url)
+        import http.client
         try:
             req = urllib.request.Request(url, headers={"User-Agent": linkcheck.UA})
             with linkcheck._OPENER.open(req, timeout=timeout) as r:
                 return r.geturl(), r.read(1_500_000).decode("utf-8", "ignore")
-        except Exception:
-            return None, ""                     # no such site: the normal case for most guesses
+        except (OSError, ValueError, http.client.HTTPException):
+            # No such site, refused, timed out, bad TLS: the normal case for
+            # most guessed domains - not an error worth reporting.
+            return None, ""
 
     pages = careers_pages(company)
     with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
@@ -849,7 +852,11 @@ def _stored_boards(get_db, key: str, now=None):
     "none found" older than DISCOVER_RECHECK_DAYS)."""
     import json
     from datetime import datetime, timedelta, timezone
-    rows = _read_rows(get_db, "SELECT boards, checked_at FROM company_boards WHERE company_key=?", (key,))
+    try:
+        rows = _read_rows(get_db, "SELECT boards, checked_at FROM company_boards WHERE company_key=?", (key,))
+    except Exception as exc:              # a database without m0024: look it up, just don't remember it
+        print("[links] WARNING company_boards unreadable (%s): %s" % (type(exc).__name__, exc))
+        return None
     if not rows:
         return None
     boards = [tuple(b) for b in json.loads(rows[0]["boards"] or "[]")]
