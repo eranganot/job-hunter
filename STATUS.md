@@ -81,6 +81,17 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Step 1c, careers-map: the job board a company's own careers page embeds, found once and kept.**
+  - **Measured first,** on the 30 jobs of Eran's 11-07 search trial, where the free lookups found 0 and web search 2:
+    - guessing the company's site from its name (full name first, then a shortened form) and reading `/careers`, `careers.` and `/jobs` found the right board for 3: Check Point → SmartRecruiters, FrontStory → Comeet, Echo → Ashby;
+    - it found one **wrong** company: Papaya Global → papaya.com, which is Papaya Gaming. The title match rejected it, which is why nothing is linked without a live posting whose title matches (≥82).
+  - **End to end:** **2 of 30 resolved to the exact posting** (FrontStory, Echo; both 100%). Web search's 2 were different jobs (TechSee, Team8), so together 4 of 30. About 7 s per new company.
+  - **Code:**
+    - `links.discover_boards` parallel-fetches the candidate pages; `boards_in_page` reads Comeet, Greenhouse (including `embed?for=`), Lever, Ashby, SmartRecruiters and Workday links.
+    - `make_resolver` order: learned boards → careers-page board → name guessing.
+    - Up to 15 new companies per run (`DISCOVER_PER_RUN`). Results are kept in `company_boards` (m0024, public data, no user id); "none found" is rechecked after 30 days.
+    - The link report and the search trial measure with it but write nothing.
+  - **Tests:** page parsing; the full-name-first slug; a discovered board resolves on a title match, is stored, is not looked up again, and gives no link without a title match; "none" is stored.
 - 2026-11-08 — **"Daily apply limit reached (20 of 20)" with the engine off: the scheduler queued an apply run every minute of the apply hour.**
   - **Reproduced locally:** auto-apply on, apply hour = now, engine off, 25 one-minute scheduler ticks with each run finished as the worker does → 20 apply runs, then `enqueue` raises "Daily apply limit reached: 20 of 20", the message Eran saw. His Settings show apply time 4:00 PM, and he hit it at 17:38.
   - **Root cause:** `_check_scheduled_jobs` treated the day as done only if `activity_log` had a `job_applied` entry, which only a real submission writes. Every other outcome writes nothing: `apply_engine_disabled`, an empty queue, `not_entitled`, `daily_limit_reached`. So the next tick (each minute, `file_watcher`) queued another run. Dedupe stops only concurrent runs, and each ended at once.

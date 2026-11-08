@@ -72,6 +72,7 @@ TABLE_ORDER = [
     # No foreign key; only needs to come after users.
     "application_qa",
     "tailored_cvs",
+    "company_boards",
     "subscriptions",
     "billing_events",
 ]
