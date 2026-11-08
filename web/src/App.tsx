@@ -1729,6 +1729,49 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
 // Standing instructions for application forms (2026-11-08): answers to the
 // questions that recur on every form, kept on the account - Eran asked for
 // them not to be profile questions.
+// Proves notifications live (2026-11-08): the security-code flow depends on
+// them, and every channel used to fail without a trace.
+function NotificationCheck() {
+  const [st, setSt] = useState<Record<string, any> | null>(null);
+  const [res, setRes] = useState<Record<string, string> | null>(null);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const load = () => api.adminNotifyStatus().then(setSt).catch((e: any) => setErr(e?.message || "Could not load"));
+  useEffect(() => { load(); }, []);
+  const send = async () => {
+    setBusy(true); setErr(""); setRes(null);
+    try { const r = await api.adminNotifyCheck(); setRes(r.results || {}); setSt(r); }
+    catch (e: any) { setErr(e?.message || "The check failed"); }
+    finally { setBusy(false); }
+  };
+  const ok = (v: string) => v.startsWith("sent");
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h3 className="font-semibold text-white mb-1">Notification check</h3>
+      <p className="text-xs text-gray-400 mb-2">What can reach you, and a real test on every channel you use.</p>
+      {st && (
+        <div className="text-xs text-gray-300 space-y-1">
+          <p>Push on the server: <span className={st.push?.keys && st.push?.library ? "text-green-300" : "text-amber-300"}>{st.push?.keys && st.push?.library ? "ready" : `not ready (${!st.push?.keys ? "keys missing" : "library missing"})`}</span></p>
+          <p>Devices with notifications on: {st.devices?.length ? st.devices.map((d: any) => d.service).join(", ") : <span className="text-amber-300">none - turn them on in Settings on your phone</span>}</p>
+          <p>Other channels: {st.channels?.length ? st.channels.join(", ") : "none"}{st.channels?.includes("email") && st.email_sender_is_sandbox ? " (email reaches only your own address until the domain is set up)" : ""}</p>
+        </div>
+      )}
+      <button onClick={send} disabled={busy}
+        className="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Sending..." : "Send me a test on every channel"}</button>
+      {res && (
+        <ul className="mt-2 text-xs space-y-0.5">
+          {Object.entries(res).map(([k, v]) => <li key={k} className={ok(v) ? "text-green-300" : "text-amber-300"}><span className="text-gray-300">{k}:</span> {v}</li>)}
+        </ul>
+      )}
+      {st?.recent?.length > 0 && (
+        <details className="mt-2"><summary className="text-xs text-gray-400 cursor-pointer">Last notifications logged</summary>
+          <ul className="mt-1 text-[11px] text-gray-400 space-y-0.5">{st.recent.map((r: any, i: number) => <li key={i}>{r.at} {r.detail}</li>)}</ul>
+        </details>
+      )}
+      {err && <p className="text-xs text-red-300 mt-2">{err}</p>}
+    </div>
+  );
+}
+
 function ApplicationInstructions() {
   const [text, setText] = useState(""); const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState("");
@@ -2176,6 +2219,7 @@ function AdminPanel({ me }: any) {
             )}
           </div>
           <SupervisedApply />
+          <NotificationCheck />
           <ApplicationInstructions />
           <LinkReport />
           <LearningCheck />
@@ -2837,7 +2881,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   };
 
   const enableNotifs = async () => { setPushMsg("Enabling…"); const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "✓ Notifications enabled" : (r.reason || "Couldn't enable")); };
-  const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch { setPushMsg("Test failed"); } };
+  const sendTest = async () => { setPushMsg("Sending…"); try { await api.pushTest(); setPushMsg("✓ Test sent — check your notifications"); } catch (e: any) { setPushMsg("Test failed: " + (e?.message || "unknown error")); } };
   const save = async () => {
     setSaving(true); setSaved(false);
     try {

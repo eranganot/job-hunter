@@ -234,6 +234,9 @@ def test_a_supervised_apply_waits_for_the_emailed_security_code(stack, users, mo
         return {"success": True, "status": "confirmed", "confirmation_text": "Thank you for applying",
                 "error": ""}
     monkeypatch.setattr(apply_engine, "submit_application", fake_submit)
+    # The fixture job is not on a company site, so the route would first run the
+    # real career-page lookup over the network - a 10 s client timeout, 1 run in 9.
+    monkeypatch.setattr(apply_engine, "resolve_ats_application", lambda *a, **k: None)
     uid = _user_id(stack["db"], "admin@example.test")
     job_id = _new_job(stack["db"], uid)
     seen = {}
@@ -505,3 +508,21 @@ def test_the_learning_report_is_admin_only_and_answers(stack, users):
     assert st == 200 and "verdict" in json.loads(body)
     st, _l, _b = users["a"].get("/api/admin/learning-report")
     assert st == 403
+
+
+def test_the_notification_check_is_admin_only_and_reports_each_channel(stack, users, monkeypatch):
+    import app as A
+    monkeypatch.setattr(A, "send_web_push_to_user", lambda u, m, suf="", url=None: {
+        "configured": True, "devices": 0, "sent": 0, "failed": 0, "errors": []})
+    # The shared server stubs deliver_notification (offline suite); its real
+    # behaviour is tested in test_notifications.py. Here: the route passes it on.
+    monkeypatch.setattr(A, "deliver_notification", lambda *a, **k: {"push": "no device has notifications on"})
+    st, _l, _b = users["a"].get("/api/admin/notify-check")
+    assert st == 403
+    st, _l, body = users["admin"].get("/api/admin/notify-check")
+    v = json.loads(body)
+    assert st == 200 and set(v) >= {"push", "devices", "channels", "recent"}
+    st, _l, body = users["admin"].post_json("/api/admin/notify-check", {})
+    assert st == 200 and json.loads(body)["results"]["push"] == "no device has notifications on"
+    st, _l, body = users["admin"].post_json("/api/push/test", {})
+    assert st == 502 and json.loads(body)["success"] is False          # it used to say success

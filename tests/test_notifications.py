@@ -4,6 +4,8 @@ import pytest
 import db as database
 import auth
 
+_PUSHED = {"configured": True, "devices": 1, "sent": 1, "failed": 0, "errors": []}
+
 
 @pytest.fixture
 def env(tmp_path):
@@ -23,7 +25,7 @@ def env(tmp_path):
 def test_push_fires_with_no_channels(env, monkeypatch):
     app, uid = env
     calls = []
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="": calls.append((u, m, suf)))
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: calls.append((u, m, suf)) or _PUSHED)
     app.deliver_notification(uid, "Search Complete - 3 new jobs", "/dashboard#new")
     assert calls, "push must fire even with no channels configured"
     assert calls[0][0] == uid and "Search Complete" in calls[0][1] and calls[0][2] == "/dashboard#new"
@@ -39,7 +41,7 @@ def test_push_fires_alongside_email(env, monkeypatch):
     conn.commit()
     conn.close()
     pushes, emails = [], []
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="": pushes.append(u))
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: pushes.append(u) or _PUSHED)
     monkeypatch.setattr(app, "send_email", lambda **k: emails.append(k))
     app.deliver_notification(uid, "Applied to 2 jobs", "/dashboard#applied")
     assert pushes == [uid]      # push fired
@@ -61,7 +63,7 @@ def test_every_selected_channel_fires_not_just_the_first(env, monkeypatch):
     conn.commit()
     conn.close()
     pushes, emails, tgs = [], [], []
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="": pushes.append(u))
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: pushes.append(u) or _PUSHED)
     monkeypatch.setattr(app, "send_email", lambda **k: emails.append(k))
     monkeypatch.setattr(app, "send_telegram", lambda t, c, m: tgs.append((t, c)))
     app.deliver_notification(uid, "3 new jobs", "/app")
@@ -81,7 +83,7 @@ def test_whitespace_around_a_channel_does_not_silently_drop_it(env, monkeypatch)
     )
     conn.commit()
     conn.close()
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="": None)
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: _PUSHED)
     emails, tgs = [], []
     monkeypatch.setattr(app, "send_email", lambda **k: emails.append(k))
     monkeypatch.setattr(app, "send_telegram", lambda t, c, m: tgs.append(t))
@@ -109,3 +111,53 @@ def test_the_real_sender_is_installed_and_not_someone_elses_stub():
         "not restored - every notification assertion after this point is void")
     assert app.deliver_notification.__name__ == "deliver_notification"
     assert getattr(app.notify_admin_new_user, "__name__", "") == "notify_admin_new_user"
+
+
+def test_each_channel_reports_what_really_happened(env, monkeypatch):
+    """2026-11-08: Telegram and WhatsApp swallowed their errors and the log said
+    "Sent OK"; push returned nothing. Now every outcome comes back and is logged."""
+    app, uid = env
+    conn = database.get_db()
+    conn.execute("UPDATE user_profiles SET notification_channel='telegram,email', "
+                 "email_address='x@e.com', telegram_token='t', telegram_chat_id='c' WHERE user_id=?", (uid,))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: {
+        "configured": True, "devices": 1, "sent": 0, "failed": 1, "errors": ["410 Gone"]})
+
+    def refused(*a):
+        raise RuntimeError("Telegram refused the message: chat not found")
+    monkeypatch.setattr(app, "send_telegram", refused)
+    monkeypatch.setattr(app, "send_email", lambda **k: None)
+    res = app.deliver_notification(uid, "hello")
+    assert res["push"].startswith("FAILED") and "410" in res["push"]
+    assert res["telegram"].startswith("FAILED") and "chat not found" in res["telegram"]
+    assert res["email"] == "sent"
+    conn = database.get_db()
+    logged = [r["details"] for r in conn.execute(
+        "SELECT details FROM activity_log WHERE user_id=? AND event_type='notification'", (uid,)).fetchall()]
+    conn.close()
+    assert any("TELEGRAM" in d and "FAILED" in d for d in logged)
+    assert any("PUSH" in d and "FAILED" in d for d in logged)
+    assert not any("TELEGRAM" in d and "Sent OK" in d for d in logged)
+
+
+def test_telegram_raises_when_telegram_says_no(env, monkeypatch):
+    app, _uid = env
+    import io, json as _j
+
+    class R(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(app.urllib.request, "urlopen", lambda *a, **k: R(_j.dumps({"ok": False, "description": "Unauthorized"}).encode()))
+    with pytest.raises(RuntimeError, match="refused"):
+        app.send_telegram("bad", "c", "hi")
+    with pytest.raises(RuntimeError, match="missing"):
+        app.send_telegram("", "", "hi")
+
+
+def test_push_reports_missing_keys_and_no_devices(env, monkeypatch):
+    app, uid = env
+    monkeypatch.setattr(app, "VAPID_PUBLIC_KEY", "")
+    r = app.send_web_push_to_user(uid, "x")
+    assert r["configured"] is False and "VAPID" in r["errors"][0]

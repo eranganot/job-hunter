@@ -359,6 +359,9 @@ export const api = {
     request<{ success: boolean; saved: number }>(`/api/jobs/${jobId}/answers`, "POST", { answers }),
   // A supervised live apply runs in the background; poll it, and hand over the
   // security code a site emails after Submit (Greenhouse).
+  // Notification check (2026-11-08): what can reach the admin, and a real send on every channel.
+  adminNotifyStatus: () => request<Record<string, any>>("/api/admin/notify-check"),
+  adminNotifyCheck: () => request<Record<string, any>>("/api/admin/notify-check", "POST", {}),
   adminApplyRun: (runId: string) =>
     request<Record<string, any>>(`/api/admin/apply-run?id=${encodeURIComponent(runId)}`),
   adminApplyCode: (runId: string, code: string) =>
