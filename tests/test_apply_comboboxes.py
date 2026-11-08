@@ -261,3 +261,35 @@ def test_a_fill_wiped_by_the_form_taking_over_is_retried_until_it_sticks():
         assert form.input_value("#email") == "eran@example.org"
     finally:
         b.close(); pw.stop()
+
+
+# React-select markup, as on Payoneer's embedded Greenhouse form (2026-11-08).
+# `sticky` decides whether clicking the option actually selects it - on the
+# live page inside payoneer.com it intermittently did not, and the engine
+# reported success for having clicked.
+def _react_select(sticky: bool) -> str:
+    return """<!doctype html><html><body>
+<label id="pp-label" for="pp">I read and understood the privacy policy*</label>
+<div class="select__control"><div class="select__value-container">
+  <div class="select__placeholder">Select...</div>
+  <input id="pp" role="combobox" aria-required="true" aria-labelledby="pp-label" autocomplete="off">
+</div></div>
+<div id="pp-list" role="listbox" hidden><div role="option">Yes</div></div>
+<script>
+const inp = document.getElementById('pp'), box = document.getElementById('pp-list'), vc = inp.parentElement;
+inp.addEventListener('keydown', e => { if (e.key === 'Escape') box.hidden = true; });
+inp.addEventListener('input', () => { inp.setAttribute('aria-controls', 'pp-list'); box.hidden = false; });
+box.querySelector('[role=option]').addEventListener('click', () => {
+  box.hidden = true; inp.value = '';
+  if (%s) { vc.classList.add('select__value-container--has-value');
+            vc.querySelector('.select__placeholder').outerHTML = '<div class="select__single-value">Yes</div>'; }
+});
+</script></body></html>""" % ("true" if sticky else "false")
+
+
+def test_a_react_select_choice_counts_only_when_the_value_shows(page):
+    page.set_content(_react_select(sticky=True))
+    assert ae._choose_combobox(page, "#pp", "Yes") is True
+    assert page.inner_text(".select__single-value") == "Yes"
+    page.set_content(_react_select(sticky=False))
+    assert ae._choose_combobox(page, "#pp", "Yes") is False      # clicked, nothing selected: not success
