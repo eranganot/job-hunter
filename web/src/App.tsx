@@ -963,7 +963,7 @@ function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: 
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-white">{jobs.length} in queue</h3>
         <button onClick={checkLinks} disabled={checking} className="px-3 py-2 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">{checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}{checking ? "Checking…" : "Check links"}</button>
-        {canAutoApply && jobs.length > 0 && (
+        {canAutoApply && me?.auto_apply_live && jobs.length > 0 && (
           <button onClick={runApply} disabled={applying || checking}
                   className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">
             {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
