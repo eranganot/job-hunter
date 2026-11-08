@@ -348,7 +348,10 @@ export const api = {
     request<Record<string, any>>(`/api/admin/learning-report?scope=${scope}`),
   // Standing answers for application forms: minimum salary (gross / month) and notice period.
   applicationAnswers: () =>
-    request<{ salary_expectation_min: number | null; salary_expectation_currency: string; notice_period_days: number }>("/api/application-answers"),
+    request<{ salary_expectation_min: number | null; salary_expectation_currency: string; notice_period_days: number; standing_notes?: string }>("/api/application-answers"),
+  // Standing instructions the form answerer follows on every application (plain English, max 3,000 chars).
+  saveApplicationInstructions: (standing_notes: string) =>
+    request<any>("/api/application-answers", "POST", { standing_notes }),
   saveApplicationAnswers: (body: { salary_expectation_min: number | null; salary_expectation_currency: string; notice_period_days: number }) =>
     request<any>("/api/application-answers", "POST", body),
   // Answers to the questions an application is held on; saved for reuse.

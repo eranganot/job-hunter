@@ -177,6 +177,24 @@ def test_sure_answers_are_filled_and_an_unsure_required_one_holds_the_applicatio
     assert res["unsure"][0]["draft"] == "40,000 ILS"
 
 
+def test_standing_instructions_go_to_the_model_as_their_own_section(page):
+    page.set_content(FORM_QS)
+    seen = {}
+
+    def llm(prompt):
+        seen["p"] = prompt
+        return []
+    notes = "Current salary: do not answer."
+    res = questions.answer(page, {"full_name": "Eran Ganot", "standing_instructions": notes}, {}, llm)
+    head, _, rest = seen["p"].partition("standing instructions (they override every rule below):")
+    assert rest.lstrip().startswith(notes)
+    assert "standing_instructions" not in head                  # not duplicated in the applicant JSON
+    assert "Salary expectations *" in [u["label"] for u in res["unsure"]]   # unanswered required: held
+    seen.clear()
+    questions.answer(page, {"full_name": "Eran Ganot"}, {}, llm)
+    assert "override every rule below):\n(none)" in seen["p"]
+
+
 def test_a_saved_answer_is_used_without_asking_the_model(page):
     page.set_content(FORM_QS)
     bank = {questions.key("Salary expectations *"): "As discussed in interview"}

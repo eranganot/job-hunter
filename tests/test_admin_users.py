@@ -390,7 +390,7 @@ def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users
     uid = _user_id(stack["db"], "admin@example.test")
     _s, _l, body = users["admin"].get("/api/application-answers")
     assert json.loads(body) == {"salary_expectation_min": None, "salary_expectation_currency": "ILS",
-                                "notice_period_days": 30}                      # defaults
+                                "notice_period_days": 30, "standing_notes": ""}  # defaults
     got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
     assert got["notice_period"] == "30 days" and "salary_expectation" not in got
     st, _l, body = users["admin"].post_json("/api/application-answers", {
@@ -406,6 +406,26 @@ def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users
                 {"salary_expectation_min": "lots"}):
         st, _l, _b = users["admin"].post_json("/api/application-answers", bad)
         assert st == 400, bad
+
+
+def test_standing_instructions_are_kept_on_the_account_and_reach_the_applicant(stack, users, monkeypatch):
+    """Eran, 2026-11-08: answers to recurring form questions, kept as one block of
+    instructions on the account - not as profile questions, not in the code."""
+    import app as A
+    import apply_engine
+    monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
+    uid = _user_id(stack["db"], "admin@example.test")
+    assert "standing_instructions" not in A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    notes = "Willing to relocate: yes.\nCurrent salary: do not answer."
+    st, _l, body = users["admin"].post_json("/api/application-answers", {"standing_notes": "  " + notes + " "})
+    assert st == 200 and json.loads(body)["standing_notes"] == notes
+    assert A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")["standing_instructions"] == notes
+    # Saving the salary section later leaves the instructions alone.
+    users["admin"].post_json("/api/application-answers", {"notice_period_days": 30, "salary_expectation_min": None,
+                                                          "salary_expectation_currency": "ILS"})
+    assert A._standing_answers(uid)["standing_notes"] == notes
+    st, _l, _b = users["admin"].post_json("/api/application-answers", {"standing_notes": "x" * 3001})
+    assert st == 400
 
 
 def test_a_salary_too_low_pass_keeps_the_jobs_salary(stack, users):
