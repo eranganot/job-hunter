@@ -960,14 +960,17 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
     assert json.loads(body)["status"] in ("queued", "already_running")
 
 
-def test_run_apply_refuses_a_free_plan_with_an_answer(stack, users):
+def test_run_apply_refuses_a_plan_without_auto_apply_with_an_answer(stack, users, monkeypatch):
     """A 403 the screen can read, not a queued run that quietly does nothing.
 
     The engine is protected at the chokepoint inside run_job_apply. Without this
     second check the enqueue succeeds, the button says "queued", and the worker
     returns not_entitled some minutes later with nobody watching - a button that
-    lies. So the route answers, and it answers with the reason.
+    lies. So the route answers, and it answers with the reason. (Every plan has
+    auto-apply since 2026-11-08, so the plan row is changed for the test.)
     """
+    import plans
+    monkeypatch.setitem(plans.PLANS["free"], "auto_apply", False)
     _set_plan(stack["db"], "bob@example.test", "free")
     status, _loc, body = users["b"].post_json("/api/run-apply", {},
                                               {"Sec-Fetch-Site": "same-origin"})

@@ -601,3 +601,50 @@ def test_the_settings_test_button_uses_the_saved_telegram_details(stack, users, 
     users["a"].post_json("/api/test-notification", {"channel": "telegram", "telegram_token": "9:typed",
                                                       "telegram_chat_id": "7"})
     assert calls[-1] == ("9:typed", "7")
+
+
+def test_ats_names_cover_the_systems_and_embedded_greenhouse():
+    import apply_engine as ae
+    assert ae.ats_name("https://boards.greenhouse.io/payoneer/jobs/1") == "Greenhouse"
+    assert ae.ats_name("https://www.payoneer.com/careers/position/8284597/?gh_jid=8284597") == "Greenhouse"
+    assert ae.ats_name("https://jobs.lever.co/acme/1") == "Lever"
+    assert ae.ats_name("https://www.comeet.co/jobs/x/1") == "Comeet"
+    assert ae.ats_name("https://www.linkedin.com/jobs/view/1") == "LinkedIn"
+    assert ae.ats_name("https://acme.com/careers/1") == "Company site"
+
+
+def test_apply_rates_count_engine_attempts_by_system_and_outcome(stack, users):
+    """Step 8.3: held and manual are not engine failures."""
+    uid = _user_id(stack["db"], "admin@example.test")
+    conn = stack["db"].get_db()
+    for i, (url, st) in enumerate([
+            ("https://boards.greenhouse.io/a/jobs/1", "confirmed"), ("https://boards.greenhouse.io/a/jobs/2", "failed"),
+            ("https://boards.greenhouse.io/a/jobs/3", "needs_code"), ("https://jobs.lever.co/a/4", "submitted"),
+            ("https://www.linkedin.com/jobs/view/5", "manual_required")]):
+        conn.execute("INSERT INTO jobs (user_id,title,company,url,status,apply_status,apply_attempts) VALUES (?,?,?,?,?,?,1)",
+                     (uid, "PM %d" % i, "Rates", url + "?rates", "approved", st))
+    conn.execute("INSERT INTO jobs (user_id,title,company,url,status,apply_status,apply_attempts) VALUES (?,?,?,?,?,?,0)",
+                 (uid, "never tried", "Rates", "https://boards.greenhouse.io/a/jobs/9?rates", "approved", "failed"))
+    conn.commit()
+    conn.close()
+    st, _l, _b = users["a"].get("/api/admin/apply-rates")
+    assert st == 403
+    st, _l, body = users["admin"].get("/api/admin/apply-rates?scope=me")
+    by = {r["system"]: r for r in json.loads(body)["systems"]}
+    gh = by["Greenhouse"]
+    assert (gh["attempted"], gh["sent"], gh["failed"], gh["held"]) == (3, 1, 1, 1)
+    assert gh["success_rate"] == 50 and gh["small_sample"] is True
+    assert by["Lever"]["success_rate"] == 100 and by["LinkedIn"]["manual"] == 1
+
+
+def test_auto_apply_starts_off_for_everyone_but_the_admin(stack):
+    """m0022: flags left on from before the paywall must not start applying for
+    people who never chose it now (auto-apply opened to every plan, 2026-11-08)."""
+    import migrations
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE user_profiles SET auto_apply_enabled=1")
+    conn.commit()
+    migrations.m0022_auto_apply_fresh_choice(conn)
+    rows = conn.execute("SELECT u.role, p.auto_apply_enabled FROM user_profiles p JOIN users u ON u.id=p.user_id").fetchall()
+    conn.close()
+    assert rows and all((r["auto_apply_enabled"] == 1) == (r["role"] == "admin") for r in rows), [dict(r) for r in rows]

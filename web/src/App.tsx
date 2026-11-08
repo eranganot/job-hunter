@@ -1807,6 +1807,56 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
 // them not to be profile questions.
 // Proves notifications live (2026-11-08): the security-code flow depends on
 // them, and every channel used to fail without a trace.
+// Step 8.3: the engine's success rate per application system - the number
+// the decision to run auto-apply for everyone rests on.
+function ApplyRates() {
+  const [rep, setRep] = useState<Record<string, any> | null>(null);
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const load = async () => {
+    setBusy(true); setErr("");
+    try { setRep(await api.adminApplyRates()); } catch (e: any) { setErr(e?.message || "Could not load"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h3 className="font-semibold text-white mb-1">Apply results by system</h3>
+      <p className="text-xs text-gray-400 mb-2">Every job the engine tried, by where it applies. Success = sent / (sent + failed).</p>
+      <button onClick={load} disabled={busy}
+        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Loading..." : rep ? "Refresh" : "Show results"}</button>
+      {rep && (
+        <div className="mt-3 overflow-x-auto">
+          <p className="text-xs text-gray-300 mb-2">Auto-apply engine: <span className={rep.engine_on ? "text-green-300" : "text-amber-300"}>{rep.engine_on ? "on" : "off (supervised applies only)"}</span></p>
+          {rep.systems?.length ? (
+            <table className="w-full text-xs">
+              <thead><tr className="text-gray-400 text-left">
+                <th className="font-medium py-1 pr-2">System</th><th className="font-medium py-1 px-1 text-right">Tried</th>
+                <th className="font-medium py-1 px-1 text-right">Sent</th><th className="font-medium py-1 px-1 text-right">Held</th>
+                <th className="font-medium py-1 px-1 text-right">Manual</th><th className="font-medium py-1 px-1 text-right">Failed</th>
+                <th className="font-medium py-1 pl-1 text-right">Success</th>
+              </tr></thead>
+              <tbody>
+                {rep.systems.map((r: any) => (
+                  <tr key={r.system} className="border-t border-gray-700/60">
+                    <td className="py-1 pr-2 text-gray-200">{r.system}</td>
+                    <td className="py-1 px-1 text-right text-gray-300">{r.attempted}</td>
+                    <td className="py-1 px-1 text-right text-green-300">{r.sent}</td>
+                    <td className="py-1 px-1 text-right text-amber-300">{r.held}</td>
+                    <td className="py-1 px-1 text-right text-gray-300">{r.manual}</td>
+                    <td className="py-1 px-1 text-right text-red-300">{r.failed}</td>
+                    <td className="py-1 pl-1 text-right text-gray-100">{r.success_rate == null ? "-" : `${r.success_rate}%`}{r.small_sample ? <span className="text-gray-400"> *</span> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : <p className="text-xs text-gray-400">No engine attempts yet.</p>}
+          <p className="text-[11px] text-gray-400 mt-2">* fewer than 5 sent or failed: too few to judge. Held = waiting on your answers or a security code; manual = job boards and Workday, by design.</p>
+        </div>
+      )}
+      {err && <p className="text-xs text-red-300 mt-2">{err}</p>}
+    </div>
+  );
+}
+
 function NotificationCheck() {
   const [st, setSt] = useState<Record<string, any> | null>(null);
   const [res, setRes] = useState<Record<string, string> | null>(null);
@@ -2295,6 +2345,7 @@ function AdminPanel({ me }: any) {
             )}
           </div>
           <SupervisedApply />
+          <ApplyRates />
           <NotificationCheck />
           <ApplicationInstructions />
           <LinkReport />
@@ -3130,8 +3181,10 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
                     </p>
                     <p className="text-xs text-gray-400">
                       {autoApply && canAutoApply
-                        ? "Approving a job sends the application straight away."
-                        : "Approved jobs wait in your queue until you apply."}
+                        ? ((me as any).auto_apply_live === false
+                            ? "Auto-apply isn't running yet. Once it starts, approving a job sends the application; until then, approved jobs wait in your queue."
+                            : "Approving a job sends the application straight away. If a site needs your answers or emails you a security code, you'll get a notification.")
+                        : "Off: approved jobs wait in your queue until you apply."}
                     </p>
                   </div>
                   <Toggle

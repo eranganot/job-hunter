@@ -245,7 +245,7 @@ Follows Appendix A of `EXECUTION_PLAN_PUBLIC_LAUNCH.md`. Starting point is bette
 | On-demand searches | 1 / day | 3 / day | 10 / day | unmetered |
 | Matches shown per search (scored) | 3, the rest shown blurred | 6, the rest shown blurred | unlimited | unmetered |
 | Direct company links | yes | yes | yes | yes |
-| Auto-apply | no | not sold while parked | not sold while parked | when on |
+| Auto-apply | yes, user's choice (2026-11-08) | yes, user's choice | yes, user's choice | when on |
 | Cover letters | no | 10 / month | 30 / month | unmetered |
 | CV optimizer (general review) | 2 / month | 4 / month | unlimited | unmetered |
 | Notifications | all | all | all | all |

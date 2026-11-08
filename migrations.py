@@ -904,6 +904,17 @@ def m0021_standing_notes(conn):
     conn.commit()
 
 
+def m0022_auto_apply_fresh_choice(conn):
+    """Auto-apply opens to every plan (Eran, 2026-11-08: the users decide).
+    Flags left on from before the paywall (m0010 kept them) would otherwise
+    start applying for people who never chose it now - so every non-admin
+    account starts from off and decides in Settings."""
+    conn.execute(
+        "UPDATE user_profiles SET auto_apply_enabled=0 WHERE COALESCE(auto_apply_enabled,0)<>0 "
+        "AND user_id NOT IN (SELECT id FROM users WHERE role='admin')")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -926,6 +937,7 @@ MIGRATIONS = [
     (19, "application_answers",         m0019_application_answers),
     (20, "salary_at_pass",              m0020_salary_at_pass),
     (21, "standing_notes",              m0021_standing_notes),
+    (22, "auto_apply_fresh_choice",     m0022_auto_apply_fresh_choice),
 ]
 
 

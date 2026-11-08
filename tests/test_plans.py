@@ -47,7 +47,7 @@ def test_the_matrix_is_the_one_eran_approved():
     assert (f["history_days"], p["history_days"], e["history_days"]) == (30, 365, None)
     assert not f["paid_sources"] and e["paid_source_credit"] > p["paid_source_credit"] > 0
     assert not f["deferred_list"] and p["deferred_list"] and e["deferred_list"]
-    assert not any(row["auto_apply"] for row in plans.PLANS.values())   # not sold while parked
+    assert all(row["auto_apply"] for row in plans.PLANS.values())   # every plan, user's choice (2026-11-08)
     assert (plans.PROMOTION_PLAN, plans.PROMOTION_DAYS, plans.NOTICE_DAYS) == ("premium", 30, (7, 1))
     assert plans.SIX_MONTH_DISCOUNT == 0.20
     assert "beta" not in plans.PLANS and "admin" not in plans.PLANS     # admin is a role

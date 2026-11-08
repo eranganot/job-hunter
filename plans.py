@@ -45,7 +45,10 @@ PLANS = {
         "search_cadence": "weekly",
         "on_demand_search": 1,
         "matches_per_search": 3,
-        "auto_apply": False,
+        # Every plan may turn auto-apply on; each user decides in Settings and
+        # it is off until they do (Eran, 2026-11-08). The engine's own switch
+        # (APPLY_ENGINE_ENABLED) still has to be on before anything is sent.
+        "auto_apply": True,
         "cover_letter": 0,
         "cv_review": 2,
         "notifications": "all",
@@ -62,7 +65,7 @@ PLANS = {
         "search_cadence": "daily",
         "on_demand_search": 3,
         "matches_per_search": 6,
-        "auto_apply": False,            # not sold while parked
+        "auto_apply": True,             # every plan (2026-11-08)
         "cover_letter": 10,
         "cv_review": 4,
         "notifications": "all",
@@ -79,7 +82,7 @@ PLANS = {
         "search_cadence": "daily",      # "daily + on demand"
         "on_demand_search": 10,
         "matches_per_search": UNLIMITED,
-        "auto_apply": False,            # not sold while parked
+        "auto_apply": True,             # every plan (2026-11-08)
         "cover_letter": 30,
         "cv_review": UNLIMITED,
         "notifications": "all",

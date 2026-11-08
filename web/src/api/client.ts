@@ -360,6 +360,8 @@ export const api = {
   // A supervised live apply runs in the background; poll it, and hand over the
   // security code a site emails after Submit (Greenhouse).
   // Notification check (2026-11-08): what can reach the admin, and a real send on every channel.
+  // Step 8.3: engine success rate per application system.
+  adminApplyRates: (scope: "all" | "me" = "all") => request<Record<string, any>>(`/api/admin/apply-rates?scope=${scope}`),
   adminNotifyStatus: () => request<Record<string, any>>("/api/admin/notify-check"),
   adminNotifyCheck: () => request<Record<string, any>>("/api/admin/notify-check", "POST", {}),
   // Applications paused on a security code the site emailed the user.
