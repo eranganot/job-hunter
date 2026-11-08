@@ -2666,8 +2666,10 @@ function NotificationChannels({ me }: { me: any }) {
     for (const ch of channels) {
       try {
         const r = await api.testNotification(ch);
-        (r?.error || r?.success === false ? bad : okd).push(ch);
-      } catch { bad.push(ch); }
+        // Say WHY a channel failed - "Failed: telegram" alone left nothing to act on.
+        if (r?.error || r?.success === false) bad.push(`${ch} (${r?.error || "no reason given"})`);
+        else okd.push(ch);
+      } catch (e: any) { bad.push(`${ch} (${e?.message || "request failed"})`); }
     }
     const parts: string[] = [];
     if (okd.length) parts.push("\u2713 Sent to " + okd.join(", "));

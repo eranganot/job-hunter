@@ -5409,6 +5409,26 @@ class Handler(BaseHTTPRequestHandler):
                 return
             user_id = user["id"]
             msg     = f"✅ Job Hunter test message — connection works!"
+            # Settings sends only {"channel"}; the route read the credentials
+            # from the request body alone, so it tested Telegram/WhatsApp/email
+            # with empty values. send_telegram swallowed that and the button said
+            # "Sent" - until #58 made it raise ("Failed: telegram", Eran,
+            # 2026-11-08). Saved details now fill whatever the request leaves out.
+            try:
+                _pc = database.get_db()
+                try:
+                    _saved = _pc.execute("SELECT telegram_token, telegram_chat_id, twilio_account_sid, "
+                                         "twilio_auth_token, whatsapp_number, email_address "
+                                         "FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
+                finally:
+                    _pc.close()
+                _saved = dict(crypto.decrypt_row(_saved)) if _saved else {}
+            except Exception as _se:
+                print(f"[notify] test: could not read saved details for user {user_id}: {_se}")
+                _saved = {}
+            for _k, _v in _saved.items():
+                if not (data.get(_k) or "").strip():
+                    data[_k] = _v or ""
             try:
                 if channel == "telegram":
                     send_telegram(data.get("telegram_token",""), data.get("telegram_chat_id",""), msg)

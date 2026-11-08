@@ -578,3 +578,26 @@ def test_a_background_apply_waits_for_the_users_code_beyond_the_deadline(stack, 
 def test_a_missed_code_is_held_for_the_user_not_retried(stack):
     import app as A
     assert A._apply_failure_fields("other", 1, "needs_code") == ("needs_code", None)
+
+
+def test_the_settings_test_button_uses_the_saved_telegram_details(stack, users, monkeypatch):
+    """2026-11-08, Eran: "Failed: telegram". Settings sends only {"channel"}, and
+    the route read the token and chat id from the request body - so it called
+    Telegram with none. send_telegram used to swallow that and the button said
+    "Sent"; since #58 it raised. The saved details must be used."""
+    import app as A
+    uid = _user_id(stack["db"], "alice@example.test")
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE user_profiles SET notification_channel='telegram', telegram_token=?, telegram_chat_id=? "
+                 "WHERE user_id=?", (A.crypto.encrypt("123:saved") if hasattr(A.crypto, "encrypt") else "123:saved", "42", uid))
+    conn.commit()
+    conn.close()
+    calls = []
+    monkeypatch.setattr(A, "send_telegram", lambda t, c, m: calls.append((t, c)))
+    st, _l, body = users["a"].post_json("/api/test-notification", {"channel": "telegram"})
+    assert st == 200 and json.loads(body).get("success") is True, body
+    assert calls == [("123:saved", "42")]
+    # Details typed in the form but not saved yet still win.
+    users["a"].post_json("/api/test-notification", {"channel": "telegram", "telegram_token": "9:typed",
+                                                      "telegram_chat_id": "7"})
+    assert calls[-1] == ("9:typed", "7")

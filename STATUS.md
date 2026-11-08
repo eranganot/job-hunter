@@ -81,6 +81,14 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Settings → Notification channels → "Send test" said "Failed: telegram". Root cause: the test route tested with empty credentials; this test had been false-green before #58.**
+  - **Reproduced** (a test with saved Telegram details): Settings sends only `{"channel"}` (since 8421de1, Phase 4). `/api/test-notification` read the token and chat id from the request body only, so it called `send_telegram('', '')`.
+  - **Why silent until today:** `send_telegram` swallowed the error (Telegram 404 on `/bot/sendMessage`) and the route answered success, so the button said "Sent" while nothing arrived. #58 made the sender raise, which exposed it.
+  - **Not the cause:** the real notification path. `deliver_notification` reads the saved profile and was never affected.
+  - **Fix:**
+    - The route fills any credential the request leaves out from the saved profile, decrypted; values typed but not yet saved still win. Same for WhatsApp and email.
+    - The Settings message names the reason, e.g. "Failed: telegram (Telegram refused the message: …)".
+  - **Blast radius:** every user's Telegram, WhatsApp and email test button since Phase 4. The tests reported success and sent nothing.
 - 2026-11-08 — **Security codes in the users' flow (option 1, Eran): notify, "Finish applying" on every screen, "Needs you" when missed.** This only fires once the engine is on (auto-apply is still parked); "Apply now" and scheduled applies use it then.
   - **Engine runs:** `_submit_application_guarded(..., user_id, job_id)` (both background paths) creates a run, so the engine can ask for a code.
   - **When a site asks for a code:**
