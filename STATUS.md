@@ -81,6 +81,23 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Greenhouse's emailed security code: the supervised apply now waits for it and you paste it (Eran chose option A).** Eran's third Payoneer submit ended "No confirmation after submit (form still present)", and he received an email with a code at the same moment.
+  - **Cause:** Greenhouse's anti-bot step. After Submit it greys the button, emails an 8-character code (`no-reply@us.greenhouse-mail.io`, "Security code for your application to …") and shows one box per character. **The application is not sent until the code is entered and the form submitted again.** The engine saw a form still present and called it a failure.
+  - **How solid this is:** the step is documented by several automation projects (dkkyai/job-fit-apply-ai #167, markshield07/AI-Agent-Jobs- #30). The email arriving at submit time matches it. Our page after Submit was not captured (no screenshot in production), so the box markup is built from those descriptions plus a fixture, not from Payoneer's page. The first real run is the live test.
+  - **Also wrong before:** the result said "[auto-answered 2 required field(s)]". The recovery pass had treated the code boxes as unanswered questions and had Gemini type into them.
+  - **Engine** (`_security_code_step`, inside `_finalize_after_submit`, so every handler gets it):
+    - After Submit it waits up to 45 s for a code prompt: ≥4 visible one-character boxes with a code phrase or ≥6 of them, or one box named security/verification/one-time-code beside a code phrase.
+    - It stops early on a confirmation, the form leaving, or any visible error. The Payoneer rehearsal stays at 22 s.
+    - It asks `applicant["_await_code"]`, types the code (auto-advancing boxes, else one per box), submits again and verifies for up to 10 s. A refused code is reported, never called a success.
+    - The recovery pass never touches a code prompt.
+    - With no one to enter the code (unattended), the status is `needs_code`, which `_apply_failure_fields` maps to `manual_required`: retries would only send more code emails.
+    - `_prompt_safe` keeps internal keys and callables out of every applicant JSON sent to Gemini.
+  - **App:**
+    - `apply-test?mode=live` now starts a background run and returns `run_id`.
+    - `GET /api/admin/apply-run?id=` reports the run's state; `POST /api/admin/apply-run/code {run_id, code}` takes the code (4–12 letters or digits, admin, the run's owner only).
+    - The run waits up to 10 min (`APPLY_CODE_WAIT_S`). The registry is in memory: one server instance; a restart loses a waiting run, and nothing is sent in that case.
+    - Admin → Supervised apply polls the run and shows a code box when asked.
+  - **Tests:** the code fixture (right code → confirmed; wrong → not success; no one / no code → `needs_code`); an ordinary form has no code step; the route round-trip (bad code 400, finished run 409, another user 403, job marked applied).
 - 2026-11-08 — **Eran's second real Payoneer submit was held on "I read and understood the privacy policy*" (draft "Yes"). Root cause: payoneer.com's page around the embedded form intermittently breaks the form's dropdowns. The engine now applies on the embed's own address.**
   - **Reproduced** with probes against the live posting (writes aborted). The question was detected correctly (required, single option "Yes"), so the auto-fill ran. The *pick* failed in three ways:
     - `fill()` left the menu closed (`aria-expanded=false`, 0 options);

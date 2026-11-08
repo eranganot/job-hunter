@@ -198,9 +198,64 @@ def test_a_supervised_submit_hands_the_browser_a_real_cv_file(stack, users, monk
     monkeypatch.setattr(apply_engine, "submit_application", fake_submit)
     uid = _cold_cv(stack, "admin@example.test")
     job_id = _new_job(stack["db"], uid)
-    status, _loc, _b = users["admin"].get("/api/admin/apply-test?job_id=%d&mode=live" % job_id)
+    status, _b = _live(users, job_id)
     assert status == 200
     assert seen.get("readable"), "the live submit got %r, which does not exist" % seen.get("cv")
+
+
+def _live(users, job_id, on_wait=None, timeout=20):
+    """Start a supervised live apply and poll it to the end (it runs in the
+    background since 2026-11-08). on_wait(view) is called once when it asks
+    for a security code."""
+    import time as _t
+    st, _l, body = users["admin"].get("/api/admin/apply-test?job_id=%d&mode=live" % job_id)
+    v = json.loads(body)
+    if st != 200:
+        return st, v
+    end, asked = _t.time() + timeout, False
+    while v.get("state") != "done" and _t.time() < end:
+        if v.get("state") == "awaiting_code" and on_wait and not asked:
+            asked = True
+            on_wait(v)
+        _t.sleep(0.1)
+        st, _l, body = users["admin"].get("/api/admin/apply-run?id=" + v["run_id"])
+        v = json.loads(body)
+    return st, v
+
+
+def test_a_supervised_apply_waits_for_the_emailed_security_code(stack, users, monkeypatch):
+    """Greenhouse emails a code after Submit (Eran's Payoneer try, 2026-11-08):
+    the run pauses, the page hands the code over, the engine finishes."""
+    import apply_engine
+    got = {}
+
+    def fake_submit(url, title, company, applicant, cv_path, *a, **k):
+        got["code"] = applicant["_await_code"]()
+        return {"success": True, "status": "confirmed", "confirmation_text": "Thank you for applying",
+                "error": ""}
+    monkeypatch.setattr(apply_engine, "submit_application", fake_submit)
+    uid = _user_id(stack["db"], "admin@example.test")
+    job_id = _new_job(stack["db"], uid)
+    seen = {}
+
+    def hand_over(v):
+        seen["left"] = v.get("code_seconds_left")
+        st, _l, _b = users["admin"].post_json("/api/admin/apply-run/code", {"run_id": v["run_id"], "code": "bad!"})
+        assert st == 400
+        st, _l, _b = users["admin"].post_json("/api/admin/apply-run/code", {"run_id": v["run_id"], "code": " AB12 cd34 "})
+        assert st == 200
+    st, out = _live(users, job_id, on_wait=hand_over)
+    assert st == 200 and out["state"] == "done" and out["result"]["status"] == "confirmed"
+    assert got["code"] == "AB12cd34" and seen["left"] > 0
+    conn = stack["db"].get_db()
+    row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    assert row["status"] == "applied"
+    # A finished run takes no code; another user cannot see it.
+    st, _l, _b = users["admin"].post_json("/api/admin/apply-run/code", {"run_id": out["run_id"], "code": "AB12CD34"})
+    assert st == 409
+    st, _l, _b = users["a"].get("/api/admin/apply-run?id=" + out["run_id"])
+    assert st == 403
 
 
 def test_the_selftest_reports_the_live_database_and_the_stored_cv(stack, users):
@@ -374,8 +429,8 @@ def test_a_held_supervised_submit_puts_its_questions_on_the_job(stack, users, mo
         "error": "1 question(s) need your answer", "apply_failure_type": "needs_answers"})
     uid = _user_id(stack["db"], "admin@example.test")
     job_id = _new_job(stack["db"], uid)
-    st, _l, body = users["admin"].get("/api/admin/apply-test?job_id=%d&mode=live" % job_id)
-    assert st == 200 and json.loads(body)["result"]["questions"] == held
+    st, out = _live(users, job_id)
+    assert st == 200 and out["result"]["questions"] == held
     conn = stack["db"].get_db()
     row = conn.execute("SELECT apply_status, apply_questions FROM jobs WHERE id=?", (job_id,)).fetchone()
     conn.close()

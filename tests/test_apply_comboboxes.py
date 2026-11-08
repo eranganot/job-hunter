@@ -293,3 +293,65 @@ def test_a_react_select_choice_counts_only_when_the_value_shows(page):
     assert page.inner_text(".select__single-value") == "Yes"
     page.set_content(_react_select(sticky=False))
     assert ae._choose_combobox(page, "#pp", "Yes") is False      # clicked, nothing selected: not success
+
+
+# Greenhouse's security-code step, as described by projects that met it: Submit
+# greys out, a code is emailed, eight one-character boxes appear after a short
+# delay; the application goes only after the code and a second Submit.
+CODE_FORM = """<!doctype html><html><body><form id="f" onsubmit="return false">
+<input id="first_name" value="Eran"><button type="submit" id="go">Submit application</button>
+<div id="code"></div></form>
+<script>
+(() => {
+let stage = 0;
+document.getElementById('go').addEventListener('click', () => {
+  if (stage === 0) {
+    stage = 1;
+    setTimeout(() => {
+      const c = document.getElementById('code');
+      c.innerHTML = '<p>Enter the 8-character code we sent to confirm you\\'re a human (security code)</p>' +
+        [...Array(8)].map((_, i) => '<input class="sec" maxlength="1" aria-label="Character ' + (i + 1) + '">').join('');
+      const boxes = [...document.querySelectorAll('.sec')];
+      boxes.forEach((b, i) => b.addEventListener('input', () => { if (b.value && boxes[i + 1]) boxes[i + 1].focus(); }));
+    }, 800);
+  } else {
+    const typed = [...document.querySelectorAll('.sec')].map(b => b.value).join('');
+    if (typed === 'K7Q2ZP9X') document.body.innerHTML = '<h1>Thank you for applying!</h1>';
+    else document.getElementById('code').insertAdjacentHTML('beforeend', '<p role="alert">Incorrect code</p>');
+  }
+});
+})();
+</script></body></html>"""
+SUBMIT = ['button[type="submit"]']
+
+
+def test_a_security_code_prompt_is_answered_with_the_applicants_code(page):
+    page.set_content(CODE_FORM)
+    page.click("#go")
+    asked = []
+    res = ae._finalize_after_submit(page, {"email": "e@x.test", "_await_code": lambda: asked.append(1) or "K7Q2 ZP9X"}, SUBMIT)
+    assert asked == [1]
+    assert res["status"] == "confirmed" and res["success"], res
+
+
+def test_a_security_code_prompt_with_no_one_to_answer_is_not_a_retry(page):
+    page.set_content(CODE_FORM)
+    page.click("#go")
+    res = ae._finalize_after_submit(page, {"email": "e@x.test"}, SUBMIT)
+    assert res["status"] == "needs_code" and "e@x.test" in res["error"]
+    page.set_content(CODE_FORM)
+    page.click("#go")
+    res = ae._finalize_after_submit(page, {"email": "e@x.test", "_await_code": lambda: None}, SUBMIT)
+    assert res["status"] == "needs_code" and "in time" in res["error"]
+
+
+def test_a_wrong_security_code_is_reported_not_called_a_success(page):
+    page.set_content(CODE_FORM)
+    page.click("#go")
+    res = ae._finalize_after_submit(page, {"_await_code": lambda: "WRONG123"}, SUBMIT)
+    assert not res["success"]
+
+
+def test_an_ordinary_form_has_no_code_step(page):
+    page.set_content(PAGE)
+    assert ae._code_boxes(page) == 0

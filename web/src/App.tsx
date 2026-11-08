@@ -1912,6 +1912,8 @@ function SupervisedApply() {
   const [err, setErr] = useState("");
   const [dry, setDry] = useState<any>(null);
   const [live, setLive] = useState<any>(null);
+  const [codeRun, setCodeRun] = useState<any>(null);
+  const [code, setCode] = useState(""); const [codeMsg, setCodeMsg] = useState("");
 
   const list = async () => {
     setBusy("list"); setErr(""); setDry(null); setLive(null);
@@ -1935,10 +1937,28 @@ function SupervisedApply() {
     if (!dry?.job) return;
     if (!confirm(`Submit a REAL application to ${dry.job.company} for "${dry.job.title}"?\n\n` +
                  `Target: ${dry.target_url}\n\nThis sends your CV and details to the employer. It cannot be undone.`)) return;
-    setBusy("live"); setErr("");
-    try { setLive(await api.adminApplyTest(dry.job.id, true)); }
+    setBusy("live"); setErr(""); setCodeRun(null);
+    try {
+      let v = await api.adminApplyTest(dry.job.id, true);
+      // The submit runs in the background; a site may email a security code.
+      let misses = 0;
+      while (v.run_id && v.state !== "done") {
+        setCodeRun(v.state === "awaiting_code" ? v : null);
+        await new Promise((res) => setTimeout(res, 2000));
+        try { v = await api.adminApplyRun(v.run_id); misses = 0; }
+        catch (e: any) { if (++misses >= 5) throw e; }
+      }
+      setCodeRun(null);
+      setLive(v);
+    }
     catch (e: any) { setErr(e?.message || "The submit failed to run"); }
-    finally { setBusy(""); }
+    finally { setBusy(""); setCodeRun(null); }
+  };
+  const sendCode = async () => {
+    if (!codeRun) return;
+    setCodeMsg("");
+    try { await api.adminApplyCode(codeRun.run_id, code.trim()); setCode(""); setCodeMsg("Sent - submitting..."); }
+    catch (e: any) { setCodeMsg(e?.message || "The code was not accepted"); }
   };
   const ready = dry && dry.is_direct_ats && !dry.account_needed && dry.cv_present && dry.applicant_ready;
   const Field = ({ k, v, ok }: { k: string; v: any; ok?: boolean }) => (
@@ -1997,8 +2017,21 @@ function SupervisedApply() {
                 className="flex-1 py-2 rounded-lg border border-gray-600 text-sm text-gray-300 disabled:opacity-60">Back</button>
               <button onClick={runLive} disabled={!!busy || !ready}
                 className="flex-1 py-2 rounded-lg bg-red-600 text-white text-sm font-medium disabled:opacity-40">
-                {busy === "live" ? "Submitting\u2026 (up to 2\u00bd min)" : "Submit for real"}
+                {busy === "live" ? (codeRun ? "Waiting for the code\u2026" : "Submitting\u2026 (up to 2\u00bd min)") : "Submit for real"}
               </button>
+            </div>
+          )}
+          {codeRun && (
+            <div className="pt-2 border-t border-gray-700 space-y-2">
+              <p className="text-sm text-amber-300 font-medium">The site emailed you a security code</p>
+              <p className="text-xs text-gray-300">Check your inbox (from Greenhouse: "Security code for your application to {dry.job?.company}") and paste the code. Nothing is sent until you do. About {Math.ceil((codeRun.code_seconds_left || 0) / 60)} min left.</p>
+              <div className="flex gap-2">
+                <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="8-character code" autoComplete="one-time-code"
+                  className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-100 tracking-widest" />
+                <button onClick={sendCode} disabled={code.trim().length < 4}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">Enter code</button>
+              </div>
+              {codeMsg && <p className="text-xs text-gray-300">{codeMsg}</p>}
             </div>
           )}
           {!ready && !live && <p className="text-xs text-amber-300">Not submittable: {!dry.is_direct_ats ? "a job-board listing (apply there yourself)" : dry.account_needed ? "Workday asks for an account on the company's site first (apply there yourself)" : !dry.cv_present ? "no CV found" : "no applicant name in your CV"}.</p>}
@@ -2009,6 +2042,7 @@ function SupervisedApply() {
               {r.confirmation_text && <Field k="Confirmation" v={r.confirmation_text} />}
               {r.error && <Field k="Error" v={r.error} ok={false} />}
               {r.apply_failure_type && <Field k="Failure" v={`${r.apply_failure_type}${r.apply_failure_detail ? ": " + r.apply_failure_detail : ""}`} ok={false} />}
+              {r.status === "needs_code" && <p className="text-xs text-amber-300">Not sent: the site's security code was not entered. Submit again and paste the new code when asked.</p>}
               {r.status === "needs_answers" && Array.isArray(r.questions) && (
                 <div className="pt-1">
                   <p className="text-xs text-amber-300 mb-1">Held, not sent. Answer these in the job's details (Queue), then submit again:</p>
