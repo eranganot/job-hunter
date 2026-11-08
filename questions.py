@@ -217,7 +217,8 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
         ask.append(q)
     answers = {}
     if ask and llm is not None:
-        safe = {k: v for k, v in (applicant or {}).items() if k not in ("answer_bank", "standing_instructions")}
+        safe = {k: v for k, v in (applicant or {}).items()
+                if k not in ("answer_bank", "standing_instructions") and not str(k).startswith("_") and not callable(v)}
         notes = ((applicant or {}).get("standing_instructions") or "").strip()[:3000] or "(none)"
         prompt = _PROMPT.format(applicant=json.dumps(safe)[:6000], job=json.dumps(job)[:3500], instructions=notes,
                                 questions=json.dumps([{k: q[k] for k in ("selector", "label", "type", "options", "required")}

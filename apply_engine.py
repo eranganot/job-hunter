@@ -410,7 +410,7 @@ def _answer_and_fill_required(page, fields, applicant) -> int:
         return 0
     prompt = (
         "You are completing REQUIRED fields on a job application that were left blank.\n"
-        "Applicant data (JSON):\n" + json.dumps(applicant) + "\n\n"
+        "Applicant data (JSON):\n" + json.dumps(_prompt_safe(applicant)) + "\n\n"
         "Fields (JSON array):\n" + json.dumps(fields) + "\n\n"
         "Return ONLY a JSON array of actions: "
         '{"selector": "...", "action": "fill|select|check", "value": "..."}.\n'
@@ -465,11 +465,139 @@ def _answer_and_fill_required(page, fields, applicant) -> int:
     return n
 
 
+def _prompt_safe(applicant) -> dict:
+    """The applicant for a model prompt: no internal keys ("_job", the
+    supervised run's "_await_code" callback) - a function in the dict made
+    json.dumps raise."""
+    return {k: v for k, v in (applicant or {}).items() if not str(k).startswith("_") and not callable(v)}
+
+
+_CODE_PHRASES = ("security code", "verification code", "8-character code", "confirm you're a human",
+                 "confirm you’re a human", "confirm you are a human")
+
+_MARK_CODE_BOXES_JS = """() => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const text = (document.body.innerText || '').toLowerCase();
+  const phrase = %s.some(p => text.includes(p));
+  const ins = [...document.querySelectorAll('input')].filter(e => vis(e) && !e.disabled
+      && !['hidden', 'checkbox', 'radio', 'file', 'submit', 'button'].includes((e.type || '').toLowerCase()));
+  const single = ins.filter(e => e.maxLength === 1);
+  const named = ins.filter(e => /security|verif|one-time-code|\\bcode\\b/i.test(
+      [e.id, e.name, e.getAttribute('aria-label'), e.getAttribute('autocomplete'), e.placeholder].join(' ')));
+  let boxes = [];
+  if (single.length >= 4 && (phrase || single.length >= 6)) boxes = single;
+  else if (phrase && named.length) boxes = named.slice(0, 1);
+  document.querySelectorAll('[data-jh-code]').forEach(e => e.removeAttribute('data-jh-code'));
+  boxes.forEach((e, i) => e.setAttribute('data-jh-code', String(i)));
+  return boxes.length;
+}""" % json.dumps(list(_CODE_PHRASES))
+
+
+def _code_boxes(page) -> int:
+    """How many security-code boxes the page shows now (marked data-jh-code=i)."""
+    try:
+        return int(page.evaluate(_MARK_CODE_BOXES_JS) or 0)
+    except Exception as exc:
+        print(f"[apply-engine] code prompt check: {type(exc).__name__}")
+        return 0
+
+
+def _security_code_step(page, applicant, submit_selectors, wait_s: int = 45):
+    """Greenhouse's anti-bot step (Eran's Payoneer submit, 2026-11-08): after
+    Submit it greys the button, emails an 8-character "security code" and shows
+    one box per character; the application is NOT sent until the code is
+    entered and the form submitted again. Before this the engine saw "form
+    still present" and reported no confirmation, and the recovery pass had
+    Gemini type into the boxes.
+
+    Returns None when no code prompt appears (the page confirmed, showed
+    errors or nothing within wait_s) - the caller verifies as before.
+    Otherwise asks applicant["_await_code"]() - the supervised apply's paste
+    box; it blocks until the user enters the code or gives up - types it in,
+    submits again and verifies."""
+    import time as _time
+    deadline = _time.time() + wait_s
+    n = 0
+    while _time.time() < deadline:
+        try:
+            low = (page.evaluate("document.body.innerText") or "").lower()
+        except Exception as exc:
+            print(f"[apply-engine] code step: page unreadable ({type(exc).__name__})")
+            return None
+        if any(p in low for p in _CONFIRMATION_PHRASES):
+            return None
+        n = _code_boxes(page)
+        if n:
+            break
+        try:
+            if not page.query_selector("form"):
+                return None
+            # A blocked or refused submit shows errors, not a code prompt.
+            if any(e.is_visible() and (e.inner_text() or "").strip()
+                   for e in page.query_selector_all('[aria-invalid="true"], [role="alert"], [class*="error"]')[:20]):
+                return None
+        except Exception as exc:
+            print(f"[apply-engine] code step: {type(exc).__name__}")
+        page.wait_for_timeout(1_000)
+    if not n:
+        return None
+    email = (applicant or {}).get("email") or "your email"
+    print(f"[apply-engine] security code prompt ({n} box(es)) - waiting for the applicant")
+    ask = (applicant or {}).get("_await_code")
+    if not callable(ask):
+        return {"success": False, "status": "needs_code", "confirmation_text": "",
+                "error": f"The site emailed a security code to {email}; nothing was sent. "
+                         "Only a supervised apply can take the code."}
+    code = re.sub(r"\s+", "", str(ask() or ""))
+    if not code:
+        return {"success": False, "status": "needs_code", "confirmation_text": "",
+                "error": f"No security code was entered in time (sent to {email}); nothing was sent."}
+    n = _code_boxes(page) or n
+    try:
+        if n > 1:
+            page.click('[data-jh-code="0"]')
+            _keyboard(page).type(code, delay=60)
+            got = "".join(page.input_value('[data-jh-code="%d"]' % i) for i in range(n))
+            if got.lower() != code[:n].lower():          # no auto-advance: one box at a time
+                for i, ch in enumerate(code[:n]):
+                    page.fill('[data-jh-code="%d"]' % i, ch)
+        else:
+            page.fill('[data-jh-code="0"]', code)
+    except Exception as exc:
+        return {"success": False, "status": "failed", "confirmation_text": "",
+                "error": f"Could not type the security code ({type(exc).__name__}); nothing was sent."}
+    page.wait_for_timeout(500)
+    for sel in submit_selectors:
+        try:
+            page.click(sel, timeout=5_000)
+            break
+        except Exception as exc:
+            print(f"[apply-engine] code step: submit {sel}: {type(exc).__name__}")
+    res = {}
+    for _ in range(4):                                     # the confirmation can take a moment
+        res = _verify_submission(page)
+        if res.get("success"):
+            break
+        page.wait_for_timeout(2_500)
+    if not res.get("success") and _code_boxes(page):
+        res["error"] = "The site did not accept the security code (the code boxes are still showing); nothing was sent."
+    res["confirmation_text"] = ((res.get("confirmation_text") or "") + " [security code entered]")[:600]
+    return res
+
+
 def _finalize_after_submit(page, applicant, submit_selectors) -> dict:
     """Verify the outcome; if the submit was blocked by required/invalid fields,
     auto-answer them once and resubmit. Bounded to a single recovery pass."""
+    coded = _security_code_step(page, applicant, submit_selectors)
+    if coded is not None:
+        return coded
     res = _verify_submission(page)
     if res.get("status") != "failed":
+        return res
+    if _code_boxes(page):
+        # Never let the recovery pass type answers into a security-code prompt.
+        res["error"] = "The site asked for an emailed security code; nothing was sent."
+        res["status"] = "needs_code"
         return res
     try:
         fields = _collect_unfilled_required(page)
@@ -1913,7 +2041,7 @@ def submit_application(
             try:
                 instructions = _claude_json(
                     f'Fill job application for "{job_title}" at "{company}".\n\n'
-                    f'Applicant data:\n{json.dumps(applicant, indent=2)}\n\n'
+                    f'Applicant data:\n{json.dumps(_prompt_safe(applicant), indent=2)}\n\n'
                     f'Page HTML (first 8000 chars):\n{page_html[:8000]}\n\n'
                     f'Return a JSON ARRAY of interactions (no explanation):\n'
                     f' {{"action":"fill","selector":"CSS","value":"text"}}\n'

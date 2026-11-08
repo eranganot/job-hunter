@@ -2464,6 +2464,97 @@ def _submit_application_guarded(job_url, job_title, company, applicant, cv_path,
             }
 
 
+def _supervised_live_apply(run, user, job, applicant, _cv_path, _jloc, out):
+    """Background body of a supervised LIVE apply (one job, past the kill
+    switch). Stores the page's view of the result on the run."""
+    import apply_engine as _ae
+    try:
+        applicant["_await_code"] = _await_code_for(run)
+        res = _ae.submit_application(
+            job["url"] or "", job["title"], job["company"], applicant, _cv_path,
+            GEMINI_KEY, _jloc, True,   # api_key, job_location, force=True
+        )
+        out["result"] = {
+            "status": res.get("status"), "success": res.get("success"),
+            "resolved_url": res.get("resolved_url"),
+            "confirmation_text": (res.get("confirmation_text") or "")[:500],
+            "error": (res.get("error") or "")[:500],
+            "apply_failure_type": res.get("apply_failure_type"),
+            "apply_failure_detail": (res.get("apply_failure_detail") or "")[:500],
+            "questions": res.get("questions") or [],
+        }
+        try:
+            _st = res.get("status")
+            c3 = database.get_db()
+            try:
+                if _st in ("submitted", "confirmed") and not (res.get("error") or "").strip():
+                    c3.execute(
+                        "UPDATE jobs SET status='applied', applied_date=?, apply_status=?, "
+                        "apply_confirmation=?, apply_error='', "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
+                        (datetime.now().strftime('%Y-%m-%d'), _st,
+                         (res.get('confirmation_text') or '')[:1000], job["id"], user["id"]))
+                else:
+                    # The held questions go on the job, where the Queue shows them.
+                    c3.execute(
+                        "UPDATE jobs SET apply_status=?, apply_error=?, apply_questions=?, "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
+                        (_st, (res.get('error') or '')[:500],
+                         json.dumps(res["questions"]) if res.get("questions") else None,
+                         job["id"], user["id"]))
+                c3.commit(); c3.close()
+                out["persisted"] = True
+            finally:
+                c3.close()
+        except Exception as _e:
+            out["persist_error"] = str(_e)[:200]
+    except Exception as exc:
+        print(f"[apply] supervised run {run['id']} crashed: {exc}")
+        out["result"] = {"status": "failed", "success": False, "error": f"The run crashed: {exc}"[:500]}
+    run["out"] = out
+    run["state"] = "done"
+
+
+# Supervised live applies run in the background so the page can hand over the
+# security code a site emails after Submit (Greenhouse, 2026-11-08). One
+# server instance (STATUS), so an in-process registry is enough.
+_APPLY_RUNS: dict = {}
+_APPLY_RUNS_LOCK = threading.Lock()
+_CODE_WAIT_S = int(os.environ.get("APPLY_CODE_WAIT_S", "600"))
+
+
+def _new_apply_run(user_id, job_id) -> dict:
+    import secrets as _sec
+    run = {"id": _sec.token_hex(8), "user_id": user_id, "job_id": job_id, "state": "running",
+           "out": None, "code": None, "code_event": threading.Event(), "code_asked_at": None,
+           "started": time.time()}
+    with _APPLY_RUNS_LOCK:
+        for k in [k for k, r in _APPLY_RUNS.items() if time.time() - r["started"] > 3600]:
+            _APPLY_RUNS.pop(k, None)
+        _APPLY_RUNS[run["id"]] = run
+    return run
+
+
+def _await_code_for(run):
+    """The engine's applicant["_await_code"]: show the paste box, wait for it."""
+    def wait():
+        run["code_asked_at"] = time.time()
+        run["state"] = "awaiting_code"
+        got = run["code_event"].wait(_CODE_WAIT_S)
+        run["state"] = "running"
+        return run["code"] if got else None
+    return wait
+
+
+def _apply_run_view(run) -> dict:
+    v = {"run_id": run["id"], "state": run["state"], "job_id": run["job_id"]}
+    if run["state"] == "awaiting_code":
+        v["code_seconds_left"] = max(0, int(_CODE_WAIT_S - (time.time() - (run["code_asked_at"] or time.time()))))
+    if run["state"] == "done":
+        v.update(run["out"] or {})
+    return v
+
+
 def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
     """Pick (apply_status, apply_next_attempt_at) for a failed apply using the
     retry policy: route manual failures to manual_required, cap attempts, and
@@ -2473,6 +2564,10 @@ def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
         return ("manual_required", None)
     if engine_status == "needs_answers":
         return ("needs_answers", None)        # held for the user, never retried on its own
+    if engine_status == "needs_code":
+        # An emailed security code nobody is there to enter: retrying would only
+        # send more code emails (2026-11-08).
+        return ("manual_required", None)
     action, backoff = _ae.retry_decision(failure_type, attempts_after)
     if action == "manual":
         return ("manual_required", None)
@@ -4252,49 +4347,28 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(out)
                     return
 
-                # LIVE: submit exactly this one job, forcing past the kill-switch.
-                res = _ae.submit_application(
-                    job["url"] or "", job["title"], job["company"], applicant, _cv_path,
-                    GEMINI_KEY, _jloc, True,   # api_key, job_location, force=True
-                )
-                out["result"] = {
-                    "status": res.get("status"), "success": res.get("success"),
-                    "resolved_url": res.get("resolved_url"),
-                    "confirmation_text": (res.get("confirmation_text") or "")[:500],
-                    "error": (res.get("error") or "")[:500],
-                    "apply_failure_type": res.get("apply_failure_type"),
-                    "apply_failure_detail": (res.get("apply_failure_detail") or "")[:500],
-                    "questions": res.get("questions") or [],
-                }
-                try:
-                    _st = res.get("status")
-                    c3 = database.get_db()
-                    try:
-                        if _st in ("submitted", "confirmed") and not (res.get("error") or "").strip():
-                            c3.execute(
-                                "UPDATE jobs SET status='applied', applied_date=?, apply_status=?, "
-                                "apply_confirmation=?, apply_error='', "
-                                "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
-                                (datetime.now().strftime('%Y-%m-%d'), _st,
-                                 (res.get('confirmation_text') or '')[:1000], job["id"], user["id"]))
-                        else:
-                            # The held questions go on the job, where the Queue shows them.
-                            c3.execute(
-                                "UPDATE jobs SET apply_status=?, apply_error=?, apply_questions=?, "
-                                "apply_attempts=COALESCE(apply_attempts,0)+1 WHERE id=? AND user_id=?",
-                                (_st, (res.get('error') or '')[:500],
-                                 json.dumps(res["questions"]) if res.get("questions") else None,
-                                 job["id"], user["id"]))
-                        c3.commit(); c3.close()
-                        out["persisted"] = True
-                    finally:
-                        c3.close()
-                except Exception as _e:
-                    out["persist_error"] = str(_e)[:200]
-                self.send_json(out)
+                # LIVE: submit exactly this one job, forcing past the kill-switch,
+                # in the background (the page polls; a security code may be asked).
+                run = _new_apply_run(user["id"], job["id"])
+                threading.Thread(target=_supervised_live_apply, daemon=True, name="supervised-apply",
+                                 args=(run, dict(user), dict(job), applicant, _cv_path, _jloc, out)).start()
+                self.send_json({**out, **_apply_run_view(run)})
                 return
             finally:
                 conn.close()
+
+        if path == "/api/admin/apply-run":
+            # Status of a supervised live apply started by apply-test?mode=live.
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            run = _APPLY_RUNS.get((qs.get("id", [""])[0] or "").strip())
+            if not run or run["user_id"] != user["id"]:
+                self.send_json({"error": "No such run (the server may have restarted)"}, 404)
+                return
+            self.send_json(_apply_run_view(run))
+            return
 
         if path == "/api/admin/apply-selftest":
             # Read-only production diagnosis of the apply engine. Does NOT submit
@@ -5033,6 +5107,28 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         # ── Save profile ──
+        # ── The security code a site emailed during a supervised apply ──
+        if path == "/api/admin/apply-run/code":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            data = self.read_json() or {}
+            run = _APPLY_RUNS.get(str(data.get("run_id") or ""))
+            if not run or run["user_id"] != user_id:
+                self.send_json({"error": "No such run (the server may have restarted)"}, 404)
+                return
+            if run["state"] != "awaiting_code":
+                self.send_json({"error": "This apply is not waiting for a code"}, 409)
+                return
+            code = re.sub(r"\s+", "", str(data.get("code") or ""))
+            if not re.fullmatch(r"[A-Za-z0-9]{4,12}", code):
+                self.send_json({"error": "The code should be 4-12 letters or digits"}, 400)
+                return
+            run["code"] = code
+            run["code_event"].set()
+            self.send_json({"success": True, **_apply_run_view(run)})
+            return
+
         # ── Standing answers for application forms (2026-11-07) ──
         # The application_answers table existed since the baseline schema and
         # nothing used it. Salary expectation (minimum, gross per month) and

@@ -357,6 +357,12 @@ export const api = {
   // Answers to the questions an application is held on; saved for reuse.
   answerQuestions: (jobId: number | string, answers: { key: string; label: string; answer: string | string[] }[]) =>
     request<{ success: boolean; saved: number }>(`/api/jobs/${jobId}/answers`, "POST", { answers }),
+  // A supervised live apply runs in the background; poll it, and hand over the
+  // security code a site emails after Submit (Greenhouse).
+  adminApplyRun: (runId: string) =>
+    request<Record<string, any>>(`/api/admin/apply-run?id=${encodeURIComponent(runId)}`),
+  adminApplyCode: (runId: string, code: string) =>
+    request<Record<string, any>>("/api/admin/apply-run/code", "POST", { run_id: runId, code }),
   adminApplyTest: (jobId: number, live = false) =>
     request<Record<string, any>>(`/api/admin/apply-test?job_id=${jobId}${live ? "&mode=live" : ""}`),
 };
