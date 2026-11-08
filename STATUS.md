@@ -84,7 +84,8 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 - 2026-11-08 — **Saved tailored CVs get the role guarantee when opened; wider job pop-up on desktop.**
   - **Still no DAZN after #64:** Eran's 17:05 screenshot shows the same five "What changed" notes, word for word, as his 16:47 one. That is the draft saved before #64, which the role check never ran on (it ran only on new drafts).
   - **Fix:** `_tailored_cv_checked` runs `restore_roles` whenever a stored draft is read (the JSON, the Word download and the file sent with an application) and saves the repair back. No model call. A draft the user edited is left as they made it.
-  - **New:** the panel shows "Tailored <date, time>", stored in UTC and shown in local time, so a stale draft is visible.
+  - **New:** the panel shows "Tailored <date, time>", stored in UTC, so a stale draft is visible.
+  - **Israel time (Eran, 2026-11-08: "always use Israel time zone unless I say otherwise"):** every date the UI formats is pinned to `Asia/Jerusalem`, not the device's zone: the tailored time, plan dates and the CV upload date. The scheduler already ran on Israel time (`israel_now`, DST-aware).
   - **Job details pop-up:** `lg:max-w-5xl` and `94vh` on desktop (was `max-w-2xl`, `88vh`); a taller cover-letter box. Checked on a 1440×900 screenshot.
 - 2026-11-08 — **Tailored CV: every role in the CV is now guaranteed, without depending on the model.** Eran's tailored CV had no DAZN, his current job: "DAZN is my current job and cannot be removed".
   - **Ruled out:** reading the CV. The app's own reader on his PDF gives 5,347 chars with "DAZN TLV, Israel / Head of Product 2025-Present".

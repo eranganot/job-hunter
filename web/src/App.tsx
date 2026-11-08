@@ -849,7 +849,7 @@ export function planLimit(me: any, key: string): any {
 export function fmtPlanDate(s: string | null | undefined): string {
   if (!s) return "";
   const d = new Date(s.replace(" ", "T") + "Z");
-  return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "Asia/Jerusalem" });
 }
 
 /* The end of the swipe deck when the plan is holding matches back: one more
@@ -1628,7 +1628,7 @@ function StatusPill({ s }: { s: string }) {
 /** "8 Nov, 16:52" in the viewer's time, from the server's UTC 'YYYY-MM-DD HH:MM:SS'. */
 function fmtWhen(s: string): string {
   const d = new Date((s || "").replace(" ", "T") + "Z");
-  return isNaN(d.getTime()) ? s : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return isNaN(d.getTime()) ? s : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jerusalem" });
 }
 
 function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: boolean }) {
@@ -3124,7 +3124,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   const [gateMsg, setGateMsg] = useState("");
 
   useEffect(() => { if (!cvName) return; api.cvOptimizerCached().then((r) => { if (r && r.cached && !r.error) setCvAnalysis(r); }).catch(() => {}); }, []);
-  const fmtDate = (iso: string) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); };
+  const fmtDate = (iso: string) => { if (!iso) return ""; const d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "Asia/Jerusalem" }); };
   const analyzeCv = async () => { setAnalyzing(true); setAnalyzeMsg(""); try { const r = await api.cvOptimizer(); if (r?.error) setAnalyzeMsg(r.error); else { setCvAnalysis(r); setAnalyzeMsg(r?.cached ? "Showing your most recent analysis" : ""); } } catch (e: any) { setAnalyzeMsg(e?.message || "Analysis failed"); } finally { setAnalyzing(false); } };
 
   /* The gap that mattered most: /app could upload a CV and never read it, so a
