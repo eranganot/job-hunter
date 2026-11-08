@@ -124,11 +124,17 @@ _PROMPT = """You are filling in a job application ON BEHALF of the applicant, in
 Applicant (JSON): {applicant}
 Job: {job}
 
+Applicant's standing instructions (they override every rule below):
+{instructions}
+
 Questions (JSON array): {questions}
 
 Return ONLY a JSON array, one item per question you can answer:
 {{"selector": "...", "value": "...", "confidence": "high" | "low"}}
 Rules:
+- Follow the standing instructions first. Where they say not to answer something: if the
+  question is required, return it with value "" and confidence "low" (the applicant will be
+  asked); if it is optional, leave it out. A fact stated in the instructions is a fact you may use.
 - Use only facts in the applicant data, the CV excerpt and the job. Never invent employers,
   degrees, numbers, dates, salaries, notice periods, references or certifications.
 - Open questions ("why us", "proudest project", "tell us about..."): 2-4 sentences in the
@@ -211,8 +217,9 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
         ask.append(q)
     answers = {}
     if ask and llm is not None:
-        safe = {k: v for k, v in (applicant or {}).items() if k not in ("answer_bank",)}
-        prompt = _PROMPT.format(applicant=json.dumps(safe)[:6000], job=json.dumps(job)[:3500],
+        safe = {k: v for k, v in (applicant or {}).items() if k not in ("answer_bank", "standing_instructions")}
+        notes = ((applicant or {}).get("standing_instructions") or "").strip()[:3000] or "(none)"
+        prompt = _PROMPT.format(applicant=json.dumps(safe)[:6000], job=json.dumps(job)[:3500], instructions=notes,
                                 questions=json.dumps([{k: q[k] for k in ("selector", "label", "type", "options", "required")}
                                                       for q in ask])[:8000])
         try:

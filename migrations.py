@@ -894,6 +894,16 @@ def m0020_salary_at_pass(conn):
     conn.commit()
 
 
+def m0021_standing_notes(conn):
+    """Standing instructions for application forms (2026-11-08): one block of
+    plain English the question answerer follows on every form ("willing to
+    relocate: yes", "current salary: do not answer"). Kept on the account, not
+    as profile questions (Eran, 2026-11-07)."""
+    if not _has_column(conn, "application_answers", "standing_notes"):
+        conn.execute("ALTER TABLE application_answers ADD COLUMN standing_notes TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -915,6 +925,7 @@ MIGRATIONS = [
     (18, "sponsorship",                 m0018_sponsorship),
     (19, "application_answers",         m0019_application_answers),
     (20, "salary_at_pass",              m0020_salary_at_pass),
+    (21, "standing_notes",              m0021_standing_notes),
 ]
 
 

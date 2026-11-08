@@ -3079,6 +3079,8 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     out["answer_bank"] = _answer_bank(user_id)
     _sa = _standing_answers(user_id)
     out["notice_period"] = "%d days" % _sa["notice_period_days"]
+    if _sa["standing_notes"].strip():
+        out["standing_instructions"] = _sa["standing_notes"].strip()
     if _sa["salary_expectation_min"]:
         out["salary_expectation"] = "at least %s %s gross per month" % (
             format(_sa["salary_expectation_min"], ","), _sa["salary_expectation_currency"])
@@ -3121,12 +3123,13 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
 def _standing_answers(user_id) -> dict:
     """application_answers for the user, with Eran's defaults: notice period 30
     days, currency ILS."""
-    out = {"salary_expectation_min": None, "salary_expectation_currency": "ILS", "notice_period_days": 30}
+    out = {"salary_expectation_min": None, "salary_expectation_currency": "ILS", "notice_period_days": 30,
+           "standing_notes": ""}
     try:
         c = database.get_db()
         try:
-            r = c.execute("SELECT salary_expectation_min, salary_expectation_currency, notice_period_days "
-                          "FROM application_answers WHERE user_id=?", (user_id,)).fetchone()
+            r = c.execute("SELECT salary_expectation_min, salary_expectation_currency, notice_period_days, "
+                          "standing_notes FROM application_answers WHERE user_id=?", (user_id,)).fetchone()
         finally:
             c.close()
         if r:
@@ -3136,6 +3139,7 @@ def _standing_answers(user_id) -> dict:
                 out["salary_expectation_currency"] = r["salary_expectation_currency"]
             if r["notice_period_days"] is not None:
                 out["notice_period_days"] = int(r["notice_period_days"])
+            out["standing_notes"] = r["standing_notes"] or ""
     except Exception as exc:
         print(f"[apply] WARNING could not read application answers for user {user_id}: {exc}")
     return out
@@ -5023,6 +5027,12 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json({"error": "notice_period_days must be 0-365"}, 400)
                     return
                 vals["notice_period_days"] = n
+            if "standing_notes" in data:
+                txt = str(data["standing_notes"] or "").strip()
+                if len(txt) > 3000:
+                    self.send_json({"error": "Application instructions are limited to 3,000 characters"}, 400)
+                    return
+                vals["standing_notes"] = txt
             if vals:
                 cols = ", ".join(vals)
                 conn = database.get_db()

@@ -1726,6 +1726,37 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
 
 
 /* Step 12: are the learning rules earning their place? Read-only. */
+// Standing instructions for application forms (2026-11-08): answers to the
+// questions that recur on every form, kept on the account - Eran asked for
+// them not to be profile questions.
+function ApplicationInstructions() {
+  const [text, setText] = useState(""); const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState("");
+  useEffect(() => {
+    api.applicationAnswers().then((a) => { setText(a.standing_notes || ""); setLoaded(true); })
+      .catch(() => setMsg("Could not load the instructions"));
+  }, []);
+  const save = async () => {
+    setBusy(true); setMsg("");
+    try { await api.saveApplicationInstructions(text); setMsg("Saved"); }
+    catch (e: any) { setMsg(e?.message || "Save failed"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h3 className="font-semibold text-white mb-1">Application instructions</h3>
+      <p className="text-xs text-gray-400 mb-2">How to answer the questions forms keep asking. Followed on every application; anything marked "do not answer" that a form requires is sent to you instead.</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} disabled={!loaded} rows={10} maxLength={3000}
+        className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-100" />
+      <div className="flex items-center gap-3 mt-2">
+        <button onClick={save} disabled={busy || !loaded}
+          className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Saving..." : "Save"}</button>
+        <span className="text-xs text-gray-400">{text.length}/3000 {msg && `· ${msg}`}</span>
+      </div>
+    </div>
+  );
+}
+
 function LearningCheck() {
   const [rep, setRep] = useState<Record<string, any> | null>(null);
   const [scope, setScope] = useState<"me" | "all">("me");
@@ -2111,6 +2142,7 @@ function AdminPanel({ me }: any) {
             )}
           </div>
           <SupervisedApply />
+          <ApplicationInstructions />
           <LinkReport />
           <LearningCheck />
           <div>
