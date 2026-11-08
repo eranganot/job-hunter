@@ -324,21 +324,58 @@ def _listbox_options(page, sel) -> list:
     return [o for o in page.query_selector_all('[role="option"]') if o.is_visible()]
 
 
-def _choose_combobox(page, sel, value: str) -> bool:
-    """Pick `value` in a role="combobox" dropdown: open it, type to filter, click
-    the option whose text matches (exactly, then by prefix)."""
-    page.click(sel, timeout=3_000)
-    page.fill(sel, value)
-    page.wait_for_timeout(400)
-    want = value.strip().lower()
-    opts = _listbox_options(page, sel)
-    pick = next((o for o in opts if (o.inner_text() or "").strip().lower() == want), None) \
-        or next((o for o in opts if (o.inner_text() or "").strip().lower().startswith(want)), None)
-    if not pick:
-        _keyboard(page).press("Escape")
+def _combobox_has_value(page, sel) -> bool:
+    """True when a React-select shows a chosen value (not its placeholder)."""
+    try:
+        return bool(page.evaluate("""(sel) => { const el = document.querySelector(sel);
+          const v = el && el.closest('[class*="value-container"]');
+          return !!(v && (/has-value/.test(v.className) || v.querySelector('[class*="single-value"]'))); }""", sel))
+    except Exception as exc:
+        print(f"[apply-engine] combobox value check {sel}: {type(exc).__name__}")
         return False
-    pick.click()
-    return True
+
+
+def _choose_combobox(page, sel, value: str) -> bool:
+    """Pick `value` in a role="combobox" dropdown and CHECK it stuck.
+
+    Payoneer's embedded Greenhouse form, 2026-11-08 (Eran's real submit held on
+    "I read and understood the privacy policy*"): fill() could leave the menu
+    closed (no options), or a click on the option could register nothing, and
+    this used to report success for having clicked. Now: fill, else type key by
+    key; click the matching option; success = the control shows a value (for
+    React-select markup; a plain dropdown is judged by the click). Two tries."""
+    want = value.strip().lower()
+
+    def _find():
+        o = _listbox_options(page, sel)
+        return next((x for x in o if (x.inner_text() or "").strip().lower() == want), None) \
+            or next((x for x in o if (x.inner_text() or "").strip().lower().startswith(want)), None)
+
+    try:
+        checked = bool(page.evaluate(
+            "(sel) => { const e = document.querySelector(sel); return !!(e && e.closest('[class*=\"value-container\"]')); }", sel))
+    except Exception as exc:
+        print(f"[apply-engine] {sel}: markup check: {type(exc).__name__}")
+        checked = False
+    for attempt in range(2):
+        page.click(sel, timeout=3_000)
+        page.fill(sel, value)
+        page.wait_for_timeout(400)
+        pick = _find()
+        if not pick:
+            page.fill(sel, "")
+            page.locator(sel).first.press_sequentially(value, delay=40)
+            page.wait_for_timeout(500)
+            pick = _find()
+        if pick:
+            pick.click()
+            page.wait_for_timeout(250)
+            if not checked or _combobox_has_value(page, sel):
+                return True
+            print(f"[apply-engine] {sel}: chose {value!r} but no value shows (try {attempt + 1})")
+        _keyboard(page).press("Escape")
+        page.wait_for_timeout(500)
+    return False
 
 
 def _fill_by_label(page, words, value: str) -> bool:
@@ -539,8 +576,28 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         if form is None:
             result["error"] = "Greenhouse: no application form found on the page or in an embedded frame"
             return result
-        if form is not page:
-            # Let the embedded React form take over before typing (see _gh_fill).
+        embedded = form is not page
+        if embedded and "greenhouse.io/embed/job_app" in (form.url or ""):
+            # Apply on the embed's own address, not inside the company page.
+            # Observed 2026-11-08 on Payoneer, same form, same code: the privacy
+            # dropdown was picked and kept 8/8 opened directly, 4/8 inside
+            # payoneer.com (whose third-party scripts vary per load); Eran's
+            # real submit was held on it. The embed URL carries its own
+            # validityToken and posts to Greenhouse exactly as the iframe does.
+            embed_url = form.url
+            try:
+                page.goto(embed_url, wait_until="domcontentloaded", timeout=30_000)
+                page.wait_for_selector("#first_name", timeout=15_000)
+                form = page
+                print(f"[apply-engine] GH: applying on the embed's own page ({embed_url[:80]})")
+            except Exception as exc:
+                print(f"[apply-engine] GH: embed page did not open ({type(exc).__name__}); staying in the iframe")
+                form = _greenhouse_form(page, wait_ms=8_000)
+                if form is None:
+                    result["error"] = "Greenhouse: the embedded form could not be opened"
+                    return result
+        if embedded:
+            # Let the React form take over before typing (see _gh_fill).
             try:
                 form.wait_for_load_state("networkidle", timeout=8_000)
             except Exception as exc:
