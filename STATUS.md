@@ -81,6 +81,22 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Eran's second real Payoneer submit was held on "I read and understood the privacy policy*" (draft "Yes"). Root cause: payoneer.com's page around the embedded form intermittently breaks the form's dropdowns. The engine now applies on the embed's own address.**
+  - **Reproduced** with probes against the live posting (writes aborted). The question was detected correctly (required, single option "Yes"), so the auto-fill ran. The *pick* failed in three ways:
+    - `fill()` left the menu closed (`aria-expanded=false`, 0 options);
+    - typed keys were swallowed ("es", "s" for "Yes");
+    - or the click on the found option selected nothing.
+  - **Ruled out:**
+    - fill order (a realistic phone first, the country picker first: no effect);
+    - load timing (retries over 8 s kept failing on a bad load and kept working on a good one);
+    - a duplicate element id (exactly 1 copy, checked 10 times per load);
+    - the frame reloading (never detached, same URL);
+    - something covering the field (hit test returns the form's iframe).
+  - **Proven by contrast:** same form, same code, same waits. The dropdown was picked and kept **8/8 with the embed URL opened directly**, and **4/8 inside payoneer.com**, whose third-party scripts vary per load (4 vs 8 frames). Their exact mechanism is inside those scripts and was not traced. It is also the likely source of the "first typed values wiped" seen the same morning (not re-proven).
+  - **Fix 1:** `_apply_greenhouse` opens `job-boards.greenhouse.io/embed/job_app?...` (carries its own validityToken) as the page and applies there; it falls back to the iframe if that page fails to open. Rehearsed 3/3 on the posting: questions "2 found, 1 answered, 0 need the applicant". The captured application POST carries the privacy answer (`69893549 → option 756238933`), phone, CV and LinkedIn.
+  - **Fix 2 (why it was silent):** `_choose_combobox` returned True for having *clicked* an option. Now success = the React-select shows a value; it tries fill, then key-by-key typing, twice. A click that selects nothing returns False (test reproduces it).
+  - **Blast radius:** every Greenhouse board embedded on a company site; any dropdown (country picker, visa, EEO) could silently stay empty.
+  - **Not a blocker:** "Phone number is too short" appears only after the harness aborts the POST. Typed +972 numbers (fake and realistic) show no phone error on the embed's own page.
 - 2026-11-08 — **Standing application instructions (Admin → Application instructions).** These are Eran's answers to the questions that recur on forms: relocation, work setup, travel, employment status, how he heard about the job, referral, languages, education, and which questions not to answer. They are one block of plain English stored on his account (`application_answers.standing_notes`, migration 21, max 3,000 chars, `POST /api/application-answers {standing_notes}`). They are deliberately not profile questions (his call) and not in code (the bundle is public). `_applicant_for` passes them as `standing_instructions`. `questions.py` sends them to the model as their own section, which overrides the default rules. "Do not answer" on a required question → value "" with low confidence → the application is held and the question goes to him. On an optional question → left blank. Tests: the API round-trip, that a salary save leaves the instructions alone, the length limit, and that the prompt section is not duplicated in the applicant JSON.
 - 2026-11-08 — **Eran's first real supervised submit failed: "Greenhouse: could not find submit button" (Payoneer, Director of Product, Onboarding). Two causes, both observed, both fixed, and the exact posting rehearsed.**
   - **Reproduced read-only:** `boards.greenhouse.io/payoneer/jobs/8284597` **redirects** to `payoneer.com/careers/position/8284597/?gh_jid=8284597`. That page has no form; the Greenhouse form is in an **iframe** from `job-boards.greenhouse.io/embed/job_app?for=payoneer&validityToken=...`.
