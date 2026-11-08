@@ -165,16 +165,30 @@ def _find_company_apply_url(company: str, job_title: str) -> str | None:
 
 # ── ATS-specific form handlers ────────────────────────────────────────────────
 
-def _gh_fill(page, selector: str, value: str):
-    """Safely fill a form field, skipping if not found or empty value."""
+def _gh_fill(page, selector: str, value: str, tries: int = 3) -> bool:
+    """Fill a form field and CHECK it stuck, retrying; skips a missing field.
+
+    Observed 2026-11-08 on Payoneer's embedded Greenhouse form: the inputs are
+    in the page before its React app takes over, and the takeover wipes what
+    was typed - the first fill was lost in every order tried (domain ruled
+    out), so the submit failed on "Please enter a valid email address". This
+    used to fill once and never look."""
     if not value:
-        return
-    try:
-        el = page.query_selector(selector)
-        if el and el.is_visible():
+        return False
+    for attempt in range(tries):
+        try:
+            el = page.query_selector(selector)
+            if not (el and el.is_visible()):
+                return False
             el.fill(value)
-    except Exception:
-        pass
+            page.wait_for_timeout(250)
+            if (el.input_value() or "").strip() == value.strip():
+                return True
+        except Exception as exc:
+            print(f"[apply-engine] fill {selector} attempt {attempt + 1}: {type(exc).__name__}")
+        page.wait_for_timeout(700)
+    print(f"[apply-engine] WARNING {selector} did not keep its value after {tries} tries")
+    return False
 
 _DEBUG_DIR = os.environ.get("APPLY_DEBUG_DIR", "")
 
@@ -470,41 +484,106 @@ def _needs_answers(unsure: list) -> dict:
             "error": f"{len(unsure)} question(s) need your answer"}
 
 
+def _greenhouse_form(page, wait_ms: int = 10_000):
+    """Where the Greenhouse form is: the page itself, or the embed iframe.
+
+    Observed 2026-11-08 (Eran's first real supervised submit, Payoneer):
+    boards.greenhouse.io/payoneer/jobs/8284597 redirects to
+    payoneer.com/careers/position/8284597/?gh_jid=8284597, which embeds the form
+    in an iframe from job-boards.greenhouse.io/embed/job_app?for=payoneer&...
+    The handler only looked at the page: it filled nothing (field fills skip a
+    missing field) and reported "could not find submit button". Companies that
+    host their Greenhouse board on their own site (Payoneer, Taboola...) all
+    work this way."""
+    waited = 0
+    while waited <= wait_ms:
+        try:
+            if page.query_selector("#first_name"):
+                return page
+        except Exception as exc:
+            print(f"[apply-engine] GH: page not readable yet ({type(exc).__name__})")
+        for fr in page.frames[1:]:
+            u = fr.url or ""
+            try:
+                if "greenhouse.io/embed/job_app" in u or fr.query_selector("#first_name"):
+                    if fr.query_selector("#first_name"):
+                        print(f"[apply-engine] GH: form is in the embed iframe ({u[:80]})")
+                        return fr
+            except Exception as exc:
+                print(f"[apply-engine] GH: frame not readable yet ({type(exc).__name__})")
+        page.wait_for_timeout(500)
+        waited += 500
+    return None
+
+
 def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
-    """Handle Greenhouse application forms with known structure."""
+    """Handle Greenhouse application forms with known structure - on the page,
+    or in the embed iframe on a company's own careers site."""
     result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
     try:
-        # Click "Apply for this job" button if present
-        for sel in ['a:has-text("Apply")', 'button:has-text("Apply")', 'a[href*="application"]']:
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    el.click()
-                    page.wait_for_load_state("networkidle", timeout=4_000)
-                    break
-            except Exception:
-                continue
-
-        # Fill standard Greenhouse fields
-        _gh_fill(page, '#first_name', applicant.get('first_name', ''))
-        _gh_fill(page, '#last_name', applicant.get('last_name', ''))
-        _gh_fill(page, '#email', applicant.get('email', ''))
-        _gh_fill(page, '#phone', applicant.get('phone', ''))
-        _gh_fill(page, 'input[name*="linkedin"], input[autocomplete*="url"]', applicant.get('linkedin_url', ''))
-        _fill_by_label(page, ["linkedin"], applicant.get('linkedin_url', ''))
-        _gh_fill(page, 'input[name*="location"], input[name*="city"]', applicant.get('location', ''))
-
-        # Upload CV
-        if cv_path:
-            for sel in ['input[type="file"]', '#resume', 'input[name*="resume"]', 'input[name*="cv"]']:
+        # Find the form FIRST: on a company's careers page a generic "Apply"
+        # link can lead away from the embedded form.
+        form = _greenhouse_form(page, wait_ms=4_000)
+        if form is None:
+            # Click "Apply for this job" button if present
+            for sel in ['a:has-text("Apply")', 'button:has-text("Apply")', 'a[href*="application"]']:
                 try:
-                    page.set_input_files(sel, cv_path)
-                    print(f"[apply-engine] GH: uploaded CV via {sel}")
-                    break
+                    el = page.query_selector(sel)
+                    if el and el.is_visible():
+                        el.click()
+                        page.wait_for_load_state("networkidle", timeout=4_000)
+                        break
                 except Exception:
                     continue
+            form = _greenhouse_form(page, wait_ms=8_000)
+        if form is None:
+            result["error"] = "Greenhouse: no application form found on the page or in an embedded frame"
+            return result
+        if form is not page:
+            # Let the embedded React form take over before typing (see _gh_fill).
+            try:
+                form.wait_for_load_state("networkidle", timeout=8_000)
+            except Exception as exc:
+                print(f"[apply-engine] GH: embed still loading ({type(exc).__name__})")
+            page.wait_for_timeout(1_500)
 
-        qa = _answer_form(page, applicant)
+        # Fill standard Greenhouse fields
+        _gh_fill(form, '#first_name', applicant.get('first_name', ''))
+        _gh_fill(form, '#last_name', applicant.get('last_name', ''))
+        _gh_fill(form, '#email', applicant.get('email', ''))
+        _gh_fill(form, '#phone', applicant.get('phone', ''))
+        # The phone's country picker (#country, a combobox) does not always follow
+        # the typed +972 (Payoneer's embed, 2026-11-08): set it from the profile.
+        try:
+            _ctry = form.query_selector('#country')
+            if _ctry is not None and _ctry.get_attribute("role") == "combobox":
+                _has = form.evaluate("""() => { const v = document.querySelector('#country')
+                    .closest('[class*="value-container"]'); return !!(v && (/has-value/.test(v.className)
+                    || v.querySelector('[class*="single-value"]'))); }""")
+                if not _has:
+                    _choose_combobox(form, '#country', applicant.get('home_country') or 'Israel')
+        except Exception as exc:
+            print(f"[apply-engine] GH: country picker: {exc}")
+        _gh_fill(form, 'input[name*="linkedin"], input[autocomplete*="url"]', applicant.get('linkedin_url', ''))
+        _fill_by_label(form, ["linkedin"], applicant.get('linkedin_url', ''))
+        _gh_fill(form, 'input[name*="location"], input[name*="city"]', applicant.get('location', ''))
+
+        # Upload CV. On the embed this must come after the form has taken over
+        # (the wait above): before that its uploader threw "reading
+        # 'uploadFile'" and the submit failed on "Resume/CV is required"
+        # (Payoneer, 2026-11-08). The page does not reliably show the file
+        # name afterwards, so success is judged by the submit, not the screen.
+        if cv_path:
+            for sel in ['#resume', 'input[type="file"]', 'input[name*="resume"]', 'input[name*="cv"]']:
+                try:
+                    form.set_input_files(sel, cv_path, timeout=5_000)
+                    print(f"[apply-engine] GH: uploaded CV via {sel}")
+                    form.wait_for_timeout(1_500)
+                    break
+                except Exception as exc:
+                    print(f"[apply-engine] GH: CV via {sel}: {type(exc).__name__}")
+
+        qa = _answer_form(form, applicant)
         if qa["unsure"]:
             return _needs_answers(qa["unsure"])
 
@@ -513,7 +592,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         for sel in ['button[type="submit"]', 'input[type="submit"]',
                     'button:has-text("Submit")', 'button:has-text("Apply")']:
             try:
-                page.click(sel, timeout=5_000)
+                form.click(sel, timeout=5_000)
                 submitted = True
                 break
             except Exception:
@@ -523,7 +602,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
             result["error"] = "Greenhouse: could not find submit button"
             return result
 
-        return _finalize_after_submit(page, applicant,
+        return _finalize_after_submit(form, applicant,
             ['button[type="submit"]', 'input[type="submit"]',
              'button:has-text("Submit")', 'button:has-text("Apply")'])
     except Exception as e:

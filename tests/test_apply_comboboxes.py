@@ -192,3 +192,54 @@ def test_a_react_select_with_a_chosen_value_counts_as_answered(page):
         <input id="country" role="combobox" aria-required="true" aria-labelledby="country-label" value="">
       </div>""")
     assert [q for q in questions.collect(page) if q["label"].startswith("Country")] == []
+
+
+# ── Greenhouse embedded on a company's own careers page (Payoneer, 2026-11-08) ──
+
+CAREERS = """<!doctype html><html><body><h1>Director of Product</h1>
+<a href="/careers">Apply</a>
+<iframe src="https://job-boards.greenhouse.io/embed/job_app?for=acme&validityToken=t" style="width:700px;height:600px"></iframe>
+</body></html>"""
+
+# The inputs exist first; 100 ms later the "app" takes over and wipes them -
+# what Payoneer's embed did to the first values typed. _gh_fill's check-and-
+# retry catches a wipe inside its 250 ms check window; a LATER wipe is what the
+# handler's settle wait (networkidle + 1.5 s before filling an embed) is for -
+# the live Payoneer rehearsal needed no retries after that wait.
+EMBED = """<!doctype html><html><body><form>
+<input id="first_name"><input id="last_name"><input id="email"><input id="phone">
+<button type="submit" onclick="event.preventDefault()">Submit application</button></form>
+<script>setTimeout(() => { for (const i of document.querySelectorAll('input')) i.value = ''; }, 100);</script>
+</body></html>"""
+
+
+def _careers_page():
+    from playwright.sync_api import sync_playwright
+    pw = sync_playwright().start()
+    b = pw.chromium.launch(executable_path=CHROME, headless=True, args=["--no-sandbox"])
+    ctx = b.new_context()
+    ctx.route("https://www.acme.example/**", lambda r: r.fulfill(status=200, content_type="text/html", body=CAREERS))
+    ctx.route("https://job-boards.greenhouse.io/**", lambda r: r.fulfill(status=200, content_type="text/html", body=EMBED))
+    page = ctx.new_page()
+    page.goto("https://www.acme.example/careers/position/1/?gh_jid=1")
+    return pw, b, page
+
+
+def test_the_greenhouse_form_is_found_in_the_embed_iframe():
+    pw, b, page = _careers_page()
+    try:
+        form = ae._greenhouse_form(page, wait_ms=5_000)
+        assert form is not None and form is not page and "embed/job_app" in form.url
+    finally:
+        b.close(); pw.stop()
+
+
+def test_a_fill_wiped_by_the_form_taking_over_is_retried_until_it_sticks():
+    pw, b, page = _careers_page()
+    try:
+        form = ae._greenhouse_form(page, wait_ms=5_000)
+        assert ae._gh_fill(form, "#email", "eran@example.org")       # wiped once, retried, kept
+        page.wait_for_timeout(400)
+        assert form.input_value("#email") == "eran@example.org"
+    finally:
+        b.close(); pw.stop()
