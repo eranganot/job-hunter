@@ -86,7 +86,8 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
   - **Fix:** `_tailored_cv_checked` runs `restore_roles` whenever a stored draft is read (the JSON, the Word download and the file sent with an application) and saves the repair back. No model call. A draft the user edited is left as they made it.
   - **New:** the panel shows "Tailored <date, time>", stored in UTC, so a stale draft is visible.
   - **Israel time (Eran, 2026-11-08: "always use Israel time zone unless I say otherwise"):** every date the UI formats is pinned to `Asia/Jerusalem`, not the device's zone: the tailored time, plan dates and the CV upload date. The scheduler already ran on Israel time (`israel_now`, DST-aware).
-  - **Job details pop-up:** `lg:max-w-5xl` and `94vh` on desktop (was `max-w-2xl`, `88vh`); a taller cover-letter box. Checked on a 1440×900 screenshot.
+  - **Job details pop-up:** 94vh tall on desktop (was 88vh); a taller cover-letter box. Width: `lg:max-w-5xl` in #65, still too small on Eran's ~1900px screen, so it is now 92% of the window up to 1,600px (`lg:max-w-[92vw] 2xl:max-w-[1600px]`).
+  - **Root cause settled (Eran's 17:19 screenshot):** the repaired draft reads "DAZN TLV, Israel was left out by the model". The model omitted the current role; the fact check did not remove it. Both paths stay closed.
 - 2026-11-08 — **Tailored CV: every role in the CV is now guaranteed, without depending on the model.** Eran's tailored CV had no DAZN, his current job: "DAZN is my current job and cannot be removed".
   - **Ruled out:** reading the CV. The app's own reader on his PDF gives 5,347 chars with "DAZN TLV, Israel / Head of Product 2025-Present".
   - **Not determined:** whether the model left the role out or the fact check removed it ("employer not in your CV" when the model adds words to the employer). His screenshot didn't show the removed list. Both paths are now closed rather than one guessed at.
