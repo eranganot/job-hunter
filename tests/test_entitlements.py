@@ -24,14 +24,13 @@ from tests.test_routes import (Client, _new_job, _job_row, _user_id,  # noqa: F4
 @pytest.mark.parametrize("user, expected", [
     ({"role": "admin", "plan": "free"},    True),   # admin never depends on a plan row
     ({"role": "admin", "plan": None},      True),
-    ({"role": "user",  "plan": "premium"}, False),  # not sold while parked (2026-11-05)
-    ({"role": "user",  "plan": "expert"},  False),
-    ({"role": "user",  "plan": "free"},    False),
-    ({"role": "user",  "plan": ""},        False),
-    ({"role": "user",  "plan": None},      False),
-    ({"role": "user",  "plan": "  Premium "}, False),  # casing normalised; still parked
-    ({"role": "user",  "plan": "gold"},    False),     # unknown plan fails CLOSED
-    ({"role": "",      "plan": "free"},    False),
+    # Every plan since 2026-11-08 (Eran): the user's own switch decides.
+    ({"role": "user",  "plan": "premium"}, True),
+    ({"role": "user",  "plan": "expert"},  True),
+    ({"role": "user",  "plan": "free"},    True),
+    ({"role": "user",  "plan": ""},        True),       # no plan = Free
+    ({"role": "user",  "plan": "  Premium "}, True),
+    ({"role": "user",  "plan": "gold"},    True),       # unknown plan = Free, no more
     (None,                                 False),
 ])
 def test_can_auto_apply(user, expected):
@@ -43,8 +42,9 @@ def test_an_unknown_plan_never_opens_a_paid_feature():
     not silently hand out the thing that costs real money to run."""
     for bogus in ("gold", "PRO", "premium_v2", "admin", "0", "free "):
         assert entitlements.plan_of({"role": "user", "plan": bogus}) in ("free", "premium", "expert")
-        if bogus not in ("free ",):
-            assert entitlements.can_auto_apply({"role": "user", "plan": bogus}) is False
+        # No more than Free gets (auto-apply is in every plan since 2026-11-08).
+        assert entitlements.limit({"role": "user", "plan": bogus}, "matches_per_search") == \
+            entitlements.limit({"role": "user", "plan": "free"}, "matches_per_search")
 
 
 # ── The gate, over real HTTP ────────────────────────────────────────────────
@@ -65,22 +65,26 @@ def _auto_apply_flag(database, email):
     return row["auto_apply_enabled"] if row else None
 
 
-def test_a_free_user_cannot_switch_auto_apply_on(stack, users):
-    """The attack the disabled button does not stop."""
+def test_any_plan_can_switch_auto_apply_on_and_off(stack, users):
+    """Eran, 2026-11-08: the users decide - every plan, off until they do."""
+    for plan in ("free", "premium", "expert"):
+        _set_plan(stack["db"], "alice@example.test", plan)
+        status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
+        assert status == 200, plan
+        assert _auto_apply_flag(stack["db"], "alice@example.test") == 1, plan
+        status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 0})
+        assert status == 200 and not _auto_apply_flag(stack["db"], "alice@example.test"), plan
+    _set_plan(stack["db"], "alice@example.test", "free")
+
+
+def test_a_plan_without_auto_apply_is_still_refused(stack, users, monkeypatch):
+    """The gate stays for a plan that drops the feature later."""
+    import plans
+    monkeypatch.setitem(plans.PLANS["free"], "auto_apply", False)
     _set_plan(stack["db"], "alice@example.test", "free")
     status, _loc, body = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
-    assert status == 403, f"a free account switched auto-apply on (status {status})"
-    assert json.loads(body).get("code") == "upgrade_required"
+    assert status == 403 and json.loads(body).get("code") == "upgrade_required"
     assert not _auto_apply_flag(stack["db"], "alice@example.test")
-
-
-def test_a_paid_user_cannot_while_auto_apply_is_parked(stack, users):
-    """Approved matrix (2026-11-05): auto-apply is not sold while parked."""
-    _set_plan(stack["db"], "alice@example.test", "premium")
-    status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
-    assert status == 403
-    assert not _auto_apply_flag(stack["db"], "alice@example.test")
-    _set_plan(stack["db"], "alice@example.test", "free")
 
 
 def _set_flag(database, email, on):
@@ -122,10 +126,13 @@ def test_the_rest_of_the_schedule_still_saves_for_a_free_user(stack, users):
     assert row["search_hour"] == 9 and row["search_day_of_week"] == 3
 
 
-def test_a_stale_flag_does_not_make_the_app_apply(stack, users):
+def test_a_stale_flag_does_not_make_the_app_apply(stack, users, monkeypatch):
     """A row set while the user was paying, or before this gate existed, must
     not still trigger an application after a downgrade. The flag is checked at
-    the point of use, not only at the point of setting."""
+    the point of use, not only at the point of setting. (Every plan has
+    auto-apply since 2026-11-08, so the plan row is changed for the test.)"""
+    import plans
+    monkeypatch.setitem(plans.PLANS["free"], "auto_apply", False)
     _set_flag(stack["db"], "alice@example.test", True)        # set while it was allowed
     _set_plan(stack["db"], "alice@example.test", "free")
 

@@ -81,6 +81,12 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Step 8: auto-apply is every user's choice, and the engine's success rate per application system is measured.** The server-wide engine switch (`APPLY_ENGINE_ENABLED`) stays off until Eran turns it on.
+  - **Every plan (Eran's choice):** `plans.py` gives `auto_apply` to Free, Premium and Expert; each user turns it on in Settings, off by default. The chokepoint check in `run_job_apply` and on approve stays, for a plan that drops it later. A missing user is never entitled.
+  - **Migration 22** sets every non-admin account's flag to off. m0010 had left pre-paywall flags on, and those users would otherwise start auto-applying when the engine is switched on, without having chosen to now.
+  - **Settings:** unlocked for all plans. With the switch on and the engine off it says "Auto-apply isn't running yet…"; with both on it says notifications will come for answers and security codes. `/api/me` carries `auto_apply_live`. Checked on a phone-size screenshot as a Free user.
+  - **8.3:** `apply_engine.ats_name(url)` names the system (a `?gh_jid=` careers page counts as Greenhouse). Admin → **Apply results by system** (`/api/admin/apply-rates`) counts engine-attempted jobs by latest outcome: sent / held (answers or code) / manual / failed. Success = sent / (sent + failed), with fewer than 5 marked "too few to judge".
+  - **Tier matrix updated:** auto-apply is "yes, user's choice" in every plan.
 - 2026-11-08 — **Settings → Notification channels → "Send test" said "Failed: telegram". Root cause: the test route tested with empty credentials; this test had been false-green before #58.**
   - **Reproduced** (a test with saved Telegram details): Settings sends only `{"channel"}` (since 8421de1, Phase 4). `/api/test-notification` read the token and chat id from the request body only, so it called `send_telegram('', '')`.
   - **Why silent until today:** `send_telegram` swallowed the error (Telegram 404 on `/bot/sendMessage`) and the route answered success, so the button said "Sent" while nothing arrived. #58 made the sender raise, which exposed it.

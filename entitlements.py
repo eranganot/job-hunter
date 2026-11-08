@@ -101,12 +101,15 @@ def limit(user, key):
 def can_auto_apply(user) -> bool:
     """May this user have the app apply on their behalf without asking?
 
-    Per the approved matrix, auto-apply is not sold while it is parked: admin
-    only, whatever the plan. Note this answers only "is it allowed to be ON" -
+    Since 2026-11-08 every plan may (Eran: the users decide, in Settings; off
+    until they do). The check stays at the chokepoint for a plan that drops it
+    later. Note this answers only "is it allowed to be ON" -
     whether the engine then does anything is a separate switch
     (APPLY_ENGINE_ENABLED), and the user's own toggle is a third. All three
     have to agree before a form is ever submitted.
     """
+    if not user:                      # no account, no applying on its behalf
+        return False
     return bool(plans.row(tier_of(user)).get("auto_apply"))
 
 

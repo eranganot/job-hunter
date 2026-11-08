@@ -64,27 +64,24 @@ def engine_on(stack, monkeypatch):
     return stack
 
 
-def test_a_free_user_with_the_flag_set_is_not_applied_for(engine_on):
-    """The exact post-migration-10 shape: plan free, flag still on."""
+def test_a_plan_without_auto_apply_is_not_applied_for(engine_on, monkeypatch):
+    """The chokepoint gate, for a plan that drops the feature (every plan has it
+    since 2026-11-08, so the row is changed for the test)."""
+    import plans
+    monkeypatch.setitem(plans.PLANS["free"], "auto_apply", False)
     uid = _make_user(engine_on["db"], "free-gate@example.test", "free", True)
     out = engine_on["app"].run_job_apply(uid)
     assert out["skipped"] == "not_entitled", (
-        "a free-plan user's approved queue reached the apply engine: %r" % (out,))
+        "a user whose plan lacks auto-apply reached the apply engine: %r" % (out,))
     assert out["applied"] == 0
 
 
-def test_an_empty_plan_is_not_a_paid_plan(engine_on):
-    """Fail closed. A row written before m0010, or by hand, has no plan at all."""
-    uid = _make_user(engine_on["db"], "noplan-gate@example.test", None, True)
-    assert engine_on["app"].run_job_apply(uid)["skipped"] == "not_entitled"
-
-
-def test_paid_plans_are_not_applied_for_while_auto_apply_is_parked(engine_on):
-    """Approved matrix (2026-11-05): auto-apply is not sold while parked. A
-    Premium or Expert user with the flag set is refused at the chokepoint."""
-    for plan in ("premium", "expert"):
-        uid = _make_user(engine_on["db"], "%s-gate@example.test" % plan, plan, True)
-        assert engine_on["app"].run_job_apply(uid)["skipped"] == "not_entitled", plan
+def test_every_plan_with_the_flag_on_is_applied_for(engine_on):
+    """Eran, 2026-11-08: every plan; the user's switch decides."""
+    for plan in ("free", "premium", "expert", None):
+        uid = _make_user(engine_on["db"], "%s-on@example.test" % plan, plan, True)
+        out = engine_on["app"].run_job_apply(uid)
+        assert out.get("skipped") != "not_entitled", (plan, out)
 
 
 def test_the_entitled_case_still_gets_through(engine_on):

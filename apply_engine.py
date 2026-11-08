@@ -1519,6 +1519,24 @@ _ATS_DIRECT_HOSTS = (
 )
 
 
+_ATS_NAMES = (("greenhouse.io", "Greenhouse"), ("lever.co", "Lever"), ("ashbyhq.com", "Ashby"),
+              ("smartrecruiters.com", "SmartRecruiters"), ("comeet.co", "Comeet"),
+              ("myworkdayjobs.com", "Workday"), ("linkedin.com", "LinkedIn"), ("indeed.", "Indeed"),
+              ("glassdoor.", "Glassdoor"))
+
+
+def ats_name(url: str) -> str:
+    """The application system behind a URL, for the per-system success rate
+    (Step 8.3). A careers page that embeds Greenhouse (?gh_jid=) counts as it."""
+    u = (url or "").lower()
+    if "gh_jid=" in u:
+        return "Greenhouse"
+    for host, name in _ATS_NAMES:
+        if host in u:
+            return name
+    return "Company site" if u else "No link"
+
+
 def _is_direct_ats(url: str) -> bool:
     u = (url or "").lower()
     return any(h in u for h in _ATS_DIRECT_HOSTS)

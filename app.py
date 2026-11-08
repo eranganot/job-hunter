@@ -321,6 +321,40 @@ def _log_notification(user_id: int, channel: str, status: str, error_msg: str = 
         pass
 
 
+_APPLY_OUTCOME = {"confirmed": "sent", "submitted": "sent", "needs_answers": "held", "needs_code": "held",
+                  "awaiting_code": "held", "manual_required": "manual", "failed": "failed"}
+
+
+def _apply_rates(conn, user_id=None) -> dict:
+    """Step 8.3: what the engine achieved per application system. Counts jobs
+    the engine attempted (apply_attempts > 0) by their latest outcome:
+    sent (confirmed/submitted), held for the user (questions / security code),
+    manual (the engine cannot submit there by design) and failed.
+    success = sent / (sent + failed): held and manual are not engine failures."""
+    sql = ("SELECT url, apply_resolved_url, apply_status FROM jobs WHERE COALESCE(apply_attempts,0) > 0"
+           + (" AND user_id=?" if user_id else ""))
+    import apply_engine as _ae
+    by = {}
+    for r in conn.execute(sql, (user_id,) if user_id else ()).fetchall():
+        sys_ = _ae.ats_name(r["apply_resolved_url"] or r["url"] or "")
+        row = by.setdefault(sys_, {"system": sys_, "attempted": 0, "sent": 0, "held": 0, "manual": 0,
+                                   "failed": 0, "other": 0})
+        row["attempted"] += 1
+        row[_APPLY_OUTCOME.get((r["apply_status"] or "").strip(), "other")] += 1
+    rows = sorted(by.values(), key=lambda x: -x["attempted"])
+    for row in rows:
+        d = row["sent"] + row["failed"]
+        row["success_rate"] = round(100.0 * row["sent"] / d) if d else None
+        row["small_sample"] = d < 5
+    return {"systems": rows, "engine_on": _engine_on(),
+            "note": "success = sent / (sent + failed); held (your answers or a security code) and "
+                    "manual (job boards, Workday accounts) are not counted as failures."}
+
+
+def _engine_on() -> bool:
+    return os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _notify_status(user_id) -> dict:
     """What can reach this user: server config, their devices and channels,
     and the last notification outcomes logged for them."""
@@ -4162,6 +4196,9 @@ class Handler(BaseHTTPRequestHandler):
                     _pc.close()
             except Exception as _pe:      # /api/me must never fail over a statistic
                 print(f"[plans] WARNING plan info for user {user.get('id')}: {_pe}")
+            # Settings tells a user who switched auto-apply on whether anything
+            # is being sent yet (the engine's own server-wide switch).
+            out["auto_apply_live"] = _engine_on()
             self.send_json(out)
             return
 
@@ -4200,6 +4237,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, no-cache")
             self.end_headers()
             self.wfile.write(_data)
+            return
+
+        if path == "/api/admin/apply-rates":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            conn = database.get_db()
+            try:
+                self.send_json(_apply_rates(conn, None if (qs.get("scope", ["all"])[0] == "all") else user["id"]))
+            finally:
+                conn.close()
             return
 
         if path == "/api/admin/notify-check":
