@@ -80,6 +80,94 @@ def _in_cv(phrase: str, cv_norm: str) -> bool:
     return bool(ws) and all(w in cv_norm for w in ws)
 
 
+
+# ── Roles read from the CV itself, without the model (Eran, 2026-11-08: the
+# tailored CV left out DAZN, his current job - "DAZN is my current job and
+# cannot be removed"). Whatever the model does, every role found here must be
+# in the result: missing ones get one retry naming them, then are put back
+# from the CV as written.
+_DATES = re.compile(r"((?:19|20)\d{2})\s*[-\u2013\u2014to]+\s*((?:19|20)\d{2}|present|current|now|today)", re.I)
+_SECTION_END = re.compile(r"^\s*(education|military|skills|certifications?|languages|projects|publications|"
+                          r"volunteer\w*|awards|interests|references|core competencies)\b", re.I)
+_SECTION_START = re.compile(r"^\s*(experience|professional experience|work experience|employment|work history|career)\b", re.I)
+_BULLET = re.compile(r"^\s*[\u25cf\u2022\u25aa\u25e6*\-]\s+")
+
+
+def cv_roles(cv_text: str) -> list:
+    """[{company, title, dates, bullets, key}] in CV order. key: the employer's
+    first word, used to find the role in the model's output.
+
+    A role starts at a non-bullet line ending in a date range ("Head of Product
+    2025-Present"). Its employer is on that line ("Senior PM - Wix (2016 -
+    2021)") or the line before ("DAZN TLV, Israel"). Lines after it are its
+    description and bullets; a line continues the previous one unless that one
+    ended a sentence. Reading stops at Education, Skills and similar headings,
+    which use the same date pattern."""
+    raw = [l.strip() for l in (cv_text or "").splitlines()]
+    lines = [l for l in raw if l]
+    start = next((i + 1 for i, l in enumerate(lines) if _SECTION_START.match(l) and not _DATES.search(l)), 0)
+    end = next((i for i in range(start, len(lines)) if _SECTION_END.match(lines[i]) and not _DATES.search(lines[i])),
+               len(lines))
+    is_role = [i for i in range(start, end) if _DATES.search(lines[i]) and not _BULLET.match(lines[i])]
+    roles, employer_lines = [], set()
+    for i in is_role:
+        line = lines[i]
+        m = _DATES.search(line)
+        head = line[:m.start()].strip(" \t|,(-\u2013")
+        parts = [x.strip() for x in re.split(r"\s+[-\u2013|@]\s+|\s+at\s+", head, maxsplit=1) if x.strip()]
+        if len(parts) == 2:
+            title, company = parts
+        else:
+            title, company = head, ""
+            if i - 1 >= start and not _BULLET.match(lines[i - 1]) and not _DATES.search(lines[i - 1]):
+                company = lines[i - 1]
+                employer_lines.add(i - 1)
+        roles.append({"company": company, "title": title, "dates": m.group(0), "bullets": [],
+                      "key": (_words(company) or _words(title) or [""])[0], "_at": i})
+    for n, r in enumerate(roles):
+        stop = roles[n + 1]["_at"] if n + 1 < len(roles) else end
+        prev_end = True
+        for i in range(r["_at"] + 1, stop):
+            if i in employer_lines:
+                continue
+            line = lines[i]
+            if _BULLET.match(line):
+                r["bullets"].append(_BULLET.sub("", line))
+            elif r["bullets"] and not prev_end:
+                r["bullets"][-1] += " " + line            # a wrapped line
+            else:
+                r["bullets"].append(line)
+            prev_end = line.rstrip().endswith((".", "!", "?", ":"))
+    for r in roles:
+        r.pop("_at")
+    return [r for r in roles if r["key"]]
+
+
+def _covers(role_out: dict, key: str) -> bool:
+    return key in _words(" ".join([role_out.get("company") or "", role_out.get("title") or ""]))
+
+
+def missing_roles(tailored: dict, roles: list) -> list:
+    out = tailored.get("experience") or []
+    return [r for r in roles if not any(_covers(o, r["key"]) for o in out)]
+
+
+def restore_roles(result: dict, roles: list) -> dict:
+    """Put back, from the CV as written and in CV order, any role still missing."""
+    exp = result["cv"]["experience"]
+    for r in missing_roles(result["cv"], roles):
+        pos = len(exp)
+        later = [x["key"] for x in roles[roles.index(r) + 1:]]
+        for k, o in enumerate(exp):
+            if any(_covers(o, key) for key in later):
+                pos = k
+                break
+        exp.insert(pos, {"title": r["title"], "company": r["company"], "dates": r["dates"],
+                         "bullets": list(r["bullets"])})
+        result["flags"].append(f"{r['company'] or r['title']} was left out by the model; it is back, as your CV has it.")
+    return result
+
+
 def verify(tailored: dict, cv_text: str) -> dict:
     """Remove what the CV does not support; return {"cv", "removed", "flags"}."""
     cv_norm = _norm(cv_text)
@@ -125,8 +213,13 @@ def verify(tailored: dict, cv_text: str) -> dict:
         title = str(role.get("title") or "").strip()
         dates = str(role.get("dates") or "").strip()
         if company and not _in_cv(company, cv_norm):
-            removed.append({"what": "role", "text": f"{title} at {company}", "why": "employer not in your CV"})
-            continue
+            # "DAZN - sports streaming": the employer is real, the extra words
+            # are the model's. Keep the role under the CV's own employer line.
+            match = next((r for r in cv_roles(cv_text) if r["key"] in _words(company)), None)
+            if match is None:
+                removed.append({"what": "role", "text": f"{title} at {company}", "why": "employer not in your CV"})
+                continue
+            company = match["company"]
         ok, bad = numbers_ok(dates)
         if not ok:
             flags.append(f"Dates for {company or title} ({dates}) don't match your CV - left out.")
@@ -189,7 +282,22 @@ def tailor(cv_text: str, job: dict, *, user_id=None, key: str = "", llm=None) ->
             raise RuntimeError(f"The model's answer could not be read ({type(exc).__name__}). Try again.")
     if not isinstance(raw, dict) or not raw.get("experience"):
         raise RuntimeError("The model returned no experience section. Try again.")
-    return verify(raw, cv_text)
+    roles = cv_roles(cv_text)
+    res = verify(raw, cv_text)
+    gone = missing_roles(res["cv"], roles)
+    if gone:
+        names = "; ".join(f"{r['title']} at {r['company']} ({r['dates']})" for r in gone)
+        retry = prompt + ("\n\nYour previous answer left out these roles from the CV: " + names +
+                          ". Every role must be included, in the CV's order. Answer again in full.")
+        try:
+            raw2 = llm(retry) if llm is not None else _parse(gemini.generate_text(
+                {**body, "contents": [{"role": "user", "parts": [{"text": retry}]}]},
+                purpose="tailored_cv", user_id=user_id, key=key, timeout=90))
+            if isinstance(raw2, dict) and raw2.get("experience"):
+                res = verify(raw2, cv_text)
+        except (ValueError, KeyError, IndexError) as exc:
+            print(f"[tailor] retry for missing roles failed ({type(exc).__name__}); restoring from the CV")
+    return restore_roles(res, roles)
 
 
 def to_docx(cv: dict, *, name: str, contact: list) -> bytes:

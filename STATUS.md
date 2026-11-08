@@ -81,6 +81,14 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-08 — **Tailored CV: every role in the CV is now guaranteed, without depending on the model.** Eran's tailored CV had no DAZN, his current job: "DAZN is my current job and cannot be removed".
+  - **Ruled out:** reading the CV. The app's own reader on his PDF gives 5,347 chars with "DAZN TLV, Israel / Head of Product 2025-Present".
+  - **Not determined:** whether the model left the role out or the fact check removed it ("employer not in your CV" when the model adds words to the employer). His screenshot didn't show the removed list. Both paths are now closed rather than one guessed at.
+  - **`tailor.cv_roles`:** reads the roles from the CV text with no model involved: a dated title line, with the employer on the same line or the line before, then its description and bullets (wrapped lines joined). It stops at Education, Skills, Military and similar headings. On his CV it finds all five roles (DAZN, Moon Active, Trax, Terra Digital, ZIM) and stops before Education.
+  - **After the check:** any CV role missing from the result triggers one retry naming it; if it is still missing, it is put back from the CV as written, in CV order, flagged "was left out by the model; it is back, as your CV has it".
+  - **`verify`:** an employer with words the model added ("Nova - sports streaming") is kept under the CV's own employer line. Only an employer matching no CV role ("Google") is removed.
+  - **Tests:** a made-up CV in his layout; the retry names the dropped current role; a role still missing is restored first; the extra-words employer is kept; the invented one is removed.
+  - **Existing tailored CVs** are not rewritten; Eran presses "Tailor again".
 - 2026-11-08 — **Cover letters rewritten from the full CV (Eran: "should be written more accurate and in more human way"), and Word CVs read with their tables.**
   - **Why letters were inaccurate (cause, from the code plus the 11-07 observation):** `generate_cover_letter` built the letter from `profile.cv_summary`, the 2–3 sentence summary with no name or details (STATUS 2026-11-07). A prompt demanding "specific, measurable experience from the CV" had none to use.
   - **Now `write_cover_letter`:**
