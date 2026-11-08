@@ -138,6 +138,15 @@ Every accepted link is verified by `linkcheck.py` before it is stored. A link th
 
 **Risks:** title matching across languages and seniority wording (mitigated by the existing threshold of 82 and the location tiebreak); LinkedIn changing its guest markup (existing risk, unchanged); Gemini cost (bounded by `gemini.py` ceilings).
 
+### Step 16 — Board-first search (Step 1, part 2; added 2026-11-08, next in line)
+**Why:** the share of open jobs with a direct link follows the share of *incoming* jobs that arrive direct. Dedicated board sources are 100% direct; the main search (1,076 of 1,378 open jobs, 2026-11-07) is ~55% direct. Fixing links after the fact resolves ~14-16% of the rest (measured: free lookups ~2%, careers-map ~7%, web search ~7%), which tops out near 65%.
+1. **Board search:** for each user's titles, query the boards the app knows (learned boards from stored direct links, `company_boards` from the careers-map, the verified Workday tenants), Israel-filtered, deduplicated against existing jobs. Results enter like any other source (relevance gate, scoring), already direct.
+2. **Resolve-before-show:** run the free link lookups when a job is inserted, before it reaches the swipe deck; the background pass remains for retries.
+3. **Measure for a week:** share of new jobs arriving direct, by source; cost (requests, run time).
+4. **Then decide (Eran):** the target, and the rule for LinkedIn-only jobs that cannot be resolved (keep / separate "Apply on LinkedIn" list / drop).
+
+**Done when:** a week of new jobs shows the direct share by source, and Eran has set the target and the LinkedIn-only rule from it.
+
 ### Step 2 — Link checker gaps (1 session)
 The 10-12 rebuild caught 29 of 41 dead links. The 10 it still calls alive are aggregator pages (builtin, jobright, secrethunter) and invented company-site slugs that return the site's front page with HTTP 200.
 - Aggregators: treat these hosts as **boards**, so they go through Step 1's resolver instead of being trusted as direct.
