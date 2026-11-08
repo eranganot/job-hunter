@@ -3554,6 +3554,35 @@ def _answer_bank(user_id) -> dict:
         return {}
 
 
+def _docx_text(doc) -> str:
+    """All the text of a Word CV: header, body paragraphs AND tables, in order.
+    It read .paragraphs only, which skips tables, headers and nested cells -
+    and many CV templates put roles and dates in a table (reproduced
+    2026-11-08: a role in a table never reached the tailored CV or the letter)."""
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    out = []
+    for sec in doc.sections:
+        for p in sec.header.paragraphs:
+            if p.text.strip():
+                out.append(p.text)
+
+    def walk(parent):
+        for child in parent.iter_inner_content():
+            if isinstance(child, Paragraph):
+                out.append(child.text)
+            elif isinstance(child, Table):
+                for row in child.rows:
+                    seen = []
+                    for cell in row.cells:
+                        if cell._tc in seen:          # merged cells repeat
+                            continue
+                        seen.append(cell._tc)
+                        walk(cell)
+    walk(doc)
+    return "\n".join(out)
+
+
 def _extract_cv_text(cv_path, cv_summary):
     if cv_path and os.path.exists(cv_path):
         try:
@@ -3571,7 +3600,7 @@ def _extract_cv_text(cv_path, cv_summary):
             elif cv_path.lower().endswith(('.docx', '.doc')):
                 try:
                     from docx import Document as _Docx
-                    _t = '\n'.join(p.text for p in _Docx(cv_path).paragraphs)
+                    _t = _docx_text(_Docx(cv_path))
                     if len(_t.strip()) > 100:
                         return _t
                 except Exception as _docx_e:
@@ -6204,9 +6233,13 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 conn.close()
                 try:
-                    from ai_analysis import generate_cover_letter
-                    letter = generate_cover_letter(dict(job), dict(profile) if profile else {},
-                                                   GEMINI_KEY, user_id=user_id)
+                    from ai_analysis import write_cover_letter
+                    # The full CV and the account name, not the 2-3 sentence
+                    # profile summary it used to be written from (2026-11-08).
+                    _cvt, _nm, _contact = _tailor_inputs(user_id, user)
+                    _wl = write_cover_letter(dict(job), dict(profile) if profile else {},
+                                             GEMINI_KEY, user_id=user_id, cv_text=_cvt, name=_nm)
+                    letter, _notes = _wl["letter"], _wl["notes"]
                 except Exception as gen_err:
                     self.send_json({"error": str(gen_err)}, 500)
                     return
@@ -6217,7 +6250,7 @@ class Handler(BaseHTTPRequestHandler):
                     c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
                     c2.commit()
                     c2.close()
-                    self.send_json({"success": True, "letter": letter})
+                    self.send_json({"success": True, "letter": letter, "notes": _notes})
                     return
                 finally:
                     c2.close()

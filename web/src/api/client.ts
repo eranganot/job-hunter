@@ -272,7 +272,7 @@ export const api = {
   useCv: (id: number, use: "tailored" | "original") =>
     request<Record<string, any>>(`/api/jobs/${id}/tailored-cv`, "POST", { action: "use", use }),
   coverLetter: (id: number, action: "generate" | "save", letter?: string) =>
-    request<{ letter?: string; success?: boolean; error?: string }>(
+    request<{ letter?: string; success?: boolean; error?: string; notes?: string[] }>(
       `/api/jobs/${id}/cover-letter`, "POST", letter === undefined ? { action } : { action, letter }),
   setStage: (id: number, stage: string) =>
     request<{ ok?: boolean; error?: string }>("/api/set-stage", "POST", { id, stage }),

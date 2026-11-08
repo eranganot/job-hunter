@@ -1774,7 +1774,12 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
     try {
       const r = await api.coverLetter(job.id, action, action === "save" ? letter : undefined);
       if (r?.error) { setClMsg(r.error); return; }
-      if (action === "generate" && r.letter) { setLetter(r.letter); setClMsg("Generated \u2014 edit before you send it."); }
+      if (action === "generate" && r.letter) {
+        setLetter(r.letter);
+        // Sentences the fact check removed (a number not in the CV) are named, not hidden.
+        setClMsg("Written from your CV \u2014 read and edit it before you send it." +
+                 (Array.isArray(r.notes) && r.notes.length ? " " + r.notes.join(" ") : ""));
+      }
       if (action === "save") setClMsg("Saved");
     } catch (e: any) { setClMsg(e?.message || "That did not work"); }
     finally { setClBusy(""); }
