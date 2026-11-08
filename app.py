@@ -1596,6 +1596,30 @@ def run_job_search(user_id: int):
                         for t in batch: t.start()
                         for t in batch: t.join(timeout=25)
 
+                    # -- Step 16: board-first search (2026-11-08). Every job board the
+                    # app knows - behind stored direct links (any user) and found by
+                    # the careers-map - filtered by title and Israel BEFORE scoring,
+                    # so these jobs arrive with a direct link. --
+                    try:
+                        import boardsearch as _bs
+                        _known_static = {u for u in (j.get("url") for j in all_raw) if u}
+                        _bjobs, _bstats = _bs.search(database.get_db, _title_match)
+                        _bjobs = [j for j in _bjobs if j["url"] not in _known_static]
+                        all_raw.extend(_bjobs)
+                        print(f"[search] Board-first: {_bstats['boards']} boards, {_bstats['asked']} answered, "
+                              f"{_bstats['postings']} postings -> {len(_bjobs)} matching ({_bstats['by_ats']}), "
+                              f"{_bstats['not_reached']} not reached, {_bstats['seconds']}s")
+                        try:
+                            from ingestion.integration import _remember
+                            _remember("boards", "degraded" if _bstats["not_reached"] else "ok",
+                                      _bstats["postings"], len(_bjobs),
+                                      ("%d of %d boards not reached in time" % (_bstats["not_reached"], _bstats["boards"]))
+                                      if _bstats["not_reached"] else "")
+                        except Exception as _bre:
+                            print(f"[search] WARNING could not record board-first health: {_bre}")
+                    except Exception as _bse:
+                        print(f"[search] ERROR board-first search failed: {_bse}")
+
                     # -- TechMap CSV(s) (reuse prefetched rows from discovery step) --
                     try:
                         import csv as _csv, io as _io
@@ -1858,6 +1882,17 @@ def run_job_search(user_id: int):
                                 out.append(j)
                         return out
 
+                    def _keep_source(scored_, batch_):
+                        """The scorer returns the jobs it kept without their source,
+                        and "greenhouse/lever" was stamped on all of them - LinkedIn
+                        and aggregator jobs included - so the link report's by-source
+                        split measured nothing (found 2026-11-08, Step 16)."""
+                        _src = {b.get("url"): b.get("source") for b in batch_ if b.get("url")}
+                        for _j in scored_:
+                            if _src.get(_j.get("url")):
+                                _j["source"] = _src[_j["url"]]
+                        return scored_
+
                     def _score_batch(batch_, profile_text_):
                         """Score a batch of jobs via Gemini → Anthropic → heuristic fallback."""
                         import os as _os_sb
@@ -2035,7 +2070,7 @@ def run_job_search(user_id: int):
                     scored_jobs = []
                     for batch_i in range(0, len(_jobs_to_score), 20):
                         batch = _jobs_to_score[batch_i:batch_i+20]
-                        scored_jobs.extend(_score_batch(batch, profile_text))
+                        scored_jobs.extend(_keep_source(_score_batch(batch, profile_text), batch))
 
                     # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
                     import os as _os_ws
@@ -2126,7 +2161,7 @@ def run_job_search(user_id: int):
                                 _wsj.setdefault('job_title', _wsj.get('title', ''))
                                 _wsj.setdefault('full_description', _wsj.get('description', ''))
                                 _wsj['source'] = 'web_search'
-                            _ws_scored = _score_batch(_ws_raw, profile_text)
+                            _ws_scored = _keep_source(_score_batch(_ws_raw, profile_text), _ws_raw)
                             for _wsj in _ws_scored:
                                 _wsj.setdefault('fit_reason', 'Found via Google Search')
                                 _wsj.setdefault('found_date', today)
