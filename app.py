@@ -2761,9 +2761,13 @@ def _await_code_for(run, notify=False):
     with a link that opens the code prompt), waits up to _CODE_WAIT_S for it.
     The supervised admin run passes notify=False: the admin is on the page."""
     def wait():
+        # Order matters: the job is marked first, then the run is listed as
+        # waiting (the app shows it from then on), then the user is told - so
+        # whatever they open already agrees. Listing first raced the job's
+        # status (seen on the SQLite smoke run, 2026-11-08).
+        _set_job_apply_status(run, "awaiting_code")
         run["code_asked_at"] = time.time()
         run["state"] = "awaiting_code"
-        _set_job_apply_status(run, "awaiting_code")
         if notify:
             who = run["company"] or "The employer"
             what = (" for " + run["title"]) if run["title"] else ""
