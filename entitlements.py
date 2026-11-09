@@ -352,8 +352,8 @@ def upgrade_required(reason: str, user, **extra) -> dict:
     for fn in ON_UPGRADE_REQUIRED:
         try:
             fn(reason, user)
-        except Exception:
-            pass
+        except Exception as exc:   # a listener must never turn a 402 into a 500
+            print("[entitlements] upgrade_required listener failed: %s" % exc)
     body = {"error": extra.pop("message", "This needs a higher plan."), "code": "upgrade_required",
             "reason": reason, "plan": tier_of(user)}
     body.update(extra)

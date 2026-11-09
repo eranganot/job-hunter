@@ -143,10 +143,8 @@ def landing_html() -> str:
 
 
 def _paywall_hit(_reason, user):
-    try:
-        _funnel((user or {}).get("id"), "paywall")
-    except Exception:
-        pass
+    # _funnel never raises; the entitlements caller logs anything else.
+    _funnel((user or {}).get("id"), "paywall")
 
 
 entitlements.ON_UPGRADE_REQUIRED.append(_paywall_hit)
