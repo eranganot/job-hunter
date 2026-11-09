@@ -394,3 +394,27 @@ def test_lever_location_is_chosen_from_its_dropdown(page):
     assert "Tel Aviv, ISR" in page.eval_on_selector("input[name=selectedLocation]", "e => e.value")
     page.set_content(LEVER_LOCATION)
     assert ae._lever_location(page, {}) is False                      # no city known: leave it
+
+
+COMEET_DROPDOWN = """<form><div class="question">
+ <div class="title">Are you currently based in Israel? *</div>
+ <div><div class="dropdown left"><label>
+   <a class="dropdown-toggle" href="" id="Are you currently based in Israel?"
+      aria-label="Choose answer for Are you currently based in Israel?" aria-haspopup="true" onclick="return false">Choose &nbsp;</a></label>
+   <ul class="dropdown-menu"><li><a href="" onclick="pick(this);return false"><div class="option-title">Yes</div></a></li>
+     <li><a href="" onclick="pick(this);return false"><div class="option-title">No</div></a></li></ul>
+ </div></div></div></form>
+<script>function pick(a){ document.getElementById('Are you currently based in Israel?').innerText = a.innerText; }</script>"""
+
+
+def test_comeets_custom_dropdown_is_a_question_and_gets_answered(page):
+    """Dream (2026-11-09): Comeet's "Are you currently based in Israel? *" is an
+    AngularJS dropdown, not a <select>. Unread, it stayed "Choose" and Comeet
+    refused the submit with "Required"."""
+    import questions
+    page.set_content(COMEET_DROPDOWN)
+    qs = questions.collect(page)
+    assert [(q["label"], q["type"], q["options"], q["required"]) for q in qs] == [
+        ("Are you currently based in Israel?", "dropdown", ["Yes", "No"], True)]
+    assert questions._fill(page, qs[0], "Yes")
+    assert questions.collect(page) == []          # answered: no longer "Choose"

@@ -798,6 +798,33 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         result["error"] = f"Greenhouse handler error: {e}"
         return result
 
+def _comeet_frame(page):
+    """The Comeet application frame (comeet.co/jobs/<company>/<pos>/apply?token=...)."""
+    return next((f for f in page.frames
+                 if "/apply?token" in (f.url or "") and "comeet.co" in (f.url or "")), None)
+
+
+def _wait_comeet_frame(page, ms: int = 8000):
+    """A company careers page that embeds Comeet (its careers-api widget): the
+    form frame appears a few seconds after load. Only waited for when the page
+    loads Comeet at all, so other sites cost nothing."""
+    try:
+        html = page.content()
+    except Exception as exc:
+        print(f"[apply-engine] Comeet check: {exc}")
+        return None
+    if "comeet" not in html.lower():
+        return None
+    waited = 0
+    while waited < ms:
+        f = _comeet_frame(page)
+        if f is not None:
+            return f
+        page.wait_for_timeout(500)
+        waited += 500
+    return None
+
+
 def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
     """Comeet (rehearsal against a live Cyera posting, 2026-11-07): the posting
     page has no form; "APPLY FOR THIS JOB" loads one in an iframe from
@@ -808,7 +835,11 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
     that iframe, so every Comeet application failed."""
     result = {"success": False, "status": "failed", "confirmation_text": "", "error": ""}
     try:
-        for sel in ['text=APPLY FOR THIS JOB', 'a:has-text("Apply")', 'button:has-text("Apply")']:
+        # A company site with the Comeet widget (dreamgroup.com, 2026-11-09)
+        # already shows the form frame - and its own "Apply"/"Contact" links
+        # lead elsewhere, so nothing is clicked then.
+        already = _comeet_frame(page) is not None
+        for sel in ([] if already else ['text=APPLY FOR THIS JOB', 'a:has-text("Apply")', 'button:has-text("Apply")']):
             try:
                 el = page.query_selector(sel)
                 if el and el.is_visible():
@@ -843,6 +874,9 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
             except Exception as exc:
                 result["error"] = f"Comeet: could not attach the CV: {exc}"
                 return result
+            # Comeet shows the position's own questions only once the CV is in
+            # (Dream, 2026-11-09: "Are you currently based in Israel? *" ~2s later).
+            page.wait_for_timeout(3000)
         qa = _answer_form(frame, applicant)
         if qa["unsure"]:
             return _needs_answers(qa["unsure"])
@@ -2106,7 +2140,11 @@ def submit_application(
                 res["resolved_url"] = actual_url
                 return _add_failure_type(res)
 
-            if _is_comeet(actual_url):
+            # Comeet by address, or built into the company's own careers page
+            # (dreamgroup.com/comeet-positions/... - its form is a comeet.co
+            # frame next to the company's own "Contact us" form, which the
+            # generic path could not tell apart; 2026-11-09).
+            if _is_comeet(actual_url) or _wait_comeet_frame(page) is not None:
                 print(f"[apply-engine] Detected Comeet ATS")
                 res = _apply_comeet(page, applicant, cv_path)
                 browser.close()
