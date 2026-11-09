@@ -2512,6 +2512,34 @@ function SupervisedApply() {
   );
 }
 
+/* Step 10: signups in the last 30 days and how many of them reached each step.
+   A cohort, so the bars only ever shrink left to right (paywall aside). */
+const FUNNEL_LABELS: Record<string, string> = {
+  signup: "Signed up", verified: "Confirmed email", cv: "Uploaded a CV",
+  first_search: "First search", first_approve: "First approve", paywall: "Hit a plan limit",
+};
+function FunnelCard({ steps }: { steps: { step: string; users: number }[] }) {
+  const top = Math.max(1, steps[0]?.users || 0);
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-400" />Signup funnel</h3>
+      <p className="text-xs text-gray-400 mb-3">Accounts created in the last 30 days, and how many of them got to each step. Accounts from before 9 Nov 2026 aren't counted.</p>
+      <div className="space-y-2">
+        {steps.map((s) => {
+          const pct = Math.round((s.users / top) * 100);
+          return (
+            <div key={s.step} className="flex items-center gap-3 text-sm">
+              <span className="w-36 shrink-0 text-gray-300">{FUNNEL_LABELS[s.step] || s.step}</span>
+              <div className="flex-1 h-2.5 bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{ width: `${steps[0]?.users ? pct : 0}%` }} /></div>
+              <span className="w-16 shrink-0 text-right text-gray-200 tabular-nums">{s.users}{s.step !== "signup" && steps[0]?.users ? <span className="text-gray-400"> · {pct}%</span> : null}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel({ me }: any) {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
@@ -2520,7 +2548,9 @@ function AdminPanel({ me }: any) {
   const [diag, setDiag] = useState<Record<string, any> | null>(null);
   const [userMsg, setUserMsg] = useState("");
   const myId = me?.id;
+  const [funnel, setFunnel] = useState<{ step: string; users: number }[] | null>(null);
   const load = () => {
+    api.adminFunnel(30).then((f) => setFunnel(f.steps)).catch(() => setFunnel(null));
     api.adminQueueStats().then(setStats).catch(() => {});
     api.adminUsers().then((u) => setUsers(Array.isArray(u) ? u : [])).catch(() => {});
   };
@@ -2593,6 +2623,7 @@ function AdminPanel({ me }: any) {
               <Stat n={stats?.dead_links} label="Dead links" color="text-red-400" />
             </div>
           </div>
+          {funnel && <FunnelCard steps={funnel} />}
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
             <div className="space-y-2">
