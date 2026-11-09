@@ -6,7 +6,7 @@ from tests.test_routes import stack  # noqa: F401
 
 def test_google_returns_to_the_address_it_started_from(stack, monkeypatch):
     app = stack["app"]
-    monkeypatch.setattr(app, "_SERVED_HOSTS", {"job-hunter.work", "web-production-192b7.up.railway.app"})
+    monkeypatch.setattr(app, "_SERVED_HOSTS", {"job-hunter.work"})   # as on Railway with the custom domain
     monkeypatch.setattr(app, "MOBILE_URL", "https://job-hunter.work")
     assert app._base_for("job-hunter.work") == "https://job-hunter.work"
     assert app._base_for("web-production-192b7.up.railway.app") == "https://web-production-192b7.up.railway.app"

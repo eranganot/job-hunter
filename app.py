@@ -188,7 +188,12 @@ _SERVED_HOSTS = {h for h in (urllib.parse.urlparse(_public_url).netloc if _publi
 def _base_for(host: str) -> str:
     """https://<host> when the request came to one of our addresses, else MOBILE_URL."""
     h = (host or "").strip().lower()
-    return f"https://{h}" if h and h in _SERVED_HOSTS else MOBILE_URL.rstrip("/")
+    # *.up.railway.app too: with a custom domain added, RAILWAY_PUBLIC_DOMAIN no
+    # longer named the Railway address - observed 2026-11-09, sign-in started on
+    # web-production-192b7.up.railway.app was sent back to job-hunter.work and
+    # would fail the state check. Google still only accepts registered URIs.
+    ok = h in _SERVED_HOSTS or h.endswith(".up.railway.app")
+    return f"https://{h}" if h and ok else MOBILE_URL.rstrip("/")
 
 # ── DB + Auth init ────────────────────────────────────────────────────────────
 
