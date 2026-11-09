@@ -78,6 +78,10 @@ TABLE_ORDER = [
     "paid_pool_jobs",
     "paid_pool_runs",
     "subscriptions",
+    # m0029/m0030 (Step 5, 2026-11-09): link tokens and the signup funnel.
+    # No foreign keys; they only need to come after users.
+    "auth_tokens",
+    "funnel_events",
     "billing_events",
 ]
 
