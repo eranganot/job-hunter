@@ -10,7 +10,7 @@ from tests.test_routes import stack, users  # noqa: F401
 def _user(stack, email, role):
     conn = stack["db"].get_db()
     conn.execute("DELETE FROM users WHERE email=?", (email,))
-    conn.execute("INSERT INTO users (email, password_hash, salt, name, role) VALUES (?,?,?,?,?)", (email, "x", "s", "T", role))
+    conn.execute("INSERT INTO users (email, password_hash, salt, name, role, email_verified_at) VALUES (?,?,?,?,?,?)", (email, "x", "s", "T", role, "2026-01-01"))
     uid = conn.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()["id"]
     conn.commit()
     conn.close()
@@ -72,6 +72,7 @@ def test_apply_selected_is_admins_only_and_runs_only_the_users_approved_jobs(sta
     admin = conn.execute("SELECT id FROM users WHERE email='admin@example.test'").fetchone()["id"]
     alice = conn.execute("SELECT id FROM users WHERE email='alice@example.test'").fetchone()["id"]
     conn.execute("UPDATE users SET role='admin' WHERE id=?", (admin,))
+    conn.execute("UPDATE users SET email_verified_at='2026-01-01' WHERE id IN (?,?)", (admin, alice))
     ids = []
     for owner, status, ast in ((admin, "approved", None), (admin, "approved", "applying"),
                                (admin, "new", None), (alice, "approved", None), (admin, "approved", "failed")):

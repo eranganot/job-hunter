@@ -175,6 +175,99 @@ def change_password(user_id: int, current_pw: str, new_pw: str, keep_token: str 
         conn.close()
 
 
+# ── Email verification and password reset (Step 5, 2026-11-09) ──────────────
+#
+# Tokens are random, single-use and expiring; only their SHA-256 is stored, so a
+# leaked database row cannot be turned into a working link.
+
+VERIFY_TTL_S = 48 * 3600
+RESET_TTL_S = 3600
+
+
+def _token_hash(raw: str) -> str:
+    import hashlib
+    return hashlib.sha256((raw or "").encode()).hexdigest()
+
+
+def issue_token(user_id: int, purpose: str, ttl_s: int) -> str:
+    """A new link token; earlier unused ones for the same purpose stop working."""
+    raw = secrets.token_urlsafe(32)
+    now = _utc_now()
+    conn = _get_db()
+    try:
+        conn.execute("UPDATE auth_tokens SET used_at=? WHERE user_id=? AND purpose=? AND used_at IS NULL",
+                     (_stamp(now), user_id, purpose))
+        conn.execute("INSERT INTO auth_tokens (user_id, purpose, token_hash, created_at, expires_at) "
+                     "VALUES (?,?,?,?,?)",
+                     (user_id, purpose, _token_hash(raw), _stamp(now), _stamp(now + timedelta(seconds=ttl_s))))
+        conn.commit()
+    finally:
+        conn.close()
+    return raw
+
+
+def peek_token(raw: str, purpose: str):
+    """user_id if the link is still good, without using it up (for showing the form)."""
+    conn = _get_db()
+    try:
+        r = conn.execute("SELECT user_id FROM auth_tokens WHERE token_hash=? AND purpose=? AND used_at IS NULL "
+                         "AND expires_at > ?", (_token_hash(raw), purpose, _stamp(_utc_now()))).fetchone()
+        return r["user_id"] if r else None
+    finally:
+        conn.close()
+
+
+def use_token(raw: str, purpose: str):
+    """user_id, consuming the token - exactly once, even with two clicks at the same moment."""
+    if not raw:
+        return None
+    h, now = _token_hash(raw), _stamp(_utc_now())
+    conn = _get_db()
+    try:
+        cur = conn.execute("UPDATE auth_tokens SET used_at=? WHERE token_hash=? AND purpose=? "
+                           "AND used_at IS NULL AND expires_at > ?", (now, h, purpose, now))
+        conn.commit()
+        if cur.rowcount != 1:
+            return None
+        r = conn.execute("SELECT user_id FROM auth_tokens WHERE token_hash=?", (h,)).fetchone()
+        return r["user_id"] if r else None
+    finally:
+        conn.close()
+
+
+def mark_email_verified(user_id: int):
+    conn = _get_db()
+    try:
+        conn.execute("UPDATE users SET email_verified_at=COALESCE(email_verified_at, ?) WHERE id=?",
+                     (_stamp(_utc_now()), user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_email_verified(user_id: int) -> bool:
+    conn = _get_db()
+    try:
+        r = conn.execute("SELECT email_verified_at FROM users WHERE id=?", (user_id,)).fetchone()
+        return bool(r and r["email_verified_at"])
+    finally:
+        conn.close()
+
+
+def reset_password(user_id: int, new_pw: str) -> int:
+    """Set a new password from a reset link: every session ends (whoever had the
+    old password is signed out), and the address is proven - the link reached it."""
+    pw_hash, salt = hash_password(new_pw)
+    conn = _get_db()
+    try:
+        conn.execute("UPDATE users SET password_hash=?, salt=? WHERE id=?", (pw_hash, salt, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+    mark_email_verified(user_id)
+    return delete_sessions_for_user(user_id, "")
+
+
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 def create_session(user_id: int) -> str:
@@ -409,8 +502,9 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
         ).fetchone()
         if row:
             conn.execute(
-                "UPDATE users SET google_sub=?, avatar_url=COALESCE(NULLIF(?,''), avatar_url) WHERE id=?",
-                (google_sub, avatar_url or "", row["id"])
+                "UPDATE users SET google_sub=?, avatar_url=COALESCE(NULLIF(?,''), avatar_url), "
+                "email_verified_at=COALESCE(email_verified_at, ?) WHERE id=?",
+                (google_sub, avatar_url or "", _stamp(_utc_now()), row["id"])
             )
             conn.commit()
             updated = conn.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
@@ -425,9 +519,9 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
         display_name = (name or normalized_email.split("@")[0]).strip()
         conn.execute(
             "INSERT INTO users (name, email, password_hash, salt, created_date, role, "
-            "google_sub, auth_provider, avatar_url) VALUES (?,?,?,?,?,?,?,?,?)",
+            "google_sub, auth_provider, avatar_url, email_verified_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (display_name, normalized_email, pw_hash, salt, datetime.now().isoformat(),
-             role, google_sub, "google", avatar_url or "")
+             role, google_sub, "google", avatar_url or "", _stamp(_utc_now()))
         )
         user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.execute(

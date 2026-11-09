@@ -11,6 +11,7 @@ Cloud (Railway):
 """
 
 import hmac
+import html as html_lib
 import json
 import os
 import re
@@ -21,7 +22,7 @@ import time
 import urllib.parse
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
@@ -93,6 +94,28 @@ ONBOARDING_ENTRY = "/app"
 # Where a signed-in user lands: /app, the only UI since Step 9 (2026-11-05)
 # deleted the legacy server-rendered pages and the LEGACY_UI switch that could
 # bring them back. Kept as a function so the many call sites read the same.
+FUNNEL_STEPS = ("signup", "verified", "cv", "first_search", "first_approve", "paywall")
+
+
+def _funnel(user_id, step: str) -> None:
+    """Record the first time a user reaches a funnel step (Step 10: signup ->
+    verified -> CV -> first search -> first approve -> paywall hit). Only the
+    first occurrence counts; never fails the request that triggered it."""
+    if not user_id or step not in FUNNEL_STEPS:
+        return
+    try:
+        c = database.get_db()
+        try:
+            c.execute("INSERT INTO funnel_events (user_id, step, created_at) VALUES (?,?,?) "
+                      "ON CONFLICT (user_id, step) DO NOTHING",
+                      (user_id, step, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
+            c.commit()
+        finally:
+            c.close()
+    except Exception as exc:
+        print("[funnel] %s for user %s not recorded: %s" % (step, user_id, exc))
+
+
 def home_url() -> str:
     return "/app"
 
@@ -419,18 +442,21 @@ def _engine_on_for(user) -> bool:
     user: a user dict or a user id."""
     if not _engine_on():
         return False
+    uid = user.get("id") if isinstance(user, dict) else user
+    conn = database.get_db()
+    try:
+        r = conn.execute("SELECT role, email_verified_at FROM users WHERE id=?", (uid,)).fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return False
+    # Applications go out under the account's email: it must be confirmed
+    # first (Step 5, 2026-11-09). Google sign-ins and pre-Step-5 accounts are.
+    if not r["email_verified_at"]:
+        return False
     if _flag("APPLY_ENGINE_FOR_ALL"):
         return True
-    if isinstance(user, dict):
-        role = user.get("role")
-    else:
-        conn = database.get_db()
-        try:
-            r = conn.execute("SELECT role FROM users WHERE id=?", (user,)).fetchone()
-        finally:
-            conn.close()
-        role = r["role"] if r else None
-    return role == "admin"
+    return r["role"] == "admin"
 
 
 def _tailor_inputs(user_id, user):
@@ -3572,6 +3598,11 @@ _AUTH_HEAD = """
     .alt a:hover { text-decoration:underline; }
     .err { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); color:#fca5a5;
            border-radius:.75rem; padding:.75rem 1rem; font-size:.85rem; margin-bottom:1rem; }
+    .ok { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.35); color:#86efac;
+          border-radius:.75rem; padding:.75rem 1rem; font-size:.85rem; margin-bottom:1rem; }
+    .forgot { display:block; text-align:right; font-size:.78rem; color:#a5b4fc; text-decoration:none; margin:-.4rem 0 .6rem; }
+    .forgot:hover { text-decoration:underline; }
+    .muted { font-size:.85rem; color:#cbd5e1; line-height:1.5; margin:0 0 1rem; }
   </style>
   <script>
     function revealPw(btn){
@@ -3624,6 +3655,7 @@ LOGIN_HTML = """<!DOCTYPE html>
           <button type="button" class="reveal" aria-pressed="false" aria-label="Show password" onclick="revealPw(this)">Show</button>
         </div>
       </div>
+      <a class="forgot" href="/forgot-password">Forgot password?</a>
       <button type="submit" class="primary">Sign in</button>
     </form>
     <p class="alt">Don't have an account? <a href="/register">Create one</a></p>
@@ -3678,6 +3710,64 @@ REGISTER_HTML = """<!DOCTYPE html>
 </div>
 </body>
 </html>"""
+
+def notice_block(msg: str) -> str:
+    return f"""<div class="ok">{msg}</div>""" if msg else ""
+
+
+def _auth_page(title: str, heading: str, inner: str) -> str:
+    """A small page in the sign-in look (forgot / reset / verify, Step 5)."""
+    return ("""<!DOCTYPE html><html lang="en"><head>""" + _AUTH_HEAD + "<title>Job Hunter — " + title + """</title></head>
+<body><div class="wrap"><div class="brand">""" + _MARK + """<h1>Job Hunter</h1></div>
+<div class="card"><h2>""" + heading + "</h2>" + inner + "</div></div></body></html>")
+
+
+FORGOT_HTML = _auth_page("Reset your password", "Reset your password", """
+    {error_block}
+    <p class="muted">Enter the email you signed up with. We'll send you a link to choose a new password.</p>
+    <form method="POST" action="/forgot-password">
+      <div class="field"><label for="email">Email</label>
+        <input type="email" name="email" id="email" autocomplete="email" placeholder="you@example.com" required autofocus/></div>
+      <button type="submit" class="primary">Send the link</button>
+    </form>
+    <p class="alt"><a href="/login">Back to sign in</a></p>""")
+
+RESET_HTML = _auth_page("Choose a new password", "Choose a new password", """
+    {error_block}
+    <form method="POST" action="/reset-password">
+      <input type="hidden" name="token" value="{token}"/>
+      <div class="field"><label for="password">New password</label>
+        <div class="pw"><input type="password" name="password" id="password" autocomplete="new-password" placeholder="At least 8 characters" required minlength="8" autofocus/>
+        <button type="button" class="reveal" aria-pressed="false" aria-label="Show password" onclick="revealPw(this)">Show</button></div></div>
+      <div class="field"><label for="password2">Confirm password</label>
+        <div class="pw"><input type="password" name="password2" id="password2" autocomplete="new-password" placeholder="Type it again" required minlength="8"/>
+        <button type="button" class="reveal" aria-pressed="false" aria-label="Show password" onclick="revealPw(this)">Show</button></div></div>
+      <button type="submit" class="primary">Save the new password</button>
+    </form>""")
+
+LINK_EXPIRED_HTML = _auth_page("Link expired", "This link doesn't work anymore", """
+    <p class="muted">Links are good for one use, and expire (a password link after an hour, an email link after two days).</p>
+    <p class="alt"><a href="/forgot-password">Send a new password link</a> · <a href="/login">Sign in</a></p>""")
+
+
+def _send_verification(user_id: int, email: str, name: str = "") -> None:
+    """The "confirm your email" mail. Raises if it could not be sent."""
+    raw = auth.issue_token(user_id, "verify", auth.VERIFY_TTL_S)
+    link = MOBILE_URL.rstrip("/") + "/verify-email?token=" + raw
+    send_email(email, "Confirm your email for Job Hunter",
+               "Hi%s,\n\nConfirm this is your email address so Job Hunter can send applications and "
+               "notifications with it:\n\n%s\n\nThe link works once and expires in 2 days. If you didn't "
+               "create a Job Hunter account, ignore this email.\n\nJob Hunter" % ((" " + name.split()[0]) if name else "", link))
+
+
+def _send_reset(user_id: int, email: str) -> None:
+    raw = auth.issue_token(user_id, "reset", auth.RESET_TTL_S)
+    link = MOBILE_URL.rstrip("/") + "/reset-password?token=" + raw
+    send_email(email, "Reset your Job Hunter password",
+               "Someone (hopefully you) asked to reset the password for this Job Hunter account.\n\n"
+               "Choose a new password here:\n\n%s\n\nThe link works once and expires in 1 hour. "
+               "If you didn't ask, ignore this email - your password stays as it is.\n\nJob Hunter" % link)
+
 
 def error_block(msg: str) -> str:
     if not msg:
@@ -4288,7 +4378,37 @@ class Handler(BaseHTTPRequestHandler):
                 if qs.get("deleted", ["0"])[0] == "1":
                     _note = error_block("Your account will be deleted in %d days. Changed your mind? "
                                         "Sign in before then and nothing is deleted." % accountdata.GRACE_DAYS)
+                _n = qs.get("notice", [""])[0]
+                if _n == "reset":
+                    _note = notice_block("Your password is changed. Sign in with the new one.")
+                elif _n == "verified":
+                    _note = notice_block("Your email is confirmed. Sign in to continue.")
                 self.send_html(LOGIN_HTML.replace("{error_block}", _note))
+            return
+
+        # ── Step 5: forgot / reset password, confirm email (2026-11-09) ──
+        if path in ("/forgot-password", "/forgot-password/"):
+            self.send_html(FORGOT_HTML.replace("{error_block}", ""))
+            return
+
+        if path in ("/reset-password", "/reset-password/"):
+            _tok = qs.get("token", [""])[0]
+            if not _tok or not auth.peek_token(_tok, "reset"):
+                self.send_html(LINK_EXPIRED_HTML, 410)
+                return
+            self.send_html(RESET_HTML.replace("{error_block}", "").replace("{token}", html_lib.escape(_tok, quote=True)))
+            return
+
+        if path in ("/verify-email", "/verify-email/"):
+            _uid = auth.use_token(qs.get("token", [""])[0], "verify")
+            if not _uid:
+                self.send_html(LINK_EXPIRED_HTML, 410)
+                return
+            auth.mark_email_verified(_uid)
+            _funnel(_uid, "verified")
+            _me = self.get_user()
+            self.redirect((home_url() + ("&" if "?" in home_url() else "?") + "verified=1")
+                          if _me and _me["id"] == _uid else "/login?notice=verified")
             return
 
         if path in ("/register", "/register/"):
@@ -4386,6 +4506,9 @@ class Handler(BaseHTTPRequestHandler):
             if not _sub or not _email or not _verified:
                 _google_fail("Your Google account email isn't verified, so we can't sign you in."); return
             _user, _is_new, _err = auth.find_or_create_google_user(_sub, _email, _name, _pic)
+            if _is_new and _user:
+                _funnel(_user["id"], "signup")
+                _funnel(_user["id"], "verified")       # Google already confirmed the address
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
             _token = auth.create_session(_user["id"])
@@ -4620,6 +4743,7 @@ class Handler(BaseHTTPRequestHandler):
             # Settings tells a user who switched auto-apply on whether anything
             # is being sent yet (the engine's own server-wide switch).
             out["auto_apply_live"] = _engine_on_for(user)
+            out["email_verified"] = auth.is_email_verified(user["id"])
             self.send_json(out)
             return
 
@@ -5438,6 +5562,53 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        # ── Forgot password: the same answer whether or not the address has an
+        # account, so the page cannot be used to find out who is signed up. ──
+        if path == "/forgot-password":
+            body = urllib.parse.parse_qs(self.read_body().decode())
+            email = (body.get("email", [""])[0] or "").strip().lower()
+            _w = ratelimit.check_and_record("reset", "ip:" + self.client_ip()) or \
+                 (email and ratelimit.check_and_record("reset", "em:" + email))
+            if _w:
+                self.send_html(FORGOT_HTML.replace("{error_block}", error_block(
+                    "Too many requests. Try again in about %d minute(s)." % max(1, _w // 60))), 429)
+                return
+            if email:
+                _c = database.get_db()
+                try:
+                    _u = _c.execute("SELECT id, email FROM users WHERE email=? AND is_active=1", (email,)).fetchone()
+                finally:
+                    _c.close()
+                if _u:
+                    try:
+                        _send_reset(_u["id"], _u["email"])
+                    except Exception as _e:
+                        print("[auth] reset mail to user %s failed: %s" % (_u["id"], _e))
+            self.send_html(FORGOT_HTML.replace("{error_block}", notice_block(
+                "If there's an account for that address, we've sent it a link. It works for 1 hour - "
+                "check your spam folder if it isn't there in a minute.")))
+            return
+
+        if path == "/reset-password":
+            body = urllib.parse.parse_qs(self.read_body().decode())
+            tok = body.get("token", [""])[0]
+            pw, pw2 = body.get("password", [""])[0], body.get("password2", [""])[0]
+            def _again(msg):
+                self.send_html(RESET_HTML.replace("{error_block}", error_block(msg))
+                               .replace("{token}", html_lib.escape(tok, quote=True)))
+            if len(pw) < 8:
+                _again("Password must be at least 8 characters."); return
+            if pw != pw2:
+                _again("Passwords don't match."); return
+            _uid = auth.use_token(tok, "reset")
+            if not _uid:
+                self.send_html(LINK_EXPIRED_HTML, 410)
+                return
+            _n = auth.reset_password(_uid, pw)
+            print("[auth] password reset for user %s; %s session(s) ended" % (_uid, _n))
+            self.redirect("/login?notice=reset")
+            return
+
         # ── Register ──
         if path == "/register":
             # Nothing stopped a script creating accounts in a loop. Attempt-based,
@@ -5475,6 +5646,11 @@ class Handler(BaseHTTPRequestHandler):
                 notify_admin_new_user(new_user_email=email, new_user_name=name)
             except Exception as e:
                 print(f"[admin-notify] registration hook error: {e}")
+            _funnel(user_id, "signup")
+            try:
+                _send_verification(user_id, email.strip().lower(), name)
+            except Exception as _ve:
+                print("[auth] verification mail for user %s failed: %s" % (user_id, _ve))
             token = auth.create_session(user_id)
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(token))
@@ -5548,6 +5724,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+
+        # ── Send the "confirm your email" mail again (Step 5) ──
+        if path == "/api/auth/resend-verification":
+            if auth.is_email_verified(user_id):
+                self.send_json({"success": True, "already": True})
+                return
+            _w = ratelimit.check_and_record("verify", "u:%s" % user_id)
+            if _w:
+                self.send_json({"error": "You've asked for several emails already. Try again in about %d minute(s)."
+                                % max(1, _w // 60), "code": "rate_limited"}, 429)
+                return
+            _c = database.get_db()
+            try:
+                _u = _c.execute("SELECT email, name FROM users WHERE id=?", (user_id,)).fetchone()
+            finally:
+                _c.close()
+            try:
+                _send_verification(user_id, _u["email"], _u["name"] or "")
+            except Exception as _e:
+                print("[auth] resend verification for user %s failed: %s" % (user_id, _e))
+                self.send_json({"error": "The email could not be sent. Try again in a few minutes.", "code": "send_failed"}, 502)
+                return
+            self.send_json({"success": True, "sent_to": _u["email"]})
             return
 
         # ── Contact support (2026-11-09) ──────────────────────────────────────

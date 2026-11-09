@@ -212,6 +212,13 @@ def users(stack):
         assert location == "/app", location
         assert c.cookie, f"no session cookie for {email}"
         made[key] = c
+    # Confirmed, as a working account is (Step 5): tests of the email gate make
+    # their own unconfirmed account (tests/test_email_verification.py).
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE users SET email_verified_at='2026-01-01' WHERE email IN "
+                 "('alice@example.test','bob@example.test','admin@example.test')")
+    conn.commit()
+    conn.close()
     return made
 
 

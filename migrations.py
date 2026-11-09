@@ -996,6 +996,40 @@ def m0028_apply_prepared(conn):
     conn.commit()
 
 
+def m0029_email_verification(conn):
+    """Step 5 (2026-11-09, unblocked by job-hunter.work + Resend): users.
+    email_verified_at, and auth_tokens - single-use, expiring, stored hashed -
+    for "confirm your email" and "reset your password". Accounts that existed
+    before verification are treated as verified (created_date): they have been
+    receiving the app's mail and applying with that address."""
+    if not _has_column(conn, "users", "email_verified_at"):
+        conn.execute("ALTER TABLE users ADD COLUMN email_verified_at TEXT")
+        conn.execute("UPDATE users SET email_verified_at = COALESCE(created_date, 'before-step-5')")
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS auth_tokens (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL,
+        purpose     TEXT NOT NULL,
+        token_hash  TEXT NOT NULL UNIQUE,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT NOT NULL,
+        used_at     TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)""", conn))
+    conn.commit()
+
+
+def m0030_funnel_events(conn):
+    """Step 10's funnel: the first time each user reaches signup, verified, cv,
+    first_search, first_approve, paywall - one row per (user, step)."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS funnel_events (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL,
+        step       TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, step),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)""", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1025,6 +1059,8 @@ MIGRATIONS = [
     (26, "paid_pool",                   m0026_paid_pool),
     (27, "unconfirmed_applies",         m0027_unconfirmed_applies),
     (28, "apply_prepared",              m0028_apply_prepared),
+    (29, "email_verification",          m0029_email_verification),
+    (30, "funnel_events",               m0030_funnel_events),
 ]
 
 

@@ -105,6 +105,9 @@ export type Me = {
   email: string;
   role?: string;
   is_admin?: boolean;
+  // Step 5: false until the user opens the link we mailed. Applications go out
+  // under this address, so auto-apply waits for it.
+  email_verified?: boolean;
   cv_path?: string | null;
   cv_filename?: string | null;
   cv_uploaded_date?: string | null;
@@ -247,6 +250,7 @@ async function request<T>(path: string, method = "GET", body?: unknown): Promise
 
 export const api = {
   me: () => request<Me>("/api/me"),
+  resendVerification: () => request<{ success: boolean; sent_to: string }>("/api/auth/resend-verification", "POST", {}),
   stats: () => request<Stats>("/api/stats"),
   activity: () => request<Activity[]>("/api/activity"),
   jobs: (status: string, sort = "match") =>

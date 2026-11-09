@@ -28,7 +28,8 @@ def env(tmp_path, monkeypatch):
     # tests/test_auto_apply_entitlement.py). While auto-apply is parked only the
     # admin role is entitled (plans.py, 2026-11-05); without this every test
     # below would stop at the gate for a reason unrelated to retries or backoff.
-    conn.execute("UPDATE users SET role='admin' WHERE id=?", (uid,))
+    # Applications need a confirmed email (Step 5, 2026-11-09).
+    conn.execute("UPDATE users SET role='admin', email_verified_at='2026-01-01' WHERE id=?", (uid,))
     conn.commit()
     conn.close()
     monkeypatch.setattr(apply_engine, "extract_applicant_data", lambda cv, em, **_k: {"email": em})
