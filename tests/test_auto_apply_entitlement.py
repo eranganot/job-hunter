@@ -33,8 +33,8 @@ from tests.test_routes import stack  # noqa: F401
 def _make_user(database, email, plan, auto_apply, role="user"):
     conn = database.get_db()
     conn.execute(
-        "INSERT INTO users (email, password_hash, salt, name, plan, role) "
-        "VALUES (?,?,?,?,?,?)", (email, "x", "s", email.split("@")[0], plan, role))
+        "INSERT INTO users (email, password_hash, salt, name, plan, role, email_verified_at) "
+        "VALUES (?,?,?,?,?,?,?)", (email, "x", "s", email.split("@")[0], plan, role, "2026-01-01"))
     uid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.execute("INSERT INTO user_profiles (user_id, auto_apply_enabled) VALUES (?,?)",
                  (uid, 1 if auto_apply else 0))

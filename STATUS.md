@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-09 by Claude (paid pool asks every user's titles: senior first, fold, rotate)._
+_Last updated: 2026-11-09 by Claude (Step 5: email confirmation + password reset)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,14 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-09 — **Step 5: email confirmation and password reset** (the domain blocker is gone: `support@job-hunter.work` sends through Resend).
+  - Tokens: `auth_tokens` (m0029) stores only a sha256 of the link token; single use (atomic `UPDATE … WHERE used_at IS NULL`), expiring (confirm 48 h, reset 1 h), and a new token voids the user's earlier unused ones of the same kind.
+  - `users.email_verified_at` (m0029). **Existing accounts were backfilled as confirmed** (they already receive mail at that address); Google sign-ins are confirmed by Google, so new ones and accounts that link Google are stamped too.
+  - New password accounts get a "Confirm your email" mail on signup; `/app` shows a banner with "Send it again" (`POST /api/auth/resend-verification`, 5/hour) until the link is opened, then "Email confirmed". **What it gates:** the apply engine (`_engine_on_for`), since applications go out under that address. Everything else works unconfirmed.
+  - `/forgot-password` → mail → `/reset-password?token=` → new password, which marks the address confirmed and **ends every session** of that account. Same reply whether or not the address has an account; 5 requests/hour per IP and per address. Used or expired links show "This link doesn't work anymore".
+  - `funnel_events` (m0030, one row per user per step) and `_funnel()` - recorded so far: `signup`, `verified`. The rest of the funnel comes with Step 2's landing page work.
+  - Tests: `tests/test_email_verification.py` (7). Fixtures that drive the engine now create confirmed users.
+  - **Still to check after deploy:** both mails arriving at a non-Eran address (the plan's "done when").
 - 2026-11-09 — **Every "Manual action needed" says why; Lever jobs get a ready-to-paste sheet (Eran's choice over a browser extension).** The NYC job showed the badge and nothing else (no engine message stored). `manualReason(job)`: the engine's message, else one derived from the failure type (login_wall, captcha, form_validation, unconfirmed, timeout, else "no form the app can fill at this link"), on the queue card and in the job details. For a form the app filled but could not send (Lever's human check), `_form_snapshot` reads back every filled field (labels without the required star) into new `jobs.apply_prepared` (m0028); the details show "Everything is prepared - finish it on jobs.lever.co" with Open the application, Your CV, Tailored CV, and a Copy button per answer plus the cover letter. Lever jobs' chip now says "Prepared · you press Submit" instead of "Auto-apply ready". Retry on an `unconfirmed` job asks first ("may already have been sent") and reads "Try again anyway".
 - 2026-11-09 — **Comeet's verdict is now Comeet's own answer to the application request.** Rehearsal on the production server (after #88): cookie banner dismissed, Comeet detected, 4 questions answered, and `POST comeet.co/careers-api/1.0/company/73.00E/positions/BF.071/apply` (6,536 bytes) went out - i.e. reCAPTCHA did NOT stop the production browser (my suspicion, ruled out). So the real Rapyd retry, and Riverside before it, most likely **reached Comeet**, and were reported "no confirmation after submit" only because no thank-you text the engine knows appeared (no email either - many companies switch Comeet's candidate email off). Fix: `_apply_comeet` listens for the response to `/careers-api/.../apply`: 2xx = confirmed ("Comeet accepted the application (HTTP 200)"), 4xx = shown as Comeet's refusal with its body; no response = the old text check. Rapyd 3875 / Riverside 3874 stay "Manual action needed" (never auto-retried) - Eran told not to Retry them.
 - 2026-11-09 — **Rapyd: three layers, found by running the rehearsal on the production server itself (Railway web console, Eran) and here.**

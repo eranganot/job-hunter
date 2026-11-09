@@ -31,7 +31,8 @@ def google_db(monkeypatch):
             role          TEXT DEFAULT 'user',
             google_sub    TEXT DEFAULT NULL,
             auth_provider TEXT DEFAULT 'password',
-            avatar_url    TEXT DEFAULT NULL
+            avatar_url    TEXT DEFAULT NULL,
+            email_verified_at TEXT DEFAULT NULL
         );
         CREATE UNIQUE INDEX idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL;
         CREATE TABLE user_profiles (
