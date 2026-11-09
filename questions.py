@@ -5,7 +5,8 @@ multiple answer questions - you should answer on my behalf. If you are not
 sure - show me the questions and I'll guide you."
 
   collect(frame)              every unanswered question on the form: text, long
-                              text, <select>, role="combobox", and radio /
+                              text, <select>, role="combobox", Comeet's custom
+                              dropdown, and radio /
                               checkbox GROUPS with their option labels
   answer(frame, applicant, job, llm)
                               answers from the user's saved answers first, then
@@ -89,6 +90,25 @@ COLLECT_JS = r"""() => {
                  : !!clean(el.value);
     const required = el.required || el.getAttribute('aria-required') === 'true' || /[*✱]/.test(label);
     out.push({selector: sel, label, type, options, required, filled});
+  }
+  // Comeet's custom dropdown (AngularJS): no <select>, an <a class="dropdown-toggle"
+  // aria-label="Choose answer for <question>"> and a ul.dropdown-menu of options.
+  // Not read before 2026-11-09 - Dream's "Are you currently based in Israel? *"
+  // went unanswered and Comeet refused the submit with "Required".
+  for (const a of document.querySelectorAll('a.dropdown-toggle[aria-haspopup]')) {
+    if (!vis(a)) continue;
+    const dd = a.closest('.dropdown'); if (!dd) continue;
+    const opts = [...dd.querySelectorAll('.dropdown-menu li')].map(l => clean(l.innerText)).filter(Boolean);
+    if (!opts.length) continue;
+    const box = dd.parentElement && dd.parentElement.parentElement;
+    const label = clean((a.getAttribute('aria-label') || '').replace(/^Choose answer for /i, '')) ||
+                  clean(((box || {}).innerText || '').split('\n')[0]);
+    const required = /[*✱]/.test(((box || {}).innerText || '').split('\n')[0]);
+    const sel = a.id ? '[id="' + a.id.replace(/"/g, '\\"') + '"]' : '';
+    if (!sel || seen.has(sel)) continue; seen.add(sel);
+    const shown = clean(a.innerText);
+    out.push({selector: sel, label, type: 'dropdown', options: opts.slice(0, 40), required,
+              filled: !!shown && !/^choose/i.test(shown)});
   }
   return out;
 }"""
@@ -178,6 +198,16 @@ def _fill(frame, q, value) -> bool:
         return bool(ok)
     if t == "combobox":
         return _ae._choose_combobox(frame, sel, str(value))
+    if t == "dropdown":                   # Comeet's custom dropdown: open it, click the option
+        frame.click(sel)
+        ok = frame.evaluate("""([sel, want]) => {
+          const norm = s => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+          const dd = document.querySelector(sel).closest('.dropdown');
+          const hit = [...dd.querySelectorAll('.dropdown-menu li a')].find(x => norm(x.innerText) === norm(want));
+          if (hit) hit.click();
+          return !!hit;
+        }""", [sel, str(value)])
+        return bool(ok)
     if t == "select":
         try:
             frame.select_option(sel, label=str(value))
