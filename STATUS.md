@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-09 by Claude (Step 5: email confirmation + password reset)._
+_Last updated: 2026-11-09 by Claude (Step 10: landing page + signup funnel)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,12 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-09 — **Step 10 (second half): public landing page, robots.txt, signup funnel.**
+  - `/` for a signed-out visitor is now a landing page (`landing.py`, self-contained like `/login`, no script): what it does, how it works, what you get, "Free while in beta" (every signup gets Beta), Start free → `/register`. Meta description + Open Graph/Twitter tags; canonical/`og:url` only when `JH_PUBLIC_URL` is set. Signed in → `/app` as before. Every claim is true today; auto-apply is described as "in testing with a small group" (it is admin-only).
+  - `/robots.txt`: allows `/`, disallows `/app`, `/api/`, `/reset-password`, `/verify-email`.
+  - Funnel hooks: `cv` (CV upload), `first_search` (a search finishes), `first_approve` (approve or bulk approve), `paywall` (any `entitlements.upgrade_required`, through a listener so no route has to remember). `GET /api/admin/funnel?days=30` = a cohort: signups in the window and how many of them reached each step; shown as "Signup funnel" in the Admin tab. Accounts from before 2026-11-09 have no signup event and are not counted.
+  - **Found while testing:** `send_html` strips every character in U+0080–U+00FF (a legacy mojibake filter), so `·` and `©` silently vanished - including the `·` between the two links on PR 91's "This link doesn't work anymore" page. Those pages now use HTML entities, and a test fails if the landing page contains a raw one. The filter itself is left alone (its scope is every server-rendered page).
+  - Smoke: two new anonymous checks (`/` serves the landing page, `/robots.txt`). Tests: `tests/test_funnel.py` (5), landing test in `tests/test_root_lands_on_app.py`.
 - 2026-11-09 — **Step 5: email confirmation and password reset** (the domain blocker is gone: `support@job-hunter.work` sends through Resend).
   - Tokens: `auth_tokens` (m0029) stores only a sha256 of the link token; single use (atomic `UPDATE … WHERE used_at IS NULL`), expiring (confirm 48 h, reset 1 h), and a new token voids the user's earlier unused ones of the same kind.
   - `users.email_verified_at` (m0029). **Existing accounts were backfilled as confirmed** (they already receive mail at that address); Google sign-ins are confirmed by Google, so new ones and accounts that link Google are stamped too.

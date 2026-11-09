@@ -44,10 +44,21 @@ def test_the_switch_that_restored_the_old_page_is_gone(stack, users, monkeypatch
     assert users["a"].get("/dashboard")[:2] == (302, "/app")
 
 
-def test_signed_out_still_goes_to_login(stack, monkeypatch):
+def test_signed_out_gets_the_landing_page(stack, monkeypatch):
+    """Step 10 (2026-11-09): the bare domain is the public page for strangers,
+    not a sign-in form. It must not leak the app shell or anyone's data."""
     from tests.test_routes import Client
     monkeypatch.delenv("LEGACY_UI", raising=False)
-    assert Client(stack["port"]).get("/")[1] == "/login"
+    status, location, body = Client(stack["port"]).get("/")
+    assert status == 200 and location is None
+    page = body.decode()
+    assert 'href="/register"' in page and 'href="/login"' in page
+    assert 'property="og:title"' in page and 'name="description"' in page
+    assert "<script" not in page, "the landing page runs no script"
+    # send_html strips U+0080-U+00FF (a legacy mojibake filter), so the page
+    # spells those characters as entities - a raw one would vanish silently.
+    import landing
+    assert not [ch for ch in landing.landing_html("https://x.test") if 0x80 <= ord(ch) <= 0xff]
 
 
 def test_notification_links_point_at_the_home_ui(stack, monkeypatch):

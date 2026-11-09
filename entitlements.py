@@ -341,9 +341,19 @@ def allowed(conn, user, meter: str, n: int = 1, now: datetime | None = None) -> 
     return (cap is None or have + n <= cap), have, cap
 
 
+# Called with (reason, user) whenever a plan refusal is built - app.py records
+# the funnel's "paywall" step here, so no route has to remember to.
+ON_UPGRADE_REQUIRED = []
+
+
 def upgrade_required(reason: str, user, **extra) -> dict:
     """The one body every plan refusal sends (HTTP 402), so the UI can show the
     same upgrade prompt wherever a limit is hit."""
+    for fn in ON_UPGRADE_REQUIRED:
+        try:
+            fn(reason, user)
+        except Exception as exc:   # a listener must never turn a 402 into a 500
+            print("[entitlements] upgrade_required listener failed: %s" % exc)
     body = {"error": extra.pop("message", "This needs a higher plan."), "code": "upgrade_required",
             "reason": reason, "plan": tier_of(user)}
     body.update(extra)

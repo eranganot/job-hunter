@@ -460,6 +460,12 @@ def run(args):
         s.check(f"GET {p} redirects to /login",
                 lambda p=p: (lambda r: True if r["code"] == 302 and "/login" in r["location"]
                              else f"status {r['code']} location {r['location']}")(get(base + p)))
+    s.check("GET / shows the public landing page to a stranger",
+            lambda: (lambda r: True if r["code"] == 200 and 'href="/register"' in (r.get("body") or "")
+                     else f"status {r['code']} location {r.get('location')}")(get(base + "/")))
+    s.check("GET /robots.txt keeps /app and /api out of search engines",
+            lambda: (lambda r: True if r["code"] == 200 and "Disallow: /app" in (r.get("body") or "")
+                     else f"status {r['code']}")(get(base + "/robots.txt")))
     for p in ("/api/me", "/api/jobs", "/api/stats", "/api/activity"):
         s.check(f"GET {p} is not served anonymously",
                 lambda p=p: (lambda r: True if r["code"] == 302 else f"status {r['code']}")(get(base + p)))

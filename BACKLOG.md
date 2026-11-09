@@ -31,12 +31,12 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 1 | Direct company links | P1 | 1a-1d, Workday, web search after each search (#30s), **careers-map** (#68: 2 of 30 hard jobs resolved free). Remaining: #1-#3 above |
 | 2 | Link checker | P1 | **Done** (2a/2b, #7, #8) |
 | 4 | Plans, quotas, entitlements (Phase 5) | P1 | **Done** (#19-#21) |
-| 5 | Email verification + password reset | P1 | Blocked: domain |
+| 5 | Email verification + password reset | P1 | **Done** (#91); left: confirm both mails reach a non-Eran inbox |
 | 6 | Legal + data export / deletion + history hiding | P1 | 6a/6b shipped (#22, #23); legal drafts need the placeholders above |
 | 7 | Broad-exception audit | P1 | **Done** (#24); ratchet keeps it |
 | 8 | Un-park auto-apply + apply-flow UX | P2 | **Done except the switch** (#52-#61, #67): first real submit 2026-11-08; questions, security codes, notifications, per-system rates; every user's choice |
 | 9 | Delete legacy HTML | P2 | **Done** (#25) |
-| 10 | Domain + landing + funnel | P2 | Blocked: domain |
+| 10 | Domain + landing + funnel | P2 | **Done** (job-hunter.work on Cloudflare + Railway, landing + funnel this PR) |
 | 11 | Payments (Paddle sandbox) | P2 | Blocked: Paddle account |
 | 12 | Feedback-loop metrics | P2 | **Done** (Admin → Learning check) |
 | 13 | Salary at pass time | P3 | **Done** (m0020) |

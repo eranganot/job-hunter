@@ -116,6 +116,40 @@ def _funnel(user_id, step: str) -> None:
         print("[funnel] %s for user %s not recorded: %s" % (step, user_id, exc))
 
 
+def funnel_report(days: int = 30) -> dict:
+    """Signups in the last `days` days, and how many of THOSE users reached
+    each later step. A cohort, so a step can never exceed the one before it
+    by counting older users. Accounts from before 2026-11-09 have no signup
+    event and are not in it."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    c = database.get_db()
+    try:
+        rows = c.execute(
+            "SELECT f.step, COUNT(*) AS n FROM funnel_events f "
+            "WHERE f.user_id IN (SELECT user_id FROM funnel_events WHERE step='signup' AND created_at >= ?) "
+            "GROUP BY f.step", (since,)).fetchall()
+    finally:
+        c.close()
+    got = {r["step"]: r["n"] for r in rows}
+    return {"days": days, "since": since,
+            "steps": [{"step": s, "users": int(got.get(s, 0))} for s in FUNNEL_STEPS]}
+
+
+def landing_html() -> str:
+    """The public page at `/` (landing.py). Canonical/OG URL only when
+    JH_PUBLIC_URL is set, so a Railway preview never claims to be the site."""
+    import landing
+    return landing.landing_html(os.environ.get("JH_PUBLIC_URL", "").strip())
+
+
+def _paywall_hit(_reason, user):
+    # _funnel never raises; the entitlements caller logs anything else.
+    _funnel((user or {}).get("id"), "paywall")
+
+
+entitlements.ON_UPGRADE_REQUIRED.append(_paywall_hit)
+
+
 def home_url() -> str:
     return "/app"
 
@@ -2754,6 +2788,7 @@ def run_job_search(user_id: int):
                                         finally:
                                             conn.close()
 
+                                _funnel(user_id, "first_search")
                                 database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)"
                                                       + (f"; {locked_n} more need a higher plan" if locked_n else ""))
 
@@ -3747,7 +3782,7 @@ RESET_HTML = _auth_page("Choose a new password", "Choose a new password", """
 
 LINK_EXPIRED_HTML = _auth_page("Link expired", "This link doesn't work anymore", """
     <p class="muted">Links are good for one use, and expire (a password link after an hour, an email link after two days).</p>
-    <p class="alt"><a href="/forgot-password">Send a new password link</a> · <a href="/login">Sign in</a></p>""")
+    <p class="alt"><a href="/forgot-password">Send a new password link</a>&nbsp;&middot; <a href="/login">Sign in</a></p>""")
 
 
 def _send_verification(user_id: int, email: str, name: str = "") -> None:
@@ -4520,12 +4555,39 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # Root redirect
+        # The bare domain: signed in -> the app; signed out -> the public
+        # landing page (Step 10 of EXECUTION_PLAN_NEXT.md, 2026-11-09). It used
+        # to send strangers straight to a sign-in form.
         if path in ("/", ""):
             user = self.get_user()
             # home_url(), not "/dashboard": this was the one redirect Phase 4's
             # flip missed, and it is the bare domain - the link people click.
-            self.redirect(home_url() if user else "/login")
+            if user:
+                self.redirect(home_url())
+            else:
+                self.send_html(landing_html())
+            return
+
+        if path == "/robots.txt":
+            body = ("User-agent: *\nAllow: /$\nDisallow: /app\nDisallow: /api/\n"
+                    "Disallow: /reset-password\nDisallow: /verify-email\n").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if path == "/api/admin/funnel":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                days = max(1, min(365, int(qs.get("days", ["30"])[0])))
+            except ValueError:
+                days = 30
+            self.send_json(funnel_report(days))
             return
 
         # Auth-required routes
@@ -5931,6 +5993,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"success": True, "path": cv_path,
                                 "filename": _orig_name, "uploaded_date": _uploaded_at})
                 bump_onboarding(user_id, "cv_uploaded")
+                _funnel(user_id, "cv")
             except Exception as exc:
                 import traceback
                 print(f"[cv/upload] ❌ Exception: {exc}\n{traceback.format_exc()}")
@@ -6452,6 +6515,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 database.write_approved_jobs(BASE_DIR)
                 bump_onboarding(user_id, "first_job_reviewed")
+                if action == "approve":
+                    _funnel(user_id, "first_approve")
 
                 # On approval: kick off a background application ONLY if the user has
                 # auto-apply enabled. Otherwise approving just shortlists the job (moves
@@ -6925,6 +6990,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
                 label = "Approved" if action == "approve" else "Passed on"
                 database.log_activity(user_id, f"bulk_{action}", f"{label} {done} job(s) at once")
+                if action == "approve" and done:
+                    _funnel(user_id, "first_approve")
                 database.write_approved_jobs(BASE_DIR)
                 self.send_json({"success": True, "updated": done})
                 return
