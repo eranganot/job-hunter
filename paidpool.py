@@ -68,6 +68,14 @@ SOURCES = {
 SOURCE_NAME = {"theirstack": "theirstack", "hirebase": "hirebase",
                "fantastic": "fantastic.jobs", "apify": "ethosia"}
 
+def enabled_sources() -> list:
+    """Sources Eran has switched on: JH_PAID_POOL_SOURCES, a comma list such as
+    "hirebase,theirstack". Empty or unset = OFF: no paid source is called at all,
+    whatever keys are set (2026-11-09: plan each source before it runs)."""
+    raw = os.environ.get("JH_PAID_POOL_SOURCES", "")
+    return [n for n in (x.strip().lower() for x in raw.split(",")) if n in SOURCES]
+
+
 RUN_AFTER_HOUR = 6           # Israel time: the daily pull happens after 06:00
 POOL_MAX_AGE_DAYS = 14       # a user's search reads pool jobs fetched this recently
 MAX_TITLES = 12              # titles per provider request
@@ -378,7 +386,7 @@ def run_daily(get_db, now=None, fetchers=None) -> dict:
         conn = get_db()
         try:
             done = {r[0] for r in conn.execute("SELECT provider FROM paid_pool_runs WHERE day=?", (day,))}
-            for name in SOURCES:
+            for name in enabled_sources():
                 if name in done:
                     continue
                 res = run_source(conn, name, now, fetchers)
@@ -416,7 +424,7 @@ def status(conn, now=None) -> dict:
         last = conn.execute("SELECT day, status, fetched, detail FROM paid_pool_runs WHERE provider=? "
                             "ORDER BY day DESC LIMIT 1", (name,)).fetchone()
         pooled = conn.execute("SELECT COUNT(*) FROM paid_pool_jobs WHERE provider=?", (name,)).fetchone()[0]
-        out[name] = {"label": s["label"], "key": bool(api_key(name)),
+        out[name] = {"label": s["label"], "enabled": name in enabled_sources(), "key": bool(api_key(name)),
                      "month_used": spent(conn, name, now), "month_cap": cap(name),
                      "free_allowance": s["hard_limit"], "in_pool": int(pooled or 0),
                      "last_run": ({"day": last[0], "status": last[1], "fetched": last[2], "detail": last[3]}

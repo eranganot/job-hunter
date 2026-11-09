@@ -25,6 +25,7 @@ def conn(monkeypatch):
     for n in paidpool.SOURCES:
         monkeypatch.delenv("JH_POOL_CAP_%s" % n.upper(), raising=False)
     monkeypatch.delenv("JH_POOL_ALLOW_ABOVE_FREE", raising=False)
+    monkeypatch.setenv("JH_PAID_POOL_SOURCES", ",".join(paidpool.SOURCES))
     c = sqlite3.connect(":memory:")
     c.row_factory = sqlite3.Row
     migrations.run(c)
@@ -228,3 +229,16 @@ def test_pool_jobs_carry_their_real_source_name(conn, monkeypatch):
     monkeypatch.setenv("APIFY_TOKEN", "k")
     paidpool.run_source(conn, "apify", NOW, {"apify": _fake(_jobs(1, "e"))})
     assert paidpool.jobs_for_search(conn, NOW)[0]["source"] == "ethosia"
+
+
+def test_off_by_default_nothing_is_called_whatever_keys_are_set(conn, monkeypatch):
+    for n in ("THEIRSTACK_API_KEY", "HIREBASE_API_KEY", "FANTASTIC_JOBS_API_KEY", "APIFY_TOKEN"):
+        monkeypatch.setenv(n, "k")
+    calls = []
+    fetchers = {n: _fake(_jobs(2, n), seen=calls) for n in paidpool.SOURCES}
+    monkeypatch.delenv("JH_PAID_POOL_SOURCES")
+    assert paidpool.run_daily(lambda: _NoClose(conn), NOW, fetchers) == {} and calls == []
+    assert paidpool.status(conn, NOW)["hirebase"]["enabled"] is False
+    monkeypatch.setenv("JH_PAID_POOL_SOURCES", "hirebase, nonsense")      # one at a time
+    out = paidpool.run_daily(lambda: _NoClose(conn), NOW, fetchers)
+    assert list(out) == ["hirebase"] and len(calls) == 1
