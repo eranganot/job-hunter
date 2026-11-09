@@ -46,22 +46,29 @@ print = _log.make_print(__name__)  # noqa: A001 - see log.py
 
 # ── the sources ────────────────────────────────────────────────────────────
 # unit = what the provider bills (all four: one job / dataset row returned).
-# HARD_LIMIT = the free allowance per month; the cap can never exceed it.
-# DEFAULT_CAP leaves a margin under it. Override down with JH_POOL_CAP_<NAME>.
+# hard_limit = the free allowance per billing cycle; the cap can never exceed it.
+# default_cap leaves a margin under it. Override down with JH_POOL_CAP_<NAME>.
+# cycle_day = the day of the month the provider's own billing cycle starts (UTC).
+# All read off each provider's dashboard on 2026-11-09 (Eran signed in):
+#   TheirStack  Free plan, 200 API credits, cycle Oct 28 - Nov 28, auto-recharge off
+#   Hirebase    Free plan, cycle Nov 1 - Nov 30, no paid add-ons
+#   Fantastic   14-day trial Nov 9 - Nov 23: 500 jobs + 100 requests, no overage, no card
+#   Apify       Free plan, $5 usage, cycle Oct 29 - Nov 28 UTC, pauses at $5, no card
 SOURCES = {
     "theirstack": {"label": "TheirStack", "keys": ("THEIRSTACK_API_KEY",),
-                   "hard_limit": 200, "default_cap": 180, "per_run_max": 25},
+                   "hard_limit": 200, "default_cap": 180, "per_run_max": 25, "cycle_day": 28},
     "hirebase":   {"label": "Hirebase", "keys": ("HIREBASE_API_KEY", "HIREBASE_KEY"),
-                   "hard_limit": 500, "default_cap": 450, "per_run_max": 40},
-    # The 14-day trial's allowance is not published; 300 is a deliberately low
-    # guess until Eran reads the real number off dashboard.fantastic.jobs.
+                   "hard_limit": 500, "default_cap": 450, "per_run_max": 40, "cycle_day": 1},
+    # 500 jobs per 2-week trial period; one request a day stays far inside the
+    # 100-request allowance. A monthly cycle anchored on the 9th with cap 450 can
+    # never put more than 450 into the 14-day trial window.
     "fantastic":  {"label": "Fantastic.jobs",
                    "keys": ("FANTASTIC_JOBS_API_KEY", "FANTASTIC_API_KEY", "FANTASTICJOBS_API_KEY"),
-                   "hard_limit": 300, "default_cap": 300, "per_run_max": 30},
-    # Apify free plan: $5/month of usage. Ethosia ~ $1.12 per 1,000 rows, so
+                   "hard_limit": 500, "default_cap": 450, "per_run_max": 30, "cycle_day": 9},
+    # Apify free plan: $5 of usage per cycle. Ethosia ~ $1.12 per 1,000 rows, so
     # 1,000 rows ~ $1.12 + run costs - far inside $5.
     "apify":      {"label": "Apify (Ethosia)", "keys": ("APIFY_TOKEN",),
-                   "hard_limit": 1500, "default_cap": 1000, "per_run_max": 60},
+                   "hard_limit": 1500, "default_cap": 1000, "per_run_max": 60, "cycle_day": 29},
 }
 
 # what jobs.source says for a pool job (Apify's actor is Ethosia's board)
@@ -90,18 +97,41 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _month(now=None) -> str:
-    return (now or _now()).astimezone(_LOCAL).strftime("%Y-%m")
+def _anchor(y, m, day):
+    """`day` of month (y, m), clamped to the month's length (the 29th of February)."""
+    nxt = (datetime(y, m, 28) + timedelta(days=4)).replace(day=1)
+    return datetime(y, m, min(day, (nxt - timedelta(days=1)).day)).date()
+
+
+def _cycle_bounds(name, now=None):
+    """(start, next_start) dates (UTC) of the provider's current billing cycle."""
+    day = int(SOURCES[name].get("cycle_day", 1))
+    today = (now or _now()).astimezone(timezone.utc).date()
+    start = _anchor(today.year, today.month, day)
+    if today < start:
+        py, pm = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+        start = _anchor(py, pm, day)
+    ny, nm = (start.year, start.month + 1) if start.month < 12 else (start.year + 1, 1)
+    return start, _anchor(ny, nm, day)
+
+
+def _cycle(name, now=None) -> str:
+    """The ledger key for the provider's current billing cycle. A cycle that
+    starts on the 1st keeps the old "YYYY-MM" key, so units counted before
+    cycles existed (Hirebase's first run) still count."""
+    start, _nxt = _cycle_bounds(name, now)
+    if int(SOURCES[name].get("cycle_day", 1)) == 1:
+        return start.strftime("%Y-%m")
+    return start.isoformat()
 
 
 def _day(now=None) -> str:
     return (now or _now()).astimezone(_LOCAL).strftime("%Y-%m-%d")
 
 
-def _days_left_in_month(now=None) -> int:
-    local = (now or _now()).astimezone(_LOCAL)
-    nxt = (local.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return max(1, (nxt.date() - local.date()).days)
+def _days_left_in_cycle(name, now=None) -> int:
+    _start, nxt = _cycle_bounds(name, now)
+    return max(1, (nxt - (now or _now()).astimezone(timezone.utc).date()).days)
 
 
 def api_key(name: str) -> str:
@@ -129,15 +159,16 @@ def cap(name: str) -> int:
 
 def spent(conn, name: str, now=None) -> int:
     r = conn.execute("SELECT units FROM paid_source_spend WHERE provider=? AND month=?",
-                     (name, _month(now))).fetchone()
+                     (name, _cycle(name, now))).fetchone()
     return int(r[0]) if r else 0
 
 
 def reserve(conn, name: str, units: int, now=None) -> bool:
-    """Atomically add `units` to this month's spend if it stays within the cap."""
+    """Atomically add `units` to this billing cycle's spend if it stays within
+    the cap. (The column is still called `month`; it holds the cycle key.)"""
     if units <= 0:
         return False
-    month = _month(now)
+    month = _cycle(name, now)
     conn.execute("INSERT INTO paid_source_spend (provider, month, units) VALUES (?,?,0) "
                  "ON CONFLICT (provider, month) DO NOTHING", (name, month))
     cur = conn.execute("UPDATE paid_source_spend SET units = units + ? "
@@ -152,17 +183,17 @@ def settle(conn, name: str, reserved: int, used: int, now=None) -> None:
     back = max(0, reserved - max(0, used))
     if back:
         conn.execute("UPDATE paid_source_spend SET units = units - ? WHERE provider=? AND month=?",
-                     (back, name, _month(now)))
+                     (back, name, _cycle(name, now)))
         conn.commit()
 
 
 def budget_today(conn, name: str, now=None) -> int:
-    """How many units one run may request now: the month's remainder spread
-    over the days left, at most per_run_max."""
+    """How many units one run may request now: the cycle's remainder spread
+    over the days left in it, at most per_run_max."""
     left = cap(name) - spent(conn, name, now)
     if left <= 0:
         return 0
-    return max(0, min(SOURCES[name]["per_run_max"], left // _days_left_in_month(now) or 1, left))
+    return max(0, min(SOURCES[name]["per_run_max"], left // _days_left_in_cycle(name, now) or 1, left))
 
 
 # ── HTTP: one attempt, never a retry ───────────────────────────────────────
@@ -424,7 +455,9 @@ def status(conn, now=None) -> dict:
         last = conn.execute("SELECT day, status, fetched, detail FROM paid_pool_runs WHERE provider=? "
                             "ORDER BY day DESC LIMIT 1", (name,)).fetchone()
         pooled = conn.execute("SELECT COUNT(*) FROM paid_pool_jobs WHERE provider=?", (name,)).fetchone()[0]
+        _cs, _cn = _cycle_bounds(name, now)
         out[name] = {"label": s["label"], "enabled": name in enabled_sources(), "key": bool(api_key(name)),
+                     "cycle": "%s to %s" % (_cs.isoformat(), _cn.isoformat()),
                      "month_used": spent(conn, name, now), "month_cap": cap(name),
                      "free_allowance": s["hard_limit"], "in_pool": int(pooled or 0),
                      "last_run": ({"day": last[0], "status": last[1], "fetched": last[2], "detail": last[3]}

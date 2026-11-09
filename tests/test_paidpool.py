@@ -14,7 +14,7 @@ import pytest
 import migrations
 import paidpool
 
-NOW = datetime(2026, 11, 9, 10, 0, 0, tzinfo=timezone.utc)      # 12:00 in Israel, 22 days left
+NOW = datetime(2026, 11, 9, 10, 0, 0, tzinfo=timezone.utc)      # 12:00 in Israel
 
 
 @pytest.fixture
@@ -80,6 +80,7 @@ def test_caps_never_exceed_the_free_allowance(monkeypatch):
     assert paidpool.cap("theirstack") == 5000                     # only with an explicit opt-in
     for s in paidpool.SOURCES.values():
         assert s["default_cap"] <= s["hard_limit"]
+    assert paidpool.cap("fantastic") == 450                        # trial: 500 per period
 
 
 def test_reserve_refuses_anything_past_the_cap(conn):
@@ -90,10 +91,40 @@ def test_reserve_refuses_anything_past_the_cap(conn):
     assert paidpool.budget_today(conn, "theirstack", NOW) == 0
 
 
-def test_the_month_is_spread_over_its_days(conn):
-    # 180 left, 22 days left in November (Israel) -> 8 today, not the whole cap
-    assert paidpool.budget_today(conn, "theirstack", NOW) == 8
+def test_the_cycle_is_spread_over_its_days(conn):
+    # TheirStack's cycle is Oct 28 - Nov 28: 180 over 19 days -> 9 today, not the whole cap
+    assert paidpool.budget_today(conn, "theirstack", NOW) == 9
+    # Hirebase's is the calendar month: 450 over 22 days -> 20
     assert paidpool.budget_today(conn, "hirebase", NOW) == 20
+
+
+def test_each_provider_has_the_billing_cycle_its_dashboard_shows():
+    """Read off each dashboard on 2026-11-09. A ledger on calendar months would
+    let the pool spend two of its "months" inside one TheirStack cycle."""
+    d = lambda *a: datetime(*a).date()
+    assert paidpool._cycle_bounds("theirstack", NOW) == (d(2026, 10, 28), d(2026, 11, 28))
+    assert paidpool._cycle_bounds("apify", NOW) == (d(2026, 10, 29), d(2026, 11, 29))
+    assert paidpool._cycle_bounds("fantastic", NOW) == (d(2026, 11, 9), d(2026, 12, 9))
+    assert paidpool._cycle_bounds("hirebase", NOW) == (d(2026, 11, 1), d(2026, 12, 1))
+    # the cycle turns on its own day, not on the 1st
+    late = datetime(2026, 11, 28, 1, 0, tzinfo=timezone.utc)
+    assert paidpool._cycle_bounds("theirstack", late) == (d(2026, 11, 28), d(2026, 12, 28))
+    assert paidpool._cycle("theirstack", late) != paidpool._cycle("theirstack", NOW)
+    assert paidpool._cycle("hirebase", NOW) == "2026-11"           # same key as before cycles
+    # day 29 in February clamps to its last day
+    feb = datetime(2027, 2, 15, tzinfo=timezone.utc)
+    assert paidpool._cycle_bounds("apify", feb) == (d(2027, 1, 29), d(2027, 2, 28))
+
+
+def test_spend_in_one_cycle_does_not_count_against_the_next(conn):
+    assert paidpool.reserve(conn, "theirstack", 180, NOW)
+    assert paidpool.budget_today(conn, "theirstack", NOW) == 0
+    nxt = datetime(2026, 11, 28, 9, 0, tzinfo=timezone.utc)
+    assert paidpool.spent(conn, "theirstack", nxt) == 0 and paidpool.budget_today(conn, "theirstack", nxt) > 0
+    # ...and the calendar month turning over does NOT reset TheirStack mid-cycle
+    dec1 = datetime(2026, 12, 1, 9, 0, tzinfo=timezone.utc)
+    assert paidpool.reserve(conn, "theirstack", 170, nxt)
+    assert not paidpool.reserve(conn, "theirstack", 11, dec1)
 
 
 # ── one run ────────────────────────────────────────────────────────────────
@@ -103,7 +134,7 @@ def test_a_run_bills_only_what_came_back_and_fills_the_pool(conn, monkeypatch):
     seen = []
     res = paidpool.run_source(conn, "theirstack", NOW, {"theirstack": _fake(_jobs(3), seen=seen)})
     assert res["status"] == "ok" and res["fetched"] == 3 and res["added"] == 3
-    assert seen[0][1] == 8                                        # asked for today's budget
+    assert seen[0][1] == 9                                        # asked for today's budget
     assert "Head of Product" in seen[0][0] and "Data Analyst" not in seen[0][0]   # Free user excluded
     assert paidpool.spent(conn, "theirstack", NOW) == 3           # reserved 8, settled to 3
     assert len(paidpool.jobs_for_search(conn, NOW)) == 3
@@ -150,6 +181,8 @@ def test_the_status_block_for_health(conn, monkeypatch):
     st = paidpool.status(conn, NOW)
     assert st["theirstack"]["key"] is True and st["theirstack"]["month_used"] == 2
     assert st["theirstack"]["month_cap"] == 180 and st["theirstack"]["free_allowance"] == 200
+    assert st["theirstack"]["cycle"] == "2026-10-28 to 2026-11-28"
+    assert st["fantastic"]["month_cap"] == 450 and st["fantastic"]["free_allowance"] == 500
     assert "secret-value" not in json.dumps(st)
 
 
