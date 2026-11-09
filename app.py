@@ -3226,10 +3226,11 @@ def run_job_apply(user_id: int) -> int:
                                 "apply_status=?, apply_error=?, "
                                 "apply_failure_type=?, apply_failure_detail=?, "
                                 "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=?, "
-                                "apply_questions=? "
+                                "apply_questions=?, apply_prepared=? "
                                 "WHERE id=? AND user_id=?",
                                 (notes, _fstatus, apply_error, apply_failure_type, apply_failure_detail, _next_at,
                                  json.dumps(res.get("questions")) if res.get("questions") else None,
+                                 json.dumps(res.get("prepared")) if res.get("prepared") else None,
                                  j["id"], user_id)
                             )
                         c2.commit()
@@ -3423,11 +3424,12 @@ def _apply_one(user_id: int, job_id: int):
                         "UPDATE jobs SET apply_status=?, apply_error=?, "
                         "apply_failure_type=?, apply_failure_detail=?, "
                         "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=?, "
-                        "apply_questions=? "
+                        "apply_questions=?, apply_prepared=? "
                         "WHERE id=? AND user_id=?",
                         (_fstatus, apply_error, apply_failure_type,
                          apply_failure_detail, _next_at,
                          json.dumps(res.get("questions")) if res.get("questions") else None,
+                         json.dumps(res.get("prepared")) if res.get("prepared") else None,
                          job_id, user_id)
                     )
                 c2.commit()

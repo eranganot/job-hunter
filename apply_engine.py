@@ -1061,6 +1061,50 @@ def _lever_location(page, applicant: dict) -> bool:
         return False
 
 
+_SNAPSHOT_JS = r"""() => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const labelOf = el => {
+    let t = '';
+    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) t = l.innerText; }
+    if (!t && el.closest('label')) t = el.closest('label').innerText;
+    if (!t) { const q = el.closest('.application-question, li, [class*="question"]');
+              if (q) t = (q.querySelector('.application-label, label, legend') || q).innerText.split('\n')[0]; }
+    return clean(t || el.getAttribute('aria-label') || el.placeholder || el.name);
+  };
+  const out = [], seen = new Set();
+  for (const el of document.querySelectorAll('input, select, textarea')) {
+    const type = (el.type || '').toLowerCase();
+    if (['hidden', 'file', 'submit', 'button', 'password', 'image', 'reset'].includes(type)) continue;
+    if ((el.name || '').match(/captcha/i) || (!vis(el) && el.tagName !== 'SELECT')) continue;
+    let value = '';
+    if (type === 'radio' || type === 'checkbox') {
+      if (!el.name || seen.has(el.name)) continue; seen.add(el.name);
+      value = [...document.getElementsByName(el.name)].filter(i => i.checked)
+        .map(i => clean((i.closest('label') || {}).innerText || i.value)).join(', ');
+      const q = el.closest('.application-question, li, fieldset, [class*="question"]');
+      const label = clean(q ? (q.querySelector('.application-label, legend, .text') || q).innerText.split('\n')[0] : el.name);
+      if (value) out.push({label, value});
+      continue;
+    }
+    value = el.tagName === 'SELECT' ? clean((el.options[el.selectedIndex] || {}).text) : clean(el.value);
+    if (value && !/^select/i.test(value)) out.push({label: labelOf(el), value});
+  }
+  return out.slice(0, 40);
+}"""
+
+
+def _form_snapshot(page) -> list:
+    """[{label, value}] of everything filled in on the form - for the user's
+    ready-to-paste sheet when the app could not send it (Lever's human check)."""
+    try:
+        return [{"label": re.sub(r"\s*[*✱]\s*$", "", x["label"]).strip(), "value": x["value"]}
+                for x in (page.evaluate(_SNAPSHOT_JS) or []) if x.get("label") and x.get("value")]
+    except Exception as exc:
+        print(f"[apply-engine] form snapshot: {type(exc).__name__}")
+        return []
+
+
 def _antibot_state(page) -> str:
     """What the page's anti-bot widget frames show, for the failure detail.
     Rehearsal 2026-11-08 (Cloudinary on Lever): Submit sent nothing, but the
@@ -1151,6 +1195,7 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
                 # different") and the form stayed - nothing was sent. A check meant
                 # for a person: it is never solved for the user.
                 return {**res, "status": "failed", "apply_failure_type": "captcha",
+                        "prepared": _form_snapshot(page),
                         "apply_failure_detail": "Lever human check: " + state[:200],
                         "error": "Lever showed the app's automated browser a human-check puzzle, so nothing "
                                  "was sent. When you open the link yourself you normally won't see it - "

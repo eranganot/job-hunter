@@ -6,7 +6,7 @@ import {
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, MessageSquare, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
-  Download, LifeBuoy,
+  Download, LifeBuoy, Copy,
 } from "lucide-react";
 import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -791,6 +791,10 @@ export const AUTO_ROUTES = new Set(["auto", "site"]);
 function RouteBadge({ job }: { job: UiJob }) {
   const r = job.applyRoute;
   const pill = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border";
+  // Lever shows the app's browser a human-check puzzle (Houzz, Cloudinary - 2026-11-09):
+  // the app fills everything and you press Submit from the ready-to-paste sheet.
+  if (r === "auto" && /jobs\.lever\.co/i.test(job.url || "")) return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
+    title="Lever shows the app's browser a human check. The app prepares every answer; you open the job and press Submit."><Zap className="w-3 h-3" />Prepared · you press Submit</span>;
   if (r === "auto") return <span className={`${pill} bg-emerald-900/40 border-emerald-700 text-emerald-300`}
     title="A form system Job Hunter fills in and submits for you."><Zap className="w-3 h-3" />Auto-apply ready</span>;
   if (r === "site") return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
@@ -861,6 +865,53 @@ function AnswerQuestions({ job, onDone }: { job: UiJob; onDone: () => void }) {
         {busy ? "Saving…" : "Save answers"}
       </button>
       {msg && <p className="text-sm text-gray-300">{msg}</p>}
+    </div>
+  );
+}
+
+/* Why a job needs you, always in words (Eran, 2026-11-09: the NYC job said
+   "Manual action needed" and nothing else). The engine's own message when there
+   is one; otherwise one derived from the failure type. */
+export function manualReason(job: UiJob): string {
+  if (job.applyError) return job.applyError;
+  switch (job.applyFailureType) {
+    case "login_wall": return "This site asks you to sign in or create an account before it accepts an application, so the app doesn't apply here.";
+    case "captcha": return "The site showed the app's automated browser a human check, so nothing was sent. Open the link and apply there.";
+    case "form_validation": return "The form refused something the app filled in, so nothing was sent. Open the link and apply there.";
+    case "unconfirmed": return "It may have been sent: the app pressed Submit but couldn't confirm it. Check before applying again.";
+    case "timeout": return "The site was too slow to load. Retry later, or apply yourself.";
+  }
+  return "The app couldn't find an application form it can fill at this link (for example, the posting tells you to apply somewhere else). Open the job and apply there.";
+}
+
+/* Ready-to-paste sheet for a form the app filled but could not send (Lever's
+   human check, 2026-11-09 - Eran chose this over a browser extension): the job
+   opens in a new tab and every value the app prepared is one tap from the
+   clipboard. */
+function FinishYourself({ job }: { job: UiJob }) {
+  const [copied, setCopied] = useState<string>("");
+  const copy = async (key: string, text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(""), 1500); }
+    catch { setCopied("fail"); }
+  };
+  const site = linkSiteName(job.url) || "the company's site";
+  return (
+    <div className="mt-3 rounded-lg border border-indigo-800 bg-indigo-950/30 p-3">
+      <p className="text-sm text-gray-200 font-medium">Everything is prepared - finish it on {site}</p>
+      <p className="text-xs text-gray-400 mt-0.5">Open the job, then copy each answer into the same field and press Submit.</p>
+      <div className="flex gap-2 mt-2 flex-wrap">
+        <a href={job.url} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium inline-flex items-center gap-1.5"><ExternalLink className="w-4 h-4" />Open the application</a>
+        <a href="/api/cv" target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm inline-flex items-center gap-1.5"><Download className="w-4 h-4" />Your CV</a>
+        <a href={`/api/jobs/${job.id}/tailored-cv.docx`} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm inline-flex items-center gap-1.5"><Download className="w-4 h-4" />Tailored CV (if made)</a>
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {[...job.applyPrepared, ...(job.coverLetter ? [{ label: "Cover letter", value: job.coverLetter }] : [])].map((f, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs">
+            <div className="flex-1 min-w-0"><span className="text-gray-400">{f.label}</span><div className="text-gray-100 break-words line-clamp-3">{f.value}</div></div>
+            <button onClick={() => copy(String(i), f.value)} className="shrink-0 px-2 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 inline-flex items-center gap-1"><Copy className="w-3.5 h-3.5" />{copied === String(i) ? "Copied" : "Copy"}</button>
+          </li>))}
+      </ul>
+      {copied === "fail" && <p className="text-xs text-red-300 mt-2">Copy didn't work here - select the text instead.</p>}
     </div>
   );
 }
@@ -1090,6 +1141,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
             {job.location && <span className="text-xs text-gray-400 truncate">{job.location}</span>}
           </div>
           <div className="flex items-center gap-2 mt-1 flex-wrap"><RouteBadge job={job} />{!(["board", "account"].includes(job.applyRoute) && (!job.applyStatus || job.applyStatus === "queued")) && <ApplyBadge job={job} />}<FeedbackBadge job={job} />{job.applyRoute !== "board" && <LinkBadge job={job} />}</div>
+          {job.applyStatus === "manual_required" && <p className="text-xs text-amber-200/90 mt-1 line-clamp-2">{manualReason(job)}</p>}
           {/* Written by the scorer and shown on the swipe card, then dropped the
               moment a job reached the queue - which is where the decision to
               actually apply gets made. */}
@@ -1900,7 +1952,8 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
               <h4 className="font-semibold text-white mb-2">Application status</h4>
               <ApplyBadge job={job} />
               {job.applyConfirmation && <p className="text-sm text-gray-300 mt-2 whitespace-pre-line">{job.applyConfirmation}</p>}
-              {!job.applyConfirmation && job.applyError && <p className="text-sm text-red-300 mt-2 break-words">{job.applyError}</p>}
+              {!job.applyConfirmation && (job.applyError || job.applyStatus === "manual_required") && <p className="text-sm text-red-300 mt-2 break-words">{job.applyStatus === "manual_required" ? manualReason(job) : job.applyError}</p>}
+              {job.applyStatus === "manual_required" && job.applyPrepared.length > 0 && <FinishYourself job={job} />}
               {job.applyStatus === "needs_answers" && job.applyQuestions.length > 0 && (
                 <AnswerQuestions job={job} onDone={onClose} />
               )}
@@ -1914,7 +1967,9 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
                 <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><Send className="w-4 h-4" />Apply now</button>
               )}
               {(job.applyStatus === "failed" || job.applyStatus === "manual_required") && onRetry && (
-                <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />Retry application</button>
+                <button onClick={() => {
+                  if (job.applyFailureType === "unconfirmed" && !window.confirm("This application may already have been sent. Send it again anyway?")) return;
+                  onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />{job.applyFailureType === "unconfirmed" ? "Try again anyway" : "Retry application"}</button>
               )}
             </div>
           )}

@@ -43,6 +43,7 @@ export type ApiJob = {
   apply_confirmation?: string | null;
   apply_error?: string | null;
   apply_failure_type?: string | null;
+  apply_prepared?: string | null;
   // JSON list of {key,label,type,options,draft}: the required questions an
   // application is held on (apply_status 'needs_answers', 2026-11-07).
   apply_questions?: string | null;
@@ -88,6 +89,8 @@ export type UiJob = {
   applyConfirmation: string;
   applyError: string;
   applyFailureType: string;
+  /** What the app filled into a form it could not send (Lever's human check). */
+  applyPrepared: { label: string; value: string }[];
   applyQuestions: FormQuestion[];
   foundDate: string | null;
   coverLetter: string;
@@ -418,6 +421,7 @@ export function toUiJob(j: ApiJob): UiJob {
     applyConfirmation: j.apply_confirmation || "",
     applyError: j.apply_error || "",
     applyFailureType: j.apply_failure_type || "",
+    applyPrepared: (() => { try { const q = JSON.parse(j.apply_prepared || "[]"); return Array.isArray(q) ? q : []; } catch { return []; } })(),
     applyQuestions: (() => { try { const q = JSON.parse(j.apply_questions || "[]"); return Array.isArray(q) ? q : []; } catch { return []; } })(),
     foundDate: j.found_date ?? null,
     coverLetter: j.cover_letter || "",
