@@ -1598,6 +1598,33 @@ def ats_name(url: str) -> str:
     return "Company site" if u else "No link"
 
 
+def apply_route(url: str) -> str:
+    """What auto-apply can do with this link, judged from the URL alone (no
+    network) - for the queue's per-job sign (Eran, 2026-11-09: "I can't say
+    which one can be relevant to the auto-apply and which one I have to do it
+    manually").
+
+      auto    - a form system the engine fills (Greenhouse, Lever, Ashby,
+                SmartRecruiters, Comeet, or a careers page embedding Greenhouse)
+      account - Workday: an account on the employer's site comes first
+      board   - a job board (LinkedIn, Indeed...): needs a login; the engine
+                only gets through when it finds the same job on the company's
+                own system, so it is counted as manual
+      site    - another company site: the engine tries, results vary
+      none    - no link
+    """
+    u = (url or "").strip()
+    if not u:
+        return "none"
+    if _is_workday(u):
+        return "account"
+    if _is_job_board(u):
+        return "board"
+    if "gh_jid=" in u.lower() or _is_direct_ats(u):
+        return "auto"
+    return "site"
+
+
 def _is_direct_ats(url: str) -> bool:
     u = (url or "").lower()
     return any(h in u for h in _ATS_DIRECT_HOSTS)

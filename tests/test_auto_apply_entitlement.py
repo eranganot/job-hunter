@@ -56,6 +56,9 @@ def engine_on(stack, monkeypatch):
     reason this bug survived: production has the switch off.
     """
     monkeypatch.setenv("APPLY_ENGINE_ENABLED", "1")
+    # The entitlement gate is under test here, not the admins-only stage
+    # (tests/test_engine_admin_only.py).
+    monkeypatch.setenv("APPLY_ENGINE_FOR_ALL", "1")
     import apply_engine
     monkeypatch.setattr(apply_engine, "apply_to_job",
                         lambda *a, **k: {"success": False, "status": "manual_required",

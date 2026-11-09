@@ -232,3 +232,74 @@ def test_a_saved_draft_without_a_cv_role_gets_it_back_when_opened(stack, users, 
     conn.close()
     st, _l, body = users["a"].get("/api/jobs/%d/tailored-cv" % job_id)
     assert [r["company"] for r in json.loads(body)["cv"]["experience"]] == ["ORBIT GAMES TLV, Israel"]
+
+
+# ── 2026-11-09: written for the job, measured changes, honest match ──────────
+
+CV_FOCUS = """Experience
+Head of Product - Northwind (2021 - Present)
+- Owned the checkout roadmap for 4 markets.
+- Built a pricing experimentation program with the data team.
+- Hired and coached 6 product managers.
+Product Manager - Contoso (2017 - 2021)
+- Shipped the partner onboarding flow.
+- Wrote the API documentation portal.
+Product leader with a passion for checkout, pricing and onboarding. Built teams that ship.
+Education
+B.A. Economics (2016)
+"""
+
+
+def _answer(summary, match=None, northwind=None):
+    return {"headline": "Product leader - checkout and pricing", "summary": summary,
+            "skills": ["pricing", "experimentation", "onboarding"],
+            "match": match or [],
+            "experience": [
+                {"title": "Head of Product", "company": "Northwind", "dates": "2021 - Present",
+                 "bullets": northwind or ["Built a pricing experimentation program with the data team.",
+                                          "Owned the checkout roadmap for 4 markets."]},
+                {"title": "Product Manager", "company": "Contoso", "dates": "2017 - 2021",
+                 "bullets": ["Shipped the partner onboarding flow."]}],
+            "education": ["B.A. Economics (2016)"], "other": [],
+            "changes": ["Rewrote everything for payments."]}       # the model's claim: ignored
+
+
+def test_a_summary_copied_from_the_cv_is_sent_back_once():
+    calls = []
+
+    def llm(prompt):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return _answer("Product leader with a passion for checkout, pricing and onboarding. Built teams that ship.")
+        return _answer("Checkout and pricing are where most of this role's work sits, and Northwind's "
+                       "checkout roadmap across 4 markets covers both. A pricing experimentation program "
+                       "built with the data team shows the experimentation the job asks for.")
+    res = tailor.tailor(CV_FOCUS, JOB, llm=llm)
+    assert len(calls) == 2 and "copies the CV's own sentences" in calls[1]
+    assert tailor.copied_share(res["cv"]["summary"], CV_FOCUS) < tailor.COPIED
+    assert "Summary written for this job." in res["cv"]["changes"]
+
+
+def test_what_changed_is_measured_not_the_models_word():
+    res = tailor.tailor(CV_FOCUS, JOB, llm=lambda p: _answer(
+        "Checkout, pricing and onboarding experience across two companies, led from the roadmap down."))
+    ch = res["cv"]["changes"]
+    assert "Rewrote everything for payments." not in ch
+    assert any(c.startswith("Northwind:") and "moved to the top" in c and "1 less relevant point left out" in c
+               for c in ch), ch
+    assert any(c.startswith("Contoso:") and "left out" in c for c in ch), ch
+    assert "Skills led by: pricing, experimentation, onboarding." in ch
+
+
+def test_match_evidence_the_cv_does_not_back_becomes_a_gap():
+    res = tailor.tailor(CV_FOCUS, JOB, llm=lambda p: _answer(
+        "Checkout, pricing and onboarding experience across two companies, led from the roadmap down.",
+        match=[{"need": "Pricing experimentation", "evidence": "Built a pricing experimentation program with the data team"},
+               {"need": "Payments compliance", "evidence": "Led PCI compliance for card payments"},
+               {"need": "Team leadership", "evidence": "Hired and coached 9 product managers"},
+               {"need": "Mobile apps", "evidence": ""}]))
+    m = {x["need"]: x["evidence"] for x in res["match"]}
+    assert m["Pricing experimentation"].startswith("Built a pricing")
+    assert m["Payments compliance"] == ""             # not in the CV
+    assert m["Team leadership"] == ""                 # 9 is not the CV's 6
+    assert m["Mobile apps"] == ""

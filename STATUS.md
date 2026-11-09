@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-08 by Claude (first real supervised submit failed on Payoneer: Greenhouse embed iframe + wiped fills - fixed and rehearsed)._
+_Last updated: 2026-11-09 by Claude (auto-apply engine admins-only; queue auto-apply signs + "Auto-apply selected"; tailored CV written for the job)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,11 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-09 — **Engine admins-only while Eran tests; the queue shows which jobs auto-apply can send; tailored CV aimed at the job.**
+  - **Safety (Eran set `APPLY_ENGINE_ENABLED` on Railway; "for now only for me"):** with the switch on, the engine was on for *every* user who had turned auto-apply on in Settings. New `_engine_on_for(user)`: the switch AND (admin OR `APPLY_ENGINE_FOR_ALL`). Applied at every chokepoint: `run_job_apply` (scheduler, queue runs), the single-job thread, `/api/run-apply`, `/api/jobs/<id>/apply-now` (it said "Application started" with the engine off, then did nothing - now 409 `engine_off`), the new batch route, and `/api/me` `auto_apply_live`. **Opening it to everyone later = set `APPLY_ENGINE_FOR_ALL=1`.**
+  - **Queue sign per job:** `apply_engine.apply_route(url)` from the URL alone - `auto` (Greenhouse/Lever/Ashby/SmartRecruiters/Comeet, `gh_jid=` embeds), `site` (company site: tries, varies), `account` (Workday), `board` (LinkedIn/Indeed…: login wall; only succeeds if the same job is found on the company's system). Shown as a chip on each queue row, a "N can auto-apply · M to apply yourself" line, "Select the auto-apply ones", and **"Auto-apply selected"** (`POST /api/jobs/apply-selected`, max 15, the user's approved jobs not already in flight, sent one after another in one thread).
+  - **Found while refactoring (proven by reading the SELECT):** the single-job apply never passed the job's location to the engine - it asked `"location" in job.keys()` of a row that did not select it - so the sponsorship-question logic always saw "". Fixed (`_apply_one` selects it).
+  - **Tailored CV:** the prompt now has the model pick the job's 4-6 main requirements and write the summary/headline for them (not the CV's own). A summary that is ≥60% the CV's own three-word runs gets one retry (combined with the missing-role retry, so still at most one). New **"How your CV meets this job"**: each requirement with the CV's evidence, or a gap - evidence the CV doesn't back (or with a number not in the CV) is shown as a gap, never a strength. **"What changed" is now measured against the CV** (summary rewritten or not, skills order, per role: point moved to the top / reworded / left out) instead of the model's own claims.
 - 2026-11-08 — **Lever hCaptcha investigated: NOT determinable from the workspace. Three proven Lever defects fixed; GitHub address filled from the instructions.**
   - **Rehearsal** (Cloudinary "Head of MIS", writes aborted except hCaptcha's own): with every question answered, Submit sent no application POST in 20–80 s.
   - **Why hCaptcha can't be judged here:** a direct probe shows the hCaptcha widget's challenge frame reading "Please try again ⚠️" *before* any click, as well as after. hCaptcha does not initialise properly in this workspace, so nothing here says whether it blocks production's browser. I first read that text as "Submit opened a challenge" and wrote a detector on it; the before/after comparison disproved it, and the detector was removed before shipping.

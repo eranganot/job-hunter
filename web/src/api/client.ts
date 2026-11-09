@@ -31,6 +31,7 @@ export type ApiJob = {
   link_type?: string | null;
   source_url?: string | null;
   link_penalty?: number | null;
+  apply_route?: string | null;
   apply_status?: string | null;
   // Where the application got to AFTER it was sent. A separate column from
   // apply_status on purpose: one records that we submitted, the other what
@@ -74,6 +75,8 @@ export type UiJob = {
   sourceUrl: string;
   /** 5 when no direct link was found; part of the effective rank. */
   linkPenalty: number;
+  /** apply_engine.apply_route(url): auto | site | account | board | none. */
+  applyRoute: string;
   verified: boolean;
   timeAgo: string;
   status: string;
@@ -249,6 +252,7 @@ export const api = {
   reject: (id: number, reason: string) =>
     request(`/api/jobs/${id}/reject`, "POST", { reason }),
   applyNow: (id: number) => request(`/api/jobs/${id}/apply-now`, "POST", {}),
+  applySelected: (ids: number[]) => request<{ started: number; skipped: number; max: number }>(`/api/jobs/apply-selected`, "POST", { ids }),
   markApplied: (id: number) => request(`/api/jobs/${id}/applied`, "POST", { notes: "Marked applied manually" }),
   later: (id: number) => request(`/api/jobs/${id}/later`, "POST", {}),
   // Puts a job back in the review queue and clears every apply field. Also the
@@ -402,6 +406,7 @@ export function toUiJob(j: ApiJob): UiJob {
     linkType: j.link_type || "",
     sourceUrl: j.source_url || "",
     linkPenalty: j.link_penalty ?? 0,
+    applyRoute: j.apply_route || "",
     verified: j.url_verified === 1,
     timeAgo: timeAgo(j.found_date),
     status: j.status,
