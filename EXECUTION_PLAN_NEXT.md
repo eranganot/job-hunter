@@ -178,7 +178,7 @@ Builds on what exists: `users.plan` (migration 10) and `entitlements.py` (`plan_
 7. Admin: set a user's plan, grant credits, per-user usage and estimated AI cost.
 
 **Eran's decisions, 2026-11-05** (matrix doc; not yet approved as a whole):
-- No `beta` plan. Every new user, and every existing user when Step 4 ships, gets **Premium as a 30-day promotion**, then moves to Free automatically. A promotion = a plan with an end date (admin can grant any plan, with an end date); when it ends the user drops to Free, or to their paid plan.
+- **Superseded 2026-11-09 (Eran): every new user joins a `beta` plan - Premium's limits, no end date - and running Premium promotions moved to it (Step 17).** _Was:_ No `beta` plan. Every new user, and every existing user when Step 4 ships, gets **Premium as a 30-day promotion**, then moves to Free automatically. A promotion = a plan with an end date (admin can grant any plan, with an end date); when it ends the user drops to Free, or to their paid plan.
 - Users are **notified before a promotion ends** (lead time open; proposed 7 and 1 days). Email to non-Eran addresses needs the verified sending domain (Step 5 blocker), so push/Telegram/WhatsApp carry it until then.
 - **Matches shown per search:** Free 3, Premium 6, Expert all, each in full (score, explanation, link); the rest appear **blurred** with an upgrade prompt. The blur must be built server-side: the API returns only a count and placeholders for hidden matches, never the jobs themselves, or a free user could read them from the response.
 - **Billing (Step 11):** monthly, or 6 months upfront at a discount (Paddle prices with a 6-month billing cycle).

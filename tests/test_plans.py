@@ -50,7 +50,11 @@ def test_the_matrix_is_the_one_eran_approved():
     assert all(row["auto_apply"] for row in plans.PLANS.values())   # every plan, user's choice (2026-11-08)
     assert (plans.PROMOTION_PLAN, plans.PROMOTION_DAYS, plans.NOTICE_DAYS) == ("premium", 30, (7, 1))
     assert plans.SIX_MONTH_DISCOUNT == 0.20
-    assert "beta" not in plans.PLANS and "admin" not in plans.PLANS     # admin is a role
+    assert "admin" not in plans.PLANS                                    # admin is a role
+    # Beta (2026-11-09): Premium's limits under its own name, the plan every signup gets.
+    assert plans.NEW_USER_PLAN == "beta" and "beta" not in plans.PAID_PLANS
+    assert {k: v for k, v in plans.PLANS["beta"].items() if k != "label"} == \
+        {k: v for k, v in p.items() if k != "label"} and plans.PLANS["beta"]["label"] == "Beta"
 
 
 def test_admin_is_a_role_with_no_limits_whatever_the_plan_column_says():
@@ -70,15 +74,45 @@ def test_a_promotion_is_over_at_its_end_even_before_the_sweep_runs():
     assert entitlements.plan_of(u, NOW) == "free"
 
 
-def test_new_user_promotion_is_premium_for_30_days_then_free(conn):
-    out = entitlements.start_new_user_promotion(conn, 1, now=NOW)
-    assert out == {"plan": "premium", "plan_until": "2026-12-05 12:00:00",
-                   "plan_after": "free", "plan_source": "promotion"}
+def _promo(conn, uid=1, now=NOW):
+    """The 30-day Premium promotion new users got from 11-05 to 11-09; still
+    what an admin-granted promotion looks like."""
+    return entitlements.grant_plan(conn, uid, plans.PROMOTION_PLAN, days=plans.PROMOTION_DAYS,
+                                   after="free", reason="new_user", now=now)
+
+
+def test_a_new_user_joins_beta_with_no_end_date(conn):
+    out = entitlements.start_new_user_plan(conn, 1, now=NOW)
+    assert out == {"plan": "beta", "plan_until": None, "plan_after": None, "plan_source": "beta"}
     u = _user(conn)
-    assert entitlements.plan_of(u, NOW) == "premium"
-    assert entitlements.plan_of(u, NOW + timedelta(days=30)) == "free"
+    assert entitlements.plan_of(u, NOW + timedelta(days=3650)) == "beta"   # never runs out
+    assert entitlements.limit(u, "matches_per_search") == 6                 # Premium's limits
+    assert entitlements.plan_info(u, NOW)["label"] == "Beta"
+    assert entitlements.expire_promotions(conn, NOW + timedelta(days=60)) == []
+    assert entitlements.due_notices(conn, NOW + timedelta(days=23)) == []    # no downgrade push
     ev = conn.execute("SELECT from_plan, to_plan, reason FROM plan_events").fetchall()
-    assert [tuple(r) for r in ev] == [("free", "premium", "new_user")]
+    assert [tuple(r) for r in ev] == [("free", "beta", "beta")]
+
+
+def test_running_promotions_move_to_beta_and_nothing_else_does(conn):
+    for uid, email, role in ((2, "b@x.test", "user"), (3, "c@x.test", "user"),
+                             (4, "d@x.test", "user"), (5, "adm@x.test", "admin")):
+        conn.execute("INSERT INTO users (id, name, email, password_hash, salt, created_date, role) "
+                     "VALUES (?,?,?,'h','s','2026-11-01',?)", (uid, email, email, role))
+    _promo(conn, 1)                                                    # running -> beta
+    entitlements.grant_plan(conn, 2, "premium", days=3, now=NOW - timedelta(days=10))   # ended -> left
+    entitlements.expire_promotions(conn, NOW)
+    entitlements.grant_plan(conn, 3, "expert", now=NOW)                # admin-set, permanent -> left
+    entitlements.grant_plan(conn, 4, "expert", days=14, now=NOW)       # Expert promotion -> left (Beta would be a downgrade)
+    _promo(conn, 5)                                                    # admin role -> left
+    moved = entitlements.move_promotions_to_beta(conn, NOW + timedelta(hours=1))
+    assert moved == [1]
+    plans_now = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+        "SELECT id, plan, plan_until, plan_source FROM users")}
+    assert plans_now[1] == ("beta", None, "beta_migration")
+    assert plans_now[2][0] == "free" and plans_now[3] == ("expert", None, "admin")
+    assert plans_now[4][:2] == ("expert", "2026-11-19 12:00:00") and plans_now[5][0] == "premium"
+    assert entitlements.move_promotions_to_beta(conn, NOW + timedelta(hours=2)) == []    # idempotent
 
 
 def test_admin_can_grant_a_permanent_plan_and_it_is_recorded(conn):
@@ -87,11 +121,11 @@ def test_admin_can_grant_a_permanent_plan_and_it_is_recorded(conn):
     assert (u["plan"], u["plan_until"], u["plan_after"]) == ("expert", None, None)
     assert conn.execute("SELECT by_user_id FROM plan_events").fetchone()[0] == 9
     with pytest.raises(ValueError):
-        entitlements.grant_plan(conn, 1, "beta", now=NOW)               # not a plan
+        entitlements.grant_plan(conn, 1, "gold", now=NOW)               # not a plan
 
 
 def test_ended_promotions_move_to_their_fallback_once(conn):
-    entitlements.start_new_user_promotion(conn, 1, now=NOW)
+    _promo(conn, 1)
     assert entitlements.expire_promotions(conn, NOW + timedelta(days=29)) == []
     moved = entitlements.expire_promotions(conn, NOW + timedelta(days=30))
     assert moved == [(1, "premium", "free")]
@@ -101,7 +135,7 @@ def test_ended_promotions_move_to_their_fallback_once(conn):
 
 
 def test_notices_come_7_days_and_1_day_before_and_never_twice(conn):
-    entitlements.start_new_user_promotion(conn, 1, now=NOW)            # ends 2026-12-05 12:00
+    _promo(conn, 1)            # ends 2026-12-05 12:00
     pushed = []
     run = lambda at: entitlements.run_lifecycle(lambda: _NoClose(conn), lambda u, m: pushed.append((u, m)), at)
 
@@ -138,7 +172,7 @@ def test_a_promotion_granted_inside_its_last_day_gets_only_the_1_day_notice(conn
 
 
 def test_a_failed_push_is_logged_and_not_retried(conn, capsys):
-    entitlements.start_new_user_promotion(conn, 1, now=NOW)
+    _promo(conn, 1)
     def boom(u, m):
         raise RuntimeError("no subscription")
     entitlements.run_lifecycle(lambda: _NoClose(conn), boom, NOW + timedelta(days=23))
@@ -186,14 +220,14 @@ def test_a_day_is_an_israeli_day_and_a_month_a_calendar_month():
 
 # ── over HTTP ──────────────────────────────────────────────────────────────
 
-def test_a_new_signup_starts_on_the_premium_promotion_and_admin_on_none(stack, users):  # noqa: F811
+def test_a_new_signup_starts_on_beta_and_admin_on_none(stack, users):  # noqa: F811
     db = stack["db"]
     conn = db.get_db()
     alice = dict(conn.execute("SELECT * FROM users WHERE email='alice@example.test'").fetchone())
     admin = dict(conn.execute("SELECT * FROM users WHERE email='admin@example.test'").fetchone())
     conn.close()
-    assert (alice["plan"], alice["plan_after"], alice["plan_source"]) == ("premium", "free", "promotion")
-    assert alice["plan_until"] > datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    assert (alice["plan"], alice["plan_until"], alice["plan_after"], alice["plan_source"]) == \
+        ("beta", None, None, "beta")
     assert admin["plan_source"] is None
 
 
@@ -202,7 +236,7 @@ def test_me_reports_plan_limits_and_usage(stack, users):  # noqa: F811
     assert status == 200
     me = json.loads(body)
     info = me["plan_info"]
-    assert info["tier"] in ("premium", "free") and info["limits"]["matches_per_search"] in (3, 6)
+    assert info["tier"] in ("beta", "free") and info["limits"]["matches_per_search"] in (3, 6)
     assert set(me["usage"]) == set(plans.METERS)
     assert me["usage"]["cover_letter"]["period"] == "month"
     status, _loc, body = users["admin"].get("/api/me")

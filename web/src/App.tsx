@@ -6,7 +6,7 @@ import {
   LayoutGrid, List, Check, RefreshCw, Bell, Search as SearchIcon,
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, MessageSquare, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
-  Download,
+  Download, LifeBuoy,
 } from "lucide-react";
 import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -615,6 +615,7 @@ const TABS: [DashboardTab, string, any][] = [
 const ADMIN_TAB: [DashboardTab, string, any] = ["admin", "Admin", ShieldCheck];
 
 function DashboardView(p: any) {
+  const [showSupport, setShowSupport] = useState(false);
   const { me, activeTab, setActiveTab, onBackToSwipe, approvedJobs, appliedJobs, deferredJobs, onUnDefer, onMarkApplied, onRemoveQueued, onRetry, approvedCount, rejectedCount, deferredCount, selectedJob, setSelectedJob, onOpenSettings, showSettings, onCloseSettings, onReload, stats } = p;
   const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
   const [sortBy, setSortBy] = useState<"match" | "date" | "company">("match");
@@ -667,6 +668,7 @@ function DashboardView(p: any) {
         <div className="px-3 py-3 border-t border-gray-700 space-y-1">
           <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
           <button onClick={onOpenSettings} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><Settings className="w-[18px] h-[18px] shrink-0" />Settings</button>
+          <button onClick={() => setShowSupport(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><LifeBuoy className="w-[18px] h-[18px] shrink-0" />Contact support</button>
           {/* A full-page navigation, not a fetch: /logout clears the session
               cookie in its response, which only a real navigation applies. */}
           <a href="/logout" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><LogOut className="w-[18px] h-[18px] shrink-0" />Sign out</a>
@@ -721,6 +723,7 @@ function DashboardView(p: any) {
       {selectedJob && <JobDetailModal job={selectedJob} onClose={() => setSelectedJob(null)} onRetry={onRetry} isAdmin={isAdmin} me={me} />}
       <AnimatePresence>{removeTarget && <RejectReasonSheet job={removeTarget} onPick={(k) => { onRemoveQueued(removeTarget, k ? (REJECT_REASONS[k] || k) : "Removed from queue"); setRemoveTarget(null); }} onUndo={() => setRemoveTarget(null)} />}</AnimatePresence>
       <AnimatePresence>{showSettings && me && <SettingsModal me={me} onClose={onCloseSettings} />}</AnimatePresence>
+      <AnimatePresence>{showSupport && <SupportModal onClose={() => setShowSupport(false)} />}</AnimatePresence>
     </div>
   );
 }
@@ -1982,7 +1985,7 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
       </p>
       <div className="flex flex-wrap items-center gap-2 mt-2">
         <select value={plan} onChange={(e) => setPlan(e.target.value)} className="px-2 py-1.5 border border-gray-600 rounded-lg bg-gray-700 text-white text-xs">
-          <option value="free">Free</option><option value="premium">Premium</option><option value="expert">Expert</option>
+          <option value="free">Free</option><option value="beta">Beta</option><option value="premium">Premium</option><option value="expert">Expert</option>
         </select>
         <select value={days} onChange={(e) => setDays(e.target.value)} className="px-2 py-1.5 border border-gray-600 rounded-lg bg-gray-700 text-white text-xs">
           <option value="perm">Permanent</option>
@@ -3046,6 +3049,54 @@ const METER_LABELS: Record<string, string> = {
   tailored_cv: "Tailored CVs",
 };
 
+/* Contact support (2026-11-09): the message is emailed to the team with
+   Reply-To set to the user, so the answer comes back to their own inbox. The
+   server refuses to claim "sent" when the email did not go out. */
+function SupportModal({ onClose }: { onClose: () => void }) {
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState("");
+  const send = async () => {
+    if (!message.trim()) { setErr("Write a message first."); return; }
+    setBusy(true); setErr("");
+    try { await api.contactSupport(message.trim(), subject.trim()); setSent(true); }
+    catch (e: any) { setErr(e?.message || "Your message couldn't be sent right now."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center sm:p-6" onClick={onClose}>
+      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="bg-gray-900 rounded-t-3xl sm:rounded-3xl shadow-2xl max-w-lg w-full border border-gray-700">
+        <div className="p-5 border-b border-gray-700 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-white flex items-center gap-2"><LifeBuoy className="w-5 h-5 text-indigo-400" />Contact support</h2>
+          <button onClick={onClose} aria-label="Close" className="p-2 active:bg-gray-800 rounded-xl"><X className="w-5 h-5 text-gray-400" /></button>
+        </div>
+        {sent ? (
+          <div className="p-6 text-center space-y-3">
+            <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
+            <p className="text-white font-semibold">Message sent</p>
+            <p className="text-sm text-gray-400">We'll reply to your account's email address.</p>
+            <button onClick={onClose} className="mt-2 px-5 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-sm text-gray-200">Close</button>
+          </div>
+        ) : (
+          <div className="p-5 space-y-3">
+            <p className="text-sm text-gray-400">A question, a bug, an idea - tell us. We'll answer by email.</p>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={120} placeholder="Subject (optional)"
+              className="w-full px-3.5 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500" />
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={5000} rows={6} placeholder="Your message"
+              className="w-full px-3.5 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-y" />
+            {err && <p className="text-sm text-amber-300">{err}</p>}
+            <button onClick={send} disabled={busy} className="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
+              {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4" />}{busy ? "Sending…" : "Send"}
+            </button>
+          </div>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* What the plan includes and how much is used. Read-only: the numbers are the
    server's (plans.py via /api/me), and upgrades open with billing (Step 11). */
 function PlanPanel({ me }: { me: any }) {
@@ -3062,6 +3113,7 @@ function PlanPanel({ me }: { me: any }) {
       {promo && <p className="text-sm text-gray-300 mt-2">Free Premium until <b>{fmtPlanDate(info.plan_until)}</b>
         {info.days_left != null && <> ({info.days_left} day{info.days_left === 1 ? "" : "s"} left)</>}.
         After that you move to the {String(info.plan_after || "free").replace(/^./, (c: string) => c.toUpperCase())} plan.</p>}
+      {info.tier === "beta" && <p className="text-sm text-gray-300 mt-2">You're one of our beta users: everything in Premium, free while Job Hunter is in beta.</p>}
       {info.tier !== "admin" && <p className="text-xs text-gray-400 mt-3">Upgrade options open soon.</p>}
     </div>
     <div>
@@ -3172,6 +3224,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   const [cvDate, setCvDate] = useState<string>(me.cv_uploaded_date || "");
   const [cvMsg, setCvMsg] = useState("");
   const [tab, setTab] = useState<SettingsTab>(initialTab || "profile");
+  const [showSupport, setShowSupport] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [extractMsg, setExtractMsg] = useState("");
@@ -3406,9 +3459,11 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
           <NotificationChannels me={me} />
           </>)}
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
+          <button onClick={() => setShowSupport(true)} className="w-full py-3 flex items-center justify-center gap-2 text-sm text-gray-400 hover:text-gray-200"><LifeBuoy className="w-4 h-4" />Questions or a problem? Contact support</button>
         </div>
       </motion.div>
     </motion.div>
+    <AnimatePresence>{showSupport && <SupportModal onClose={() => setShowSupport(false)} />}</AnimatePresence>
     </>
   );
 }

@@ -379,7 +379,7 @@ def test_admin_sets_a_promotion_and_the_upgrade_unlocks_held_back_matches(stack,
 
 
 @pytest.mark.parametrize("payload, code", [
-    ({"plan": "beta"}, 400), ({"plan": "premium", "days": 0}, 400),
+    ({"plan": "gold"}, 400), ({"plan": "premium", "days": 0}, 400),
     ({"plan": "premium", "days": 999}, 400), ({"plan": "premium", "after": "gold", "days": 3}, 400)])
 def test_admin_plan_input_is_validated(stack, users, payload, code):  # noqa: F811
     uid = _uid(stack["db"], "bob@example.test")
