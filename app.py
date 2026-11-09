@@ -173,8 +173,22 @@ def get_local_ip():
 
 LOCAL_IP   = get_local_ip()
 _railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN', '')
-MOBILE_URL = (f"https://{_railway_domain}" if _railway_domain
-              else f"http://{LOCAL_IP}:{PORT}")
+# JH_PUBLIC_URL (2026-11-09, job-hunter.work): the address the app gives out -
+# notification and push links, the cross-origin header. Unset: the Railway one.
+_public_url = os.environ.get('JH_PUBLIC_URL', '').strip().rstrip('/')
+MOBILE_URL = (_public_url or (f"https://{_railway_domain}" if _railway_domain
+              else f"http://{LOCAL_IP}:{PORT}"))
+# Every address the app answers on. Google sign-in returns to the address it
+# started from: its state cookie is per address, so sending someone who began
+# on the Railway address back to the new one would fail the security check.
+_SERVED_HOSTS = {h for h in (urllib.parse.urlparse(_public_url).netloc if _public_url else "",
+                             _railway_domain) if h}
+
+
+def _base_for(host: str) -> str:
+    """https://<host> when the request came to one of our addresses, else MOBILE_URL."""
+    h = (host or "").strip().lower()
+    return f"https://{h}" if h and h in _SERVED_HOSTS else MOBILE_URL.rstrip("/")
 
 # ── DB + Auth init ────────────────────────────────────────────────────────────
 
@@ -4197,7 +4211,7 @@ class Handler(BaseHTTPRequestHandler):
             _verifier = _secrets_g.token_urlsafe(64)
             _challenge = _b64_g.urlsafe_b64encode(
                 _hashlib_g.sha256(_verifier.encode()).digest()).rstrip(b"=").decode()
-            _redirect_uri = MOBILE_URL.rstrip("/") + "/auth/google/callback"
+            _redirect_uri = _base_for(self.headers.get("Host", "")) + "/auth/google/callback"
             _params = urllib.parse.urlencode({
                 "client_id": GOOGLE_CLIENT_ID,
                 "redirect_uri": _redirect_uri,
@@ -4231,7 +4245,7 @@ class Handler(BaseHTTPRequestHandler):
             _cookie_verifier = _ck["g_verifier"].value  if "g_verifier" in _ck else ""
             if not _code or not _state or not _cookie_state or _state != _cookie_state:
                 _google_fail("Google sign-in failed a security check. Please try again."); return
-            _redirect_uri = MOBILE_URL.rstrip("/") + "/auth/google/callback"
+            _redirect_uri = _base_for(self.headers.get("Host", "")) + "/auth/google/callback"
             try:
                 _tok_body = urllib.parse.urlencode({
                     "code": _code,
