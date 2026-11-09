@@ -91,8 +91,8 @@ def test_tier_gating_admin_vs_user():
     # free big-tech available to everyone
     assert JobSource.MICROSOFT in user_sources
     # paid sources gated out for normal users, present for admin
-    assert JobSource.THEIRSTACK not in user_sources
-    assert JobSource.THEIRSTACK in admin_sources
+    # TheirStack runs only through the daily pool (paidpool.py), never per search
+    assert JobSource.THEIRSTACK not in user_sources | admin_sources
     assert JobSource.APIFY in admin_sources
     assert len(admin_adapters) > len(user_adapters)
 

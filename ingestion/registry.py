@@ -29,8 +29,10 @@ from .adapters import (
 ALL_ADAPTERS: list[type[SourceAdapter]] = [
     # FREE — Big Tech (the existing ATS/board sources still live in app.py)
     MicrosoftAdapter, GoogleAdapter, AmazonAdapter, AppleAdapter,
-    # PAID — aggregators
-    TheirStackAdapter, AdzunaAdapter, CoresignalAdapter,
+    # PAID — aggregators. TheirStack is NOT here since 2026-11-09: it bills per
+    # job returned, so it runs once a day into the shared pool (paidpool.py),
+    # never per user search.
+    AdzunaAdapter, CoresignalAdapter,
     # PAID — managed scraping
     ApifyAdapter, JobSpyAdapter,
     # PAID — authenticated (account holder's own session)
