@@ -35,7 +35,10 @@ except ImportError:
 
 def _is_greenhouse(url: str) -> bool:
     """Check if URL is a Greenhouse job board."""
-    return bool(re.search(r'boards\.greenhouse\.io|job-boards\.greenhouse\.io|grnh\.se', url))
+    # (?:\.eu)?: Greenhouse's EU boards (job-boards.eu.greenhouse.io - Tavily)
+    # did not match, so they went to the generic LLM form path and hit the 150s
+    # deadline three times each (2026-11-09).
+    return bool(re.search(r'(?:job-)?boards(?:\.eu)?\.greenhouse\.io|grnh\.se', url or ""))
 
 def _is_lever(url: str) -> bool:
     """Check if URL is a Lever job board."""
@@ -1194,10 +1197,15 @@ def _apply_workday(page, applicant: dict, cv_path: str | None) -> dict:
 
 def _classify_failure(error: str, page_text: str = "") -> tuple[str, str]:
     """Return (failure_type, failure_detail).
-    failure_type: captcha | timeout | login_wall | form_validation | network_error | other
+    failure_type: unconfirmed | captcha | timeout | login_wall | form_validation | network_error | other
     """
     combined = ((error or "") + " " + (page_text or "")).lower()
     detail = (error or "")[:300]
+    # First: after the submit button, anything uncertain is "unconfirmed" - even
+    # with an anti-bot note attached ("no confirmation after submit (form still
+    # present) - needs manual review [anti-bot ...]"), the form may have gone.
+    if any(k in (error or "").lower() for k in ("after submit", "needs manual review", "may have been sent")):
+        return "unconfirmed", detail
     if any(k in combined for k in ("captcha", "recaptcha", "hcaptcha", "cloudflare",
                                     "verify you are human", "bot detection", "i am not a robot")):
         return "captcha", detail
@@ -1237,7 +1245,12 @@ MAX_APPLY_ATTEMPTS = 3
 # callers (search/scoring) keep the generous 90s default.
 _APPLY_LLM_TIMEOUT = int(os.environ.get('APPLY_LLM_TIMEOUT', '25'))
 RETRYABLE_FAILURES = {"timeout", "network_error", "other"}
-MANUAL_FAILURES = {"captcha", "login_wall", "form_validation"}
+# "unconfirmed": the application may have gone out - the submit was pressed and
+# no confirmation was recognised, or the overall deadline ran out while the
+# browser was still working (it is not stopped). Retrying could send the same
+# application again (2026-11-09: Seatpicl and Tavily were tried 3 times each in
+# one day), so a person checks instead.
+MANUAL_FAILURES = {"captcha", "login_wall", "form_validation", "unconfirmed"}
 
 def retry_decision(failure_type, attempts, max_attempts=MAX_APPLY_ATTEMPTS):
     """Decide what to do after a failed apply attempt.

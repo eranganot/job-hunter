@@ -971,6 +971,22 @@ def m0026_paid_pool(conn):
     conn.commit()
 
 
+def m0027_unconfirmed_applies(conn):
+    """Jobs already marked for an automatic retry although the application may
+    have gone out (2026-11-09): the overall-deadline result ("Apply exceeded
+    150s deadline" - the browser was not stopped) and "no confirmation after
+    submit". From now on these are "unconfirmed" and never retried; this moves
+    the ones already waiting for a retry to the same place, so the next run does
+    not send them again."""
+    conn.execute(
+        "UPDATE jobs SET apply_status='manual_required', apply_failure_type='unconfirmed', "
+        "apply_next_attempt_at=NULL "
+        "WHERE status='approved' AND apply_status='failed' AND ("
+        " apply_error LIKE 'Apply exceeded %deadline%' OR LOWER(apply_error) LIKE '%after submit%' "
+        " OR LOWER(apply_error) LIKE '%needs manual review%')")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -998,6 +1014,7 @@ MIGRATIONS = [
     (24, "company_boards",              m0024_company_boards),
     (25, "beta_plan",                   m0025_beta_plan),
     (26, "paid_pool",                   m0026_paid_pool),
+    (27, "unconfirmed_applies",         m0027_unconfirmed_applies),
 ]
 
 

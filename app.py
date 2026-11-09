@@ -2878,10 +2878,16 @@ def _submit_application_guarded(job_url, job_title, company, applicant, cv_path,
                     if time.time() - t0 - (_run_waited(run) if run else 0) <= _APPLY_DEADLINE_S:
                         continue
                 print(f"[apply] DEADLINE exceeded ({_APPLY_DEADLINE_S}s) for {job_title} @ {company}")
+                # The engine thread is NOT stopped here and may still press
+                # Submit, so this is "unconfirmed" (never auto-retried), not
+                # "timeout": a retry could send the application twice
+                # (2026-11-09).
                 return {
                     "success": False, "status": "failed",
-                    "confirmation_text": "", "error": f"Apply exceeded {_APPLY_DEADLINE_S}s deadline",
-                    "apply_failure_type": "timeout",
+                    "confirmation_text": "",
+                    "error": (f"Stopped waiting after {_APPLY_DEADLINE_S}s - it may have been sent. "
+                              "Check the company's site or your email before applying again."),
+                    "apply_failure_type": "unconfirmed",
                     "apply_failure_detail": f"Overall apply deadline ({_APPLY_DEADLINE_S}s) exceeded",
                     "resolved_url": job_url,
                 }

@@ -148,6 +148,31 @@ export function SwipeFlow() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  /* The lists were loaded once, at launch. A phone keeps the app open for
+     hours, so the queue kept showing jobs as they were then - Figma and Forter
+     still "Queued" after they were sent (Eran, 2026-11-09; the database said
+     applied/confirmed). Now the lists refresh, quietly, when the app comes back
+     into view and every 2 minutes while it is on screen - without resetting
+     the swipe position or the undo. */
+  const lastLists = useRef(Date.now());
+  const refreshLists = useCallback(async (force = false) => {
+    if (document.visibilityState !== "visible") return;
+    if (!force && Date.now() - lastLists.current < 60_000) return;
+    lastLists.current = Date.now();
+    try {
+      const [ap, ad, df] = await Promise.all([api.jobs("approved", "match"), api.jobs("applied", "date"), api.jobs("deferred", "date")]);
+      setApprovedJobs(ap.map(toUiJob)); setAppliedJobs(ad.map(toUiJob)); setDeferredJobs(df.map(toUiJob));
+      api.stats().then(setStats).catch(() => {});
+    } catch { /* keep what is shown; the next refresh tries again */ }
+  }, []);
+  useEffect(() => {
+    const onVis = () => refreshLists();
+    const t = setInterval(() => refreshLists(true), 120_000);
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
+  }, [refreshLists]);
+
   const reviewJobs = newJobs;
   const currentJob = reviewJobs[currentIndex];
   const remainingCount = reviewJobs.length - currentIndex;
@@ -839,7 +864,7 @@ function AnswerQuestions({ job, onDone }: { job: UiJob; onDone: () => void }) {
 
 function ApplyBadge({ job }: { job: UiJob }) {
   const s = job.applyStatus;
-  if (!s || s === "queued") return <span className="text-xs text-gray-400">Queued · ready to apply</span>;
+  if (!s || s === "queued") return <span className="text-xs text-gray-400">Not sent yet</span>;
   if (s === "applying") return <span className="inline-flex items-center gap-1 text-xs text-blue-300"><Loader2 className="w-3 h-3 animate-spin" />Applying…</span>;
   if (s === "manual_required") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><AlertCircle className="w-3 h-3" />Manual action needed</span>;
   if (s === "awaiting_code") return <span className="inline-flex items-center gap-1 text-xs text-amber-300"><Bell className="w-3 h-3" />Waiting for your code</span>;
@@ -1443,7 +1468,7 @@ function ActivityTab() {
   if (!items.length) return <EmptyTab icon={List} title="No activity yet" sub="Searches and applications appear here" />;
   return (
     <div className="space-y-3">
-      {items.map((a) => { const ev = (a.event_type || "").toLowerCase(); const isSearch = ev.includes("search"); const isFail = ev.includes("fail") || ev.includes("reject"); return (
+      {items.map((a) => { const ev = (a.event_type || "").toLowerCase(); const isSearch = ev.includes("search"); const isFail = ev.includes("fail") || ev.includes("reject") || /— (failed|manual_required|needs_\w+)$|failed/i.test(a.details || ""); return (
         <div key={a.id} className="flex items-start gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700">
           <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isSearch ? "bg-indigo-900/40" : isFail ? "bg-red-900/40" : "bg-green-900/40"}`}>{isSearch ? <SearchIcon className="w-4 h-4 text-indigo-400" /> : isFail ? <XCircle className="w-4 h-4 text-red-400" /> : <CheckCircle className="w-4 h-4 text-green-400" />}</div>
           <div className="flex-1 min-w-0"><h4 className="font-semibold text-white text-sm capitalize">{(a.event_type || "event").replace(/_/g, " ")}</h4><p className="text-sm text-gray-400 break-words">{a.details}</p></div>
