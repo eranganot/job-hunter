@@ -188,3 +188,16 @@ def test_a_job_shows_applying_while_sent_and_leaves_the_queue_when_sent(env, mon
     assert seen == ["applying"], "the queue said 'Not sent yet' while the job was being sent"
     r = _row(jid)
     assert (r["status"], r["apply_status"]) == ("applied", "confirmed")   # Applied tab, not the queue
+
+
+def test_a_form_the_app_could_not_send_keeps_what_it_prepared(env, monkeypatch):
+    app, uid = env
+    jid = _seed(uid, url="https://jobs.lever.co/acme/1")
+    prepared = [{"label": "Full name", "value": "Dana Levi"}]
+    monkeypatch.setattr(app, "_submit_application_guarded", lambda *a, **k: {
+        "success": False, "status": "failed", "error": "Lever showed the app's automated browser a human-check puzzle",
+        "apply_failure_type": "captcha", "prepared": prepared})
+    app.run_job_apply(uid)
+    import json as _j
+    r = database.get_db().execute("SELECT apply_status, apply_prepared FROM jobs WHERE id=?", (jid,)).fetchone()
+    assert r["apply_status"] == "manual_required" and _j.loads(r["apply_prepared"]) == prepared

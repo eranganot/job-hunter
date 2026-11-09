@@ -987,6 +987,15 @@ def m0027_unconfirmed_applies(conn):
     conn.commit()
 
 
+def m0028_apply_prepared(conn):
+    """jobs.apply_prepared: what the app filled into a form it could not send
+    (Lever's human check, 2026-11-09) - [{label, value}] - so the user finishes
+    it with a ready-to-paste sheet (Eran chose the sheet over a browser extension)."""
+    if not _has_column(conn, "jobs", "apply_prepared"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN apply_prepared TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1015,6 +1024,7 @@ MIGRATIONS = [
     (25, "beta_plan",                   m0025_beta_plan),
     (26, "paid_pool",                   m0026_paid_pool),
     (27, "unconfirmed_applies",         m0027_unconfirmed_applies),
+    (28, "apply_prepared",              m0028_apply_prepared),
 ]
 
 

@@ -509,3 +509,20 @@ def test_comeet_is_judged_by_its_answer_to_the_application_request():
     assert ok["success"] and ok["status"] == "confirmed" and "HTTP 200" in ok["confirmation_text"]
     bad = _fake_comeet(422, '{"error":"email invalid"}')
     assert not bad["success"] and "HTTP 422" in bad["error"] and "email invalid" in bad["error"]
+
+
+def test_the_ready_to_paste_sheet_reads_back_what_was_filled(page):
+    """Lever's human check (2026-11-09): the app filled the form but could not
+    send it; Eran finishes it from a sheet of exactly those values."""
+    page.set_content("""<form>
+      <label for="n">Full name ✱</label><input id="n" value="Dana Levi">
+      <label for="e">Email ✱</label><input id="e" type="email" value="dana@example.test">
+      <label for="empty">Twitter</label><input id="empty" value="">
+      <input type="hidden" name="secret" value="x">
+      <li class="application-question"><div class="text">Have you ever been employed by Acme?</div>
+        <label><input type="radio" name="q1" value="Yes">Yes</label><label><input type="radio" name="q1" value="No" checked>No</label></li>
+      <label for="s">Visa</label><select id="s"><option>Select...</option><option selected>No sponsorship needed</option></select>
+    </form>""")
+    got = {x["label"]: x["value"] for x in ae._form_snapshot(page)}
+    assert got == {"Full name": "Dana Levi", "Email": "dana@example.test",
+                   "Have you ever been employed by Acme?": "No", "Visa": "No sponsorship needed"}
