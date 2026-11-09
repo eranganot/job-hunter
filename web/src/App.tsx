@@ -2087,7 +2087,7 @@ function NotificationCheck() {
       )}
       {st?.recent?.length > 0 && (
         <details className="mt-2"><summary className="text-xs text-gray-400 cursor-pointer">Last notifications logged</summary>
-          <ul className="mt-1 text-[11px] text-gray-400 space-y-0.5">{st.recent.map((r: any, i: number) => <li key={i}>{r.at} {r.detail}</li>)}</ul>
+          <ul className="mt-1 text-[11px] text-gray-400 space-y-0.5">{st.recent.map((r: any, i: number) => <li key={i}>{fmtWhen(r.at)} {r.detail}</li>)}</ul>
         </details>
       )}
       {err && <p className="text-xs text-red-300 mt-2">{err}</p>}
