@@ -73,6 +73,10 @@ TABLE_ORDER = [
     "application_qa",
     "tailored_cvs",
     "company_boards",
+    # m0026 (2026-11-09): the paid-source pool (paidpool.py). No foreign keys.
+    "paid_source_spend",
+    "paid_pool_jobs",
+    "paid_pool_runs",
     "subscriptions",
     "billing_events",
 ]

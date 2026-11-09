@@ -36,6 +36,7 @@ import entitlements
 import accountdata
 import errors
 import schedlock
+import paidpool
 import gemini
 import jobqueue
 import links as _links_mod
@@ -1095,12 +1096,39 @@ def _check_scheduled_jobs() -> None:
         print(f'[scheduler] Error: {e}')
 
 
+_POOL_THREAD = None
+
+
+def _start_pool_run():
+    """Once a day (Israel time), each paid source fills the shared pool
+    (paidpool.py). Its own thread: an Apify run can take minutes and must not
+    hold up scheduled searches. Only the scheduler-lock holder runs it."""
+    global _POOL_THREAD
+    if _POOL_THREAD is not None and _POOL_THREAD.is_alive():
+        return
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return
+    except Exception as e:
+        print(f"[pool] WARNING scheduler lock check failed: {e}")
+        return
+
+    def _run():
+        try:
+            paidpool.run_daily(database.get_db)
+        except Exception as e:
+            print(f"[pool] ERROR daily run failed: {e}")
+    _POOL_THREAD = threading.Thread(target=_run, name="paid-pool", daemon=True)
+    _POOL_THREAD.start()
+
+
 def file_watcher():
     _tick = 0
     while True:
         database.import_pending_jobs(BASE_DIR)
         database.import_applied_updates(BASE_DIR)
         _check_scheduled_jobs()
+        _start_pool_run()
         _tick += 1
         if _tick % 60 == 1:  # ~hourly, first one a minute after boot
             # Plan lifecycle: promotion-end pushes, then expired promotions moved
@@ -1258,6 +1286,19 @@ def _source_health():
     try:
         import ingestion as _ing
         return _ing.source_health()
+    except Exception as exc:  # never take health down for a statistic
+        return {"error": ("%s: %s" % (type(exc).__name__, exc))[:160]}
+
+
+def _paid_pool_health():
+    """/api/health -> paid_pool: per paid source, key present, month used vs
+    cap, free allowance, pool size, last run (paidpool.status). No secrets."""
+    try:
+        _c = database.get_db()
+        try:
+            return paidpool.status(_c)
+        finally:
+            _c.close()
     except Exception as exc:  # never take health down for a statistic
         return {"error": ("%s: %s" % (type(exc).__name__, exc))[:160]}
 
@@ -1845,6 +1886,21 @@ def run_job_search(user_id: int):
                             keywords=kws_, existing_urls=existing_urls,
                             allow_paid=_paid_ok, on_paid_call=_spend_paid_credit)
                         all_raw.extend(_ext)
+                        # The shared paid-source pool (paidpool.py): fetched once a
+                        # day for everyone, read here at no cost. Same plan gate as
+                        # paid sources (Beta/Premium/Expert, admin); no per-user credit.
+                        if _role == "admin" or (_plan_row and entitlements.limit(_plan_row, "paid_sources")):
+                            try:
+                                _pc = database.get_db()
+                                try:
+                                    _pool = paidpool.jobs_for_search(_pc)
+                                finally:
+                                    _pc.close()
+                                _pool = [p for p in _pool if p["url"] not in existing_urls]
+                                all_raw.extend(_pool)
+                                print(f"[search] paid pool: {len(_pool)} job(s) not seen before")
+                            except Exception as _pe:
+                                print(f"[search] ERROR paid pool unreadable: {_pe}")
                         _before = len(all_raw)
                         all_raw = _ingestion.deduplicate_raw(all_raw)
                         print(f"[search] Multi-source fuzzy dedup: {_before} -> {len(all_raw)} "
@@ -3892,7 +3948,7 @@ def _link_verdict(url: str, timeout: int = 10):
 HEALTH_PUBLIC_KEYS = (
     "status", "uptime_info", "scheduler", "schema_version", "commit", "db_backend",
     "credentials_encrypted", "error_reporting", "sources", "queue", "db_check",
-    "worker", "db_backend_refused", "last_search",
+    "worker", "db_backend_refused", "last_search", "paid_pool",
 )
 
 
@@ -4441,6 +4497,7 @@ class Handler(BaseHTTPRequestHandler):
                 "llm_history": gemini.history(14),
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),
+                "paid_pool": _paid_pool_health(),
                 # Queue depth and the age of the oldest running job: a wedged
                 # worker looks exactly like a healthy one from outside without
                 # this. Guarded because a box that predates migration 6 has no

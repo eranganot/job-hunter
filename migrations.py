@@ -951,6 +951,26 @@ def m0025_beta_plan(conn):
     conn.commit()
 
 
+def m0026_paid_pool(conn):
+    """The paid-source pool (2026-11-09, paidpool.py). paid_source_spend: units
+    billed per provider per Israel month - the free-tier guard; it must survive
+    redeploys, which the old /tmp ledger did not. paid_pool_jobs: what each
+    provider returned, shared by every user's search. paid_pool_runs: one row
+    per provider per day, so a source is asked once a day across restarts."""
+    conn.execute("CREATE TABLE IF NOT EXISTS paid_source_spend ("
+                 " provider TEXT NOT NULL, month TEXT NOT NULL, units INTEGER NOT NULL DEFAULT 0,"
+                 " PRIMARY KEY (provider, month))")
+    conn.execute("CREATE TABLE IF NOT EXISTS paid_pool_jobs ("
+                 " provider TEXT NOT NULL, provider_job_id TEXT NOT NULL, title TEXT NOT NULL,"
+                 " company TEXT, location TEXT, url TEXT NOT NULL, description TEXT,"
+                 " posted_at TEXT, fetched_at TEXT NOT NULL,"
+                 " PRIMARY KEY (provider, provider_job_id))")
+    conn.execute("CREATE TABLE IF NOT EXISTS paid_pool_runs ("
+                 " provider TEXT NOT NULL, day TEXT NOT NULL, status TEXT, fetched INTEGER,"
+                 " detail TEXT, ran_at TEXT, PRIMARY KEY (provider, day))")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -977,6 +997,7 @@ MIGRATIONS = [
     (23, "tailored_cvs",                m0023_tailored_cvs),
     (24, "company_boards",              m0024_company_boards),
     (25, "beta_plan",                   m0025_beta_plan),
+    (26, "paid_pool",                   m0026_paid_pool),
 ]
 
 
