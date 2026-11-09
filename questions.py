@@ -25,7 +25,11 @@ import re
 
 # Identity fields the ATS handlers fill themselves.
 _STANDARD = re.compile(r"\b(first[ _-]?name|last[ _-]?name|full[ _-]?name|e-?mail|phone|resume|cv|"
-                       r"cover[ _-]?letter|preferred first name)\b", re.I)
+                       r"cover[ _-]?letter)\b", re.I)
+# "What is your preferred first name?*" used to be in _STANDARD - but no handler
+# fills it, so a required one stayed empty and Greenhouse refused the submit
+# (Credible, 2026-11-09). It is now answered from the applicant's first name.
+_PREFERRED_NAME = re.compile(r"preferred\s+(first\s+)?name|name\s+you\s+(go|prefer)", re.I)
 _DEMOGRAPHIC = re.compile(r"gender|race|ethnic|veteran|disabilit|hispanic|latino|sexual orientation|"
                           r"pronoun|transgender", re.I)
 
@@ -130,7 +134,8 @@ def collect(frame) -> list:
     out = []
     for f in fields:
         lab = f.get("label") or ""
-        if f.get("filled") or not lab or _STANDARD.search(lab) and not f.get("options"):
+        if f.get("filled") or not lab or (_STANDARD.search(lab) and not _PREFERRED_NAME.search(lab)
+                                          and not f.get("options")):
             continue
         if f["type"] == "combobox" and not f.get("options"):
             import apply_engine as _ae
@@ -241,7 +246,9 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
         # standing instructions (Eran, 2026-11-08).
         _profile_link = None
         if q.get("type") in ("text", "url"):
-            if re.search(r"linked\s*in", q.get("label") or "", re.I):
+            if _PREFERRED_NAME.search(q.get("label") or ""):
+                _profile_link = (applicant or {}).get("first_name")
+            elif re.search(r"linked\s*in", q.get("label") or "", re.I):
                 _profile_link = (applicant or {}).get("linkedin_url")
             elif re.search(r"git\s*hub", q.get("label") or "", re.I):
                 _profile_link = (applicant or {}).get("github_url")
