@@ -278,9 +278,36 @@ RESEND_VERIFIED_EMAIL = os.environ.get("RESEND_VERIFIED_EMAIL", "eran.ganot@gmai
 # own verified address, which is why the override below ever existed.
 RESEND_SANDBOX_FROM = "onboarding@resend.dev"
 RESEND_FROM = os.environ.get("RESEND_FROM", "Job Hunter <%s>" % RESEND_SANDBOX_FROM)
+# Where "Contact support" messages go (2026-11-09). Defaults to the Resend
+# account's own address, which the sandbox sender can always deliver to - so the
+# form works before the domain is verified in Resend.
+SUPPORT_EMAIL = os.environ.get("JH_SUPPORT_EMAIL", "") or RESEND_VERIFIED_EMAIL
+SUPPORT_MAX_CHARS = 5000
 
 
-def send_email(to_addr: str, subject: str, body: str, **_kwargs):
+def send_support_message(user: dict, message: str, subject: str = "", user_agent: str = "") -> None:
+    """Email one "Contact support" message to SUPPORT_EMAIL, Reply-To the user,
+    so answering is a plain Reply. Raises on failure - the route must not say
+    "sent" when it was not."""
+    import entitlements
+    email = (user.get("email") or "").strip()
+    subj = (subject or "").strip().replace("\n", " ")[:120] or "Message from the app"
+    body = (
+        "%s\n\n"
+        "---\n"
+        "From: %s <%s>\n"
+        "Account id: %s\n"
+        "Plan: %s\n"
+        "App commit: %s\n"
+        "Device: %s\n"
+        "Reply to this email to answer them.\n"
+    ) % (message.strip(), user.get("name") or "", email, user.get("id"),
+         entitlements.plan_info(user)["label"],
+         os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or "local", (user_agent or "")[:200])
+    send_email(SUPPORT_EMAIL, "[Job Hunter support] %s" % subj, body, reply_to=email)
+
+
+def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", **_kwargs):
     """Send an email notification via the Resend SDK.
 
     This function used to set `actual_to = RESEND_VERIFIED_EMAIL` and DISCARD
@@ -317,12 +344,15 @@ def send_email(to_addr: str, subject: str, body: str, **_kwargs):
             % (RESEND_SANDBOX_FROM, RESEND_VERIFIED_EMAIL or "<unset>", to_addr))
     actual_to = to_addr
     resend.api_key = RESEND_API_KEY
-    result = resend.Emails.send({
+    msg = {
         "from": RESEND_FROM,
         "to": [actual_to],
         "subject": subject,
         "text": body,
-    })
+    }
+    if reply_to:
+        msg["reply_to"] = reply_to
+    result = resend.Emails.send(msg)
     if result.get("id"):
         print(f"[email/resend] ✅ Sent to {actual_to} — {result['id']}")
     else:
@@ -5445,6 +5475,39 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # ── Contact support (2026-11-09) ──────────────────────────────────────
+        # Emailed to the admin with Reply-To the user. 5 a day per user; a
+        # failed send is reported as a failure, never as "sent".
+        if path == "/api/support":
+            data = self.read_json() or {}
+            message = str(data.get("message") or "").strip()
+            if not message:
+                self.send_json({"error": "Write a message first.", "code": "empty"}, 400)
+                return
+            if len(message) > SUPPORT_MAX_CHARS:
+                self.send_json({"error": "Keep it under %d characters." % SUPPORT_MAX_CHARS,
+                                "code": "too_long"}, 400)
+                return
+            _swait = ratelimit.check_and_record("support", str(user_id))
+            if _swait:
+                self.send_json({"error": "You've sent several messages today. Try again tomorrow.",
+                                "code": "rate_limited", "retry_after": _swait}, 429)
+                return
+            try:
+                send_support_message(user, message, str(data.get("subject") or ""),
+                                     self.headers.get("User-Agent", ""))
+            except Exception as e:
+                print(f"[support] ERROR message from user {user_id} not sent: {e}")
+                self.send_json({"error": "Your message couldn't be sent right now. Please try again later.",
+                                "code": "send_failed"}, 503)
+                return
+            try:
+                database.log_activity(user_id, "support_message", "Sent a message to support")
+            except Exception as e:
+                print(f"[support] WARNING activity log failed for user {user_id}: {e}")
+            self.send_json({"success": True})
+            return
+
         if path == "/api/blocklist":
             data = self.read_json()
             company = (data.get("company") or "").strip()
@@ -6595,7 +6658,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Admin: toggle user active state ───────────────────────────────────
         # ── Admin: set a user's plan, permanently or as a promotion ───────────
-        # Body: {"plan": "free"|"premium"|"expert", "days": int|null, "after": plan}.
+        # Body: {"plan": "free"|"premium"|"beta"|"expert", "days": int|null, "after": plan}.
         # days = a promotion that ends after that many days and falls back to
         # `after` (default free); null = permanent. Logged in plan_events with
         # the admin's id. Admin is a role, not a plan, so an admin's own row is

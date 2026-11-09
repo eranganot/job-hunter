@@ -6,7 +6,8 @@ scattered across routes and a UI that disagrees with the server about who may
 do what. Every gate in the app answers from here; the numbers live in plans.py.
 
 The plans (plans.py, approved 2026-11-05):
-    free / premium / expert - limits and features per plan
+    free / premium / beta / expert - limits and features per plan
+                              (beta = Premium's limits, no end date; 2026-11-09)
     admin                   - a ROLE, not a plan: checked separately, so Eran's
                               own access never depends on a plan column.
 
@@ -201,10 +202,27 @@ def _has_locked_jobs_table(conn) -> bool:
         return False
 
 
-def start_new_user_promotion(conn, user_id: int, now: datetime | None = None) -> dict:
-    """Every new account starts on Premium free for 30 days, then Free."""
-    return grant_plan(conn, user_id, plans.PROMOTION_PLAN, days=plans.PROMOTION_DAYS,
-                      after="free", reason="new_user", now=now)
+def start_new_user_plan(conn, user_id: int, now: datetime | None = None) -> dict:
+    """Every new account joins on the Beta plan, with no end date (Eran,
+    2026-11-09; it replaced the 30-day Premium promotion)."""
+    return grant_plan(conn, user_id, plans.NEW_USER_PLAN, days=None, reason="beta", now=now)
+
+
+def move_promotions_to_beta(conn, now: datetime | None = None) -> list:
+    """Every non-admin account on a running PREMIUM promotion moves to Beta with
+    no end date (Eran, 2026-11-09: "move them to Beta too"). Logged as
+    'beta_migration'. Only Premium: Beta has Premium's limits, so moving an
+    Expert promotion would be a downgrade. Promotions that already ended,
+    admin-set plans and admins are left alone.
+    Idempotent: a moved account is no longer a running promotion."""
+    now = now or _utcnow()
+    rows = conn.execute(
+        "SELECT id FROM users WHERE plan_source='promotion' AND plan=? AND plan_until IS NOT NULL "
+        "AND plan_until > ? AND LOWER(COALESCE(role, 'user')) != 'admin'",
+        (plans.PROMOTION_PLAN, _stamp(now))).fetchall()
+    for r in rows:
+        grant_plan(conn, r[0], plans.NEW_USER_PLAN, days=None, reason="beta_migration", now=now)
+    return [r[0] for r in rows]
 
 
 def _event(conn, user_id, from_plan, to_plan, until, reason, by_user_id, now):

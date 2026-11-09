@@ -10,10 +10,13 @@ Admin is a ROLE, not a plan (entitlements.is_admin): it is never sold or
 granted, and the ADMIN row below is what an admin gets whatever their plan
 column says.
 
-Decisions behind the numbers (matrix doc, 2026-11-05):
-- No Beta plan. New users, and existing users when enforcement ships, get
-  Premium free for PROMOTION_DAYS, then move to Free automatically.
-- Users get a web push NOTICE_DAYS before a promotion ends.
+Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
+- Beta (Eran, 2026-11-09 - replaces the 11-05 "no Beta plan" rule): every new
+  account joins on NEW_USER_PLAN = "beta", which has Premium's limits and NO
+  end date; the users who were on the 30-day Premium promotion moved to it too
+  (migration 25). It stays until the admin moves someone. Not a paid plan.
+- Promotions (a plan with an end date, then Free) remain an admin tool; a web
+  push goes out NOTICE_DAYS before one ends.
 - Matches per search: Free 3, Premium 6, Expert all; the rest are shown as
   blurred placeholders whose content never leaves the server.
 - Auto-apply is not sold while it is parked: admin only.
@@ -26,7 +29,8 @@ from __future__ import annotations
 
 UNLIMITED = None
 
-PROMOTION_PLAN = "premium"
+NEW_USER_PLAN = "beta"          # 2026-11-09: every signup, no end date
+PROMOTION_PLAN = "premium"      # what the 11-05 new-user promotion granted
 PROMOTION_DAYS = 30
 NOTICE_DAYS = (7, 1)            # web push this many days before a promotion ends
 SIX_MONTH_DISCOUNT = 0.20       # Step 11 (Paddle); not used until billing ships
@@ -80,6 +84,7 @@ PLANS = {
         "ai_calls_per_day": 300,
         "deferred_list": True,
     },
+    # "beta" is inserted just below: a copy of Premium under its own name.
     "expert": {
         "label": "Expert",
         "search_cadence": "daily",      # "daily + on demand"
@@ -99,6 +104,13 @@ PLANS = {
         "deferred_list": True,
     },
 }
+
+# Beta = Premium's limits under its own name (2026-11-09), so the beta users
+# are countable and can be moved as a group later. Kept a copy, not a second
+# literal, so the two can never drift apart by accident.
+PLANS = {**{k: v for k, v in PLANS.items() if k != "expert"},
+         "beta": {**PLANS["premium"], "label": "Beta"},
+         "expert": PLANS["expert"]}
 
 ADMIN = {
     "label": "Admin",

@@ -83,16 +83,16 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 def _start_promotion(conn, user_id, role):
-    """Every new account starts on Premium free for 30 days (plans.py). Admin is
+    """Every new account joins on the Beta plan (plans.py, 2026-11-09). Admin is
     a role and never needs a plan. A failure here must not fail the signup: the
     account is created on Free and the error is logged loudly."""
     if role == "admin":
         return
     try:
         import entitlements
-        entitlements.start_new_user_promotion(conn, user_id)
+        entitlements.start_new_user_plan(conn, user_id)
     except Exception as e:
-        print("[plans] ERROR could not start the new-user promotion for user %s: %s" % (user_id, e))
+        print("[plans] ERROR could not put new user %s on the Beta plan: %s" % (user_id, e))
 
 
 def create_user(name: str, email: str, password: str):

@@ -47,6 +47,7 @@ POLICIES = {
     "login":      lambda: _policy("login", 8, 900),        # 8 failures / 15 min
     "register":   lambda: _policy("register", 5, 3600),    # 5 new accounts / hour / IP
     "run_search": lambda: _policy("run_search", 6, 3600),  # 6 manual searches / hour / user
+    "support":    lambda: _policy("support", 5, 86400),    # 5 support messages / day / user
 }
 
 

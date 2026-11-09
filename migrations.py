@@ -938,6 +938,19 @@ def m0024_company_boards(conn):
     conn.commit()
 
 
+def m0025_beta_plan(conn):
+    """Beta (Eran, 2026-11-09): every new account joins on the Beta plan
+    (Premium's limits, no end date), and the accounts on a running 30-day
+    Premium promotion move to Beta now - so nobody gets the "your Premium ends
+    in 7 days" push. Ended promotions, admin-set plans and admins are untouched.
+    No schema change; idempotent (a moved account has no running promotion)."""
+    import entitlements
+    moved = entitlements.move_promotions_to_beta(conn)
+    if moved:
+        print("[db] beta: %d account(s) moved from the Premium promotion to Beta" % len(moved))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -963,6 +976,7 @@ MIGRATIONS = [
     (22, "auto_apply_fresh_choice",     m0022_auto_apply_fresh_choice),
     (23, "tailored_cvs",                m0023_tailored_cvs),
     (24, "company_boards",              m0024_company_boards),
+    (25, "beta_plan",                   m0025_beta_plan),
 ]
 
 
