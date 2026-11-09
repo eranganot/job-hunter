@@ -170,3 +170,21 @@ def test_cleanup_moves_errored_applied_back(env):
     conn.close()
     assert rows["Bad"]["status"] == "approved" and rows["Bad"]["apply_status"] == "failed"
     assert rows["Good"]["status"] == "applied"   # clean one stays
+
+
+def test_a_job_shows_applying_while_sent_and_leaves_the_queue_when_sent(env, monkeypatch):
+    """Eran, 2026-11-09: "the user will see a real indication about the status
+    of the application and if something was successfully applied - remove it
+    from the queue (and move it to the applied tab)"."""
+    app, uid = env
+    jid = _seed(uid)
+    seen = []
+
+    def _submit(*a, **k):
+        seen.append(_row(jid)["apply_status"])
+        return {"success": True, "status": "confirmed", "confirmation_text": "Thank you", "error": ""}
+    monkeypatch.setattr(app, "_submit_application_guarded", _submit)
+    app.run_job_apply(uid)
+    assert seen == ["applying"], "the queue said 'Not sent yet' while the job was being sent"
+    r = _row(jid)
+    assert (r["status"], r["apply_status"]) == ("applied", "confirmed")   # Applied tab, not the queue
