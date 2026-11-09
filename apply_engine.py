@@ -1031,6 +1031,15 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         res = _finalize_after_submit(page, applicant, lever_submit)
         if not res.get("success"):
             state = _antibot_state(page)
+            if state and re.search(r"click on|select all|verify", state, re.I) and "form still present" in (res.get("error") or ""):
+                # Observed in production 2026-11-09 (Houzz): after Submit, hCaptcha
+                # showed a picture puzzle ("Please click on the TWO icons that are
+                # different") and the form stayed - nothing was sent. A check meant
+                # for a person: it is never solved for the user.
+                return {**res, "status": "failed", "apply_failure_type": "captcha",
+                        "apply_failure_detail": "Lever human check: " + state[:200],
+                        "error": "Lever asked for a human check (a picture puzzle), so nothing was sent. "
+                                 "Open the job and apply yourself."}
             if state:
                 res["error"] = ((res.get("error") or "") + " [anti-bot widget: %s]" % state)[:480]
         return res

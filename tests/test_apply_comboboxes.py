@@ -418,3 +418,19 @@ def test_comeets_custom_dropdown_is_a_question_and_gets_answered(page):
         ("Are you currently based in Israel?", "dropdown", ["Yes", "No"], True)]
     assert questions._fill(page, qs[0], "Yes")
     assert questions.collect(page) == []          # answered: no longer "Choose"
+
+
+def test_a_required_preferred_first_name_is_answered_with_the_first_name(page):
+    """Credible on Greenhouse (production, 2026-11-09): "Submit blocked by
+    required/invalid fields: What is your preferred first name?*". It was
+    treated as a name field the handler fills - and none did."""
+    import questions
+    page.set_content("""<form>
+      <label for="preferred_name">Preferred First Name</label><input id="preferred_name" type="text">
+      <label for="q1">What is your preferred first name?*</label><input id="q1" type="text" required>
+      <label for="first_name">First Name*</label><input id="first_name" type="text" required>
+    </form>""")
+    labels = [q["label"] for q in questions.collect(page)]
+    assert "What is your preferred first name?*" in labels and "First Name*" not in labels
+    questions.answer(page, {"first_name": "Dana", "last_name": "Levi"}, {"title": "PM"}, llm=lambda p: [])
+    assert page.input_value("#q1") == "Dana" and page.input_value("#preferred_name") == "Dana"
