@@ -7,7 +7,7 @@ the month is spread over its days; each source runs once a day; nothing is
 fetched per user."""
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -275,3 +275,67 @@ def test_off_by_default_nothing_is_called_whatever_keys_are_set(conn, monkeypatc
     monkeypatch.setenv("JH_PAID_POOL_SOURCES", "hirebase, nonsense")      # one at a time
     out = paidpool.run_daily(lambda: _NoClose(conn), NOW, fetchers)
     assert list(out) == ["hirebase"] and len(calls) == 1
+
+
+# ── which titles the pool asks (2026-11-09) ──────────────────────────────
+# The first live TheirStack request (its own request log) carried the two shared
+# titles, then ten more in ALPHABETICAL order cut at "G": ties were broken by
+# name, so every title from H to Z was never asked. Eran: fold and rotate - but
+# "the senior titles are important", never fold them away.
+
+def _add_users(conn, titles_by_user):
+    for i, titles in enumerate(titles_by_user, start=10):
+        conn.execute("INSERT INTO users (id, name, email, password_hash, salt, created_date, role, plan) "
+                     "VALUES (?,?,?,'h','s','2026-11-01','user','beta')", (i, "u%d" % i, "u%d@x.test" % i))
+        conn.execute("INSERT INTO user_profiles (user_id, job_titles) VALUES (?, ?)", (i, json.dumps(titles)))
+    conn.commit()
+
+
+def test_a_non_senior_variant_folds_into_the_shorter_title_but_a_senior_one_never_does():
+    c = {t.lower(): (1, t) for t in ("Product Manager", "AI Product Manager", "Senior Product Manager",
+                                      "Head of Product", "Director of Product Management",
+                                      "Software Engineer", "Backend Software Engineer", "Lead Software Engineer")}
+    kept = {v[1] for v in paidpool._collapse(c).values()}
+    assert "AI Product Manager" not in kept and "Backend Software Engineer" not in kept
+    for senior in ("Senior Product Manager", "Head of Product", "Director of Product Management",
+                   "Lead Software Engineer"):
+        assert senior in kept
+    # the folded title's users count toward the title that covers it
+    assert paidpool._collapse(c)["product manager"][0] == 2
+
+
+def test_every_title_is_asked_within_a_few_days_not_only_a_to_g(conn):
+    many = ["Zookeeper Liaison", "Yield Analyst", "Xray Technician", "Warehouse Planner", "VP Product",
+            "UX Researcher", "Technical Writer", "Software Engineer", "Recruiter", "Quality Engineer",
+            "Product Manager", "Operations Analyst", "Nurse Coordinator", "Marketing Analyst"]
+    _add_users(conn, [[t] for t in many])
+    plan = paidpool.title_plan(conn, NOW)
+    # + Head of Product, Director of Product (the Beta fixture user); the Free
+    # user's "Data Analyst" is not asked - Free plans don't see paid sources
+    assert len(plan["titles"]) == paidpool.MAX_TITLES and plan["total"] == len(many) + 2
+    seen = set()
+    for d in range(6):
+        seen |= set(paidpool.pool_titles(conn, NOW + timedelta(days=d)))
+    assert seen >= set(many) | {"Head of Product", "Director of Product"}
+    assert "Data Analyst" not in seen
+    assert "Zookeeper Liaison" in seen                              # the old cut never reached Z
+
+
+def test_senior_titles_get_the_slots_first_but_others_still_rotate(conn):
+    seniors = ["Senior %s Manager" % x for x in "ABCDEFGHIJKLMNOP"]   # 16 senior titles
+    _add_users(conn, [[t] for t in seniors] + [["Plain Analyst"], ["Plain Designer"]])
+    plan = paidpool.title_plan(conn, NOW)
+    picked = plan["titles"]
+    assert len(picked) == paidpool.MAX_TITLES
+    n_senior = sum(1 for t in picked if paidpool._seniority(paidpool._words(t)))
+    n_other = len(picked) - n_senior
+    # 18 senior incl. the fixture's Head/Director; 2 non-senior (the Free user's
+    # "Data Analyst" is not asked): both get a slot, the other 10 go to senior titles
+    assert n_other == 2 and n_senior == 10
+
+
+def test_the_run_reports_title_counts_not_titles(conn, monkeypatch):
+    monkeypatch.setenv("THEIRSTACK_API_KEY", "k")
+    res = paidpool.run_source(conn, "theirstack", NOW, {"theirstack": _fake(_jobs(1))})
+    assert "titles asked 2 of 2 (2 after folding, 2 senior)" in res["detail"]
+    assert "Head of Product" not in res["detail"]

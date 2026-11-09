@@ -322,9 +322,61 @@ FETCHERS = {"theirstack": _fetch_theirstack, "hirebase": _fetch_hirebase,
 
 # ── the daily run ──────────────────────────────────────────────────────────
 
-def pool_titles(conn) -> list:
-    """The union of target titles of active users whose plan includes paid
-    sources (and admins), most common first."""
+# Words that make a title more senior. A title carrying one of these is never
+# folded into a shorter title without it (Eran, 2026-11-09: "the senior titles
+# are important"), and senior titles get the daily slots first.
+SENIORITY_WORDS = {"senior", "sr", "lead", "principal", "staff", "head", "director",
+                   "vp", "vice", "president", "chief", "cpo", "cto", "ceo", "coo",
+                   "cmo", "group", "executive"}
+MIN_ROTATING_SLOTS = 4       # slots kept for non-senior titles when there are any
+
+
+def _words(title: str) -> frozenset:
+    import re
+    return frozenset(w for w in re.split(r"[^a-z0-9]+", title.lower()) if w)
+
+
+def _seniority(words) -> frozenset:
+    return frozenset(w for w in words if w in SENIORITY_WORDS)
+
+
+def _collapse(counts: dict) -> dict:
+    """Drop a title when a shorter title's words are all in it AND it adds no
+    seniority word: providers match title words in any order, so "Product
+    Manager" already returns "AI Product Manager". "Senior Product Manager" is
+    kept - it adds "senior". A dropped title's user count goes to the title
+    that covers it. {key: (count, title)} -> same shape."""
+    items = sorted(counts.items(), key=lambda kv: (len(_words(kv[1][1])), kv[0]))
+    kept = {}
+    for key, (n, title) in items:
+        w = _words(title)
+        cover = None
+        for k2, (_n2, t2) in kept.items():
+            w2 = _words(t2)
+            if w2 and w2 < w and _seniority(w) <= _seniority(w2):
+                cover = k2
+                break
+        if cover is None:
+            kept[key] = (n, title)
+        else:
+            kept[cover] = (kept[cover][0] + n, kept[cover][1])
+    return kept
+
+
+def _rotate(items: list, k: int, day: int) -> list:
+    """k items from `items`, a different slice each day, wrapping around, so
+    every item is asked at least every ceil(len/k) days."""
+    if k <= 0 or not items:
+        return []
+    if len(items) <= k:
+        return list(items)
+    start = (day * k) % len(items)
+    return [items[(start + i) % len(items)] for i in range(k)]
+
+
+def title_plan(conn, now=None) -> dict:
+    """Which titles the pool asks today, and why.
+    {titles, total, after_collapse, senior} - counts only go to health."""
     import entitlements
     counts = {}
     rows = conn.execute(
@@ -342,7 +394,21 @@ def pool_titles(conn) -> list:
             t = " ".join(str(t).split())[:80]
             if t:
                 counts[t.lower()] = (counts.get(t.lower(), (0, t))[0] + 1, t)
-    return [t for _n, t in sorted(counts.values(), key=lambda x: (-x[0], x[1].lower()))][:MAX_TITLES]
+    kept = _collapse(counts)
+    order = lambda x: (-x[0], x[1].lower())
+    senior = [t for _n, t in sorted((v for v in kept.values() if _seniority(_words(v[1]))), key=order)]
+    others = [t for _n, t in sorted((v for v in kept.values() if not _seniority(_words(v[1]))), key=order)]
+    day = (now or _now()).astimezone(_LOCAL).date().toordinal()
+    senior_slots = min(len(senior), MAX_TITLES - min(MIN_ROTATING_SLOTS, len(others)))
+    picked = _rotate(senior, senior_slots, day)
+    picked += _rotate(others, MAX_TITLES - len(picked), day)
+    return {"titles": picked, "total": len(counts), "after_collapse": len(kept), "senior": len(senior)}
+
+
+def pool_titles(conn, now=None) -> list:
+    """Today's titles for the paid sources: senior titles first, never folded
+    away; the rest folded where a shorter title covers them, then rotated."""
+    return title_plan(conn, now)["titles"]
 
 
 def _record_run(conn, name, day, status, fetched, detail):
@@ -378,7 +444,8 @@ def run_source(conn, name, now=None, fetchers=None) -> dict:
     status: ok | no_key | no_titles | budget_spent | error."""
     if not api_key(name):
         return {"status": "no_key", "fetched": 0, "added": 0, "detail": "no API key set"}
-    titles = pool_titles(conn)
+    plan = title_plan(conn, now)
+    titles = plan["titles"]
     if not titles and name != "apify":            # Ethosia is pulled whole, newest first
         return {"status": "no_titles", "fetched": 0, "added": 0, "detail": "no user titles to search"}
     limit = budget_today(conn, name, now)
@@ -399,7 +466,8 @@ def run_source(conn, name, now=None, fetchers=None) -> dict:
     settle(conn, name, limit, len(jobs), now)
     added = _store(conn, name, jobs)
     return {"status": "ok", "fetched": len(jobs), "added": added,
-            "detail": "requested %d, got %d, %d new to the pool" % (limit, len(jobs), added)}
+            "detail": "requested %d, got %d, %d new to the pool; titles asked %d of %d (%d after folding, %d senior)"
+                      % (limit, len(jobs), added, len(titles), plan["total"], plan["after_collapse"], plan["senior"])}
 
 
 def run_daily(get_db, now=None, fetchers=None) -> dict:
