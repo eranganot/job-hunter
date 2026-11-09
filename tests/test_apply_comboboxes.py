@@ -475,3 +475,37 @@ def test_an_employee_shared_link_does_not_open_comeets_employee_popup(page):
     assert ae._close_comeet_popups(page) == 1          # the employee window only, never the form's
     page.click("#go", timeout=1500)
     assert page.evaluate("window.sent") is True
+
+
+def _fake_comeet(status, body):
+    """A company page with a Comeet frame whose Submit posts to Comeet's API,
+    answered with `status`; no thank-you text appears either way."""
+    from playwright.sync_api import sync_playwright
+    form = """<html><body><form onsubmit="return false">
+      <input name="firstName"><input name="lastName"><input name="email"><input name="phone">
+      <button type="button" onclick="fetch('https://www.comeet.co/careers-api/1.0/company/1.1/positions/2.2/apply',
+        {method:'POST', body:'x'})">SUBMIT APPLICATION</button></form></body></html>"""
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(executable_path=CHROME, headless=True, args=["--no-sandbox"])
+        p = b.new_page()
+        p.route("https://www.comeet.co/jobs/**", lambda r: r.fulfill(status=200, content_type="text/html", body=form))
+        p.route("https://www.comeet.co/careers-api/**", lambda r: r.fulfill(
+            status=status, content_type="application/json", body=body, headers={"Access-Control-Allow-Origin": "*"}))
+        p.route("https://careers.acme.example/**", lambda r: r.fulfill(status=200, content_type="text/html",
+            body='<script src="x/comeet"></script><iframe src="https://www.comeet.co/jobs/1.1/2.2/apply?token=t"></iframe>'))
+        p.goto("https://careers.acme.example/job")
+        p.wait_for_timeout(500)
+        res = ae._apply_comeet(p, {"first_name": "Dana", "last_name": "Levi", "email": "d@example.test",
+                                   "phone": "+972 541234567"}, None)
+        b.close()
+    return res
+
+
+def test_comeet_is_judged_by_its_answer_to_the_application_request():
+    """Rapyd and Riverside (2026-11-09): the request went out from production,
+    no thank-you text the engine knows appeared, and both were reported "no
+    confirmation" though they were most likely sent."""
+    ok = _fake_comeet(200, '{"status":"ok"}')
+    assert ok["success"] and ok["status"] == "confirmed" and "HTTP 200" in ok["confirmation_text"]
+    bad = _fake_comeet(422, '{"error":"email invalid"}')
+    assert not bad["success"] and "HTTP 422" in bad["error"] and "email invalid" in bad["error"]

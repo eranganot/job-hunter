@@ -963,7 +963,37 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
             return _needs_answers(qa["unsure"])
         _dismiss_cookie_banners(page)
         _close_comeet_popups(page)
+        # Comeet's own answer to the application request is the verdict
+        # (2026-11-09): on the production server the request went out for Rapyd
+        # and Riverside, but no thank-you text the engine knows appeared, so
+        # both were reported "no confirmation" though they were most likely sent.
+        api = []
+
+        def _on_response(resp):
+            try:
+                if resp.request.method == "POST" and "/careers-api/" in resp.url and "/apply" in resp.url:
+                    try:
+                        body = (resp.text() or "")[:300]
+                    except Exception as exc:          # body unavailable (e.g. aborted)
+                        body = "(%s)" % type(exc).__name__
+                    api.append((resp.status, body))
+            except Exception as exc:
+                print(f"[apply-engine] Comeet response hook: {type(exc).__name__}")
+        page.on("response", _on_response)
         frame.click('button:has-text("SUBMIT APPLICATION")', timeout=5_000)
+        for _ in range(20):                           # the request answers within seconds
+            if api:
+                break
+            page.wait_for_timeout(500)
+        if api:
+            status, body = api[-1]
+            print(f"[apply-engine] Comeet apply answered HTTP {status}")
+            if 200 <= status < 300:
+                return {"success": True, "status": "confirmed", "error": "",
+                        "confirmation_text": f"Comeet accepted the application (HTTP {status})"}
+            return {"success": False, "status": "failed", "confirmation_text": "",
+                    "apply_failure_type": "form_validation" if 400 <= status < 500 else "other",
+                    "error": f"Comeet refused the application (HTTP {status}): {body[:200]}"}
 
         # Comeet-specific verdict. _verify_submission would call a page without
         # a visible error and without a <form> "submitted"; here success needs
