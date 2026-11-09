@@ -1058,7 +1058,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
             <span className="text-sm text-gray-400 truncate">{job.company}</span>
             {job.location && <span className="text-xs text-gray-400 truncate">{job.location}</span>}
           </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap"><RouteBadge job={job} /><ApplyBadge job={job} /><FeedbackBadge job={job} />{job.applyRoute !== "board" && <LinkBadge job={job} />}</div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap"><RouteBadge job={job} />{!(["board", "account"].includes(job.applyRoute) && (!job.applyStatus || job.applyStatus === "queued")) && <ApplyBadge job={job} />}<FeedbackBadge job={job} />{job.applyRoute !== "board" && <LinkBadge job={job} />}</div>
           {/* Written by the scorer and shown on the swipe card, then dropped the
               moment a job reached the queue - which is where the decision to
               actually apply gets made. */}
