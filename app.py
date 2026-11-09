@@ -351,8 +351,36 @@ def _apply_rates(conn, user_id=None) -> dict:
                     "manual (job boards, Workday accounts) are not counted as failures."}
 
 
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _engine_on() -> bool:
-    return os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+    """The server-wide switch only. Whether it sends for a given user is
+    _engine_on_for."""
+    return _flag("APPLY_ENGINE_ENABLED")
+
+
+def _engine_on_for(user) -> bool:
+    """APPLY_ENGINE_ENABLED is on AND this user may use it (Eran, 2026-11-09:
+    "for now I want it to be applicable only for me"). Admins only until
+    APPLY_ENGINE_FOR_ALL is also set - so switching the engine on for testing
+    can never send applications for other users who turned auto-apply on.
+    user: a user dict or a user id."""
+    if not _engine_on():
+        return False
+    if _flag("APPLY_ENGINE_FOR_ALL"):
+        return True
+    if isinstance(user, dict):
+        role = user.get("role")
+    else:
+        conn = database.get_db()
+        try:
+            r = conn.execute("SELECT role FROM users WHERE id=?", (user,)).fetchone()
+        finally:
+            conn.close()
+        role = r["role"] if r else None
+    return role == "admin"
 
 
 def _tailor_inputs(user_id, user):
@@ -2925,7 +2953,8 @@ def _apply_failure_fields(failure_type, attempts_after, engine_status=None):
 def run_job_apply(user_id: int) -> int:
     """Submit applications to all approved jobs using browser automation + Claude."""
     # Global kill-switch: apply engine disabled by default (2026-07-20).
-    if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
+    # Admins only until APPLY_ENGINE_FOR_ALL (2026-11-09).
+    if not _engine_on_for(user_id):
         return {"applied": 0, "error": "", "skipped": "apply_engine_disabled"}
     # ── Rate-limit + auto_apply gate ──────────────────────────────────────────
     from datetime import timezone as _tz
@@ -3168,127 +3197,152 @@ def _trigger_apply_bg(user_id: int, job_id: int):
     Called immediately when a user approves a job so they don't wait for the
     scheduled batch window.
     """
+    threading.Thread(target=_apply_one, args=(user_id, job_id), daemon=True).start()
+
+
+_SELECTED_MAX = 15
+
+
+def _apply_selected_bg(user_id: int, job_ids: list):
+    """The queue's "Auto-apply selected" (Eran, 2026-11-09): the jobs one after
+    another in one thread - so a selection of ten is not ten browsers waiting
+    on the engine's semaphore - each exactly as Apply now would send it."""
     def _run():
-        try:
-            import apply_engine
-            if os.environ.get("APPLY_ENGINE_ENABLED", "0").strip().lower() not in ("1", "true", "yes", "on"):
-                return  # apply engine disabled (2026-07-20)
-            conn = database.get_db()
+        for jid in job_ids:
             try:
-                job  = conn.execute(
-                    "SELECT id, title, company, url, apply_status, COALESCE(apply_attempts,0) AS apply_attempts FROM jobs "
-                    "WHERE id=? AND user_id=?", (job_id, user_id)
-                ).fetchone()
-                if not job:
-                    conn.close()
-                    return
-                # Guard: already applied or currently in flight
-                if job["apply_status"] in ("applying", "confirmed", "submitted"):
-                    conn.close()
-                    return
-
-                # Mark as 'applying' so the UI shows a spinner
-                conn.execute(
-                    "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
-                    (job_id, user_id)
-                )
-                conn.commit()
-
-                user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-                profile = conn.execute(
-                    "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
-                ).fetchone()
-                conn.close()
-
-                email     = user["email"] if user else ""
-                applicant = _applicant_for(user_id, email, (user["name"] if user else ""),
-                                           (profile["cv_path"] if profile else ""),
-                                           (profile["cv_summary"] if profile else ""))
-                cv_path   = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
-
-                res = _submit_application_guarded(
-                    job["url"], job["title"], job["company"],
-                    applicant, cv_path, GEMINI_KEY,
-                    (job["location"] if "location" in job.keys() else ""),
-                    user_id=user_id, job_id=job_id,
-                )
-
-                apply_status         = res["status"]
-                apply_confirmation   = res.get("confirmation_text", "")[:1000]
-                apply_error          = res.get("error", "")[:500]
-                apply_failure_type   = res.get("apply_failure_type")
-                apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
-                resolved_url         = res.get("resolved_url", job["url"])
-                today                = datetime.now().strftime("%Y-%m-%d")
-
-                c2 = database.get_db()
-                try:
-                    if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
-                        c2.execute(
-                            "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
-                            "apply_status=?, apply_confirmation=?, apply_error=?, "
-                            "apply_failure_type=?, apply_failure_detail=?, "
-                            # Provenance, set at the moment of truth. Backfilling this
-                            # from note strings worked once (migration 9) and must
-                            # never be needed again.
-                            "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
-                            "apply_attempts=COALESCE(apply_attempts,0)+1 "
-                            "WHERE id=? AND user_id=?",
-                            (today, f"Applied via Job Hunter — {apply_status}",
-                             apply_status, apply_confirmation, apply_error,
-                             apply_failure_type, apply_failure_detail,
-                             job["url"] or "", job_id, user_id)
-                        )
-                    else:
-                        # Failed / manual_required — keep status='approved' so user can retry
-                        _attempts_after = (job["apply_attempts"] or 0) + 1
-                        _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
-                        c2.execute(
-                            "UPDATE jobs SET apply_status=?, apply_error=?, "
-                            "apply_failure_type=?, apply_failure_detail=?, "
-                            "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=?, "
-                            "apply_questions=? "
-                            "WHERE id=? AND user_id=?",
-                            (_fstatus, apply_error, apply_failure_type,
-                             apply_failure_detail, _next_at,
-                             json.dumps(res.get("questions")) if res.get("questions") else None,
-                             job_id, user_id)
-                        )
-                    c2.commit()
-                    c2.close()
-
-                    database.log_activity(
-                        user_id, "job_applied",
-                        f"{job['title']} @ {job['company']} — {apply_status}"
-                        + (f" (via {resolved_url})" if resolved_url != job['url'] else "")
-                    )
-                    print(f"[apply-bg] job {job_id}: {apply_status}")
-                finally:
-                    c2.close()
-            finally:
-                conn.close()
-
-        except Exception as e:
-            import traceback
-            print(f"[apply-bg] job {job_id} error: {e}")
-            traceback.print_exc()
-            # Make sure we don't leave the job stuck in 'applying'
-            try:
-                c3 = database.get_db()
-                try:
-                    c3.execute(
-                        "UPDATE jobs SET apply_status='failed', apply_error=? "
-                        "WHERE id=? AND user_id=? AND apply_status IN ('applying','awaiting_code')",
-                        (str(e)[:500], job_id, user_id)
-                    )
-                    c3.commit()
-                    c3.close()
-                finally:
-                    c3.close()
-            except Exception:
-                pass
-
+                _apply_one(user_id, jid)
+            except Exception as exc:          # _apply_one catches its own; never stop the batch
+                print(f"[apply-selected] job {jid} error: {exc}")
+        print(f"[apply-selected] user {user_id}: {len(job_ids)} done")
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _apply_one(user_id: int, job_id: int):
+    """One job through the engine and its result onto the row. The thread body
+    of _trigger_apply_bg, and each step of _apply_selected_bg.
+
+    The SELECT now carries location: the posting location the engine uses for a
+    sponsorship question was always "" here, because `"location" in job.keys()`
+    was asked of a row that never selected it (found 2026-11-09)."""
+    try:
+        import apply_engine
+        if not _engine_on_for(user_id):
+            return  # engine off, or not yet open to this user (2026-11-09)
+        conn = database.get_db()
+        try:
+            job  = conn.execute(
+                "SELECT id, title, company, url, location, apply_status, COALESCE(apply_attempts,0) AS apply_attempts FROM jobs "
+                "WHERE id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            if not job:
+                conn.close()
+                return
+            # Guard: already applied or currently in flight
+            if job["apply_status"] in ("applying", "confirmed", "submitted"):
+                conn.close()
+                return
+
+            # Mark as 'applying' so the UI shows a spinner
+            conn.execute(
+                "UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
+                (job_id, user_id)
+            )
+            conn.commit()
+
+            user    = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            profile = conn.execute(
+                "SELECT cv_summary, cv_path FROM user_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            conn.close()
+
+            email     = user["email"] if user else ""
+            applicant = _applicant_for(user_id, email, (user["name"] if user else ""),
+                                       (profile["cv_path"] if profile else ""),
+                                       (profile["cv_summary"] if profile else ""))
+            cv_path   = _cv_file(user_id, (profile["cv_path"] or "") if profile else "") or None
+
+            res = _submit_application_guarded(
+                job["url"], job["title"], job["company"],
+                applicant, cv_path, GEMINI_KEY,
+                (job["location"] if "location" in job.keys() else ""),
+                user_id=user_id, job_id=job_id,
+            )
+
+            apply_status         = res["status"]
+            apply_confirmation   = res.get("confirmation_text", "")[:1000]
+            apply_error          = res.get("error", "")[:500]
+            apply_failure_type   = res.get("apply_failure_type")
+            apply_failure_detail = (res.get("apply_failure_detail") or "")[:300]
+            resolved_url         = res.get("resolved_url", job["url"])
+            today                = datetime.now().strftime("%Y-%m-%d")
+
+            c2 = database.get_db()
+            try:
+                if apply_status in ("submitted", "confirmed") and not (apply_error or "").strip():
+                    c2.execute(
+                        "UPDATE jobs SET status='applied', applied_date=?, notes=?, "
+                        "apply_status=?, apply_confirmation=?, apply_error=?, "
+                        "apply_failure_type=?, apply_failure_detail=?, "
+                        # Provenance, set at the moment of truth. Backfilling this
+                        # from note strings worked once (migration 9) and must
+                        # never be needed again.
+                        "applied_via=CASE WHEN ?='' THEN 'no_url' ELSE 'engine' END, "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1 "
+                        "WHERE id=? AND user_id=?",
+                        (today, f"Applied via Job Hunter — {apply_status}",
+                         apply_status, apply_confirmation, apply_error,
+                         apply_failure_type, apply_failure_detail,
+                         job["url"] or "", job_id, user_id)
+                    )
+                else:
+                    # Failed / manual_required — keep status='approved' so user can retry
+                    _attempts_after = (job["apply_attempts"] or 0) + 1
+                    _fstatus, _next_at = _apply_failure_fields(apply_failure_type, _attempts_after, apply_status)
+                    c2.execute(
+                        "UPDATE jobs SET apply_status=?, apply_error=?, "
+                        "apply_failure_type=?, apply_failure_detail=?, "
+                        "apply_attempts=COALESCE(apply_attempts,0)+1, apply_next_attempt_at=?, "
+                        "apply_questions=? "
+                        "WHERE id=? AND user_id=?",
+                        (_fstatus, apply_error, apply_failure_type,
+                         apply_failure_detail, _next_at,
+                         json.dumps(res.get("questions")) if res.get("questions") else None,
+                         job_id, user_id)
+                    )
+                c2.commit()
+                c2.close()
+
+                database.log_activity(
+                    user_id, "job_applied",
+                    f"{job['title']} @ {job['company']} — {apply_status}"
+                    + (f" (via {resolved_url})" if resolved_url != job['url'] else "")
+                )
+                print(f"[apply-bg] job {job_id}: {apply_status}")
+            finally:
+                c2.close()
+        finally:
+            conn.close()
+
+    except Exception as e:
+        import traceback
+        print(f"[apply-bg] job {job_id} error: {e}")
+        traceback.print_exc()
+        # Make sure we don't leave the job stuck in 'applying'
+        try:
+            c3 = database.get_db()
+            try:
+                c3.execute(
+                    "UPDATE jobs SET apply_status='failed', apply_error=? "
+                    "WHERE id=? AND user_id=? AND apply_status IN ('applying','awaiting_code')",
+                    (str(e)[:500], job_id, user_id)
+                )
+                c3.commit()
+                c3.close()
+            finally:
+                c3.close()
+        except Exception:
+            pass
+
 
 
 # ── Multipart parser ──────────────────────────────────────────────────────────
@@ -4441,7 +4495,7 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[plans] WARNING plan info for user {user.get('id')}: {_pe}")
             # Settings tells a user who switched auto-apply on whether anything
             # is being sent yet (the engine's own server-wide switch).
-            out["auto_apply_live"] = _engine_on()
+            out["auto_apply_live"] = _engine_on_for(user)
             self.send_json(out)
             return
 
@@ -4578,8 +4632,10 @@ class Handler(BaseHTTPRequestHandler):
                         (user["id"], status) + _hargs
                     ).fetchall()
                 jobs_list = [dict(r) for r in rows]
+                import apply_engine as _ae_route
                 for _j in jobs_list:
                     _j["link_penalty"] = _links_mod.link_penalty(_j)
+                    _j["apply_route"] = _ae_route.apply_route(_j.get("url"))
 
                 # ── Live feedback learning: recompute deterministic penalties so the
                 #    New/Approved tabs reflect the user's latest pass feedback on every
@@ -6116,6 +6172,40 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "saved": saved})
             return
 
+        if path == "/api/jobs/apply-selected":
+            user = self.require_auth()
+            if not user:
+                return
+            if not _engine_on_for(user):
+                self.send_json({"error": "Auto-apply isn't running for your account yet, so nothing "
+                                         "would be sent.", "status": "engine_off"}, 409)
+                return
+            if not entitlements.can_auto_apply(user):
+                self.send_json({"error": "Auto-apply is not part of your plan.",
+                                "status": "not_entitled"}, 403)
+                return
+            try:
+                raw = (self.read_json() or {}).get("ids") or []
+                ids = list(dict.fromkeys(int(x) for x in raw))[:_SELECTED_MAX]
+            except (TypeError, ValueError, AttributeError):
+                self.send_json({"error": "ids must be job ids"}, 400)
+                return
+            conn = database.get_db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, apply_status FROM jobs WHERE user_id=? AND status='approved' AND id IN (%s)"
+                    % ",".join("?" * len(ids)), (user["id"], *ids)).fetchall() if ids else []
+            finally:
+                conn.close()
+            busy = ("applying", "awaiting_code", "confirmed", "submitted")
+            ok = {r["id"] for r in rows if (r["apply_status"] or "") not in busy}
+            picked = [i for i in ids if i in ok]          # the order the user sees
+            if picked:
+                _apply_selected_bg(user["id"], picked)
+            self.send_json({"success": True, "started": len(picked), "skipped": len(ids) - len(picked),
+                            "max": _SELECTED_MAX})
+            return
+
         m = re.match(r"^/api/jobs/(\d+)/apply-now$", path)
         if m:
             job_id = int(m.group(1))
@@ -6132,6 +6222,12 @@ class Handler(BaseHTTPRequestHandler):
                 if job["apply_status"] in ("applying", "awaiting_code"):
                     self.send_json({"error": "Already applying" if job["apply_status"] == "applying"
                                     else "This application is waiting for your security code"}, 409)
+                    return
+                # It said "Application started" with the engine off too, and
+                # the background thread then returned without a word.
+                if not _engine_on_for(user_id):
+                    self.send_json({"error": "Auto-apply isn't running for your account yet, so "
+                                             "nothing would be sent.", "status": "engine_off"}, 409)
                     return
                 _trigger_apply_bg(user_id, job_id)
                 self.send_json({"success": True, "message": "Application started"})
@@ -6638,7 +6734,7 @@ class Handler(BaseHTTPRequestHandler):
             # With the engine off a run ends at once as "apply_engine_disabled"
             # while the button said "Queued" - and each press still spent one
             # of the day's 20 runs (Eran, 2026-11-08). Say so instead.
-            if not _engine_on():
+            if not _engine_on_for(user):
                 self.send_json({"error": "Auto-apply isn't running yet, so nothing would be sent. "
                                          "Apply from the job's page on the company site for now"
                                          + (", or use Supervised apply in Admin." if user.get("role") == "admin" else "."),

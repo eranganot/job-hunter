@@ -28,26 +28,38 @@ _STOP = {"and", "the", "for", "of", "at", "in", "to", "a", "an", "&", "with", "o
 _PROMPT = """You rewrite a CV for ONE job. You may re-order, re-word, shorten, and choose
 emphasis. You may NOT add anything that is not in the CV.
 
+First read the job description and pick its 4-6 most important requirements. Then:
+
+- match: for each requirement, the CV's strongest evidence for it, quoted or closely
+  paraphrased from the CV (a role, a result, a skill). If the CV has nothing for it, set
+  evidence to "" - an honest gap is useful to the candidate; never stretch.
+- headline: one line built from the CV's own titles and domains, pointed at this job
+  (e.g. CV titles "Head of Product" and "Senior PM", job "Director of Product, Payments":
+  "Product leader - payments and B2B platforms" only if the CV shows payments and B2B).
+- summary: 3-4 sentences WRITTEN FOR THIS JOB - not the CV's own summary re-used. Open
+  with the experience that answers the job's top requirement, then the next one or two,
+  each backed by a concrete fact from the CV. Do not copy sentences from the CV.
+- experience: inside each role, put first the bullets that prove this job's requirements,
+  and start each bullet with what was achieved. Use the job's words where the CV supports
+  them (the CV says "A/B tests", the job says "experimentation": "experimentation (A/B
+  tests)"). Older, less relevant roles may be cut to their 1-3 strongest bullets.
+- skills: only skills, methods and tools that appear in the CV, this job's first.
+
 Hard rules:
-- Same people facts: every employer, job title, date, degree, school, number, percentage,
-  team size, revenue figure, product name and tool must come from the CV text. Copy numbers
+- Same facts: every employer, job title, date, degree, school, number, percentage, team
+  size, revenue figure, product name and tool must come from the CV text. Copy numbers
   exactly as written there. Never round, convert or estimate.
-- Keep every role from the CV, in the CV's order (most recent first). You may drop weaker
-  bullets of older roles, never a role.
-- Use the job's wording only where the CV supports it (e.g. the CV says "A/B tests", the job
-  says "experimentation": you may say "experimentation (A/B tests)").
-- Skills: only skills, methods and tools that appear in the CV, most relevant to this job first.
+- Keep every role from the CV, in the CV's order (most recent first). Never drop a role.
 - No first person. No buzzwords ("dynamic", "results-driven", "passionate", "synergy").
-- The summary is 3-4 sentences aimed at this job.
 
 Return ONLY JSON:
-{{"headline": "a title line built from the CV's own titles",
+{{"match": [{{"need": "a requirement of the job, in a few words", "evidence": "from the CV, or empty"}}],
+  "headline": "...",
   "summary": "...",
   "skills": ["..."],
   "experience": [{{"title": "...", "company": "...", "dates": "...", "bullets": ["..."]}}],
   "education": ["one line each, from the CV"],
-  "other": ["certifications, languages, etc. from the CV"],
-  "changes": ["3-6 short notes: what you put first for this job, and why"]}}
+  "other": ["certifications, languages, etc. from the CV"]}}
 
 JOB: {title} at {company}
 JOB DESCRIPTION:
@@ -168,6 +180,78 @@ def restore_roles(result: dict, roles: list) -> dict:
     return result
 
 
+def _grams(text: str) -> list:
+    w = re.findall(r"[a-z0-9+#']+", _norm(text))
+    return [" ".join(w[i:i + 3]) for i in range(len(w) - 2)]
+
+
+def copied_share(text: str, cv_text: str) -> float:
+    """How much of `text` is the CV word for word: the share of its three-word
+    runs that also occur in the CV. 1.0 = copied, ~0.2 = rewritten in the CV's
+    vocabulary."""
+    g = _grams(text)
+    if not g:
+        return 0.0
+    cv = set(_grams(cv_text))
+    return sum(1 for x in g if x in cv) / len(g)
+
+
+COPIED = 0.6          # at or above: the summary is the CV's own, not written for the job
+
+
+def _backed(evidence: str, cv_norm: str) -> bool:
+    """Most of the evidence's significant words are in the CV (a close
+    paraphrase passes; an invented claim does not)."""
+    ws = _words(evidence)
+    return bool(ws) and sum(1 for w in ws if w in cv_norm) / len(ws) >= 0.75
+
+
+def verify_match(match, cv_text: str) -> list:
+    """[{need, evidence}] with evidence the CV does not back, or with a number
+    the CV does not have, turned into a gap ("") - never shown as a strength."""
+    cv_norm, cv_nums = _norm(cv_text), _numbers(cv_text)
+    out = []
+    for m in (match or [])[:6]:
+        if not isinstance(m, dict) or not str(m.get("need") or "").strip():
+            continue
+        ev = str(m.get("evidence") or "").strip()
+        if ev and (not _backed(ev, cv_norm) or _numbers(ev) - cv_nums):
+            ev = ""
+        out.append({"need": str(m["need"]).strip()[:120], "evidence": ev[:300]})
+    return out
+
+
+def describe_changes(cv: dict, cv_text: str, roles: list) -> list:
+    """What actually differs from the CV, measured - not the model's account of
+    what it did (which could claim a change it never made)."""
+    out = []
+    if cv.get("summary"):
+        out.append("Summary written for this job." if copied_share(cv["summary"], cv_text) < COPIED
+                   else "Summary is close to your CV's own wording.")
+    if cv.get("skills"):
+        out.append("Skills led by: " + ", ".join(cv["skills"][:3]) + ".")
+    for r in roles:
+        o = next((x for x in cv.get("experience") or [] if _covers(x, r["key"])), None)
+        if not o or not r["bullets"]:
+            continue
+        orig = [_norm(b) for b in r["bullets"]]
+        new = o.get("bullets") or []
+        reworded = sum(1 for b in new if copied_share(b, cv_text) < COPIED)
+        first = new[0] if new else ""
+        first_moved = bool(first) and copied_share(first, r["bullets"][0]) < COPIED and \
+            any(copied_share(first, b) >= COPIED for b in r["bullets"][1:])
+        bits = []
+        if first_moved:
+            bits.append("a later point moved to the top")
+        if reworded:
+            bits.append("%d of %d point%s reworded" % (reworded, len(new), "" if len(new) == 1 else "s"))
+        if len(new) < len(orig):
+            bits.append("%d less relevant point%s left out" % (len(orig) - len(new), "" if len(orig) - len(new) == 1 else "s"))
+        if bits:
+            out.append("%s: %s." % (r["company"] or r["title"], ", ".join(bits)))
+    return out
+
+
 def verify(tailored: dict, cv_text: str) -> dict:
     """Remove what the CV does not support; return {"cv", "removed", "flags"}."""
     cv_norm = _norm(cv_text)
@@ -179,8 +263,7 @@ def verify(tailored: dict, cv_text: str) -> dict:
         return not bad, bad
 
     out = {"headline": str(tailored.get("headline") or "").strip(), "summary": "", "skills": [],
-           "experience": [], "education": [], "other": [],
-           "changes": [str(c).strip() for c in (tailored.get("changes") or []) if str(c).strip()][:6]}
+           "experience": [], "education": [], "other": [], "changes": []}
     ok, bad = numbers_ok(out["headline"])
     if not ok:
         removed.append({"what": "headline", "text": out["headline"], "why": "numbers not in your CV: " + ", ".join(bad)})
@@ -248,7 +331,7 @@ def verify(tailored: dict, cv_text: str) -> dict:
                 out[key].append(line)
             else:
                 removed.append({"what": key, "text": line, "why": "numbers not in your CV: " + ", ".join(bad)})
-    return {"cv": out, "removed": removed, "flags": flags}
+    return {"cv": out, "removed": removed, "flags": flags, "match": verify_match(tailored.get("match"), cv_text)}
 
 
 def _parse(text: str) -> dict:
@@ -284,11 +367,20 @@ def tailor(cv_text: str, job: dict, *, user_id=None, key: str = "", llm=None) ->
         raise RuntimeError("The model returned no experience section. Try again.")
     roles = cv_roles(cv_text)
     res = verify(raw, cv_text)
+    # One retry, naming what was wrong: a role left out (Eran, 2026-11-08: DAZN),
+    # or a summary that is the CV's own text rather than written for the job
+    # (2026-11-09: the headline and summary came back nearly verbatim).
+    problems = []
     gone = missing_roles(res["cv"], roles)
     if gone:
         names = "; ".join(f"{r['title']} at {r['company']} ({r['dates']})" for r in gone)
-        retry = prompt + ("\n\nYour previous answer left out these roles from the CV: " + names +
-                          ". Every role must be included, in the CV's order. Answer again in full.")
+        problems.append("It left out these roles from the CV: " + names +
+                        ". Every role must be included, in the CV's order.")
+    if res["cv"]["summary"] and copied_share(res["cv"]["summary"], cv_text) >= COPIED:
+        problems.append("Its summary copies the CV's own sentences. Write the summary for this job: "
+                        "open with the experience that answers its top requirement.")
+    if problems:
+        retry = prompt + "\n\nYour previous answer had problems. " + " ".join(problems) + " Answer again in full."
         try:
             raw2 = llm(retry) if llm is not None else _parse(gemini.generate_text(
                 {**body, "contents": [{"role": "user", "parts": [{"text": retry}]}]},
@@ -296,8 +388,10 @@ def tailor(cv_text: str, job: dict, *, user_id=None, key: str = "", llm=None) ->
             if isinstance(raw2, dict) and raw2.get("experience"):
                 res = verify(raw2, cv_text)
         except (ValueError, KeyError, IndexError) as exc:
-            print(f"[tailor] retry for missing roles failed ({type(exc).__name__}); restoring from the CV")
-    return restore_roles(res, roles)
+            print(f"[tailor] retry failed ({type(exc).__name__}); keeping the first answer")
+    res = restore_roles(res, roles)
+    res["cv"]["changes"] = describe_changes(res["cv"], cv_text, roles)
+    return res
 
 
 def to_docx(cv: dict, *, name: str, contact: list) -> bytes:

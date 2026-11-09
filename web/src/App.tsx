@@ -753,6 +753,28 @@ function LinkBadge({ job }: { job: UiJob }) {
 }
 
 
+/* Can auto-apply send this one? (Eran, 2026-11-09: "from the queue I can't
+   say which one can be relevant to the auto-apply and which one I have to do
+   manually".) From apply_engine.apply_route on the server - the URL alone. */
+export const AUTO_ROUTES = new Set(["auto", "site"]);
+function RouteBadge({ job }: { job: UiJob }) {
+  const r = job.applyRoute;
+  const pill = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border";
+  if (r === "auto") return <span className={`${pill} bg-emerald-900/40 border-emerald-700 text-emerald-300`}
+    title="A form system Job Hunter fills in and submits for you."><Zap className="w-3 h-3" />Auto-apply ready</span>;
+  if (r === "site") return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
+    title="The company's own site. Auto-apply tries it; some sites need you to finish."><Zap className="w-3 h-3" />Auto-apply: may work</span>;
+  if (r === "account") return <span className={`${pill} bg-amber-900/30 border-amber-800 text-amber-300`}
+    title="Workday asks you to create an account on the employer's site first, so you apply yourself."><Lock className="w-3 h-3" />Manual · account needed</span>;
+  if (r === "board") {
+    const site = linkSiteName(job.url) || "job board";
+    return <span className={`${pill} bg-amber-900/30 border-amber-800 text-amber-300`}
+      title={`Opens on ${site}, which needs your login. Auto-apply only gets through if it finds the same job on the company's own site.`}>
+      <ExternalLink className="w-3 h-3" />Manual · {site}</span>;
+  }
+  return null;
+}
+
 /* The questions an application was held on (2026-11-07). Eran: "if you are
    not sure - show me the questions and I'll guide you". Drafts are prefilled;
    answers are saved and reused for the same question on later applications. */
@@ -931,6 +953,25 @@ function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: 
   // the server refuses it anyway (403 not_entitled): the screen decides what to
   // show, the server decides what happens.
   const canAutoApply = mayAutoApply(me);
+  const autoIds = jobs.filter((j: UiJob) => AUTO_ROUTES.has(j.applyRoute)).map((j: UiJob) => j.id);
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+  const applySelected = async () => {
+    const ids = jobs.map((j: UiJob) => j.id).filter((i: number) => bulk.sel.has(i));
+    if (!ids.length) return;
+    const manual = jobs.filter((j: UiJob) => bulk.sel.has(j.id) && !AUTO_ROUTES.has(j.applyRoute)).length;
+    setSending(true); setSendMsg("");
+    try {
+      const r = await api.applySelected(ids);
+      const parts = [`Sending ${r.started} application${r.started === 1 ? "" : "s"}, one after another`];
+      if (r.skipped) parts.push(`${r.skipped} skipped (already in progress or sent${ids.length > r.max ? `, or over ${r.max} at once` : ""})`);
+      if (manual) parts.push(`${manual} of them look manual and will probably come back as "Manual action needed"`);
+      setSendMsg(parts.join(" · ") + ". You'll get a notification if one needs a security code.");
+      bulk.clear();
+      if (onReload) await onReload();
+    } catch (e: any) { setSendMsg(e?.message || "Could not start them"); }
+    finally { setSending(false); }
+  };
   const [applying, setApplying] = useState(false);
   const [applyMsg, setApplyMsg] = useState("");
   const runApply = async () => {
@@ -978,8 +1019,15 @@ function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: 
         : <>
             {/* Only Pass here: these are already approved, so a bulk "approve"
                 would be a button that does nothing. */}
-            <BulkBar count={bulk.count} total={bulk.total} onAll={bulk.all} onClear={bulk.clear} busy={bulk.busy} msg={bulk.msg}
-                     actions={[["Remove from queue", bulk.run("reject", "Removed"), "bg-red-600/80 hover:bg-red-600 text-white"]]} />
+            <p className="text-xs text-gray-400">
+              <span className="text-emerald-300 font-medium">{autoIds.length} can auto-apply</span>
+              {" · "}{jobs.length - autoIds.length} to apply yourself
+              {autoIds.length > 0 && <button onClick={() => bulk.only(autoIds)} className="ml-2 text-indigo-300 hover:text-indigo-200">Select the auto-apply ones</button>}
+            </p>
+            <BulkBar count={bulk.count} total={bulk.total} onAll={bulk.all} onClear={bulk.clear} busy={bulk.busy || sending} msg={sendMsg || bulk.msg}
+                     actions={[
+                       ...(canAutoApply && me?.auto_apply_live ? [[sending ? "Sending…" : "Auto-apply selected", applySelected, "bg-indigo-600 hover:bg-indigo-700 text-white"]] : []),
+                       ["Remove from queue", bulk.run("reject", "Removed"), "bg-red-600/80 hover:bg-red-600 text-white"]]} />
             <div className="space-y-2">{jobs.map((job: UiJob, i: number) => (
               <QueueJobCard key={job.id} job={job} rank={i + 1} onSelect={onSelectJob}
                             onMarkApplied={onMarkApplied} onRemove={onRemove}
@@ -1010,7 +1058,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
             <span className="text-sm text-gray-400 truncate">{job.company}</span>
             {job.location && <span className="text-xs text-gray-400 truncate">{job.location}</span>}
           </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap"><ApplyBadge job={job} /><FeedbackBadge job={job} /><LinkBadge job={job} /></div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap"><RouteBadge job={job} /><ApplyBadge job={job} /><FeedbackBadge job={job} />{job.applyRoute !== "board" && <LinkBadge job={job} />}</div>
           {/* Written by the scorer and shown on the swipe card, then dropped the
               moment a job reached the queue - which is where the decision to
               actually apply gets made. */}
@@ -1102,6 +1150,7 @@ function useBulk(jobs: UiJob[], onReload?: () => void) {
   });
   const all = () => setSel(sel.size === ids.length ? new Set() : new Set(ids));
   const clear = () => setSel(new Set());
+  const only = (pick: number[]) => setSel(new Set(pick));
   const run = (action: "approve" | "reject", verb: string) => async () => {
     const picked = ids.filter((i) => sel.has(i));      /* order and membership from the CURRENT list */
     if (!picked.length) return;
@@ -1114,7 +1163,7 @@ function useBulk(jobs: UiJob[], onReload?: () => void) {
     } catch (e: any) { setMsg(e?.message || "Bulk action failed"); }
     finally { setBusy(false); }
   };
-  return { sel, toggle, all, clear, busy, msg, run, count: sel.size, total: ids.length };
+  return { sel, toggle, all, clear, only, busy, msg, run, count: sel.size, total: ids.length };
 }
 
 /* One row shape for every list on the dashboard. The queue was already a
@@ -1708,6 +1757,20 @@ function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: bool
       )}
       {cv && !draft && (
         <div className="mt-3 space-y-3 text-sm">
+          {/* The job's main asks against the CV (2026-11-09). Evidence the CV
+              does not back is shown as a gap by the server, never as a strength. */}
+          {res?.match?.length > 0 && (
+            <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3">
+              <p className="text-xs font-semibold text-gray-300 mb-1.5">How your CV meets this job</p>
+              <ul className="space-y-1.5">{res.match.map((m: any, i: number) => (
+                <li key={i} className="flex items-start gap-2 text-xs">
+                  {m.evidence ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" /> : <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />}
+                  <span><span className="text-white font-medium">{m.need}</span>{" — "}
+                    {m.evidence ? <span className="text-gray-300">{m.evidence}</span>
+                      : <span className="text-amber-300">not in your CV. If you have it, add it when you edit, or say it in the cover letter.</span>}</span>
+                </li>))}</ul>
+            </div>
+          )}
           {cv.changes?.length > 0 && (
             <div><p className="text-xs font-semibold text-gray-300 mb-1">What changed for this job</p>
               <ul className="list-disc pl-5 text-xs text-gray-300 space-y-0.5">{cv.changes.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul></div>
