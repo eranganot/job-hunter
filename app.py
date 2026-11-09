@@ -3172,6 +3172,16 @@ def run_job_apply(user_id: int) -> int:
                     job_url = j["url"] or ""
                     res = {}                 # the no-URL branch below has no engine result
                     if job_url:
+                        # Shown as "Applying…" while it is being sent (Eran,
+                        # 2026-11-09: "the user will see a real indication about
+                        # the status"). A restart mid-send is reset at boot.
+                        _mk = database.get_db()
+                        try:
+                            _mk.execute("UPDATE jobs SET apply_status='applying' WHERE id=? AND user_id=?",
+                                        (j["id"], user_id))
+                            _mk.commit()
+                        finally:
+                            _mk.close()
                         res = _submit_application_guarded(
                             job_url, j["title"], j["company"],
                             applicant, cv_path, GEMINI_KEY,

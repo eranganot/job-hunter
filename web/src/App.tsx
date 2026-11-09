@@ -165,13 +165,16 @@ export function SwipeFlow() {
       api.stats().then(setStats).catch(() => {});
     } catch { /* keep what is shown; the next refresh tries again */ }
   }, []);
+  // While something is being sent, every 15 seconds, so a sent job visibly
+  // leaves the queue for Applied soon after it goes (2026-11-09).
+  const sending = approvedJobs.some((j) => j.applyStatus === "applying" || j.applyStatus === "awaiting_code");
   useEffect(() => {
     const onVis = () => refreshLists();
-    const t = setInterval(() => refreshLists(true), 120_000);
+    const t = setInterval(() => refreshLists(true), sending ? 15_000 : 120_000);
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onVis);
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
-  }, [refreshLists]);
+  }, [refreshLists, sending]);
 
   const reviewJobs = newJobs;
   const currentJob = reviewJobs[currentIndex];
