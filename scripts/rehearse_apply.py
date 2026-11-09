@@ -73,8 +73,30 @@ CAPTURED.clear(); print("guard self-check: OK (POST captured and aborted)")
 
 os.makedirs(OUT, exist_ok=True)
 cv = os.path.join(OUT, "rehearsal_cv.pdf")
-sys.path.insert(0, os.path.join(ROOT, "tests"))
-from test_admin_users import _tiny_pdf
+
+
+def _tiny_pdf(lines):
+    """A real one-page PDF (copied from tests/test_admin_users.py: importing the
+    test module needs pytest, which the production server does not have -
+    2026-11-09, run on Railway's web console)."""
+    ops = "BT /F1 11 Tf 50 750 Td 14 TL " + " ".join(
+        "(%s) Tj T*" % l.replace("(", "[").replace(")", "]") for l in lines) + " ET"
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Length %d >>\nstream\n%s\nendstream" % (len(ops), ops)]
+    out, offs = "%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += "%d 0 obj\n%s\nendobj\n" % (i, o)
+    xref = len(out)
+    out += "xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    out += "".join("%010d 00000 n \n" % o for o in offs)
+    out += "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return out.encode("latin-1")
+
+
 open(cv, "wb").write(_tiny_pdf(["Rehearsal Test", "rehearsal@example.com", "Test CV for an apply-engine rehearsal. " * 3]))
 applicant = {"full_name": "Rehearsal Test", "first_name": "Rehearsal", "last_name": "Test",
              "email": "rehearsal@example.com", "phone": ae.intl_phone("050-0000000"),

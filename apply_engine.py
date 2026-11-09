@@ -588,6 +588,55 @@ def _security_code_step(page, applicant, submit_selectors, wait_s: int = 45):
     return res
 
 
+_COOKIE_BUTTONS = (
+    # "Necessary only" first: the applicant never agreed to more.
+    "#onetrust-reject-all-handler", ".ot-pc-refuse-all-handler", "#onetrust-accept-btn-handler",
+    "#CybotCookiebotDialogBodyButtonDecline", "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowallSelection",
+    "#CybotCookiebotDialogBodyButtonAccept",
+    '[id*="cookie" i] button:has-text("Reject")', '[class*="cookie" i] button:has-text("Reject")',
+    '[id*="cookie" i] button:has-text("Accept")', '[class*="cookie" i] button:has-text("Accept")',
+    '[id*="consent" i] button:has-text("Accept")', '[class*="consent" i] button:has-text("Accept")',
+)
+
+
+def _dismiss_cookie_banners(page) -> int:
+    """Close a cookie-consent banner that would sit on top of the form.
+
+    Observed on the production server, 2026-11-09 (Rapyd, Comeet on the
+    company's site): every field was filled, then "SUBMIT APPLICATION" could not
+    be clicked - "<div class=onetrust-pc-dark-filter> from <div id=
+    onetrust-consent-sdk> subtree intercepts pointer events". People who already
+    chose on that site, or browse from elsewhere, never see it; the app's
+    server sees it every time. Declines where it can (necessary cookies only),
+    and if an overlay still covers the page, hides it - it is the site's own
+    consent layer, not a check on the applicant. Returns what it did (0 = none)."""
+    done = 0
+    for sel in _COOKIE_BUTTONS:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                el.click(timeout=2_000)
+                page.wait_for_timeout(400)
+                done += 1
+                break
+        except Exception as exc:
+            print(f"[apply-engine] cookie banner {sel}: {type(exc).__name__}")
+    try:
+        hidden = page.evaluate("""() => {
+          let n = 0;
+          for (const el of document.querySelectorAll('#onetrust-consent-sdk, .onetrust-pc-dark-filter, #CybotCookiebotDialog, #CybotCookiebotDialogBodyUnderlay')) {
+            if (el.offsetWidth || el.offsetHeight) { el.style.display = 'none'; n++; }
+          }
+          return n;
+        }""")
+        done += hidden or 0
+    except Exception as exc:
+        print(f"[apply-engine] cookie overlay check: {type(exc).__name__}")
+    if done:
+        print(f"[apply-engine] cookie banner dismissed ({done})")
+    return done
+
+
 def _finalize_after_submit(page, applicant, submit_selectors) -> dict:
     """Verify the outcome; if the submit was blocked by required/invalid fields,
     auto-answer them once and resubmit. Bounded to a single recovery pass."""
@@ -777,6 +826,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
             return _needs_answers(qa["unsure"])
 
         # Submit
+        _dismiss_cookie_banners(page)
         submitted = False
         for sel in ['button[type="submit"]', 'input[type="submit"]',
                     'button:has-text("Submit")', 'button:has-text("Apply")']:
@@ -797,6 +847,37 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
     except Exception as e:
         result["error"] = f"Greenhouse handler error: {e}"
         return result
+
+def _without_employee_share(url: str) -> str:
+    """Drop Comeet's employeeShare flag. A link an employee shared on LinkedIn
+    (rapyd.net/...?Source=LinkedIn&employeeShare) makes Comeet open its
+    "employee share" pop-up (social_form, askForEmployeeLogin=true) over the
+    form - for the employee, not the applicant - and Submit could not be
+    clicked (2026-11-09, reproduced)."""
+    import urllib.parse as _u
+    try:
+        parts = _u.urlsplit(url or "")
+        q = [(k, v) for k, v in _u.parse_qsl(parts.query, keep_blank_values=True) if k.lower() != "employeeshare"]
+        return _u.urlunsplit(parts._replace(query=_u.urlencode(q))) if parts.query else url
+    except ValueError:
+        return url
+
+
+def _close_comeet_popups(page) -> int:
+    """Hide Comeet's own pop-ups on the company page (the employee-share window)
+    that cover the application form."""
+    try:
+        return page.evaluate("""() => { let n = 0;
+          for (const m of document.querySelectorAll('.comeet-modal')) {
+            if (m.offsetWidth && !(m.querySelector('iframe') || {src: ''}).src.includes('/apply?')) {
+              m.style.display = 'none'; n++; }
+          }
+          for (const b of document.querySelectorAll('.comeet-modal-backdrop')) { b.style.display = 'none'; }
+          return n; }""") or 0
+    except Exception as exc:
+        print(f"[apply-engine] Comeet pop-up check: {type(exc).__name__}")
+        return 0
+
 
 def _comeet_frame(page):
     """The Comeet application frame (comeet.co/jobs/<company>/<pos>/apply?token=...)."""
@@ -880,6 +961,8 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
         qa = _answer_form(frame, applicant)
         if qa["unsure"]:
             return _needs_answers(qa["unsure"])
+        _dismiss_cookie_banners(page)
+        _close_comeet_popups(page)
         frame.click('button:has-text("SUBMIT APPLICATION")', timeout=5_000)
 
         # Comeet-specific verdict. _verify_submission would call a page without
@@ -1012,6 +1095,7 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         # Submit: the VISIBLE button first. Lever pages carry a hidden
         # button#hcaptchaSubmitBtn type=submit that hCaptcha presses itself
         # once its check passes; trying it first cost 5 s per application.
+        _dismiss_cookie_banners(page)
         lever_submit = ['#btn-submit:visible', 'button:has-text("Submit application"):visible',
                         'button[type="submit"]:visible', 'button:has-text("Submit")',
                         'a:has-text("Submit")', '.postings-btn']
@@ -1038,8 +1122,9 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
                 # for a person: it is never solved for the user.
                 return {**res, "status": "failed", "apply_failure_type": "captcha",
                         "apply_failure_detail": "Lever human check: " + state[:200],
-                        "error": "Lever asked for a human check (a picture puzzle), so nothing was sent. "
-                                 "Open the job and apply yourself."}
+                        "error": "Lever showed the app's automated browser a human-check puzzle, so nothing "
+                                 "was sent. When you open the link yourself you normally won't see it - "
+                                 "just apply there."}
             if state:
                 res["error"] = ((res.get("error") or "") + " [anti-bot widget: %s]" % state)[:480]
         return res
@@ -2121,11 +2206,13 @@ def submit_application(
 
             # 1. Navigate ─────────────────────────────────────────────────────
             try:
+                actual_url = _without_employee_share(actual_url)
                 page.goto(actual_url, wait_until="domcontentloaded", timeout=30_000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=4_000)
                 except PWTimeout:
                     pass
+                _dismiss_cookie_banners(page)
             except PWTimeout:
                 browser.close()
                 return {**_base, "apply_failure_type": "timeout",

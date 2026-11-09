@@ -434,3 +434,44 @@ def test_a_required_preferred_first_name_is_answered_with_the_first_name(page):
     assert "What is your preferred first name?*" in labels and "First Name*" not in labels
     questions.answer(page, {"first_name": "Dana", "last_name": "Levi"}, {"title": "PM"}, llm=lambda p: [])
     assert page.input_value("#q1") == "Dana" and page.input_value("#preferred_name") == "Dana"
+
+
+def test_a_cookie_banner_over_the_form_is_dismissed_before_submit(page):
+    """Rapyd on the production server (2026-11-09): every field filled, then
+    "SUBMIT APPLICATION" could not be clicked - OneTrust's overlay "intercepts
+    pointer events". Declined (necessary only) and the overlay cleared."""
+    page.set_content("""
+      <button id="go" onclick="window.sent = true">SUBMIT APPLICATION</button>
+      <div id="onetrust-consent-sdk">
+        <div class="onetrust-pc-dark-filter" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10"></div>
+        <div style="position:fixed;bottom:0;left:0;z-index:11;background:#fff">
+          <button id="onetrust-reject-all-handler" onclick="window.choice='reject'">Reject All</button>
+          <button id="onetrust-accept-btn-handler" onclick="window.choice='accept'">Accept All</button>
+        </div>
+      </div>""")
+    try:
+        page.click("#go", timeout=1500)
+        blocked = False
+    except Exception:
+        blocked = True
+    assert blocked, "the fixture should reproduce the intercepted click"
+    assert ae._dismiss_cookie_banners(page) >= 1
+    assert page.evaluate("window.choice") == "reject"          # necessary cookies only
+    page.click("#go", timeout=1500)
+    assert page.evaluate("window.sent") is True
+
+
+def test_an_employee_shared_link_does_not_open_comeets_employee_popup(page):
+    """Rapyd's link from LinkedIn ends in "&employeeShare"; Comeet then opens its
+    employee-share pop-up over the form (reproduced 2026-11-09)."""
+    assert ae._without_employee_share(
+        "https://www.rapyd.net/company/careers/positions/x/?Source=LinkedIn&employeeShare") == \
+        "https://www.rapyd.net/company/careers/positions/x/?Source=LinkedIn"
+    assert ae._without_employee_share("https://acme.example/job/1") == "https://acme.example/job/1"
+    page.set_content("""
+      <div class="comeet-modal" style="position:fixed;inset:0;z-index:9"><iframe src="https://www.comeet.co/jobs/1/social_form?x"></iframe></div>
+      <div class="comeet-modal"><iframe src="https://www.comeet.co/jobs/1/2/apply?token=t"></iframe></div>
+      <button id="go" onclick="window.sent=true">SUBMIT APPLICATION</button>""")
+    assert ae._close_comeet_popups(page) == 1          # the employee window only, never the form's
+    page.click("#go", timeout=1500)
+    assert page.evaluate("window.sent") is True
