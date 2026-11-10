@@ -8,7 +8,7 @@ do what. Every gate in the app answers from here; the numbers live in plans.py.
 The plans (plans.py, approved 2026-11-05):
     free / premium / beta / expert - limits and features per plan
                               (beta = Premium's limits, no end date; 2026-11-09)
-    admin                   - a ROLE, not a plan: checked separately, so Eran's
+    admin                   - a ROLE, not a plan: checked separately, so the owner's
                               own access never depends on a plan column.
 
 A plan can carry an end date (a promotion): users.plan_until (UTC
@@ -102,7 +102,7 @@ def limit(user, key):
 def can_auto_apply(user) -> bool:
     """May this user have the app apply on their behalf without asking?
 
-    Since 2026-11-08 every plan may (Eran: the users decide, in Settings; off
+    Since 2026-11-08 every plan may (The owner: the users decide, in Settings; off
     until they do). The check stays at the chokepoint for a plan that drops it
     later. Note this answers only "is it allowed to be ON" -
     whether the engine then does anything is a separate switch
@@ -203,14 +203,14 @@ def _has_locked_jobs_table(conn) -> bool:
 
 
 def start_new_user_plan(conn, user_id: int, now: datetime | None = None) -> dict:
-    """Every new account joins on the Beta plan, with no end date (Eran,
+    """Every new account joins on the Beta plan, with no end date (The owner,
     2026-11-09; it replaced the 30-day Premium promotion)."""
     return grant_plan(conn, user_id, plans.NEW_USER_PLAN, days=None, reason="beta", now=now)
 
 
 def move_promotions_to_beta(conn, now: datetime | None = None) -> list:
     """Every non-admin account on a running PREMIUM promotion moves to Beta with
-    no end date (Eran, 2026-11-09: "move them to Beta too"). Logged as
+    no end date (The owner, 2026-11-09: "move them to Beta too"). Logged as
     'beta_migration'. Only Premium: Beta has Premium's limits, so moving an
     Expert promotion would be a downgrade. Promotions that already ended,
     admin-set plans and admins are left alone.
@@ -440,7 +440,7 @@ def is_locked(conn, user_id: int, job_id: int) -> bool:
     return bool(row) and row[0] == "locked"
 
 
-# ── history kept (Step 6, Eran 2026-11-05: hidden, not deleted) ───────────
+# ── history kept (Step 6, the owner 2026-11-05: hidden, not deleted) ───────────
 #
 # Free keeps 30 days of history, Premium 12 months, Expert and admin all of it.
 # Older history is HIDDEN at read time - nothing is deleted, so an upgrade

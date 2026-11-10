@@ -10,7 +10,7 @@ in two places:
 Both reach the browser as the literal seven characters. It is invisible in
 review - the source looks like every other escape on the page - and invisible in
 a type check, because it is a perfectly valid string. It is only visible to
-someone looking at the running app, which is how the first one shipped: Eran
+someone looking at the running app, which is how the first one shipped: The owner
 spotted `Queued \\u00b7 ready to apply` in his own screenshot on 2026-09-15.
 
 Fixing that one found two more the same day, one of them written that morning.

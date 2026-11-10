@@ -1,4 +1,4 @@
-"""plans.py - what each plan includes: the tier matrix Eran approved on
+"""plans.py - what each plan includes: the tier matrix the owner approved on
 2026-11-05 ("Job Hunter - Plan tier matrix" doc), as data.
 
 Every limit the app enforces is read from here, so changing a number is an
@@ -11,7 +11,7 @@ granted, and the ADMIN row below is what an admin gets whatever their plan
 column says.
 
 Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
-- Beta (Eran, 2026-11-09 - replaces the 11-05 "no Beta plan" rule): every new
+- Beta (The owner, 2026-11-09 - replaces the 11-05 "no Beta plan" rule): every new
   account joins on NEW_USER_PLAN = "beta", which has Premium's limits and NO
   end date; the users who were on the 30-day Premium promotion moved to it too
   (migration 25). It stays until the admin moves someone. Not a paid plan.
@@ -51,7 +51,7 @@ PLANS = {
         "on_demand_search": 1,
         "matches_per_search": 3,
         # Every plan may turn auto-apply on; each user decides in Settings and
-        # it is off until they do (Eran, 2026-11-08). The engine's own switch
+        # it is off until they do (The owner, 2026-11-08). The engine's own switch
         # (APPLY_ENGINE_ENABLED) still has to be on before anything is sent.
         "auto_apply": True,
         "cover_letter": 0,
@@ -98,7 +98,7 @@ PLANS = {
         "analytics": "full",
         "export": True,
         "paid_sources": True,
-        "paid_source_credit": 200,      # higher than Premium (Eran, 2026-11-05)
+        "paid_source_credit": 200,      # higher than Premium (The owner, 2026-11-05)
         "history_days": UNLIMITED,
         "ai_calls_per_day": 600,
         "deferred_list": True,

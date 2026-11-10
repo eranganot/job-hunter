@@ -270,7 +270,7 @@ def expire_old_jobs(conn: sqlite3.Connection, user_id: int):
     said so, and get_stats counted 'expired' in `total` and in no bucket, so
     the jobs were invisible while still inflating "found".
 
-    Removed 2026-09-15 on Eran's decision: a job leaves the review queue when
+    Removed 2026-09-15 on the owner's decision: a job leaves the review queue when
     the user decides, or when the link checker proves the posting is actually
     gone. Age is not evidence that a job is closed - it is evidence that
     nobody looked, which is the opposite of a reason to delete it.
@@ -376,13 +376,13 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         "applied_unknown": _n("AND status='applied' AND applied_via IS NULL"),
 
         # Archived passes are HIS decisions for the purposes of the approval
-        # rate (Eran's call, 2026-09-15): the rows were deleted after 30 days
+        # rate (The owner's call, 2026-09-15): the rows were deleted after 30 days
         # and their origin is unknowable, but the overwhelming majority of
         # passes are his, and leaving them out understated the denominator by
         # more than including them overstates it.
         # "Already applied elsewhere": he applied on his own, so it is neither a
         # pass nor an application the app made. Counted apart from both, and
-        # passed_by_user excludes it (Eran, 2026-11-05).
+        # passed_by_user excludes it (The owner, 2026-11-05).
         "applied_elsewhere": _n("AND status='rejected' AND rejected_by='user' "
                                 "AND LOWER(COALESCE(notes,'')) LIKE '%applied elsewhere%'"),
         "passed_by_user":    _n("AND status='rejected' AND rejected_by='user' "
@@ -627,7 +627,7 @@ APPLIED_ELSEWHERE = "applied elsewhere"
 def is_applied_elsewhere(note) -> bool:
     """The "Already applied elsewhere" removal reason. The job leaves the queue as
     rejected, but it is NOT a pass on the company - he applied there himself.
-    Eran, 2026-11-05: learn that the company interests him, never demote it, and
+    The owner, 2026-11-05: learn that the company interests him, never demote it, and
     keep it out of the "actually applied" rate (the app did not apply)."""
     return APPLIED_ELSEWHERE in (note or "").lower()
 

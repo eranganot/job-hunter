@@ -15,7 +15,7 @@ def env(tmp_path, monkeypatch):
     database.set_db_path(str(tmp_path / "t.db"))
     database.init_db()
     auth.set_db_getter(database.get_db)
-    auth.create_user("Eran", "t@e.com", "pw123456")
+    auth.create_user("Alex", "t@e.com", "pw123456")
     conn = database.get_db()
     uid = conn.execute("SELECT id FROM users WHERE email=?", ("t@e.com",)).fetchone()["id"]
     today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
@@ -174,7 +174,7 @@ def test_cleanup_moves_errored_applied_back(env):
 
 
 def test_a_job_shows_applying_while_sent_and_leaves_the_queue_when_sent(env, monkeypatch):
-    """Eran, 2026-11-09: "the user will see a real indication about the status
+    """The owner, 2026-11-09: "the user will see a real indication about the status
     of the application and if something was successfully applied - remove it
     from the queue (and move it to the applied tab)"."""
     app, uid = env

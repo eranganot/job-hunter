@@ -6,7 +6,7 @@ Why this exists: RAILWAY_RUNBOOK.md step 2.2 first said `railway connect
 Postgres` and then "type CREATE DATABASE at the psql prompt". `railway connect`
 needs the psql client installed locally, and without it the command exits and
 drops you back in PowerShell - where the SQL line is then read as a PowerShell
-command ("The term 'CREATE' is not recognized"). Found 2026-09-21 on Eran's
+command ("The term 'CREATE' is not recognized"). Found 2026-09-21 on the owner's
 machine. This does the same one statement through psycopg, which the migration
 script already needs, so there is nothing new to install.
 

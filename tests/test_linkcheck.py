@@ -1,6 +1,6 @@
 """linkcheck.classify against the shapes observed live on 2026-10-12.
 
-Every case here is a real URL from Eran's queue that the old 'answers 200'
+Every case here is a real URL from the owner's queue that the old 'answers 200'
 check called alive. Offline: fetch is injected, nothing touches the network.
 """
 import urllib.error

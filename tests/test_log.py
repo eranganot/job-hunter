@@ -186,7 +186,7 @@ import log as _log
 
 
 @_pytest.mark.parametrize("msg, level", [
-    # The exact lines from Eran's ship run, 2026-09-15. Thirteen of these
+    # The exact lines from the owner's ship run, 2026-09-15. Thirteen of these
     # rendered in red directly above four real failures, because the grader
     # asked `"error" in msg` and the COLUMN is called apply_error.
     ("[db] baseline: added apply_error to jobs",          _logging.INFO),

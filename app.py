@@ -158,7 +158,10 @@ SYNC_API_KEY  = _cfg("SYNC_API_KEY",       "sync_api_key")   # shared secret for
 PORT          = int(_cfg("PORT", "port", "5001"))
 VAPID_PUBLIC_KEY      = _cfg("VAPID_PUBLIC_KEY", "vapid_public_key")
 VAPID_PRIVATE_PEM_B64 = _cfg("VAPID_PRIVATE_PEM_B64", "vapid_private_pem_b64")
-VAPID_SUBJECT         = _cfg("VAPID_SUBJECT", "vapid_subject", "mailto:eran.ganot@gmail.com")
+# Web-push contact. No personal default in the code: VAPID_SUBJECT, else the
+# admin's address, else the product's own support address.
+VAPID_SUBJECT         = (_cfg("VAPID_SUBJECT", "vapid_subject")
+                         or ("mailto:%s" % ADMIN_EMAIL if ADMIN_EMAIL else "mailto:support@job-hunter.work"))
 
 # ── Google Sign-In (OAuth 2.0) ──
 GOOGLE_CLIENT_ID     = _cfg("GOOGLE_CLIENT_ID",     "google_client_id")
@@ -329,7 +332,9 @@ def send_whatsapp(account_sid: str, auth_token: str, to_number: str, message: st
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 
-RESEND_VERIFIED_EMAIL = os.environ.get("RESEND_VERIFIED_EMAIL", "eran.ganot@gmail.com")
+# The Resend account's own verified address (the one inbox its sandbox sender
+# can deliver to). Defaults to ADMIN_EMAIL - no personal address in the code.
+RESEND_VERIFIED_EMAIL = os.environ.get("RESEND_VERIFIED_EMAIL", "") or (ADMIN_EMAIL or "")
 
 
 # Resend's shared sandbox sender. It can only deliver to the Resend account's
@@ -371,7 +376,7 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", **_kwa
     This function used to set `actual_to = RESEND_VERIFIED_EMAIL` and DISCARD
     the address it was given. Every user's email notification went to the admin.
     Proven 2026-09-20 by driving deliver_notification for a user whose address is
-    dana@somewhere-else.test: Resend was handed to=['eran.ganot@gmail.com'], and
+    dana@somewhere-else.test: Resend was handed to=['admin@example.com'], and
     both the caller and the notification log recorded "Sent OK".
 
     It was a leftover from the unverified-domain sandbox, where only the account's
@@ -469,7 +474,7 @@ def _engine_on() -> bool:
 
 
 def _engine_on_for(user) -> bool:
-    """APPLY_ENGINE_ENABLED is on AND this user may use it (Eran, 2026-11-09:
+    """APPLY_ENGINE_ENABLED is on AND this user may use it (The owner, 2026-11-09:
     "for now I want it to be applicable only for me"). Admins only until
     APPLY_ENGINE_FOR_ALL is also set - so switching the engine on for testing
     can never send applications for other users who turned auto-apply on.
@@ -527,7 +532,7 @@ def _tailored_cv_row(user_id, job_id):
 
 def _tailored_cv_checked(user_id, job_id, user):
     """The stored tailored CV, with every CV role guaranteed (tailor.restore_roles)
-    - also for drafts saved before that check existed (Eran still saw no DAZN
+    - also for drafts saved before that check existed (The owner still saw no Northwind Media
     on one, 2026-11-08). A draft the user edited is left as they made it.
     A repaired draft is saved back. No model call."""
     got = _tailored_cv_row(user_id, job_id)
@@ -1129,7 +1134,7 @@ def _check_scheduled_jobs() -> None:
                 # the run then does. It used to look for 'job_applied' alone,
                 # which only a real submission writes - so with the engine off, an
                 # empty queue or the cap, it queued a new apply run every minute of
-                # the apply hour and used up the 20-a-day allowance (Eran,
+                # the apply hour and used up the 20-a-day allowance (The owner,
                 # 2026-11-08: "limit reached (20 out of 20)").
                 if current_hour == ah and not _scheduler_already_ran(uid, ('apply_scheduled', 'job_applied'), today):
                     run_apply = True
@@ -2772,7 +2777,7 @@ def run_job_search(user_id: int):
                                             for _r, _why in _demote:
                                                 _jid = _r["id"]; _rst = (_r["status"] or "")
                                                 # A definitively-dead link in the REVIEW queue is useless — move it
-                                                # out so Eran stops seeing expired postings. Applied/rejected rows
+                                                # out so the owner stops seeing expired postings. Applied/rejected rows
                                                 # are only re-flagged (url_verified=0), never re-statused.
                                                 if _autoreject and _rst in ("new", "approved"):
                                                     conn.execute(
@@ -2871,7 +2876,7 @@ def run_link_resolve(user_id: int):
     # crowd out their scoring. JH_LINKS_LLM=1 turns them on once the link
     # report shows they earn their cost.
     use_llm = (os.environ.get("JH_LINKS_LLM", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
-    # Option 3, the web search for the posting (Eran, 2026-11-07). Per run: a
+    # Option 3, the web search for the posting (The owner, 2026-11-07). Per run: a
     # tenth of the user's daily AI calls, at most JH_LINKS_WEBSEARCH_PER_RUN
     # (default 30) - a Free plan's 30 calls a day must still score its jobs.
     try:
@@ -3233,7 +3238,7 @@ def run_job_apply(user_id: int) -> int:
                     job_url = j["url"] or ""
                     res = {}                 # the no-URL branch below has no engine result
                     if job_url:
-                        # Shown as "Applying…" while it is being sent (Eran,
+                        # Shown as "Applying…" while it is being sent (The owner,
                         # 2026-11-09: "the user will see a real indication about
                         # the status"). A restart mid-send is reset at boot.
                         _mk = database.get_db()
@@ -3387,7 +3392,7 @@ _SELECTED_MAX = 15
 
 
 def _apply_selected_bg(user_id: int, job_ids: list):
-    """The queue's "Auto-apply selected" (Eran, 2026-11-09): the jobs one after
+    """The queue's "Auto-apply selected" (The owner, 2026-11-09): the jobs one after
     another in one thread - so a selection of ten is not ten browsers waiting
     on the engine's semaphore - each exactly as Apply now would send it."""
     def _run():
@@ -3865,7 +3870,7 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     if _sa["standing_notes"].strip():
         out["standing_instructions"] = _sa["standing_notes"].strip()
         # A GitHub address in the instructions fills GitHub fields directly
-        # (Eran, 2026-11-08: "if the application asks for my GH url - give it
+        # (The owner, 2026-11-08: "if the application asks for my GH url - give it
         # to them"); kept in his instructions, never in the code.
         _gh = re.search(r"https?://(?:www\.)?github\.com/[A-Za-z0-9_.-]+", out["standing_instructions"])
         if _gh:
@@ -3873,7 +3878,7 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     if _sa["salary_expectation_min"]:
         out["salary_expectation"] = "at least %s %s gross per month" % (
             format(_sa["salary_expectation_min"], ","), _sa["salary_expectation_currency"])
-    # The Profile page is the source of truth for who is applying (Eran,
+    # The Profile page is the source of truth for who is applying (The owner,
     # 2026-11-07: "You have everything you need in my profile page"): its
     # name, email, phone and LinkedIn win over anything read from the CV; the
     # CV only fills what the profile does not hold (title, location, summary).
@@ -3887,7 +3892,7 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
             _c.close()
         if _r:
             phone, linkedin = (_r["phone"] or "").strip(), (_r["linkedin_url"] or "").strip()
-            # Not answered = no sponsorship needed (Eran, 2026-11-07).
+            # Not answered = no sponsorship needed (The owner, 2026-11-07).
             out["home_country"] = "Israel"
             out["needs_sponsorship_in_home_country"] = (_r["sponsorship_local"] or "").lower() == "yes"
             out["needs_sponsorship_abroad"] = (_r["sponsorship_abroad"] or "").lower() == "yes"
@@ -3910,7 +3915,7 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
 
 
 def _standing_answers(user_id) -> dict:
-    """application_answers for the user, with Eran's defaults: notice period 30
+    """application_answers for the user, with the owner's defaults: notice period 30
     days, currency ILS."""
     out = {"salary_expectation_min": None, "salary_expectation_currency": "ILS", "notice_period_days": 30,
            "standing_notes": ""}
@@ -4091,7 +4096,7 @@ def _link_verdict(url: str, timeout: int = 10):
 HEALTH_PUBLIC_KEYS = (
     "status", "uptime_info", "scheduler", "schema_version", "commit", "db_backend",
     "credentials_encrypted", "error_reporting", "sources", "queue", "db_check",
-    "worker", "db_backend_refused", "last_search", "paid_pool",
+    "worker", "db_backend_refused", "last_search", "paid_pool", "support_inbox",
 )
 
 
@@ -4291,7 +4296,7 @@ class Handler(BaseHTTPRequestHandler):
         and the live PWA bundle still calls dedup as a GET - so requiring POST
         would have meant a bundle rebuild to close a hole that this closes now.
 
-        Absent header means the caller is not a browser (curl, a script, Eran
+        Absent header means the caller is not a browser (curl, a script, the owner
         testing by hand). Those cannot be CSRF - the attack needs a browser
         holding someone else's cookie - so they pass.
         """
@@ -4701,6 +4706,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),
                 "paid_pool": _paid_pool_health(),
+                # Contact support has somewhere to go (a yes/no; never the address)
+                "support_inbox": bool(SUPPORT_EMAIL),
                 # Queue depth and the age of the oldest running job: a wedged
                 # worker looks exactly like a healthy one from outside without
                 # this. Guarded because a box that predates migration 6 has no
@@ -6069,7 +6076,7 @@ class Handler(BaseHTTPRequestHandler):
         # ── Standing answers for application forms (2026-11-07) ──
         # The application_answers table existed since the baseline schema and
         # nothing used it. Salary expectation (minimum, gross per month) and
-        # notice period (default 30 days - Eran) feed the question answerer.
+        # notice period (default 30 days - the owner) feed the question answerer.
         if path == "/api/application-answers":
             data = self.read_json() or {}
             vals = {}
@@ -6180,7 +6187,7 @@ class Handler(BaseHTTPRequestHandler):
             # Settings sends only {"channel"}; the route read the credentials
             # from the request body alone, so it tested Telegram/WhatsApp/email
             # with empty values. send_telegram swallowed that and the button said
-            # "Sent" - until #58 made it raise ("Failed: telegram", Eran,
+            # "Sent" - until #58 made it raise ("Failed: telegram", the owner,
             # 2026-11-08). Saved details now fill whatever the request leaves out.
             try:
                 _pc = database.get_db()
@@ -7157,7 +7164,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # With the engine off a run ends at once as "apply_engine_disabled"
             # while the button said "Queued" - and each press still spent one
-            # of the day's 20 runs (Eran, 2026-11-08). Say so instead.
+            # of the day's 20 runs (The owner, 2026-11-08). Say so instead.
             if not _engine_on_for(user):
                 self.send_json({"error": "Auto-apply isn't running yet, so nothing would be sent. "
                                          "Apply from the job's page on the company site for now"

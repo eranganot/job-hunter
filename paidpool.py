@@ -11,7 +11,7 @@ kept in `paid_pool_jobs`, and every user's search reads from that table at no
 cost. Cost now grows with the market, not with the number of users.
 Fantastic.jobs' own docs recommend exactly this pattern.
 
-The free-tier guarantee (Eran: "make sure that you will not pass the free tier")
+The free-tier guarantee (The owner: "make sure that you will not pass the free tier")
 ------------------------------------------------------------------------------
 * Every unit is counted in `paid_source_spend` (Postgres in production), not in
   /tmp - a redeploy cannot reset it.
@@ -49,7 +49,7 @@ print = _log.make_print(__name__)  # noqa: A001 - see log.py
 # hard_limit = the free allowance per billing cycle; the cap can never exceed it.
 # default_cap leaves a margin under it. Override down with JH_POOL_CAP_<NAME>.
 # cycle_day = the day of the month the provider's own billing cycle starts (UTC).
-# All read off each provider's dashboard on 2026-11-09 (Eran signed in):
+# All read off each provider's dashboard on 2026-11-09 (The owner signed in):
 #   TheirStack  Free plan, 200 API credits, cycle Oct 28 - Nov 28, auto-recharge off
 #   Hirebase    Free plan, cycle Nov 1 - Nov 30, no paid add-ons
 #   Fantastic   14-day trial Nov 9 - Nov 23: 500 jobs + 100 requests, no overage, no card
@@ -76,7 +76,7 @@ SOURCE_NAME = {"theirstack": "theirstack", "hirebase": "hirebase",
                "fantastic": "fantastic.jobs", "apify": "ethosia"}
 
 def enabled_sources() -> list:
-    """Sources Eran has switched on: JH_PAID_POOL_SOURCES, a comma list such as
+    """Sources the owner has switched on: JH_PAID_POOL_SOURCES, a comma list such as
     "hirebase,theirstack". Empty or unset = OFF: no paid source is called at all,
     whatever keys are set (2026-11-09: plan each source before it runs)."""
     raw = os.environ.get("JH_PAID_POOL_SOURCES", "")
@@ -309,7 +309,7 @@ def _fetch_apify(titles, limit):
         out.append({"provider_job_id": str(j.get("stableJobId") or j.get("jobId") or j.get("url") or ""),
                     "title": j.get("title") or "", "company": j.get("companyName") or "",
                     "location": j.get("location") or "Israel",
-                    # applyUrl can be the hiring company's own page (Eran's direct-link rule)
+                    # applyUrl can be the hiring company's own page (The owner's direct-link rule)
                     "url": j.get("applyUrl") or j.get("url") or "",
                     "description": (j.get("description") or "")[:4000],
                     "posted_at": str(j.get("postedDate") or "")[:10]})
@@ -323,7 +323,7 @@ FETCHERS = {"theirstack": _fetch_theirstack, "hirebase": _fetch_hirebase,
 # ── the daily run ──────────────────────────────────────────────────────────
 
 # Words that make a title more senior. A title carrying one of these is never
-# folded into a shorter title without it (Eran, 2026-11-09: "the senior titles
+# folded into a shorter title without it (The owner, 2026-11-09: "the senior titles
 # are important"), and senior titles get the daily slots first.
 SENIORITY_WORDS = {"senior", "sr", "lead", "principal", "staff", "head", "director",
                    "vp", "vice", "president", "chief", "cpo", "cto", "ceo", "coo",

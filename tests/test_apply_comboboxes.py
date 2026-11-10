@@ -83,8 +83,8 @@ def _comeet_run(on_submit):
                                                                   body=FORM % on_submit))
         page = ctx.new_page()
         page.goto("https://www.comeet.com/jobs/acme/1.2/head-of-product/3.4")
-        res = ae._apply_comeet(page, {"first_name": "Eran", "last_name": "Ganot", "email": "e@x.test",
-                                      "phone": ae.intl_phone("054-6912084"),
+        res = ae._apply_comeet(page, {"first_name": "Alex", "last_name": "Tester", "email": "e@x.test",
+                                      "phone": ae.intl_phone("054-1234567"),
                                       "linkedin_url": "https://www.linkedin.com/in/x/"}, None)
         frame = next(f for f in page.frames if "/apply?token" in f.url)
         values = {n: frame.input_value('input[name="%s"]' % n)
@@ -96,8 +96,8 @@ def _comeet_run(on_submit):
 def test_comeet_fills_the_iframe_form_and_needs_a_real_confirmation():
     res, values = _comeet_run("document.getElementById('out').innerText='Thank you for applying!'")
     assert res["status"] == "confirmed", res
-    assert values == {"firstName": "Eran", "lastName": "Ganot", "email": "e@x.test",
-                      "phone": "+972 546912084", "websiteUrl": "https://www.linkedin.com/in/x/"}
+    assert values == {"firstName": "Alex", "lastName": "Tester", "email": "e@x.test",
+                      "phone": "+972 541234567", "websiteUrl": "https://www.linkedin.com/in/x/"}
 
 
 def test_comeet_without_a_confirmation_is_not_counted_as_submitted():
@@ -106,7 +106,7 @@ def test_comeet_without_a_confirmation_is_not_counted_as_submitted():
 
 
 def test_local_israeli_numbers_become_international():
-    assert ae.intl_phone("054-6912084") == "+972 546912084"
+    assert ae.intl_phone("054-1234567") == "+972 541234567"
     assert ae.intl_phone("+44 20 7946 0000") == "+44 20 7946 0000"
     assert ae.intl_phone("0044 20 7946 0000") == "+442079460000"
     assert ae.intl_phone("") == ""
@@ -140,7 +140,7 @@ FORM_QS = """<!doctype html><html><body><form>
 <select id="heard" required><option value="">Select...</option><option value="w">Company website</option><option value="l">LinkedIn</option></select>
 <label for="why">Why do you want to work here?</label><textarea id="why"></textarea>
 <label for="salary">Salary expectations *</label><input id="salary" required>
-<label for="first_name">First Name</label><input id="first_name" value="Eran">
+<label for="first_name">First Name</label><input id="first_name" value="Alex">
 </form></body></html>"""
 
 
@@ -167,7 +167,7 @@ def test_sure_answers_are_filled_and_an_unsure_required_one_holds_the_applicatio
                 {"selector": sel["How did you hear about us? *"], "value": "Company website", "confidence": "high"},
                 {"selector": sel["Why do you want to work here?"], "value": "Because...", "confidence": "low"},
                 {"selector": sel["Salary expectations *"], "value": "40,000 ILS", "confidence": "low"}]
-    res = questions.answer(page, {"full_name": "Eran Ganot"}, {"title": "PM"}, llm)
+    res = questions.answer(page, {"full_name": "Alex Tester"}, {"title": "PM"}, llm)
     assert page.input_value("#loc") == "Tel Aviv, Israel"
     assert page.is_checked('input[name="auth"][value="a1"]')
     assert page.is_checked('input[value="en"]') and page.is_checked('input[value="he"]')
@@ -185,13 +185,13 @@ def test_standing_instructions_go_to_the_model_as_their_own_section(page):
         seen["p"] = prompt
         return []
     notes = "Current salary: do not answer."
-    res = questions.answer(page, {"full_name": "Eran Ganot", "standing_instructions": notes}, {}, llm)
+    res = questions.answer(page, {"full_name": "Alex Tester", "standing_instructions": notes}, {}, llm)
     head, _, rest = seen["p"].partition("standing instructions (they override every rule below):")
     assert rest.lstrip().startswith(notes)
     assert "standing_instructions" not in head                  # not duplicated in the applicant JSON
     assert "Salary expectations *" in [u["label"] for u in res["unsure"]]   # unanswered required: held
     seen.clear()
-    questions.answer(page, {"full_name": "Eran Ganot"}, {}, llm)
+    questions.answer(page, {"full_name": "Alex Tester"}, {}, llm)
     assert "override every rule below):\n(none)" in seen["p"]
 
 
@@ -212,7 +212,7 @@ def test_a_react_select_with_a_chosen_value_counts_as_answered(page):
     assert [q for q in questions.collect(page) if q["label"].startswith("Country")] == []
 
 
-# ── Greenhouse embedded on a company's own careers page (Payoneer, 2026-11-08) ──
+# ── Greenhouse embedded on a company's own careers page (Globex, 2026-11-08) ──
 
 CAREERS = """<!doctype html><html><body><h1>Director of Product</h1>
 <a href="/careers">Apply</a>
@@ -220,10 +220,10 @@ CAREERS = """<!doctype html><html><body><h1>Director of Product</h1>
 </body></html>"""
 
 # The inputs exist first; 100 ms later the "app" takes over and wipes them -
-# what Payoneer's embed did to the first values typed. _gh_fill's check-and-
+# what an employer's embed did to the first values typed. _gh_fill's check-and-
 # retry catches a wipe inside its 250 ms check window; a LATER wipe is what the
 # handler's settle wait (networkidle + 1.5 s before filling an embed) is for -
-# the live Payoneer rehearsal needed no retries after that wait.
+# the live embed rehearsal needed no retries after that wait.
 EMBED = """<!doctype html><html><body><form>
 <input id="first_name"><input id="last_name"><input id="email"><input id="phone">
 <button type="submit" onclick="event.preventDefault()">Submit application</button></form>
@@ -256,16 +256,16 @@ def test_a_fill_wiped_by_the_form_taking_over_is_retried_until_it_sticks():
     pw, b, page = _careers_page()
     try:
         form = ae._greenhouse_form(page, wait_ms=5_000)
-        assert ae._gh_fill(form, "#email", "eran@example.org")       # wiped once, retried, kept
+        assert ae._gh_fill(form, "#email", "alex@example.org")       # wiped once, retried, kept
         page.wait_for_timeout(400)
-        assert form.input_value("#email") == "eran@example.org"
+        assert form.input_value("#email") == "alex@example.org"
     finally:
         b.close(); pw.stop()
 
 
-# React-select markup, as on Payoneer's embedded Greenhouse form (2026-11-08).
+# React-select markup, as on an employer's embedded Greenhouse form (2026-11-08).
 # `sticky` decides whether clicking the option actually selects it - on the
-# live page inside payoneer.com it intermittently did not, and the engine
+# live page inside globex.com it intermittently did not, and the engine
 # reported success for having clicked.
 def _react_select(sticky: bool) -> str:
     return """<!doctype html><html><body>
@@ -299,7 +299,7 @@ def test_a_react_select_choice_counts_only_when_the_value_shows(page):
 # greys out, a code is emailed, eight one-character boxes appear after a short
 # delay; the application goes only after the code and a second Submit.
 CODE_FORM = """<!doctype html><html><body><form id="f" onsubmit="return false">
-<input id="first_name" value="Eran"><button type="submit" id="go">Submit application</button>
+<input id="first_name" value="Alex"><button type="submit" id="go">Submit application</button>
 <div id="code"></div></form>
 <script>
 (() => {
@@ -513,7 +513,7 @@ def test_comeet_is_judged_by_its_answer_to_the_application_request():
 
 def test_the_ready_to_paste_sheet_reads_back_what_was_filled(page):
     """Lever's human check (2026-11-09): the app filled the form but could not
-    send it; Eran finishes it from a sheet of exactly those values."""
+    send it; the owner finishes it from a sheet of exactly those values."""
     page.set_content("""<form>
       <label for="n">Full name ✱</label><input id="n" value="Dana Levi">
       <label for="e">Email ✱</label><input id="e" type="email" value="dana@example.test">

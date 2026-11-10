@@ -1,4 +1,4 @@
-"""The scheduled apply fires once a day (Eran, 2026-11-08: "limit reached (20 out
+"""The scheduled apply fires once a day (The owner, 2026-11-08: "limit reached (20 out
 of 20)" - it queued a run every minute of the apply hour, because it only
 counted a day as done when an application was actually sent)."""
 import pytest
@@ -14,7 +14,7 @@ def env(tmp_path, monkeypatch):
     database.set_db_path(str(tmp_path / "t.db"))
     database.init_db()
     auth.set_db_getter(database.get_db)
-    auth.create_user("Eran", "s@e.com", "pw123456")
+    auth.create_user("Alex", "s@e.com", "pw123456")
     monkeypatch.delenv("APPLY_ENGINE_ENABLED", raising=False)
     conn = database.get_db()
     uid = conn.execute("SELECT id FROM users WHERE email=?", ("s@e.com",)).fetchone()["id"]

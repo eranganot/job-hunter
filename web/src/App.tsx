@@ -150,7 +150,7 @@ export function SwipeFlow() {
 
   /* The lists were loaded once, at launch. A phone keeps the app open for
      hours, so the queue kept showing jobs as they were then - Figma and Forter
-     still "Queued" after they were sent (Eran, 2026-11-09; the database said
+     still "Queued" after they were sent (The owner, 2026-11-09; the database said
      applied/confirmed). Now the lists refresh, quietly, when the app comes back
      into view and every 2 minutes while it is on screen - without resetting
      the swipe position or the undo. */
@@ -784,7 +784,7 @@ function LinkBadge({ job }: { job: UiJob }) {
 }
 
 
-/* Can auto-apply send this one? (Eran, 2026-11-09: "from the queue I can't
+/* Can auto-apply send this one? (The owner, 2026-11-09: "from the queue I can't
    say which one can be relevant to the auto-apply and which one I have to do
    manually".) From apply_engine.apply_route on the server - the URL alone. */
 export const AUTO_ROUTES = new Set(["auto", "site"]);
@@ -810,7 +810,7 @@ function RouteBadge({ job }: { job: UiJob }) {
   return null;
 }
 
-/* The questions an application was held on (2026-11-07). Eran: "if you are
+/* The questions an application was held on (2026-11-07). The owner: "if you are
    not sure - show me the questions and I'll guide you". Drafts are prefilled;
    answers are saved and reused for the same question on later applications. */
 function AnswerQuestions({ job, onDone }: { job: UiJob; onDone: () => void }) {
@@ -869,7 +869,7 @@ function AnswerQuestions({ job, onDone }: { job: UiJob; onDone: () => void }) {
   );
 }
 
-/* Why a job needs you, always in words (Eran, 2026-11-09: the NYC job said
+/* Why a job needs you, always in words (The owner, 2026-11-09: the NYC job said
    "Manual action needed" and nothing else). The engine's own message when there
    is one; otherwise one derived from the failure type. */
 export function manualReason(job: UiJob): string {
@@ -885,7 +885,7 @@ export function manualReason(job: UiJob): string {
 }
 
 /* Ready-to-paste sheet for a form the app filled but could not send (Lever's
-   human check, 2026-11-09 - Eran chose this over a browser extension): the job
+   human check, 2026-11-09 - the owner chose this over a browser extension): the job
    opens in a new tab and every value the app prepared is one tap from the
    clipboard. */
 function FinishYourself({ job }: { job: UiJob }) {
@@ -1561,7 +1561,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
   const notApplied    = n("applied_bulk") + n("applied_no_url");
   const appliedUnknown = n("applied_unknown");
 
-  /* Eran's model, 2026-09-15: a job the system threw away was never a real
+  /* the owner's model, 2026-09-15: a job the system threw away was never a real
      candidate, so it is excluded from EVERY number here - including "found".
      Counting it made the sourcing look more productive than it was and the
      approval rate look worse than it was, in the same breath.
@@ -1576,7 +1576,7 @@ function AnalyticsTab({ approvedCount, rejectedCount, deferredCount, appliedCoun
      unknowable, but almost every pass is his, and excluding them understated
      the denominator by more than including them overstates it. */
   const yourPasses = n("passed_by_user") + n("passed_unknown") + archived;
-  /* "Already applied elsewhere" (Eran, 2026-11-05): he approved the job and then
+  /* "Already applied elsewhere" (The owner, 2026-11-05): he approved the job and then
      applied on his own. It is not a pass, so it counts as a yes in the approval
      rate - but the app did not apply, so it stays OUT of "Actually applied",
      numerator and denominator both. */
@@ -2086,7 +2086,7 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
 
 /* Step 12: are the learning rules earning their place? Read-only. */
 // Standing instructions for application forms (2026-11-08): answers to the
-// questions that recur on every form, kept on the account - Eran asked for
+// questions that recur on every form, kept on the account - the owner asked for
 // them not to be profile questions.
 // Proves notifications live (2026-11-08): the security-code flow depends on
 // them, and every channel used to fail without a trace.
@@ -3309,7 +3309,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
   const [fullName, setFullName] = useState(me.name || "");
   const [linkedin, setLinkedin] = useState(me.linkedin_url || "");
   const [phone, setPhone] = useState(me.phone || "");
-  /* Blank = not answered, read as "no" by the apply engine (Eran, 2026-11-07). */
+  /* Blank = not answered, read as "no" by the apply engine (The owner, 2026-11-07). */
   const [sponsorLocal, setSponsorLocal] = useState<string>((me.sponsorship_local || "no").toLowerCase());
   const [salaryMin, setSalaryMin] = useState<string>("");
   const [salaryCur, setSalaryCur] = useState<string>("ILS");

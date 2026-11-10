@@ -250,7 +250,7 @@ def compute_feedback_penalty(
     # location branch never did. The match is a substring test, so once two
     # recent passes carried a "Wrong location" reason on jobs in, say,
     # "Tel Aviv, Israel", EVERY Tel Aviv job was demoted - including the ones in
-    # the city the user actually asked for. Eran hit exactly this on staging
+    # the city the user actually asked for. The owner hit exactly this on staging
     # (2026-09-15): a 97% Tel Aviv role badged "Location you've passed on" while
     # Tel Aviv was his first preferred location.
     #
@@ -620,7 +620,7 @@ def write_cover_letter(job: dict, profile: dict, api_key: str = "", user_id=None
                        cv_text: str = "", name: str = "", llm=None) -> dict:
     """{letter, notes}. Written from the full CV (cv_text); it used to get only
     the 2-3 sentence profile summary, so a prompt demanding "specific,
-    measurable experience" had none to use (Eran, 2026-11-08: "not good
+    measurable experience" had none to use (The owner, 2026-11-08: "not good
     enough"). A number that is in neither the CV nor the job description gets
     one rewrite with the problem named; if it survives, that sentence is
     removed and noted."""

@@ -3,7 +3,7 @@
 _Written 2026-09-20. Two jobs that both happen in the Railway console, and only
 one of them is dangerous._
 
-Both are **Eran-only**: they touch production variables and production data, and
+Both are **The owner-only**: they touch production variables and production data, and
 neither can be done from a chat session. Everything I can do from here is already
 in the repo — the migration script, the preflight guard, the smoke assertions.
 
@@ -255,7 +255,7 @@ values, and `scripts/encrypt_credentials.py` can re-encrypt them.
 RESEND_VERIFIED_EMAIL` — so **every user's email notification went to your
 inbox**, and both the caller and the notification log recorded "Sent OK".
 Proven 2026-09-20 by driving `deliver_notification` for a user whose address is
-`dana@somewhere-else.test`: Resend was handed `to=['eran.ganot@gmail.com']`.
+`dana@somewhere-else.test`: Resend was handed `to=['admin@example.com']`.
 
 It was a leftover from Resend's shared sandbox sender (`onboarding@resend.dev`),
 which genuinely can only deliver to the account's own verified address.

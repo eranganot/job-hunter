@@ -155,7 +155,7 @@ def landing_html(public_url: str = "") -> str:
       <div class="why"><b>Why this fits</b>
         <ul>
           <li>6 years leading B2C product teams - they ask for 5+</li>
-          <li>Personalization and experimentation, both in your CV</li>
+          <li>Recommendations and experimentation, both in your CV</li>
           <li>Tel Aviv, inside the area you chose</li>
         </ul>
       </div>

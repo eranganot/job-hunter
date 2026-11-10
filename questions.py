@@ -1,6 +1,6 @@
 """Answering an application form's questions on the applicant's behalf.
 
-Eran, 2026-11-07: "For any 'not ordinary' questions like open questions or
+The owner, 2026-11-07: "For any 'not ordinary' questions like open questions or
 multiple answer questions - you should answer on my behalf. If you are not
 sure - show me the questions and I'll guide you."
 
@@ -243,7 +243,7 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
         # Cloudinary on Lever, 2026-11-08) gets the profile's LinkedIn - it
         # used to go to the model and, in a rehearsal, held the application.
         # The same for GitHub, from a github.com address in the applicant's
-        # standing instructions (Eran, 2026-11-08).
+        # standing instructions (The owner, 2026-11-08).
         _profile_link = None
         if q.get("type") in ("text", "url"):
             if _PREFERRED_NAME.search(q.get("label") or ""):
@@ -260,7 +260,7 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
             except Exception as exc:
                 print(f"[questions] profile link {q['label'][:60]!r}: {exc}")
         # A required acknowledgement whose only option is "Yes" ("I read and
-        # understood the privacy policy*", Payoneer 2026-11-08) is consent to
+        # understood the privacy policy*", an embedded-Greenhouse employer 2026-11-08) is consent to
         # apply at all - filled without asking anyone.
         if q.get("required") and [o.strip().lower() for o in (q.get("options") or [])] == ["yes"]:
             try:

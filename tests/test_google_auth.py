@@ -92,15 +92,15 @@ def test_links_existing_password_account_by_email(google_db):
     pw_hash, salt = auth.hash_password("secret123")
     google_db.execute(
         "INSERT INTO users (name, email, password_hash, salt, role) VALUES (?,?,?,?,?)",
-        ("Eran", "eran@example.com", pw_hash, salt, "user"))
+        ("Alex", "alex@example.com", pw_hash, salt, "user"))
     google_db.execute("INSERT INTO user_profiles (user_id) VALUES (1)")
 
     user, is_new, err = auth.find_or_create_google_user(
-        "sub-eran", "Eran@example.com", "Eran G", "http://avatar")
+        "sub-alex", "Alex@example.com", "Alex G", "http://avatar")
     assert err is None
     assert is_new is False                    # linked, not created
     assert user["id"] == 1
-    assert user["google_sub"] == "sub-eran"
+    assert user["google_sub"] == "sub-alex"
     assert user["avatar_url"] == "http://avatar"
     assert _count_users(google_db) == 1       # no duplicate row
 

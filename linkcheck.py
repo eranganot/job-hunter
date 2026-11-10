@@ -2,7 +2,7 @@
 linkcheck.py - is this job URL still a live posting for THIS job?
 
 The old checks (app._link_status / apply_engine.check_url_alive) asked only
-"did the server answer 200?". Live probes on 2026-10-12 of every job Eran had
+"did the server answer 200?". Live probes on 2026-10-12 of every job the owner had
 flagged "Link is broken" or "Job no longer exists" showed that a dead posting
 almost never answers 404. It answers 200 from somewhere else:
 

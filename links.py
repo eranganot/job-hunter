@@ -2,7 +2,7 @@
 links.py - what kind of link a job carries, and (Step 1 of EXECUTION_PLAN_NEXT.md)
 the one place that turns a job-board link into the company's own posting.
 
-Eran's ask (2026-10-25): every relevant job should open the posting on the
+The owner's ask (2026-10-25): every relevant job should open the posting on the
 company's own site or ATS, not LinkedIn. Before anything is rewritten, this
 module answers the measuring question - how many open jobs carry a board link,
 and how many of those the existing resolver can already fix - via
@@ -46,7 +46,7 @@ BOARD_DOMAINS = (
     "app.greenhouse.io",    # Greenhouse's RECRUITER app: /jobs/<id> lands on sign-in
 )
 
-# Re-publishers observed in Eran's queue (STATUS.md 2026-10-12, and the
+# Re-publishers observed in the owner's queue (STATUS.md 2026-10-12, and the
 # Jobgether row that is still /api/health's last_apply).
 AGGREGATOR_DOMAINS = (
     "builtin.com", "builtintelaviv.com", "jobright.ai", "secrethunter.co",
@@ -283,7 +283,7 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     """Give the user's open jobs (New + Approved) a direct link where one exists.
 
     Touches only status new/approved rows of `user_id` - applied, passed and
-    deferred history is never rewritten (Eran's scope decision, 2026-10-25).
+    deferred history is never rewritten (The owner's scope decision, 2026-10-25).
     For each row not examined yet, or unresolved and last tried more than
     RETRY_AFTER_DAYS ago:
       * already direct / company site  -> recorded as such, url untouched
@@ -294,7 +294,7 @@ def resolve_open_jobs(get_db, user_id: int, resolver=None, use_llm: bool = True,
     A hit already stored on another row of the same user is NOT written
     (UNIQUE(user_id, url)); the reason goes in link_note.
 
-    searcher / search_cap (option 3, on since 2026-11-07 - Eran: "sure why not"
+    searcher / search_cap (option 3, on since 2026-11-07 - the owner: "sure why not"
     after a 30-job trial verified 2 for ~1 cent): when the free lookups miss,
     up to `search_cap` jobs per run are searched with Gemini + Google Search
     and only a link that passes verify_found_posting is written. Each job is
@@ -456,7 +456,7 @@ def _lookup_incomplete() -> bool:
 # ── 1d: ranking ─────────────────────────────────────────────────────────────
 
 # Points a job drops in the ranking when we looked for the company's own
-# posting and did not find it (Eran approved 5, 2026-10-25). Visible on the
+# posting and did not find it (The owner approved 5, 2026-10-25). Visible on the
 # card as "No direct link" and in the score explanation, never hidden.
 LINK_PENALTY = 5
 _PENALISED = ("board", "aggregator", "redirect", "none")
@@ -493,7 +493,7 @@ def audit_one(job: dict, fetch=None, timeout: int = 15) -> dict:
     """What a job's link actually shows. Read-only: one GET, nothing stored.
 
     The point is to see real pages before writing a rule - the 10-12 attempt
-    at a title-on-page check was rejected because it failed real Payoneer,
+    at a title-on-page check was rejected because it failed real embedded-Greenhouse,
     NICE and LinkedIn postings, and the URLs it was judged on were not kept.
     """
     import re
@@ -542,7 +542,7 @@ def audit_one(job: dict, fetch=None, timeout: int = 15) -> dict:
         "visible_chars": len(vis),
         "body_bytes": len(body or ""),
         # Little visible text in a big page = rendered by script; a title check
-        # cannot judge these from the HTML (the Payoneer/NICE false negatives).
+        # cannot judge these from the HTML (the embedded-board false negatives).
         "script_rendered": len(vis) < 1500 and len(body or "") > 20000,
     })
     return out
@@ -768,7 +768,7 @@ def resolve_from_learned(company, title, location, learned, fetch=None, threshol
 
 # ── 1c careers-map: the board a company's own careers page embeds ────────────
 #
-# Measured 2026-11-08 on the 29 companies of Eran's search trial (where Gemini
+# Measured 2026-11-08 on the 29 companies of the owner's search trial (where Gemini
 # web search found 2): guessing the company's site from its name and reading
 # its careers page found the right board for 3 (Check Point -> SmartRecruiters,
 # FrontStory -> Comeet, Echo -> Ashby) and one WRONG company (Papaya Global ->

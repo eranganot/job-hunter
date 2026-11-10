@@ -26,7 +26,7 @@ def test_home_is_the_app(monkeypatch):
 
 
 def test_signing_in_lands_on_the_app(stack):
-    """The symptom, end to end: Eran said "staging still looks like the old
+    """The symptom, end to end: The owner said "staging still looks like the old
     design" and the answer was that signing in sent him there."""
     c = Client(stack["port"])
     c.post_form("/register", {"name": "flip", "email": "flip@example.test",

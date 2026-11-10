@@ -35,7 +35,7 @@ WIDTHS = [("phone", 390, 844), ("tablet", 768, 1024), ("laptop", 1280, 800)]
 # "applied" that never was.
 def _job(i, **kw):
     j = {"id": i, "title": "Senior Product Manager, Onboarding and Growth Platform",
-         "company": "Payoneer", "location": "Herzliya, Israel",
+         "company": "Globex", "location": "Herzliya, Israel",
          "url": "https://example.test/j/%d" % i, "status": "new",
          "match_score": 77, "candidate_score": 74, "url_verified": 1,
          "feedback_penalty": 0, "feedback_reason": "",
@@ -46,7 +46,7 @@ def _job(i, **kw):
     j.update(kw); return j
 
 FIXTURES = {
-    "/api/me": {"id": 1, "name": "Eran", "email": "eran@example.test", "role": "admin",
+    "/api/me": {"id": 1, "name": "The owner", "email": "alex@example.test", "role": "admin",
                 "plan": "free", "onboarding_complete": 1, "onboarding_dismissed": 1,
                 "cv_filename": "cv.pdf", "job_titles": ["VP Product"], "keywords": ["growth"],
                 "locations": ["Tel Aviv"], "schedule_frequency": "weekly", "search_hour": 11,

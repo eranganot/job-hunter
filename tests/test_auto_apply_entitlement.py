@@ -80,7 +80,7 @@ def test_a_plan_without_auto_apply_is_not_applied_for(engine_on, monkeypatch):
 
 
 def test_every_plan_with_the_flag_on_is_applied_for(engine_on):
-    """Eran, 2026-11-08: every plan; the user's switch decides."""
+    """The owner, 2026-11-08: every plan; the user's switch decides."""
     for plan in ("free", "premium", "expert", None):
         uid = _make_user(engine_on["db"], "%s-on@example.test" % plan, plan, True)
         out = engine_on["app"].run_job_apply(uid)

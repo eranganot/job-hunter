@@ -1,6 +1,6 @@
 """links.py - link classification and the Step 1a measuring report.
 
-Hosts are the ones actually seen in Eran's queue (STATUS.md 2026-10-12 and
+Hosts are the ones actually seen in the owner's queue (STATUS.md 2026-10-12 and
 /api/health's last_apply), so a change to the lists that reclassifies a real
 link fails here first."""
 import sqlite3
@@ -704,7 +704,7 @@ def test_the_resolver_threshold_cannot_be_passed_by_position():
 
 
 
-# ── option 3 after each search (Eran, 2026-11-07) ──────────────────────────
+# ── option 3 after each search (The owner, 2026-11-07) ──────────────────────────
 
 def _searcher(found):
     calls = []

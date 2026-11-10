@@ -24,7 +24,7 @@ Big-Tech sources work and tells me which (if any) endpoints drifted so I can fix
 
 ### ☐ 2. Decide the retain threshold + confirm admin email
 **Value: Medium · Effort: ~2 min.**
-1. In Railway Variables, confirm `ADMIN_EMAIL=eran.ganot@gmail.com` (gives you the paid sources).
+1. In Railway Variables, confirm `ADMIN_EMAIL=admin@example.com` (gives you the paid sources).
 2. Set `INGEST_SCORE_THRESHOLD=30` (you asked for 30%+). Raise later if too noisy.
 **Send me:** nothing — just set and save.
 

@@ -633,7 +633,7 @@ def test_same_origin_requests_are_unaffected(stack, users):
 
 def test_requests_without_the_header_still_work(stack, users):
     """
-    curl, scripts and Eran testing by hand send no Sec-Fetch-Site. They cannot
+    curl, scripts and the owner testing by hand send no Sec-Fetch-Site. They cannot
     be CSRF - that needs a browser holding someone else's cookie - so they pass.
     """
     status, _loc, _b = users["admin"].get("/api/admin/dedup")
@@ -969,7 +969,7 @@ def test_manual_apply_is_queued_rather_than_spawned(stack, users, monkeypatch):
 
 
 def test_run_apply_says_so_when_the_engine_is_off(stack, users, monkeypatch):
-    """Eran, 2026-11-08: the button said "Queued" while the engine was off,
+    """The owner, 2026-11-08: the button said "Queued" while the engine was off,
     and every press still spent one of the day's 20 runs."""
     import jobqueue
     monkeypatch.delenv("APPLY_ENGINE_ENABLED", raising=False)

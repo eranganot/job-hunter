@@ -3,7 +3,7 @@ errors.py - report an unhandled exception somewhere a person will see it.
 
 Plan Phase 3.6 names Sentry. The gap it closes is specific: today an unhandled
 exception prints a traceback into the Railway log, and nothing tells anyone.
-With nine friendly users that is survivable - Eran notices when his own search
+With nine friendly users that is survivable - the owner notices when his own search
 fails. **The moment a stranger can sign up, a 500 on their first screen is
 invisible until they give up and leave**, and they will not write in.
 

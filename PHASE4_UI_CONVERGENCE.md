@@ -101,7 +101,7 @@ redirecting an already-authenticated user to `/dashboard` (`:5801`, `:5809`).
 `/register` POST already sends new accounts to `/app`. Non-admins hitting
 `/admin` also land on `/dashboard` (`:5959`).
 
-**Settings gained more than item 1 asked for**, from Eran's hands-on rounds:
+**Settings gained more than item 1 asked for**, from the owner's hands-on rounds:
 four tabs with Account merged into Profile, full name + LinkedIn URL, schedule
 frequency with Monday-first day pickers for search AND apply, multi-select
 notification channels, per-field password reveal, an auto-apply toggle behind
@@ -134,6 +134,6 @@ zero references" on 2026-09-15 are wired:
    `ADMIN_HTML`, the base64 Tailwind blob — ~2,900 lines). Recommended **after one
    release in production**, because deleting `DASHBOARD_HTML` makes the `LEGACY_UI=1`
    escape hatch a dead switch, and the point of the escape hatch is the release that
-   has not happened yet. Eran's call.
+   has not happened yet. The owner's call.
 2. **The Android pass.** Install the PWA, run swipe → queue → apply → settings →
-   onboarding replay on a real phone. Only Eran can do this one.
+   onboarding replay on a real phone. Only the owner can do this one.

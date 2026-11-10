@@ -1,4 +1,4 @@
-"""Job-tailored CV (Step 14, Eran 2026-11-05).
+"""Job-tailored CV (Step 14, the owner 2026-11-05).
 
 One model call rewrites the user's CV for one job description: the same roles,
 employers, dates, education and facts, re-ordered and re-worded so what this
@@ -93,8 +93,8 @@ def _in_cv(phrase: str, cv_norm: str) -> bool:
 
 
 
-# ── Roles read from the CV itself, without the model (Eran, 2026-11-08: the
-# tailored CV left out DAZN, his current job - "DAZN is my current job and
+# ── Roles read from the CV itself, without the model (The owner, 2026-11-08: the
+# tailored CV left out Northwind Media, his current job - "Northwind Media is my current job and
 # cannot be removed"). Whatever the model does, every role found here must be
 # in the result: missing ones get one retry naming them, then are put back
 # from the CV as written.
@@ -111,7 +111,7 @@ def cv_roles(cv_text: str) -> list:
 
     A role starts at a non-bullet line ending in a date range ("Head of Product
     2025-Present"). Its employer is on that line ("Senior PM - Wix (2016 -
-    2021)") or the line before ("DAZN TLV, Israel"). Lines after it are its
+    2021)") or the line before ("Northwind Media TLV, Israel"). Lines after it are its
     description and bullets; a line continues the previous one unless that one
     ended a sentence. Reading stops at Education, Skills and similar headings,
     which use the same date pattern."""
@@ -296,7 +296,7 @@ def verify(tailored: dict, cv_text: str) -> dict:
         title = str(role.get("title") or "").strip()
         dates = str(role.get("dates") or "").strip()
         if company and not _in_cv(company, cv_norm):
-            # "DAZN - sports streaming": the employer is real, the extra words
+            # "Northwind Media - sports streaming": the employer is real, the extra words
             # are the model's. Keep the role under the CV's own employer line.
             match = next((r for r in cv_roles(cv_text) if r["key"] in _words(company)), None)
             if match is None:
@@ -367,7 +367,7 @@ def tailor(cv_text: str, job: dict, *, user_id=None, key: str = "", llm=None) ->
         raise RuntimeError("The model returned no experience section. Try again.")
     roles = cv_roles(cv_text)
     res = verify(raw, cv_text)
-    # One retry, naming what was wrong: a role left out (Eran, 2026-11-08: DAZN),
+    # One retry, naming what was wrong: a role left out (The owner, 2026-11-08: Northwind Media),
     # or a summary that is the CV's own text rather than written for the job
     # (2026-11-09: the headline and summary came back nearly verbatim).
     problems = []
