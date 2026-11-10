@@ -1,6 +1,6 @@
 # Job Hunter — Mobile App Plan (PWA)
 
-**Prepared for:** Eran
+**Prepared for:** The owner
 **Date:** June 15, 2026
 **Status:** Final draft for approval — awaiting go on Phase 1
 
@@ -8,7 +8,7 @@
 
 ## 1. Goal
 
-Turn Job Hunter into an **installable Android PWA** (the AdaptiveFit pattern), featuring the new Tinder-style **swipe** design you attached. v1 native capabilities: **push notifications**, **swipe gestures**, **resume/file upload**. For now it's for **your phone only — no app store**.
+Turn Job Hunter into an **installable Android PWA** (a proven Capacitor pattern), featuring the new Tinder-style **swipe** design you attached. v1 native capabilities: **push notifications**, **swipe gestures**, **resume/file upload**. For now it's for **your phone only — no app store**.
 
 ### Two non-negotiables (will be treated as hard requirements throughout)
 1. **The existing web app keeps working for all users, unchanged.** The new UI is additive (a new `/app` route + a service worker scoped *only* to `/app`). The legacy `/dashboard` and every existing flow stay exactly as they are.

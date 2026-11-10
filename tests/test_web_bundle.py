@@ -120,7 +120,7 @@ DESKTOP_RULES = [
     ("lg\\:hidden{",       "hiding the small-screen tab grid once the rail exists"),
     # The job lists are ranked rows now, not a grid of equal cards: the order
     # is the information, and a grid hid it. What has to survive the build is
-    # the swipe page's wide card and its two-column body - the screens Eran
+    # the swipe page's wide card and its two-column body - the screens the owner
     # reported as "still centralized".
     ("lg\\:max-w-5xl{",    "the swipe card using the width at lg"),
     ("lg\\:grid-cols-2{",  "the swipe card's two-column body at lg"),
@@ -262,7 +262,7 @@ def test_admin_ships_as_a_destination_not_a_hover_window():
     assert '"admin"' in js, "the admin tab id is missing from the bundle"
 
 
-# ── Phase 4 round 2: the things Eran could not reach from /app ───────────────
+# ── Phase 4 round 2: the things the owner could not reach from /app ───────────────
 #
 # Each of these was a control that existed in the legacy HTML settings page and
 # had no equivalent in the SPA, so the symptom was always "the app just does

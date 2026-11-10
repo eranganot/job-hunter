@@ -1,7 +1,7 @@
 """
 tests/test_expiry_removed.py - jobs no longer disappear for not being looked at.
 
-Eran, seeing 33 jobs in "found" that were in no bucket: "what does founded but
+The owner, seeing 33 jobs in "found" that were in no bucket: "what does founded but
 expired means? from where? from the swipe? how can job be expired?"
 
 He had never been told, because nothing ever said it. expire_old_jobs() moved

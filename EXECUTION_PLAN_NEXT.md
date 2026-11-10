@@ -1,6 +1,6 @@
 # Job Hunter — Execution Plan: next wave
 
-**Status:** approved 2026-10-25 for Steps 0–3. Step 4 waits for Eran's approval of the tier matrix (section 7).
+**Status:** approved 2026-10-25 for Steps 0–3. Step 4 waits for the owner's approval of the tier matrix (section 7).
 **Date:** 2026-10-25 · **Repo state:** `main` @ `d652482` (2026-10-12)
 **Supersedes:** `BACKLOG.md` (June audit, 13 of 20 items since shipped). `EXECUTION_PLAN_PUBLIC_LAUNCH.md` stays the reference for Phases 5–7; this plan sequences what is left of it plus the new work.
 
@@ -16,12 +16,12 @@
 | Unresolvable link | **Keep the job, flag it ("No direct link"), rank it a bit lower.** |
 | Scope of the link fix | **New jobs + jobs still New/Approved.** Applied and passed history is not touched. |
 | **Auto-apply** | Un-parked as **P2, after Phase 5**. The link fix is its first prerequisite. |
-| **Shipping** | Claude commits and pushes to `main` directly; Railway deploys on push. Eran no longer runs PowerShell ship blocks. |
-| Phase 5 | Marked **super important** by Eran. |
+| **Shipping** | Claude commits and pushes to `main` directly; Railway deploys on push. The owner no longer runs PowerShell ship blocks. |
+| Phase 5 | Marked **super important** by the owner. |
 | Big-Tech sources | Promoted to **P1**. |
 | Order | **Links first** (Steps 1–3), then Phase 5. |
 | "No direct link" penalty | **5 points**, approved. |
-| Tier matrix | **Needs Eran's explicit approval before Step 4 starts.** |
+| Tier matrix | **Needs the owner's explicit approval before Step 4 starts.** |
 | Domain | Not chosen yet — Step 5 waits for it; Steps 4 and 6 move ahead of it if needed. |
 | Every change | Ships as a **pull request with a smoke test**, before and after merge. |
 | Feedback-loop metrics | Promoted to **P2**. |
@@ -35,7 +35,7 @@ Priority first, then value, then effort. "Session" ≈ one focused working block
 
 | Step | Item | Pri | Effort | Depends on |
 |---|---|---|---|---|
-| 0 | Housekeeping: push access, Mac-era CLAUDE.md, new BACKLOG.md, smoke runnable from here, Sentry on | P1 | S (½ session) | Eran: Sentry DSN, approve repo push |
+| 0 | Housekeeping: push access, Mac-era CLAUDE.md, new BACKLOG.md, smoke runnable from here, Sentry on | P1 | S (½ session) | the owner: Sentry DSN, approve repo push |
 | 1 | **Direct company links** | P1 | L (3 sessions) | 0 |
 | 2 | Link checker: dead postings read as alive | P1 | M (1 session) | 1 (same module, same data) |
 | 3 | Big-Tech sources (Google, Apple, Microsoft) | P1 | S–M (1 session) | 1 (shares the resolver) |
@@ -51,12 +51,12 @@ Priority first, then value, then effort. "Session" ≈ one focused working block
 | 13 | Capture salary at pass time | P3 | M | — |
 | 14 | Apply self-test reports stale SQLite fields | P3 | S | do inside 8 |
 
-**Parked:** `http.server` replacement · Android APK · SecretJobs source (waiting on Eran's feed capture).
+**Parked:** `http.server` replacement · Android APK · SecretJobs source (waiting on the owner's feed capture).
 
 **Total to the end of P1 (steps 0–7): about 10–11 sessions.**
 
-### Why links come before Phase 5 (confirmed by Eran)
-Links change Eran's queue every day and are the prerequisite for auto-apply; Phase 5 only matters once strangers sign up, and signups are also gated on steps 5–6.
+### Why links come before Phase 5 (confirmed by the owner)
+Links change the owner's queue every day and are the prerequisite for auto-apply; Phase 5 only matters once strangers sign up, and signups are also gated on steps 5–6.
 
 **Domain not chosen yet:** if it is still open when Step 5 comes up, Step 6 runs first and Step 5 waits.
 
@@ -76,7 +76,7 @@ Links change Eran's queue every day and are the prerequisite for auto-apply; Pha
 
 Any `web/src` change also rebuilds `web_bundle/`, checks CSS ~25 KB, bumps the service-worker cache and runs `verify_web_bundle.py` — Railway does not build the frontend.
 
-Data changes that touch Eran's rows are done as migrations (keyed, idempotent, tested), as `m0012` was — never through the API.
+Data changes that touch the owner's rows are done as migrations (keyed, idempotent, tested), as `m0012` was — never through the API.
 
 ---
 
@@ -84,11 +84,11 @@ Data changes that touch Eran's rows are done as migrations (keyed, idempotent, t
 
 ### Step 0 — Housekeeping (½ session)
 
-1. **Push access.** Attach `eranganot/job-hunter` with push rights to this workspace. Eran approves the prompt once.
-2. **CLAUDE.md for the Mac era.** Drop the `C:\dev` single-clone rules and the "sandbox can't push, hand Eran PowerShell" rule; replace with the push loop in section 3. Keep the two-UI and domain-fact sections.
+1. **Push access.** Attach `eranganot/job-hunter` with push rights to this workspace. The owner approves the prompt once.
+2. **CLAUDE.md for the Mac era.** Drop the `C:\dev` single-clone rules and the "sandbox can't push, hand the owner PowerShell" rule; replace with the push loop in section 3. Keep the two-UI and domain-fact sections.
 3. **Smoke from here.** The checks live in `scripts/smoke*.ps1`. Port the read-only parts (health, commit match, anonymous auth gates, service-worker version) to `scripts/smoke.py` so every deploy can be verified from the cloud workspace. The `.ps1` files stay for now.
 4. **BACKLOG.md** replaced by the list in section 2, with a pointer to this plan.
-5. **Sentry on.** Eran creates a free Sentry project and adds `JH_SENTRY_DSN` to Railway (production and staging). Claude then triggers a test error via an admin-only route and confirms it lands in Sentry.
+5. **Sentry on.** The owner creates a free Sentry project and adds `JH_SENTRY_DSN` to Railway (production and staging). Claude then triggers a test error via an admin-only route and confirms it lands in Sentry.
 
 **Done when:** Step 0's own PR goes through the full section-3 loop — local smoke, merge, production smoke posted on the PR — and a test error appears in Sentry.
 
@@ -102,10 +102,10 @@ Data changes that touch Eran's rows are done as migrations (keyed, idempotent, t
 
 **1a. Measure first (part of session 1).**
 New admin-only, read-only endpoint `GET /api/admin/link-report`:
-- Eran's open jobs (New + Approved) counted by link host: direct ATS, company domain, LinkedIn, Indeed, other boards.
+- The owner's open jobs (New + Approved) counted by link host: direct ATS, company domain, LinkedIn, Indeed, other boards.
 - A dry run of the existing resolver on up to 50 of the board-linked jobs: how many resolve, to which ATS, and the title-match score.
 
-Eran opens it once while signed in. **The result sets the target for "done" and decides how much of 1c is needed** — reported back before 1c starts.
+The owner opens it once while signed in. **The result sets the target for "done" and decides how much of 1c is needed** — reported back before 1c starts.
 
 **1b. Resolve when a job is saved (session 1).**
 - New migration: `jobs.source_url` (where we found it), `jobs.link_type` (`direct` / `board` / `unknown`), `jobs.link_resolved_at`.
@@ -128,7 +128,7 @@ Every accepted link is verified by `linkcheck.py` before it is stored. A link th
 - Re-tried automatically once a week (postings often appear on the ATS a few days after LinkedIn).
 
 **1e. Backfill existing open jobs (session 3).**
-- One idempotent pass over Eran's New + Approved jobs (and any other user's), run as a worker job with a progress line in `/api/health`.
+- One idempotent pass over the owner's New + Approved jobs (and any other user's), run as a worker job with a progress line in `/api/health`.
 - Applied, passed and system-passed rows are not touched.
 
 **1f. Visibility (session 3).**
@@ -143,16 +143,16 @@ Every accepted link is verified by `linkcheck.py` before it is stored. A link th
 1. **Board search:** for each user's titles, query the boards the app knows (learned boards from stored direct links, `company_boards` from the careers-map, the verified Workday tenants), Israel-filtered, deduplicated against existing jobs. Results enter like any other source (relevance gate, scoring), already direct.
 2. **Resolve-before-show:** run the free link lookups when a job is inserted, before it reaches the swipe deck; the background pass remains for retries.
 3. **Measure for a week:** share of new jobs arriving direct, by source; cost (requests, run time).
-4. **Then decide (Eran):** the target, and the rule for LinkedIn-only jobs that cannot be resolved (keep / separate "Apply on LinkedIn" list / drop).
+4. **Then decide (The owner):** the target, and the rule for LinkedIn-only jobs that cannot be resolved (keep / separate "Apply on LinkedIn" list / drop).
 
-**Done when:** a week of new jobs shows the direct share by source, and Eran has set the target and the LinkedIn-only rule from it.
+**Done when:** a week of new jobs shows the direct share by source, and the owner has set the target and the LinkedIn-only rule from it.
 
 ### Step 2 — Link checker gaps (1 session)
 The 10-12 rebuild caught 29 of 41 dead links. The 10 it still calls alive are aggregator pages (builtin, jobright, secrethunter) and invented company-site slugs that return the site's front page with HTTP 200.
 - Aggregators: treat these hosts as **boards**, so they go through Step 1's resolver instead of being trusted as direct.
-- Invented slugs: compare the landed page's title with the job title; the 10-12 attempt rejected a whole-page title rule because of false negatives on Payoneer, NICE and LinkedIn — so this time it applies **only to non-ATS company domains**, and the 41 observed URLs plus those pages become the test fixtures.
+- Invented slugs: compare the landed page's title with the job title; the 10-12 attempt rejected a whole-page title rule because of false negatives on an embedded-Greenhouse employer, NICE and LinkedIn — so this time it applies **only to non-ATS company domains**, and the 41 observed URLs plus those pages become the test fixtures.
 
-**Done when:** all 41 observed URLs classify correctly in `tests/test_linkcheck.py`, with no regressions on the live Payoneer/NICE/LinkedIn cases.
+**Done when:** all 41 observed URLs classify correctly in `tests/test_linkcheck.py`, with no regressions on the live embedded-board/LinkedIn cases.
 
 ### Step 3 — Big-Tech sources (1 session)
 Google (404), Apple (301 to a not-found page) and Microsoft fail; Amazon works.
@@ -167,22 +167,22 @@ Google (404), Apple (301 to a not-found page) and Microsoft fail; Amazon works.
 Builds on what exists: `users.plan` (migration 10) and `entitlements.py` (`plan_of`, `is_admin`, `can_auto_apply`).
 
 **Session 1 — the machinery**
-1. `plans.py`: one dict per plan (`free`, `beta`, `premium`, `expert`), quotas and feature flags, editable without a migration. Values: **the matrix Eran approves** (proposal in section 7). Step 4 does not start without that approval.
+1. `plans.py`: one dict per plan (`free`, `beta`, `premium`, `expert`), quotas and feature flags, editable without a migration. Values: **the matrix the owner approves** (proposal in section 7). Step 4 does not start without that approval.
 2. Migration: `usage_counters` (user, meter, period, count), `entitlement_overrides` (admin grants), `subscriptions` and `billing_events` (empty until Step 11, created now so Phase 6 adds no schema).
 3. `entitlements.check(user, feature)` and `consume(user, meter, n)`, enforced **server-side** at every metered entry point: run-search, cover letter, CV optimizer, schedule frequency, notification channels, paid ingestion sources, apply.
 4. An exhausted quota returns a clean `402` with a reason the UI can show — never a 500.
-5. Everyone moves to `beta` (Premium-level quotas, free); Eran stays admin by role.
+5. Everyone moves to `beta` (Premium-level quotas, free); the owner stays admin by role.
 
-**Session 2 — what users and Eran see**
+**Session 2 — what users and the owner see**
 6. `/api/me` returns plan, features and live usage; `/app` shows meters, locked states and an upgrade hint (no prices — billing is dark).
 7. Admin: set a user's plan, grant credits, per-user usage and estimated AI cost.
 
-**Eran's decisions, 2026-11-05** (matrix doc; not yet approved as a whole):
-- **Superseded 2026-11-09 (Eran): every new user joins a `beta` plan - Premium's limits, no end date - and running Premium promotions moved to it (Step 17).** _Was:_ No `beta` plan. Every new user, and every existing user when Step 4 ships, gets **Premium as a 30-day promotion**, then moves to Free automatically. A promotion = a plan with an end date (admin can grant any plan, with an end date); when it ends the user drops to Free, or to their paid plan.
-- Users are **notified before a promotion ends** (lead time open; proposed 7 and 1 days). Email to non-Eran addresses needs the verified sending domain (Step 5 blocker), so push/Telegram/WhatsApp carry it until then.
+**The owner's decisions, 2026-11-05** (matrix doc; not yet approved as a whole):
+- **Superseded 2026-11-09 (The owner): every new user joins a `beta` plan - Premium's limits, no end date - and running Premium promotions moved to it (Step 17).** _Was:_ No `beta` plan. Every new user, and every existing user when Step 4 ships, gets **Premium as a 30-day promotion**, then moves to Free automatically. A promotion = a plan with an end date (admin can grant any plan, with an end date); when it ends the user drops to Free, or to their paid plan.
+- Users are **notified before a promotion ends** (lead time open; proposed 7 and 1 days). Email to non-admin addresses needs the verified sending domain (Step 5 blocker), so push/Telegram/WhatsApp carry it until then.
 - **Matches shown per search:** Free 3, Premium 6, Expert all, each in full (score, explanation, link); the rest appear **blurred** with an upgrade prompt. The blur must be built server-side: the API returns only a count and placeholders for hidden matches, never the jobs themselves, or a free user could read them from the response.
 - **Billing (Step 11):** monthly, or 6 months upfront at a discount (Paddle prices with a 6-month billing cycle).
-- Admin is a role (Eran only), never a plan.
+- Admin is a role (The owner only), never a plan.
 
 **Done when:** changing a plan in admin changes what the API allows on the next request; every gated path returns the clean paywall response when exhausted (one test per path); counters have recorded a week of real usage.
 
@@ -191,10 +191,10 @@ Builds on what exists: `users.plan` (migration 10) and `entitlements.py` (`plan_
 - Signed, single-use, expiring tokens (stored hashed); verify-email gate on email/password signups (Google sign-ins are already verified by Google); "forgot password" flow that revokes other sessions, as password change already does.
 - Rate-limited through `ratelimit.py`.
 
-**Done when:** a new account on staging receives and completes verification; a reset link works once and then fails; both mails arrive at a non-Eran address.
+**Done when:** a new account on staging receives and completes verification; a reset link works once and then fails; both mails arrive at a non-admin address.
 
 ### Step 6 — Legal + data controls (1 session)
-- Draft Terms, Privacy Policy (naming Gemini, Resend, Twilio, Railway, Paddle, Sentry) and a cookie notice for Eran's review — drafts, not legal advice.
+- Draft Terms, Privacy Policy (naming Gemini, Resend, Twilio, Railway, Paddle, Sentry) and a cookie notice for the owner's review — drafts, not legal advice.
 - `/settings` → **Export my data** (JSON + CV file) and **Delete my account** (cascades CV, jobs, sessions, push subscriptions; cancels the Paddle subscription once Step 11 exists).
 - Retention policy written into the Privacy Policy and enforced by a scheduled purge.
 
@@ -206,12 +206,12 @@ Builds on what exists: `users.plan` (migration 10) and `entitlements.py` (`plan_
 ### Step 8 — Un-park auto-apply (P2, 2–3 sessions)
 Follows Appendix A of `EXECUTION_PLAN_PUBLIC_LAUNCH.md`. Starting point is better than it was: the 10-07 self-test showed the runtime healthy (Chromium launches, Gemini key present, CV present), and Step 1 means far more jobs carry an ATS link the engine can actually submit to.
 1. Fix the self-test's stale SQLite fields (old Step 14).
-2. One live, supervised submit on Eran's own approved job, with `APPLY_ENGINE_ENABLED=1` set only for that run.
-3. Measure success rate per ATS over Eran's real queue; only ATSes above an agreed rate stay enabled.
+2. One live, supervised submit on the owner's own approved job, with `APPLY_ENGINE_ENABLED=1` set only for that run.
+3. Measure success rate per ATS over the owner's real queue; only ATSes above an agreed rate stay enabled.
 4. Apply-flow UX: clear manual-required state, retry visibility, confirmation evidence in the job detail.
 5. The auto-apply toggle stays admin + paid only (already gated by `can_auto_apply`).
 
-**Done when:** a measured success rate per ATS exists and Eran decides, from that number, whether auto-apply is something he would charge for.
+**Done when:** a measured success rate per ATS exists and the owner decides, from that number, whether auto-apply is something he would charge for.
 
 ### Steps 9–13 (P2/P3, one session each)
 - **9 — Legacy HTML:** delete `DASHBOARD_HTML` and the other legacy pages (~3,000 lines) and the `LEGACY_UI=1` switch, after one last parity check against `PHASE4_UI_CONVERGENCE.md`.
@@ -222,7 +222,7 @@ Follows Appendix A of `EXECUTION_PLAN_PUBLIC_LAUNCH.md`. Starting point is bette
 
 ---
 
-## 5. What Eran needs to do (and when)
+## 5. What the owner needs to do (and when)
 
 | When | Action | Why |
 |---|---|---|
@@ -236,16 +236,16 @@ Follows Appendix A of `EXECUTION_PLAN_PUBLIC_LAUNCH.md`. Starting point is bette
 
 ---
 
-## 6. Open questions for Eran
+## 6. Open questions for the owner
 
-1. **Tier matrix** (section 7) — Eran is refining it; needed before Step 4.
+1. **Tier matrix** (section 7) — The owner is refining it; needed before Step 4.
 2. **Domain** — open; needed before Step 5.
 
 ---
 
 ## 7. Tier matrix
 
-**Approved by Eran on 2026-11-05** in the doc **Job Hunter — Plan tier matrix** (https://claude.ai/artifact/HNeqn25jQRU2taPiN3YrUm). The code's copy is `plans.py`; this table is the approved version.
+**Approved by the owner on 2026-11-05** in the doc **Job Hunter — Plan tier matrix** (https://claude.ai/artifact/HNeqn25jQRU2taPiN3YrUm). The code's copy is `plans.py`; this table is the approved version.
 
 | Feature | Free | Premium | Expert | Admin (role) |
 |---|---|---|---|---|

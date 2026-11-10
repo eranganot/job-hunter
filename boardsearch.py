@@ -1,4 +1,4 @@
-"""Step 16: board-first search (Eran, 2026-11-08).
+"""Step 16: board-first search (The owner, 2026-11-08).
 
 The share of open jobs with a direct link follows the share of *incoming* jobs
 that arrive direct. Fixing LinkedIn links afterwards resolves ~14-16% of them

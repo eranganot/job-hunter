@@ -123,7 +123,7 @@ def test_with_no_stated_locations_the_old_behaviour_stands():
 
 
 class TestAppliedElsewhere:
-    """Eran, 2026-11-05: "if I click on already applied elsewhere -> learn that
+    """The owner, 2026-11-05: "if I click on already applied elsewhere -> learn that
     this company interests me and do not pass on this company"."""
 
     def test_it_is_interest_not_a_pass(self, uid):

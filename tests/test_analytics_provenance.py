@@ -1,7 +1,7 @@
 """
 tests/test_analytics_provenance.py - "Applied" and "Passed" must mean one thing.
 
-Eran, 2026-09-15, looking at production: "I still think you have wrong
+The owner, 2026-09-15, looking at production: "I still think you have wrong
 calculation in the analytics ... only applied should be count as applied, if I
 click pass (for any reason - even applied elsewhere - should not be count)."
 
@@ -41,7 +41,7 @@ def aged(tmp_path):
     database.set_db_path(str(tmp_path / "t.db"))
     database.init_db()
     auth.set_db_getter(database.get_db)
-    auth.create_user("Eran", "e@x.test", "correct-horse-1")
+    auth.create_user("Alex", "e@x.test", "correct-horse-1")
     conn = database.get_db()
     uid = conn.execute("SELECT id FROM users WHERE email=?", ("e@x.test",)).fetchone()["id"]
 
@@ -102,7 +102,7 @@ def test_the_bulk_note_does_not_steal_the_hand_marked_rows(aged):
 
 def test_the_backfill_separates_his_passes_from_the_systems(aged):
     # 42 decisions of his: 30 passes, and 12 removed because he applied
-    # elsewhere - counted apart, never as passes (Eran, 2026-11-05).
+    # elsewhere - counted apart, never as passes (The owner, 2026-11-05).
     assert aged["passed_by_user"] == 30
     assert aged["applied_elsewhere"] == 12
     assert aged["passed_by_system"] == 200
@@ -126,7 +126,7 @@ def test_the_breakdown_adds_up_to_the_totals(aged):
 # ── The write sites: no future row should ever need a backfill ──────────────
 
 def test_a_pass_is_a_pass_whatever_reason_is_chosen(stack, users):
-    """Eran's own hypothesis, pinned. "Already applied elsewhere" is a REASON
+    """The owner's own hypothesis, pinned. "Already applied elsewhere" is a REASON
     FOR PASSING, and must never reach the applied count by any route."""
     uid = _user_id(stack["db"], "alice@example.test")
     for reason in ("Already applied elsewhere", "Not a good fit", "Wrong location"):
@@ -140,7 +140,7 @@ def test_a_pass_is_a_pass_whatever_reason_is_chosen(stack, users):
 
 
 def test_applied_elsewhere_is_counted_apart_never_as_applied_or_passed(stack, users):
-    """Eran, 2026-11-05: the job leaves the queue as rejected, but it is not a
+    """The owner, 2026-11-05: the job leaves the queue as rejected, but it is not a
     pass and the app did not apply. /api/stats counts it on its own line."""
     import json as _json
     uid = _user_id(stack["db"], "alice@example.test")

@@ -84,7 +84,7 @@ the whole row — penalty included.
 2. **re-sorts client-side by raw `matchScore`** (`App.tsx:497`), which
    **overrides the effective-score order the API just produced.**
 
-That is what Eran was seeing. In the legacy screenshot the same job reads
+That is what the owner was seeing. In the legacy screenshot the same job reads
 **97% match** *and* `⬇ Location you've passed on`. In `/app` it reads 97% and
 sits at the top of the queue, with the demotion invisible and undone.
 

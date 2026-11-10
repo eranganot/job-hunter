@@ -7,7 +7,7 @@ tests/test_email_recipient.py - the email goes to the person it is addressed to.
 
 Every user's email notification went to the admin's inbox. Proven 2026-09-20 by
 driving deliver_notification for a user whose address is
-dana@somewhere-else.test - Resend was handed to=['eran.ganot@gmail.com'] - and
+dana@somewhere-else.test - Resend was handed to=['admin@example.com'] - and
 the caller logged "Sent OK" either way, so nothing anywhere said otherwise.
 
 It came from Resend's shared sandbox sender (onboarding@resend.dev), which can

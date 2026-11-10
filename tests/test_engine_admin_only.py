@@ -1,4 +1,4 @@
-"""APPLY_ENGINE_ENABLED is on in production for Eran's testing, but only for
+"""APPLY_ENGINE_ENABLED is on in production for the owner's testing, but only for
 admins (2026-11-09: "for now I want it to be applicable only for me"). A user
 who switched auto-apply on in Settings must not reach the engine until
 APPLY_ENGINE_FOR_ALL is also set."""

@@ -1,4 +1,4 @@
-"""2026-11-09, Eran's first daily auto-apply: Seatpicl and Tavily were tried
+"""2026-11-09, the owner's first daily auto-apply: Seatpicl and Tavily were tried
 three times in one day, and Forter's confirmation email arrived for a job the
 run had marked as a failure. An application that may have gone out is never
 retried automatically - a person checks."""

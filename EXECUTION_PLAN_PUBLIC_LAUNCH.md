@@ -33,10 +33,10 @@ Locked decisions: platform API keys with hard per-tier quotas · SQLite → Post
 | Clone | Today | After Phase 0 |
 |---|---|---|
 | `C:\dev\job-hunter` | 81 commits behind, no `web/`, no `ingestion/`, no PWA | **canonical** — synced to `origin/main`, carries the uncommitted work |
-| `C:\Users\erang\job-hunter` | in sync with `origin/main` (`4e4a04a`) + 3 uncommitted files + `PAID_SOURCES_BENCHMARK.md` | archived (renamed `*_ARCHIVED_2026-09`) |
-| OneDrive `…\Eran's dev\Job Hunter` | divergent `master` @ `870c4eb` | archived |
+| `C:\Users\<user>\job-hunter` | in sync with `origin/main` (`4e4a04a`) + 3 uncommitted files + `PAID_SOURCES_BENCHMARK.md` | archived (renamed `*_ARCHIVED_2026-09`) |
+| OneDrive `…\<user>'s dev\Job Hunter` | divergent `master` @ `870c4eb` | archived |
 
-`CLAUDE.md` currently names the `C:\Users\erang` clone as source of truth — it gets rewritten to point at `C:\dev\job-hunter` in the same commit, so no future session repeats this.
+`CLAUDE.md` currently names the `C:\Users\<user>` clone as source of truth — it gets rewritten to point at `C:\dev\job-hunter` in the same commit, so no future session repeats this.
 
 **"Make the web look like the app" is a convergence, not a re-skin.** You already built the app UI: a React + Vite + TS + Tailwind PWA in `web/`, shipped as the committed `web_bundle/`, served by `app.py:5509` at `/app`, with swipe review, dark theme, Queue/Applied/Deferred/Passed/Activity/Analytics, push and an install prompt. `/dashboard` is the legacy server-rendered UI: **`app.py` lines 2345–5380, ~3,000 of its 7,554**, are HTML string constants styled by a **frozen gzip+base64 Tailwind blob** at `app.py:33` that no build step regenerates.
 
@@ -97,7 +97,7 @@ You're undecided, so the plan carries both. All billing code sits behind `billin
 
 **The deciding question is not technical:** are you willing to own VAT registration and remittance in the countries your customers live in, in exchange for roughly 2–3 points of margin? At your likely first-year volume that difference is small in absolute money and large in evenings spent on tax admin. That's why I recommend Paddle — but it's a business call, and I'll build to whichever you name.
 
-**One new input:** if the Android app ships on the Play Store (Workstream A), Google's June 2026 rules let you link out to your own web checkout for subscriptions in the US/UK/EEA — but a **10% service fee on auto-renewing subscriptions still applies** to purchases attributable to the app, with Play's own billing adding ~5% on top. Sideloading the APK (the AdaptiveFit pattern) avoids that entirely. Decide distribution before you price.
+**One new input:** if the Android app ships on the Play Store (Workstream A), Google's June 2026 rules let you link out to your own web checkout for subscriptions in the US/UK/EEA — but a **10% service fee on auto-renewing subscriptions still applies** to purchases attributable to the app, with Play's own billing adding ~5% on top. Sideloading the APK (a proven Capacitor pattern) avoids that entirely. Decide distribution before you price.
 
 **Deadline:** the provider must be chosen before Phase 6 starts, not before Phase 0.
 
@@ -239,7 +239,7 @@ Built and proven, but not switched on: no public `/pricing`, no live keys, `BILL
 
 ## Workstream A — Native Android app (parallel, ≈1–2 sessions)
 
-Cheap, because you've done it before and because Phase 4 makes `/app` a proper app on every size. **Reuse the AdaptiveFit pattern verbatim:** Capacitor 6, Android only, WebView pointed at a live URL rather than bundling the web code (`adaptivefit-mobile/capacitor.config.ts` is the template, including the `CAPACITOR_DEV` LAN-dev switch).
+Cheap, because you've done it before and because Phase 4 makes `/app` a proper app on every size. **Reuse a proven Capacitor pattern verbatim:** Capacitor 6, Android only, WebView pointed at a live URL rather than bundling the web code (an existing Capacitor project's `capacitor.config.ts` is the template, including the `CAPACITOR_DEV` LAN-dev switch).
 
 1. `npx cap init` in the repo (or a sibling `android/` project), `server.url` → `https://<domain>/app`, production HTTPS only, cleartext limited to LAN in dev.
 2. Icons + splash via `@capacitor/assets`; status-bar and safe-area handling to match the dark theme.
@@ -247,7 +247,7 @@ Cheap, because you've done it before and because Phase 4 makes `/app` a proper a
 4. External job links open in the system browser, not the WebView.
 5. Deep links: `/app#applied` etc. from a push tap; Android App Links if a custom domain lands.
 6. Signing keystore + release build; store it somewhere you won't lose it.
-7. **Distribution: sideloaded APK** (your call — the AdaptiveFit pattern). Zero store fees, no review, no privacy-policy gate, ships in a session. You and the 2 active users install directly; updates to the web UI land instantly since the shell only points at a URL, and only shell changes need a new APK.
+7. **Distribution: sideloaded APK** (your call — a proven Capacitor pattern). Zero store fees, no review, no privacy-policy gate, ships in a session. You and the 2 active users install directly; updates to the web UI land instantly since the shell only points at a URL, and only shell changes need a new APK.
 
    Play Store stays a post-launch option, and its cost is worth knowing before you price: from June 30 2026 Google's expanded billing choice lets you link out to your own checkout in the US/UK/EEA, but a **~10% service fee on auto-renewing subscriptions attributable to the app still applies** (Play's own billing adds ~5% on top), plus a Play Console account, a public privacy policy, data-safety disclosures and review. Since billing isn't going live until auto-apply works, this decision can wait — revisit it after Phase 7, when the privacy policy exists anyway.
 

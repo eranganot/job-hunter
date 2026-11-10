@@ -3,7 +3,7 @@
 Job-application automation. Python (stdlib `http.server`, no Flask) + SQLite, React PWA frontend, deployed on Railway. Remote: `github.com/eranganot/job-hunter.git`, branch `main`.
 
 ## Where the work happens — since 2026-10-25
-Eran moved to a Mac (October 2026); the Windows clones (`C:\dev\job-hunter` and the two archived before it) are history.
+The owner moved to a Mac (October 2026); the Windows clones (`C:\dev\job-hunter` and the two archived before it) are history.
 Claude works in a cloud workspace with **push access to `github.com/eranganot/job-hunter`** and ships through pull requests.
 
 ## How to work in this repo
@@ -22,7 +22,7 @@ Claude works in a cloud workspace with **push access to `github.com/eranganot/jo
 - The legacy server-rendered UI (`/dashboard`, `/settings`, `/onboarding`, `/admin`, the frozen Tailwind blob, `LEGACY_UI`) was **deleted in Step 9 (2026-11-05)**. Those URLs only redirect into `/app`. `/login` and `/register` are still server-rendered (`LOGIN_HTML` / `REGISTER_HTML`, self-contained styles) — they are not legacy.
 
 ## Domain facts
-- Auto-apply is **OFF in production** (`APPLY_ENGINE_ENABLED` unset ⇒ `apply_engine.submit_application` no-ops), root cause open — see `APPLY_ENGINE_INVESTIGATION.md`. That workstream is parked by Eran's decision; do not re-enable it without him.
+- Auto-apply is **OFF in production** (`APPLY_ENGINE_ENABLED` unset ⇒ `apply_engine.submit_application` no-ops), root cause open — see `APPLY_ENGINE_INVESTIGATION.md`. That workstream is parked by the owner's decision; do not re-enable it without him.
 - The apply engine can only auto-submit to **direct ATS URLs** (Greenhouse, Lever, Workday, Comeet, SmartRecruiters, Ashby, company `/careers`). Job-board listings (LinkedIn/Indeed/Glassdoor) are correctly flagged `manual_required` — by design, not a bug.
 - "Submitted N" in summaries must reflect real submits, not manual-flagged jobs — keep wording honest.
 - All LLM calls route through **Gemini** (Anthropic removed).

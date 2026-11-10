@@ -1,6 +1,6 @@
 """paidpool.py - the shared paid-source pool and its free-tier guard (2026-11-09).
 
-Eran: "make sure that you will not pass the free tier". What must hold:
+The owner: "make sure that you will not pass the free tier". What must hold:
 the cap never exceeds the free allowance; spend is reserved before a call and
 only fits under the cap; a 4xx gives the reservation back, a timeout keeps it;
 the month is spread over its days; each source runs once a day; nothing is
@@ -280,7 +280,7 @@ def test_off_by_default_nothing_is_called_whatever_keys_are_set(conn, monkeypatc
 # ── which titles the pool asks (2026-11-09) ──────────────────────────────
 # The first live TheirStack request (its own request log) carried the two shared
 # titles, then ten more in ALPHABETICAL order cut at "G": ties were broken by
-# name, so every title from H to Z was never asked. Eran: fold and rotate - but
+# name, so every title from H to Z was never asked. The owner: fold and rotate - but
 # "the senior titles are important", never fold them away.
 
 def _add_users(conn, titles_by_user):

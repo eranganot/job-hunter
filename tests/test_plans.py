@@ -1,6 +1,6 @@
 """Phase 5a (Step 4): plans, usage counters and promotions.
 
-The numbers are the tier matrix Eran approved on 2026-11-05; the promotion
+The numbers are the tier matrix the owner approved on 2026-11-05; the promotion
 rules are his decisions from the same day: every new account starts on Premium
 free for 30 days, then Free; a web push 7 days and 1 day before; admin is a
 role, never a plan."""
@@ -36,7 +36,7 @@ def _user(conn, uid=1):
 
 # ── the approved matrix ────────────────────────────────────────────────────
 
-def test_the_matrix_is_the_one_eran_approved():
+def test_the_matrix_is_the_one_the_owner_approved():
     f, p, e = plans.PLANS["free"], plans.PLANS["premium"], plans.PLANS["expert"]
     assert (f["matches_per_search"], p["matches_per_search"], e["matches_per_search"]) == (3, 6, None)
     assert (f["on_demand_search"], p["on_demand_search"], e["on_demand_search"]) == (1, 3, 10)

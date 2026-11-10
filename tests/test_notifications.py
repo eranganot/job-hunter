@@ -13,7 +13,7 @@ def env(tmp_path):
     database.set_db_path(str(tmp_path / "t.db"))
     database.init_db()
     auth.set_db_getter(database.get_db)
-    auth.create_user("Eran", "t@e.com", "pw123456")
+    auth.create_user("Alex", "t@e.com", "pw123456")
     conn = database.get_db()
     uid = conn.execute("SELECT id FROM users WHERE email=?", ("t@e.com",)).fetchone()["id"]
     conn.execute("UPDATE user_profiles SET notification_channel='none' WHERE user_id=?", (uid,))

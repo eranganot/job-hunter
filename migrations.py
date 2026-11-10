@@ -591,7 +591,7 @@ def m0009_decision_provenance(conn):
 def m0010_user_plan(conn):
     """users.plan - the first entitlement the app has ever had.
 
-    Auto-apply is the feature that costs money to run and the one Eran wants
+    Auto-apply is the feature that costs money to run and the one the owner wants
     behind the paywall, so it is the one that needs a plan to check against.
     Everyone starts on 'free', including him: the admin path is a separate
     check on role, so nothing depends on a hand-edited row being right.
@@ -642,8 +642,8 @@ def m0011_undo_expiry(conn):
     conn.commit()
 
 
-def m0012_reconcile_eran_backlog(conn):
-    """One-time correction of two mis-filed sets for user 1 (Eran), 2026-10-12.
+def m0012_reconcile_owner_backlog(conn):
+    """One-time correction of two mis-filed sets for user 1 (The owner's account), 2026-10-12.
 
     Both were reviewed row by row with him and he approved the outcome. Rows
     are named by primary key AND re-checked against the exact state they were
@@ -827,7 +827,7 @@ def m0016_enforcement_launch(conn):
                          plan's per-search limit (status 'locked') can be
                          unlocked search by search after an upgrade
 
-    The launch promotion (Eran, 2026-11-05): every existing account that is not
+    The launch promotion (The owner, 2026-11-05): every existing account that is not
     admin and has never had a plan decision (plan_source IS NULL) gets Premium
     free for 30 days from now, then Free - the same deal new signups have had
     since 4a. Accounts that signed up after 4a already carry their promotion and
@@ -863,7 +863,7 @@ def m0017_account_deletion(conn):
 
 def m0018_sponsorship(conn):
     """Profile: does the applicant need visa sponsorship at home (Israel) and
-    abroad? '' = not answered, read as 'no' (Eran, 2026-11-07: "for now assume
+    abroad? '' = not answered, read as 'no' (The owner, 2026-11-07: "for now assume
     I don't need sponsorship"); 'no' / 'yes' once set on the Profile page."""
     for col in ("sponsorship_local", "sponsorship_abroad"):
         if not _has_column(conn, "user_profiles", col):
@@ -898,14 +898,14 @@ def m0021_standing_notes(conn):
     """Standing instructions for application forms (2026-11-08): one block of
     plain English the question answerer follows on every form ("willing to
     relocate: yes", "current salary: do not answer"). Kept on the account, not
-    as profile questions (Eran, 2026-11-07)."""
+    as profile questions (The owner, 2026-11-07)."""
     if not _has_column(conn, "application_answers", "standing_notes"):
         conn.execute("ALTER TABLE application_answers ADD COLUMN standing_notes TEXT")
     conn.commit()
 
 
 def m0022_auto_apply_fresh_choice(conn):
-    """Auto-apply opens to every plan (Eran, 2026-11-08: the users decide).
+    """Auto-apply opens to every plan (The owner, 2026-11-08: the users decide).
     Flags left on from before the paywall (m0010 kept them) would otherwise
     start applying for people who never chose it now - so every non-admin
     account starts from off and decides in Settings."""
@@ -919,7 +919,7 @@ def m0023_tailored_cvs(conn):
     """Step 14: a CV rewritten for one job, kept per (user, job) - the checked
     JSON, plus what the check removed or flagged, shown with it. edited: the
     user changed the draft; use_for_apply: the user chose it over the original
-    for this job's application (Eran, 2026-11-08) - 0 until they do."""
+    for this job's application (The owner, 2026-11-08) - 0 until they do."""
     conn.execute(
         "CREATE TABLE IF NOT EXISTS tailored_cvs ("
         " user_id INTEGER NOT NULL, job_id INTEGER NOT NULL, content TEXT NOT NULL,"
@@ -939,7 +939,7 @@ def m0024_company_boards(conn):
 
 
 def m0025_beta_plan(conn):
-    """Beta (Eran, 2026-11-09): every new account joins on the Beta plan
+    """Beta (The owner, 2026-11-09): every new account joins on the Beta plan
     (Premium's limits, no end date), and the accounts on a running 30-day
     Premium promotion move to Beta now - so nobody gets the "your Premium ends
     in 7 days" push. Ended promotions, admin-set plans and admins are untouched.
@@ -990,7 +990,7 @@ def m0027_unconfirmed_applies(conn):
 def m0028_apply_prepared(conn):
     """jobs.apply_prepared: what the app filled into a form it could not send
     (Lever's human check, 2026-11-09) - [{label, value}] - so the user finishes
-    it with a ready-to-paste sheet (Eran chose the sheet over a browser extension)."""
+    it with a ready-to-paste sheet (The owner chose the sheet over a browser extension)."""
     if not _has_column(conn, "jobs", "apply_prepared"):
         conn.execute("ALTER TABLE jobs ADD COLUMN apply_prepared TEXT")
     conn.commit()
@@ -1042,7 +1042,7 @@ MIGRATIONS = [
     (9, "decision_provenance",          m0009_decision_provenance),
     (10, "user_plan",                   m0010_user_plan),
     (11, "undo_expiry",                 m0011_undo_expiry),
-    (12, "reconcile_eran_backlog",      m0012_reconcile_eran_backlog),
+    (12, "reconcile_owner_backlog",      m0012_reconcile_owner_backlog),
     (13, "job_links",                   m0013_job_links),
     (14, "recheck_unresolved_links",    m0014_recheck_unresolved_links),
     (15, "plans_and_promotions",        m0015_plans_and_promotions),

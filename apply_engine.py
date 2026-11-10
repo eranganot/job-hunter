@@ -50,7 +50,7 @@ def _is_comeet(url: str) -> bool:
 
 
 def intl_phone(phone: str, home_country: str = "Israel") -> str:
-    """'054-6912084' -> '+972 546912084' for an Israeli applicant. Phone pickers
+    """'054-1234567' -> '+972 541234567' for an Israeli applicant. Phone pickers
     on Greenhouse and Comeet default to United States +1, so a local number
     would be read as a US one (Comeet rehearsal, 2026-11-07). A number that
     already starts with + is left alone."""
@@ -171,7 +171,7 @@ def _find_company_apply_url(company: str, job_title: str) -> str | None:
 def _gh_fill(page, selector: str, value: str, tries: int = 3) -> bool:
     """Fill a form field and CHECK it stuck, retrying; skips a missing field.
 
-    Observed 2026-11-08 on Payoneer's embedded Greenhouse form: the inputs are
+    Observed 2026-11-08 on an employer's embedded Greenhouse form: the inputs are
     in the page before its React app takes over, and the takeover wipes what
     was typed - the first fill was lost in every order tried (domain ruled
     out), so the submit failed on "Please enter a valid email address". This
@@ -341,7 +341,7 @@ def _combobox_has_value(page, sel) -> bool:
 def _choose_combobox(page, sel, value: str) -> bool:
     """Pick `value` in a role="combobox" dropdown and CHECK it stuck.
 
-    Payoneer's embedded Greenhouse form, 2026-11-08 (Eran's real submit held on
+    an employer's embedded Greenhouse form, 2026-11-08 (a real supervised submit held on
     "I read and understood the privacy policy*"): fill() could leave the menu
     closed (no options), or a click on the option could register nothing, and
     this used to report success for having clicked. Now: fill, else type key by
@@ -506,7 +506,7 @@ def _code_boxes(page) -> int:
 
 
 def _security_code_step(page, applicant, submit_selectors, wait_s: int = 45):
-    """Greenhouse's anti-bot step (Eran's Payoneer submit, 2026-11-08): after
+    """Greenhouse's anti-bot step (a real supervised submit, 2026-11-08): after
     Submit it greys the button, emails an 8-character "security code" and shows
     one box per character; the application is NOT sent until the code is
     entered and the form submitted again. Before this the engine saw "form
@@ -674,7 +674,7 @@ def _finalize_after_submit(page, applicant, submit_selectors) -> dict:
 
 def _answer_form(frame, applicant: dict) -> dict:
     """Answer every remaining question (questions.py). Returns its result; a
-    non-empty 'unsure' means the caller must NOT submit (Eran, 2026-11-07:
+    non-empty 'unsure' means the caller must NOT submit (The owner, 2026-11-07:
     "if you are not sure - show me the questions and I'll guide you")."""
     import questions
     job = dict((applicant or {}).get("_job") or {})
@@ -704,13 +704,13 @@ def _needs_answers(unsure: list) -> dict:
 def _greenhouse_form(page, wait_ms: int = 10_000):
     """Where the Greenhouse form is: the page itself, or the embed iframe.
 
-    Observed 2026-11-08 (Eran's first real supervised submit, Payoneer):
-    boards.greenhouse.io/payoneer/jobs/8284597 redirects to
-    payoneer.com/careers/position/8284597/?gh_jid=8284597, which embeds the form
-    in an iframe from job-boards.greenhouse.io/embed/job_app?for=payoneer&...
+    Observed 2026-11-08 (the first real supervised submit, an embedded Greenhouse form):
+    boards.greenhouse.io/<company>/jobs/<id> redirects to
+    <company>.com/careers/position/<id>/?gh_jid=<id>, which embeds the form
+    in an iframe from job-boards.greenhouse.io/embed/job_app?for=<company>&...
     The handler only looked at the page: it filled nothing (field fills skip a
     missing field) and reported "could not find submit button". Companies that
-    host their Greenhouse board on their own site (Payoneer, Taboola...) all
+    host their Greenhouse board on their own site (e.g. Taboola) all
     work this way."""
     waited = 0
     while waited <= wait_ms:
@@ -759,9 +759,9 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         embedded = form is not page
         if embedded and "greenhouse.io/embed/job_app" in (form.url or ""):
             # Apply on the embed's own address, not inside the company page.
-            # Observed 2026-11-08 on Payoneer, same form, same code: the privacy
+            # Observed 2026-11-08 on an embedded-Greenhouse employer, same form, same code: the privacy
             # dropdown was picked and kept 8/8 opened directly, 4/8 inside
-            # payoneer.com (whose third-party scripts vary per load); Eran's
+            # the employer's site (whose third-party scripts vary per load); the owner's
             # real submit was held on it. The embed URL carries its own
             # validityToken and posts to Greenhouse exactly as the iframe does.
             embed_url = form.url
@@ -790,7 +790,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         _gh_fill(form, '#email', applicant.get('email', ''))
         _gh_fill(form, '#phone', applicant.get('phone', ''))
         # The phone's country picker (#country, a combobox) does not always follow
-        # the typed +972 (Payoneer's embed, 2026-11-08): set it from the profile.
+        # the typed +972 (an employer's embed, 2026-11-08): set it from the profile.
         try:
             _ctry = form.query_selector('#country')
             if _ctry is not None and _ctry.get_attribute("role") == "combobox":
@@ -809,7 +809,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         # Upload CV. On the embed this must come after the form has taken over
         # (the wait above): before that its uploader threw "reading
         # 'uploadFile'" and the submit failed on "Resume/CV is required"
-        # (Payoneer, 2026-11-08). The page does not reliably show the file
+        # (an embedded-Greenhouse employer, 2026-11-08). The page does not reliably show the file
         # name afterwards, so success is judged by the submit, not the screen.
         if cv_path:
             for sel in ['#resume', 'input[type="file"]', 'input[name*="resume"]', 'input[name*="cv"]']:
@@ -1492,7 +1492,7 @@ _CONFIRMATION_PHRASES = [
     "successfully submitted", "application complete",
     "we received your application", "your application has been",
     "we'll be in touch", "we will be in touch",
-    # Payoneer's Greenhouse embed, Eran's first real submit (2026-11-08):
+    # an employer's Greenhouse embed, the first real supervised submit (2026-11-08):
     # "Thank you for submitting your CV! :)" read as merely "submitted".
     "thank you for submitting", "thanks for submitting",
 ]
@@ -1816,7 +1816,7 @@ def ats_name(url: str) -> str:
 
 def apply_route(url: str) -> str:
     """What auto-apply can do with this link, judged from the URL alone (no
-    network) - for the queue's per-job sign (Eran, 2026-11-09: "I can't say
+    network) - for the queue's per-job sign (The owner, 2026-11-09: "I can't say
     which one can be relevant to the auto-apply and which one I have to do it
     manually").
 

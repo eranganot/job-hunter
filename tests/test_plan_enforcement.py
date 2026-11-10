@@ -2,7 +2,7 @@
 
 The hidden matches are the part a free user has a reason to attack, so most of
 this file tries to read or act on a locked job by every route there is. The
-rule (Eran, 2026-11-05): the user sees that more were found, never what they
+rule (The owner, 2026-11-05): the user sees that more were found, never what they
 are, and cannot open or apply to them."""
 import json
 import sqlite3

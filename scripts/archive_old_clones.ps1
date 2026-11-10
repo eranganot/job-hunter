@@ -24,7 +24,7 @@ function Info($m) { Write-Host "      $m" -ForegroundColor DarkGray }
 function Ok($m)   { Write-Host "OK:   $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "WARN: $m" -ForegroundColor Yellow }
 
-$targets = @("C:\Users\erang\job-hunter")
+$targets = @("C:\Users\<user>\job-hunter")
 if ($OneDrivePath -ne "") { $targets += $OneDrivePath }
 
 Write-Host ""
@@ -74,6 +74,6 @@ if (-not $Apply) {
     Write-Host ""
     Write-Host "Dry run only. Re-run with -Apply to perform the renames." -ForegroundColor Yellow
     Write-Host "For the OneDrive copy, pass its path:" -ForegroundColor DarkGray
-    Write-Host "    .\scripts\archive_old_clones.ps1 -Apply -OneDrivePath 'C:\Users\erang\OneDrive\...\Job Hunter'" -ForegroundColor DarkGray
+    Write-Host "    .\scripts\archive_old_clones.ps1 -Apply -OneDrivePath 'C:\Users\<user>\OneDrive\...\Job Hunter'" -ForegroundColor DarkGray
 }
 Write-Host ""

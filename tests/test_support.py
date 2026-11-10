@@ -1,4 +1,4 @@
-"""Contact support (Eran, 2026-11-09): a signed-in user's message is emailed to
+"""Contact support (The owner, 2026-11-09): a signed-in user's message is emailed to
 the admin with Reply-To set to the user, so answering is a plain Reply.
 
 What must hold: no account, no message; the email really goes out before the
@@ -82,7 +82,17 @@ def test_send_email_passes_reply_to_to_resend(monkeypatch):
     monkeypatch.setitem(sys.modules, "resend", module)
     import app
     monkeypatch.setattr(app, "RESEND_API_KEY", "k")
+    monkeypatch.setattr(app, "RESEND_VERIFIED_EMAIL", "owner@example.test")   # no personal default in code
     app.send_email(app.RESEND_VERIFIED_EMAIL, "s", "b", reply_to="u@example.test")
     assert sent[0]["reply_to"] == "u@example.test" and sent[0]["to"] == [app.RESEND_VERIFIED_EMAIL]
     app.send_email(app.RESEND_VERIFIED_EMAIL, "s", "b")
     assert "reply_to" not in sent[1]
+
+
+def test_no_personal_address_is_a_code_default(monkeypatch):
+    """Launch cleanup (2026-11-10): the support inbox and the web-push contact
+    come from configuration (RESEND_VERIFIED_EMAIL / JH_SUPPORT_EMAIL /
+    VAPID_SUBJECT, falling back to ADMIN_EMAIL), never from an address in the code."""
+    import re
+    src = open("app.py", encoding="utf-8").read()
+    assert not re.search(r"[\w.+-]+@gmail\.com", src)

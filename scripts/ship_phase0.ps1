@@ -93,7 +93,7 @@ Phase 0: canonical clone, route/isolation harness, staging + backup tooling
 
 - CLAUDE.md: C:\dev\job-hunter is now the single source of truth. This clone was
   81 commits behind; fast-forwarded to origin/main and the uncommitted work from
-  C:\Users\erang\job-hunter carried over. Both old copies are archived.
+  C:\Users\<user>\job-hunter carried over. Both old copies are archived.
 - tests/test_routes.py: first route-level harness for the HTTP handler - boots the
   real Handler on an ephemeral port against a temp DB. Covers auth gates on every
   page and API, admin role separation, and tenant isolation (a second user cannot

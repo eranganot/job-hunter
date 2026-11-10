@@ -6,7 +6,7 @@ passed by the user - it answers:
   * which demotion reason earns its place (company / title / location / salary...)?
   * does the AI match score predict approval?
   * and are approved jobs applied to, by the same cuts?
-"Already applied elsewhere" counts as approved and applied (Eran, 2026-11-05).
+"Already applied elsewhere" counts as approved and applied (The owner, 2026-11-05).
 
 Caveat, shown with the report: a passed job keeps the penalty it had when he
 passed it (the live recompute runs only on open jobs) - the right moment; an

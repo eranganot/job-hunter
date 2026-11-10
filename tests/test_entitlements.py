@@ -1,7 +1,7 @@
 """
 tests/test_entitlements.py - who may turn auto-apply on.
 
-Eran: "auto-apply should be with toggle so the user could turn it on/off if he
+The owner: "auto-apply should be with toggle so the user could turn it on/off if he
 likes (and more... the toggle should be clickable only for paying users (and
 admin))."
 
@@ -24,7 +24,7 @@ from tests.test_routes import (Client, _new_job, _job_row, _user_id,  # noqa: F4
 @pytest.mark.parametrize("user, expected", [
     ({"role": "admin", "plan": "free"},    True),   # admin never depends on a plan row
     ({"role": "admin", "plan": None},      True),
-    # Every plan since 2026-11-08 (Eran): the user's own switch decides.
+    # Every plan since 2026-11-08 (The owner): the user's own switch decides.
     ({"role": "user",  "plan": "premium"}, True),
     ({"role": "user",  "plan": "expert"},  True),
     ({"role": "user",  "plan": "free"},    True),
@@ -66,7 +66,7 @@ def _auto_apply_flag(database, email):
 
 
 def test_any_plan_can_switch_auto_apply_on_and_off(stack, users):
-    """Eran, 2026-11-08: the users decide - every plan, off until they do."""
+    """The owner, 2026-11-08: the users decide - every plan, off until they do."""
     for plan in ("free", "premium", "expert"):
         _set_plan(stack["db"], "alice@example.test", plan)
         status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})

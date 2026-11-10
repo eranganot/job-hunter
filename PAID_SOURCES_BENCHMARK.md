@@ -1,6 +1,6 @@
 # Paid Sources Benchmark v2 — Senior Product Leadership (Israel only)
 
-_Recalibrated to your CV + answers: **Eran Ganot — Head of Product, AI/ML/personalization/data**.
+_Recalibrated to your CV + answers: **The owner — Head of Product, AI/ML/personalization/data**.
 Scope = **Israel only — no remote-global** (Israel-based roles, including Israel-based
 hybrid/remote), **leadership + senior IC PM**, **prefer AI/data (not required)**, **price is NOT a
 constraint** (you lifted the cap). Researched June 2026._

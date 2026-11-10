@@ -38,7 +38,7 @@ def test_reconcile_only_touches_reviewed_rows(tmp_path):
     _add(conn, 1318, 1, "applied", applied_via="manual")                            # not bulk any more
     conn.commit()
 
-    migrations.m0012_reconcile_eran_backlog(conn)
+    migrations.m0012_reconcile_owner_backlog(conn)
 
     r = _row(conn, 1757)
     assert (r["status"], r["applied_via"], r["rejected_by"]) == ("applied", "manual", None)
@@ -58,7 +58,7 @@ def test_reconcile_is_idempotent(tmp_path):
     conn = _db(tmp_path)
     _add(conn, 601, 1, "applied", applied_via="bulk", notes="x")
     conn.commit()
-    migrations.m0012_reconcile_eran_backlog(conn)
+    migrations.m0012_reconcile_owner_backlog(conn)
     first = _row(conn, 601)["notes"]
-    migrations.m0012_reconcile_eran_backlog(conn)
+    migrations.m0012_reconcile_owner_backlog(conn)
     assert _row(conn, 601)["notes"] == first

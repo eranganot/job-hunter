@@ -1,72 +1,35 @@
-# Deployment Guide
+# Deploying Job Hunter
 
-## Branch Strategy
+Production runs on Railway: one web service built from the [Dockerfile](Dockerfile), plus a Postgres database. Railway deploys `main` automatically on every merge.
 
-| Branch | Railway Environment | Purpose |
-|--------|-------------------|---------|
-| `dev`  | **Staging**       | All development work goes here first |
-| `main` | **Production**    | Only receives merges from `dev` after staging validation |
+## Release flow
 
-## Daily Workflow
+Every change ships as a pull request:
 
-### 1. All changes go to `dev` first
+1. **Branch from `main`** (`step-<n>-<slug>`), make the change with tests, and run the full suite: `python3 -m pytest -q`.
+2. **Smoke-test locally before merging:** `python3 scripts/smoke.py --boot-local` boots the branch on a throwaway database and runs the suite plus every smoke check. Paste the summary into the PR.
+3. **CI** runs the suite on SQLite and on Postgres. Merge only when both are green.
+4. **Merge.** Railway builds and deploys `main`.
+5. **Smoke-test production:**
+   ```bash
+   python3 scripts/smoke.py --skip-local --expect-commit <merge sha> --wait-for-deploy-minutes 8
+   ```
+   It waits until `/api/health` reports the merge commit, then runs the checks against production. Set `JH_HEALTH_KEY` in your shell to include the checks that need the detailed health view.
 
-Push every commit to the `dev` branch. Claude will do this automatically.
+If the production smoke is red, revert the PR first and investigate second.
 
-### 2. Validate on Staging
+## Web app changes
 
-- Open the Staging URL on Railway
-- Test the specific feature changed
-- Check Railway Deploy Logs for errors
+Railway does not build the frontend. A change under `web/src` needs `python3 scripts/build_web.py` and a commit of the resulting `web_bundle/` in the same PR.
 
-### 3. Promote to Production
+## Database changes
 
-Only after staging validates:
-```bash
-git checkout main
-git merge dev
-git push origin main
-```
+Schema changes are numbered migrations in [migrations.py](migrations.py). They run at startup, in order, once each; the applied versions are recorded in `schema_migrations`. A migration must be idempotent and must work on both SQLite and Postgres (CI checks both).
 
-Railway Production auto-deploys. Done.
+## Configuration
 
----
+Set environment variables in the Railway service's Variables; [.env.example](.env.example) lists them all. Changing a variable redeploys the service.
 
-## Railway Setup (one-time, manual step)
+## Operations
 
-### Production environment
-- Service source branch: `main` (already set)
-
-### Staging environment
-- Go to Railway -> Staging environment -> your service -> Settings -> Source
-- Change branch from `main` to `dev`
-- Save
-
----
-
-## Emergency Hotfix
-
-If prod is broken and needs an immediate fix without unfinished dev work:
-
-1. Fix directly on `main`
-2. Push to `main` -> prod deploys
-3. Cherry-pick or merge the fix back to `dev` to keep branches in sync
-
----
-
-## Environment Resources
-
-| Resource | Staging | Production |
-|----------|---------|------------|
-| Database | Separate SQLite volume | Separate SQLite volume |
-| Auto-deploy branch | `dev` | `main` |
-| API keys | Same env vars | Same env vars |
-
----
-
-## Rules
-
-1. Never push directly to `main` -- always dev -> staging validation -> merge to main
-2. Every commit to `dev` triggers a staging deploy automatically
-3. Always syntax-check Python before pushing: `python3 -m py_compile app.py ai_analysis.py`
-4. Test the changed feature on staging before merging to main
+[RAILWAY_RUNBOOK.md](RAILWAY_RUNBOOK.md) covers backups, the Postgres cutover, restores and incident steps. `/api/health` is the first place to look: running commit, schema version, database, worker, and paid-source usage.

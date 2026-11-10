@@ -211,12 +211,12 @@ def test_answer_and_fill_required_executes_actions(monkeypatch):
     page = _FakePage()
     monkeypatch.setattr(ae, "_claude_json", lambda *a, **k: [
         {"selector": "#work_auth", "action": "select", "value": "Yes"},
-        {"selector": "#name", "action": "fill", "value": "Eran"},
+        {"selector": "#name", "action": "fill", "value": "Alex"},
         {"selector": "#eeo", "action": "check", "value": ""},
     ])
-    n = ae._answer_and_fill_required(page, [{"selector": "#work_auth"}], {"full_name": "Eran"})
+    n = ae._answer_and_fill_required(page, [{"selector": "#work_auth"}], {"full_name": "Alex"})
     assert n == 3
-    assert page.filled.get("#name") == "Eran"
+    assert page.filled.get("#name") == "Alex"
     assert page.selected.get("#work_auth") == "Yes"
     assert "#eeo" in page.checked
 
@@ -483,7 +483,7 @@ class _WorkdayButton:
 
 def test_workday_account_wall_is_manual_required_not_a_failure():
     page = _WorkdayPage()
-    res = ae._apply_workday(page, {"first_name": "Eran"}, None)
+    res = ae._apply_workday(page, {"first_name": "Alex"}, None)
     assert res["status"] == "manual_required", res
     assert "account" in res["error"].lower() and "step 1 of 6" in res["error"]
     assert page.clicked == ["adventureButton", "applyManually"]      # opened, nothing sent
@@ -506,8 +506,8 @@ def test_placeholders_copied_from_the_prompt_are_blanked_and_the_account_name_fi
     monkeypatch.setattr(ae, "_claude_json", lambda *a, **k: {
         "full_name": "First Last", "first_name": "First", "last_name": "Last",
         "phone": "phone or empty", "location": "City, Country", "current_title": "VP Product"})
-    got = ae.extract_applicant_data("Head of Product with 15 years ...", "e@x.test", fallback_name="Eran Ganot")
-    assert got["full_name"] == "Eran Ganot" and got["first_name"] == "Eran" and got["last_name"] == "Ganot"
+    got = ae.extract_applicant_data("Head of Product with 15 years ...", "e@x.test", fallback_name="Alex Tester")
+    assert got["full_name"] == "Alex Tester" and got["first_name"] == "Alex" and got["last_name"] == "Tester"
     assert got["phone"] == "" and got["location"] == ""
     assert got["current_title"] == "VP Product"          # real values survive
 

@@ -224,7 +224,7 @@ def _live(users, job_id, on_wait=None, timeout=20):
 
 
 def test_a_supervised_apply_waits_for_the_emailed_security_code(stack, users, monkeypatch):
-    """Greenhouse emails a code after Submit (Eran's Payoneer try, 2026-11-08):
+    """Greenhouse emails a code after Submit (a real supervised submit, 2026-11-08):
     the run pauses, the page hands the code over, the engine finishes."""
     import apply_engine
     got = {}
@@ -336,8 +336,8 @@ def test_the_applicant_is_read_from_the_cv_file_not_the_summary(stack, monkeypat
     import apply_engine
     import storage
     uid = _user_id(stack["db"], "admin@example.test")
-    pdf = _tiny_pdf(["Eran Ganot", "+972-50-000-0000 | Tel Aviv",
-                     "Head of Product for Personalization, 15 years in consumer products.",
+    pdf = _tiny_pdf(["Alex Tester", "+972-50-000-0000 | Tel Aviv",
+                     "Head of Product for Recommendations, 15 years in consumer products.",
                      "Led recommendation and personalization across web, mobile and TV."])
     storage.put(uid, pdf, "cv.pdf")
     import os
@@ -346,18 +346,18 @@ def test_the_applicant_is_read_from_the_cv_file_not_the_summary(stack, monkeypat
 
     def fake_json(prompt, **_k):
         seen["prompt"] = prompt
-        return {"full_name": "Eran Ganot", "phone": "+972-50-000-0000"}
+        return {"full_name": "Alex Tester", "phone": "+972-50-000-0000"}
     monkeypatch.setattr(apply_engine, "GEMINI_KEY", "k")
     monkeypatch.setattr(apply_engine, "_claude_json", fake_json)
     got = A._applicant_for(uid, "admin@example.test", "Admin", storage.cache_path(uid),
                            "A product leader with 15 years of experience.")
-    assert "Eran Ganot" in seen["prompt"] and "+972-50-000-0000" in seen["prompt"], \
+    assert "Alex Tester" in seen["prompt"] and "+972-50-000-0000" in seen["prompt"], \
         "the extraction did not get the CV's text"
     assert got["full_name"] == "Admin"          # the account name wins (Profile page)
 
 
 def test_the_profile_page_wins_over_the_cv(stack, monkeypatch):
-    """Eran, 2026-11-07: 'You have everything you need in my profile page'."""
+    """The owner, 2026-11-07: 'You have everything you need in my profile page'."""
     import app as A
     import apply_engine
     uid = _user_id(stack["db"], "admin@example.test")
@@ -370,8 +370,8 @@ def test_the_profile_page_wins_over_the_cv(stack, monkeypatch):
     monkeypatch.setattr(apply_engine, "_claude_json", lambda *a, **k: {
         "full_name": "Someone Else", "phone": "+1 555 0100", "linkedin_url": "",
         "current_title": "Head of Product"})
-    got = A._applicant_for(uid, "me@example.test", "Eran Ganot", "", "A product leader " * 10)
-    assert (got["full_name"], got["first_name"], got["last_name"]) == ("Eran Ganot", "Eran", "Ganot")
+    got = A._applicant_for(uid, "me@example.test", "Alex Tester", "", "A product leader " * 10)
+    assert (got["full_name"], got["first_name"], got["last_name"]) == ("Alex Tester", "Alex", "Tester")
     assert got["phone"] == "+972 540000000"           # international: pickers default to US +1
     assert got["linkedin_url"] == "https://www.linkedin.com/in/example/"
     assert got["email"] == "me@example.test"
@@ -379,18 +379,18 @@ def test_the_profile_page_wins_over_the_cv(stack, monkeypatch):
 
 
 def test_sponsorship_is_saved_and_reaches_the_applicant(stack, users, monkeypatch):
-    """Eran, 2026-11-07: assume no sponsorship for now, but let the profile say
+    """The owner, 2026-11-07: assume no sponsorship for now, but let the profile say
     it for home (Israel) and abroad."""
     import app as A
     import apply_engine
     uid = _user_id(stack["db"], "admin@example.test")
     monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
-    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    got = A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")
     assert got["needs_sponsorship_in_home_country"] is False      # not answered = no
     assert got["needs_sponsorship_abroad"] is False
     st, _l, _b = users["admin"].post_json("/api/save-profile", {"sponsorship_local": "no", "sponsorship_abroad": "yes"})
     assert st == 200
-    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    got = A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")
     assert got["needs_sponsorship_abroad"] is True and got["needs_sponsorship_in_home_country"] is False
     assert got["home_country"] == "Israel"
     st, _l, _b = users["admin"].post_json("/api/save-profile", {"sponsorship_abroad": "maybe"})
@@ -441,7 +441,7 @@ def test_a_held_supervised_submit_puts_its_questions_on_the_job(stack, users, mo
 
 
 def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users, monkeypatch):
-    """Eran, 2026-11-07: a salary expectation section, and notice period 30 days."""
+    """The owner, 2026-11-07: a salary expectation section, and notice period 30 days."""
     import app as A
     import apply_engine
     monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
@@ -449,12 +449,12 @@ def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users
     _s, _l, body = users["admin"].get("/api/application-answers")
     assert json.loads(body) == {"salary_expectation_min": None, "salary_expectation_currency": "ILS",
                                 "notice_period_days": 30, "standing_notes": ""}  # defaults
-    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    got = A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")
     assert got["notice_period"] == "30 days" and "salary_expectation" not in got
     st, _l, body = users["admin"].post_json("/api/application-answers", {
         "salary_expectation_min": "45,000", "salary_expectation_currency": "ils", "notice_period_days": 30})
     assert st == 200 and json.loads(body)["salary_expectation_min"] == 45000
-    got = A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    got = A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")
     assert got["salary_expectation"] == "at least 45,000 ILS gross per month"
     st, _l, _b = users["admin"].post_json("/api/application-answers", {"notice_period_days": 30,
                                                                        "salary_expectation_min": 50000})
@@ -467,18 +467,18 @@ def test_salary_and_notice_period_are_saved_and_reach_the_applicant(stack, users
 
 
 def test_standing_instructions_are_kept_on_the_account_and_reach_the_applicant(stack, users, monkeypatch):
-    """Eran, 2026-11-08: answers to recurring form questions, kept as one block of
+    """The owner, 2026-11-08: answers to recurring form questions, kept as one block of
     instructions on the account - not as profile questions, not in the code."""
     import app as A
     import apply_engine
     monkeypatch.setattr(apply_engine, "GEMINI_KEY", "")
     uid = _user_id(stack["db"], "admin@example.test")
-    assert "standing_instructions" not in A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")
+    assert "standing_instructions" not in A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")
     notes = "Willing to relocate: yes.\nCurrent salary: do not answer.\nGitHub: https://github.com/example-user"
     st, _l, body = users["admin"].post_json("/api/application-answers", {"standing_notes": "  " + notes + " "})
     assert st == 200 and json.loads(body)["standing_notes"] == notes
-    assert A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")["standing_instructions"] == notes
-    assert A._applicant_for(uid, "a@x.test", "Eran Ganot", "", "")["github_url"] == "https://github.com/example-user"
+    assert A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")["standing_instructions"] == notes
+    assert A._applicant_for(uid, "a@x.test", "Alex Tester", "", "")["github_url"] == "https://github.com/example-user"
     # Saving the salary section later leaves the instructions alone.
     users["admin"].post_json("/api/application-answers", {"notice_period_days": 30, "salary_expectation_min": None,
                                                           "salary_expectation_currency": "ILS"})
@@ -530,7 +530,7 @@ def test_the_notification_check_is_admin_only_and_reports_each_channel(stack, us
 
 
 def test_a_background_apply_waits_for_the_users_code_beyond_the_deadline(stack, users, monkeypatch):
-    """Option 1 (Eran, 2026-11-08): an unattended apply that hits an emailed
+    """Option 1 (The owner, 2026-11-08): an unattended apply that hits an emailed
     security code notifies the user and waits; the wait is not deadline time."""
     import threading as _th
     import time as _t
@@ -540,7 +540,7 @@ def test_a_background_apply_waits_for_the_users_code_beyond_the_deadline(stack, 
     sent = []
     monkeypatch.setattr(A, "deliver_notification", lambda uid, msg, **k: sent.append((uid, msg, k)) or {"push": "sent to 1 device(s)"})
     uid = _user_id(stack["db"], "alice@example.test")
-    job_id = _new_job(stack["db"], uid, title="Director of Product", company="Payoneer")
+    job_id = _new_job(stack["db"], uid, title="Director of Product", company="Globex")
 
     def fake_submit(url, title, company, applicant, *a, **k):
         code = applicant["_await_code"]()
@@ -549,7 +549,7 @@ def test_a_background_apply_waits_for_the_users_code_beyond_the_deadline(stack, 
     monkeypatch.setattr(apply_engine, "submit_application", fake_submit)
     out = {}
     th = _th.Thread(target=lambda: out.update(r=A._submit_application_guarded(
-        "https://boards.greenhouse.io/x/jobs/1", "Director of Product", "Payoneer", {}, None,
+        "https://boards.greenhouse.io/x/jobs/1", "Director of Product", "Globex", {}, None,
         user_id=uid, job_id=job_id)))
     th.start()
     for _ in range(50):
@@ -558,11 +558,11 @@ def test_a_background_apply_waits_for_the_users_code_beyond_the_deadline(stack, 
         if waiting:
             break
         _t.sleep(0.1)
-    assert waiting and waiting[0]["company"] == "Payoneer" and waiting[0]["job_id"] == job_id
+    assert waiting and waiting[0]["company"] == "Globex" and waiting[0]["job_id"] == job_id
     conn = stack["db"].get_db()
     assert conn.execute("SELECT apply_status FROM jobs WHERE id=?", (job_id,)).fetchone()["apply_status"] == "awaiting_code"
     conn.close()
-    assert sent and "Payoneer emailed you a security code" in sent[0][1]
+    assert sent and "Globex emailed you a security code" in sent[0][1]
     assert "/app?finish=" + waiting[0]["run_id"] in sent[0][2]["push_url"]
     # Other users see nothing and cannot answer it.
     st, _l, body = users["admin"].get("/api/apply-runs/waiting")
@@ -582,7 +582,7 @@ def test_a_missed_code_is_held_for_the_user_not_retried(stack):
 
 
 def test_the_settings_test_button_uses_the_saved_telegram_details(stack, users, monkeypatch):
-    """2026-11-08, Eran: "Failed: telegram". Settings sends only {"channel"}, and
+    """2026-11-08, the owner: "Failed: telegram". Settings sends only {"channel"}, and
     the route read the token and chat id from the request body - so it called
     Telegram with none. send_telegram used to swallow that and the button said
     "Sent"; since #58 it raised. The saved details must be used."""
@@ -606,8 +606,8 @@ def test_the_settings_test_button_uses_the_saved_telegram_details(stack, users, 
 
 def test_ats_names_cover_the_systems_and_embedded_greenhouse():
     import apply_engine as ae
-    assert ae.ats_name("https://boards.greenhouse.io/payoneer/jobs/1") == "Greenhouse"
-    assert ae.ats_name("https://www.payoneer.com/careers/position/8284597/?gh_jid=8284597") == "Greenhouse"
+    assert ae.ats_name("https://boards.greenhouse.io/globex/jobs/1") == "Greenhouse"
+    assert ae.ats_name("https://www.globex.example/careers/position/1234567/?gh_jid=1234567") == "Greenhouse"
     assert ae.ats_name("https://jobs.lever.co/acme/1") == "Lever"
     assert ae.ats_name("https://www.comeet.co/jobs/x/1") == "Comeet"
     assert ae.ats_name("https://www.linkedin.com/jobs/view/1") == "LinkedIn"

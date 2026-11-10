@@ -5,7 +5,7 @@ Phase 4 made /app the home destination through app.home_url(), and moved every
 redirect it could find: login, register, Google callback, the admin bounce.
 Two were missed, and they are the two a returning user actually hits:
 
-  * GET /  - the bare domain, i.e. the link Eran clicks - redirected a signed-in
+  * GET /  - the bare domain, i.e. the link the owner clicks - redirected a signed-in
     user to a hardcoded "/dashboard";
   * GET /dashboard served DASHBOARD_HTML unconditionally, so any bookmark, any
     old home-screen icon and every notification link (five url_suffix sites
