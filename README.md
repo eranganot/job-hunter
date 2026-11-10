@@ -47,7 +47,9 @@ Browser / installed PWA ──► /app  (React + Vite + TypeScript + Tailwind, s
 | Data | `db.py`, `dbdriver.py` (SQLite / Postgres), `migrations.py`, `storage.py` (CVs in the database), `crypto.py`, `accountdata.py` |
 | Ops | `errors.py` (Sentry), `log.py`, `scripts/smoke.py` |
 
-## Running locally
+## Running locally (maintainers)
+
+This section is for the project's maintainers. The code is proprietary: see [License](#license) before copying or running it.
 
 Requirements: Python 3.11; Node.js and npm only if you change the web app.
 
@@ -116,3 +118,7 @@ Railway builds the [Dockerfile](Dockerfile) and deploys `main` on every merge. S
 ## Support
 
 In the app: **Contact support** (sidebar, under Settings).
+
+## License
+
+Proprietary, source-visible. Copyright (c) 2026 Eran Ganot, all rights reserved. You may read the code here; you may not copy, modify, run, host or distribute it without written permission. Full terms in [LICENSE](LICENSE). Using the service at [job-hunter.work](https://job-hunter.work) is governed by its Terms of Service.
