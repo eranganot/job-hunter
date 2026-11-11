@@ -463,6 +463,10 @@ def run(args):
     s.check("GET / shows the public landing page to a stranger",
             lambda: (lambda r: True if r["code"] == 200 and 'href="/register"' in (r.get("body") or "")
                      else f"status {r['code']} location {r.get('location')}")(get(base + "/")))
+    for _p, _h in (("/terms", "Terms of Service"), ("/privacy", "Privacy Policy")):
+        s.check(f"GET {_p} is public and is the {_h}",
+                lambda _p=_p, _h=_h: (lambda r: True if r["code"] == 200 and f"<h1>{_h}</h1>" in (r.get("body") or "")
+                                      else f"status {r['code']}")(get(base + _p)))
     s.check("GET /robots.txt keeps /app and /api out of search engines",
             lambda: (lambda r: True if r["code"] == 200 and "Disallow: /app" in (r.get("body") or "")
                      else f"status {r['code']}")(get(base + "/robots.txt")))
