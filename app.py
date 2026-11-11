@@ -1904,6 +1904,7 @@ def run_job_search(user_id: int):
                     _linkedin_count = 0
                     _li_tally = _SourceTally("linkedin")
                     import urllib.parse as _urp2
+                    import html as _html_li
                     for _li_kw in titles_[:5]:
                         try:
                             _li_q = _urp2.quote(_li_kw)
@@ -1921,10 +1922,13 @@ def run_job_search(user_id: int):
                                 raise ValueError("no job cards in the page (markup changed or blocked)")
                             _li_tally.ok(len(_li_cards))
                             for _li_i in range(min(20, len(_li_cards), len(_li_titles))):
-                                _li_t = _li_titles[_li_i].strip()
+                                # The guest page is HTML: "&" arrives as "&amp;". Regex
+                                # captures keep the entity, so decode before storing
+                                # ("Head of Product &amp; Growth", "AT&amp;T"; 2026-11-11).
+                                _li_t = _html_li.unescape(_li_titles[_li_i]).strip()
                                 if _title_match(_li_t):
-                                    _li_c = _li_comps[_li_i].strip() if _li_i < len(_li_comps) else ""
-                                    _li_lc = _li_locs[_li_i].strip() if _li_i < len(_li_locs) else ""
+                                    _li_c = _html_li.unescape(_li_comps[_li_i]).strip() if _li_i < len(_li_comps) else ""
+                                    _li_lc = _html_li.unescape(_li_locs[_li_i]).strip() if _li_i < len(_li_locs) else ""
                                     all_raw.append({"title": _li_t, "company": _li_c, "location": _li_lc, "url": _li_cards[_li_i], "description": "", "source": "linkedin"})
                                     _linkedin_count += 1
                         except Exception as _li_e:

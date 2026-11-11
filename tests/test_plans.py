@@ -51,10 +51,13 @@ def test_the_matrix_is_the_one_the_owner_approved():
     assert (plans.PROMOTION_PLAN, plans.PROMOTION_DAYS, plans.NOTICE_DAYS) == ("premium", 30, (7, 1))
     assert plans.SIX_MONTH_DISCOUNT == 0.20
     assert "admin" not in plans.PLANS                                    # admin is a role
-    # Beta (2026-11-09): Premium's limits under its own name, the plan every signup gets.
+    # Beta (2026-11-09): Premium's limits under its own name, the plan every signup gets -
+    # except it shows every match per search (2026-11-11).
     assert plans.NEW_USER_PLAN == "beta" and "beta" not in plans.PAID_PLANS
-    assert {k: v for k, v in plans.PLANS["beta"].items() if k != "label"} == \
-        {k: v for k, v in p.items() if k != "label"} and plans.PLANS["beta"]["label"] == "Beta"
+    _diff = ("label", "matches_per_search")
+    assert {k: v for k, v in plans.PLANS["beta"].items() if k not in _diff} == \
+        {k: v for k, v in p.items() if k not in _diff} and plans.PLANS["beta"]["label"] == "Beta"
+    assert plans.PLANS["beta"]["matches_per_search"] is None
 
 
 def test_admin_is_a_role_with_no_limits_whatever_the_plan_column_says():
@@ -86,7 +89,8 @@ def test_a_new_user_joins_beta_with_no_end_date(conn):
     assert out == {"plan": "beta", "plan_until": None, "plan_after": None, "plan_source": "beta"}
     u = _user(conn)
     assert entitlements.plan_of(u, NOW + timedelta(days=3650)) == "beta"   # never runs out
-    assert entitlements.limit(u, "matches_per_search") == 6                 # Premium's limits
+    assert entitlements.limit(u, "matches_per_search") is None              # every match (2026-11-11)
+    assert entitlements.limit(u, "cover_letter") == 10                      # otherwise Premium's limits
     assert entitlements.plan_info(u, NOW)["label"] == "Beta"
     assert entitlements.expire_promotions(conn, NOW + timedelta(days=60)) == []
     assert entitlements.due_notices(conn, NOW + timedelta(days=23)) == []    # no downgrade push
@@ -236,7 +240,7 @@ def test_me_reports_plan_limits_and_usage(stack, users):  # noqa: F811
     assert status == 200
     me = json.loads(body)
     info = me["plan_info"]
-    assert info["tier"] in ("beta", "free") and info["limits"]["matches_per_search"] in (3, 6)
+    assert (info["tier"], info["limits"]["matches_per_search"]) in (("beta", None), ("free", 3))
     assert set(me["usage"]) == set(plans.METERS)
     assert me["usage"]["cover_letter"]["period"] == "month"
     status, _loc, body = users["admin"].get("/api/me")
