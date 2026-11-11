@@ -696,11 +696,10 @@ function DashboardView(p: any) {
         <div className="px-3 py-3 border-t border-gray-700 space-y-1">
           <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
           <button onClick={onOpenSettings} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><Settings className="w-[18px] h-[18px] shrink-0" />Settings</button>
-          <button onClick={() => setShowSupport(true)} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><LifeBuoy className="w-[18px] h-[18px] shrink-0" />Contact support</button>
           {/* A full-page navigation, not a fetch: /logout clears the session
               cookie in its response, which only a real navigation applies. */}
           <a href="/logout" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><LogOut className="w-[18px] h-[18px] shrink-0" />Sign out</a>
-          <p className="px-3 pt-2 text-xs text-gray-400"><a href="/terms" target="_blank" rel="noopener" className="hover:text-gray-200">Terms</a> &middot; <a href="/privacy" target="_blank" rel="noopener" className="hover:text-gray-200">Privacy</a></p>
+          <FooterLinks onSupport={() => setShowSupport(true)} className="px-3 pt-2" />
         </div>
       </aside>
 
@@ -3266,6 +3265,19 @@ function PlanPanel({ me }: { me: any }) {
    them as JSON, plus their CV). Deletion is scheduled 14 days ahead and signs
    them out everywhere; signing in before then cancels it. Typing the email is
    the confirmation the server also requires. */
+/* Contact support, Terms, Privacy: one small line, in the desktop sidebar and
+   at the bottom of Settings (the only menu on mobile), for every account. */
+function FooterLinks({ onSupport, className = "" }: { onSupport: () => void; className?: string }) {
+  const link = "text-gray-400 hover:text-gray-200";
+  return (
+    <p className={`text-xs text-gray-400 ${className}`}>
+      <button onClick={onSupport} className={link}>Contact support</button>
+      {" \u00b7 "}<a href="/terms" target="_blank" rel="noopener" className={link}>Terms</a>
+      {" \u00b7 "}<a href="/privacy" target="_blank" rel="noopener" className={link}>Privacy</a>
+    </p>
+  );
+}
+
 function YourData({ me }: { me: any }) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
@@ -3575,7 +3587,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
           <NotificationChannels me={me} />
           </>)}
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
-          <button onClick={() => setShowSupport(true)} className="w-full py-3 flex items-center justify-center gap-2 text-sm text-gray-400 hover:text-gray-200"><LifeBuoy className="w-4 h-4" />Questions or a problem? Contact support</button>
+          <FooterLinks onSupport={() => setShowSupport(true)} className="py-3 text-center" />
         </div>
       </motion.div>
     </motion.div>
