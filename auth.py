@@ -66,6 +66,28 @@ def set_admin_email(email: str):
     _admin_email = email.strip().lower()
 
 
+# ── New-account hook ──────────────────────────────────────────────────────────
+# Every account is created in this module (create_user, find_or_create_google_user),
+# so the admin's new-user alert fires HERE, after the commit, for every signup path
+# - not in each route. 2026-11-11: the alert lived only in the /register route, so
+# Google signups never sent one (tests/test_signup_admin_alert.py pins every path).
+_user_created_hooks = []
+
+
+def on_user_created(fn):
+    """Register fn(user_id=, email=, name=, provider=) to run after a new account commits."""
+    _user_created_hooks.append(fn)
+    return fn
+
+
+def _fire_user_created(user_id, email, name, provider):
+    for fn in list(_user_created_hooks):
+        try:
+            fn(user_id=user_id, email=email, name=name, provider=provider)
+        except Exception as e:   # a failed alert must never fail the signup
+            print("[admin-notify] ERROR new-user hook failed for user %s: %s" % (user_id, e))
+
+
 # ── Password ──────────────────────────────────────────────────────────────────
 
 def hash_password(password: str, salt: str = None):
@@ -116,6 +138,7 @@ def create_user(name: str, email: str, password: str):
         )
         _start_promotion(conn, user_id, role)
         conn.commit()
+        _fire_user_created(user_id, normalized_email, name.strip(), "password")
         return user_id, None
     except Exception as e:
         if "UNIQUE" in str(e):
@@ -531,6 +554,7 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
         _start_promotion(conn, user_id, role)
         conn.commit()
         created = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        _fire_user_created(user_id, normalized_email, display_name, "google")
         return dict(created), True, None
     except Exception as e:
         if "UNIQUE" in str(e):
