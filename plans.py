@@ -15,6 +15,10 @@ Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
   account joins on NEW_USER_PLAN = "beta", which has Premium's limits and NO
   end date; the users who were on the 30-day Premium promotion moved to it too
   (migration 25). It stays until the admin moves someone. Not a paid plan.
+- Beta shows EVERY match (The owner, 2026-11-11): a Premium copy capped Beta at 6
+  per search and locked the rest behind "upgrade options open soon", which a
+  beta user cannot act on (ticket from account 10). Beta = Premium with
+  matches_per_search unlimited; migration 31 unlocked what was held back.
 - Promotions (a plan with an end date, then Free) remain an admin tool; a web
   push goes out NOTICE_DAYS before one ends.
 - Matches per search: Free 3, Premium 6, Expert all; the rest are shown as
@@ -107,9 +111,10 @@ PLANS = {
 
 # Beta = Premium's limits under its own name (2026-11-09), so the beta users
 # are countable and can be moved as a group later. Kept a copy, not a second
-# literal, so the two can never drift apart by accident.
+# literal, so the two can never drift apart by accident - except one deliberate
+# override: Beta shows every match per search (2026-11-11, see the header).
 PLANS = {**{k: v for k, v in PLANS.items() if k != "expert"},
-         "beta": {**PLANS["premium"], "label": "Beta"},
+         "beta": {**PLANS["premium"], "label": "Beta", "matches_per_search": UNLIMITED},
          "expert": PLANS["expert"]}
 
 ADMIN = {

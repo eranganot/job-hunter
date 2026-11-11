@@ -1030,6 +1030,45 @@ def m0030_funnel_events(conn):
     conn.commit()
 
 
+def m0031_beta_shows_all_matches(conn):
+    """Beta now shows every match per search (The owner, 2026-11-11). Jobs the
+    old 6-per-search cap locked for a Beta account go back to 'new'. Other
+    plans are untouched; idempotent (a second run finds nothing locked)."""
+    import entitlements
+    opened = 0
+    for row in conn.execute("SELECT * FROM users").fetchall():
+        u = dict(row)
+        if entitlements.tier_of(u) == "beta":
+            opened += entitlements.unlock_matches(conn, u["id"], "beta")
+    if opened:
+        print("[db] beta: unlocked %d held-back match(es)" % opened)
+    conn.commit()
+
+
+def m0032_unescape_job_text(conn):
+    """LinkedIn guest results were stored with HTML entities still in them
+    ("Head of Customer Experience &amp; Success", "AT&amp;T"). Decode title,
+    company and location on rows that carry an entity. Idempotent: a decoded
+    row no longer matches."""
+    import html as _h
+    cols = [c for c in ("title", "company", "location") if _has_column(conn, "jobs", c)]
+    if not cols:
+        return
+    fixed = 0
+    rows = conn.execute(
+        "SELECT id, %s FROM jobs WHERE %s" % (", ".join(cols), " OR ".join("%s LIKE '%%&%%;%%'" % c for c in cols))
+    ).fetchall()
+    for r in rows:
+        old_vals = [r[i + 1] for i in range(len(cols))]
+        new_vals = [_h.unescape(v) if v else v for v in old_vals]
+        if new_vals != old_vals:
+            conn.execute("UPDATE jobs SET %s WHERE id=?" % ", ".join("%s=?" % c for c in cols), new_vals + [r[0]])
+            fixed += 1
+    if fixed:
+        print("[db] jobs: decoded HTML entities in %d row(s)" % fixed)
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1061,6 +1100,8 @@ MIGRATIONS = [
     (28, "apply_prepared",              m0028_apply_prepared),
     (29, "email_verification",          m0029_email_verification),
     (30, "funnel_events",               m0030_funnel_events),
+    (31, "beta_shows_all_matches",      m0031_beta_shows_all_matches),
+    (32, "unescape_job_text",           m0032_unescape_job_text),
 ]
 
 
