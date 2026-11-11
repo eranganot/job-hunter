@@ -170,7 +170,14 @@ def landing_html() -> str:
     """The public page at `/` (landing.py). Canonical/OG URL only when
     JH_PUBLIC_URL is set, so a Railway preview never claims to be the site."""
     import landing
-    return landing.landing_html(os.environ.get("JH_PUBLIC_URL", "").strip())
+    # The activity line is the latest search's own count (every source's
+    # "fetched"), so it is true whenever it is shown; none yet = no line.
+    try:
+        checked = sum(int((v or {}).get("fetched") or 0) for v in _source_health().values())
+    except Exception as exc:
+        print("[landing] activity line left out: %s" % exc)
+        checked = 0
+    return landing.landing_html(os.environ.get("JH_PUBLIC_URL", "").strip(), postings_checked=checked)
 
 
 def _paywall_hit(_reason, user):

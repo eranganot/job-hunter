@@ -67,3 +67,27 @@ def test_notification_links_point_at_the_home_ui(stack, monkeypatch):
     src = open(stack["app"].__file__, encoding="utf-8").read()
     stale = re.findall(r'url_suffix="/dashboard[^"]*"', src)
     assert not stale, "notification links still hardcode the legacy page: %s" % stale
+
+
+def test_the_landing_page_never_says_beta_and_states_the_offer():
+    """2026-11-11: the public offer is "Premium is free for a limited time";
+    accounts are on the Beta plan internally, and the page does not say so."""
+    import landing
+    page = landing.landing_html("https://x.test")
+    assert "beta" not in page.lower()
+    assert "Premium is free for a limited time" in page
+    assert "tech roles in Israel" in page          # who it is for, said up front
+
+
+def test_the_activity_line_is_shown_only_with_a_real_count():
+    import landing
+    assert "The latest search checked" not in landing.landing_html("https://x.test")
+    assert "The latest search checked" not in landing.landing_html("https://x.test", postings_checked=120)
+    assert "9,563 job postings" in landing.landing_html("https://x.test", postings_checked=9563)
+
+
+def test_the_headline_font_is_inlined_not_fetched():
+    import landing
+    page = landing.landing_html("https://x.test")
+    assert "data:font/woff2;base64," in page
+    assert "fonts.googleapis" not in page and "<link rel=\"stylesheet\"" not in page
