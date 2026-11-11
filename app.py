@@ -4588,6 +4588,13 @@ class Handler(BaseHTTPRequestHandler):
             if _is_new and _user:
                 _funnel(_user["id"], "signup")
                 _funnel(_user["id"], "verified")       # Google already confirmed the address
+                # The admin's new-user alert. /register always sent it; this path
+                # never did, so every Google signup arrived silently (2026-11-11).
+                try:
+                    notify_admin_new_user(new_user_email=_user.get("email") or _email,
+                                          new_user_name=_user.get("name") or _name)
+                except Exception as _ne:
+                    print(f"[admin-notify] google signup hook error: {_ne}")
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
             _token = auth.create_session(_user["id"])
