@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-11 by Claude (Step 6: Terms of Service and Privacy Policy published)._
+_Last updated: 2026-11-11 by Claude (Contact support / Terms / Privacy in one footer line, on mobile too)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,7 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-11 — **"Contact support · Terms · Privacy": one footer line, desktop and mobile.** The owner could not find Terms/Privacy in the mobile PWA. Cause: on mobile the only place #95 put them was Settings → Your data, which is hidden for admin accounts (`{!isAdmin && <YourData/>}`), and the desktop sidebar where the other copy lives does not exist on mobile. Now `FooterLinks` sits under Sign out in the sidebar (replacing the Contact support button, at the owner's request) and at the bottom of Settings on every tab, for every account (replacing "Questions or a problem? Contact support").
 - 2026-11-11 — **Step 6 finished: Terms of Service (`/terms`) and Privacy Policy (`/privacy`) are live.** Why they were missing: never written - Step 6 shipped only the data controls (6a/6b, 2026-11-05) and the texts waited on the owner's answers. Answered 2026-11-11: database Railway EU West (Amsterdam); Sentry org in the EU region; server logs up to 12 months; liability capped at 12 months' fees or ILS 100; contact `support@job-hunter.work` (not a personal address); written for a free service, paid plans to come with their own terms. Earlier answers used: operator a private individual in Ramat Gan, Israeli law and Tel Aviv courts, minimum age 18, EU users in scope.
   - `legal.py`: both pages, self-contained like the landing page. Privacy lists every processor the code calls (Railway, Gemini, Google sign-in, Resend, Cloudflare, Gmail for support, Sentry EU, browser push services, Telegram/Twilio with the user's own credentials), employers when you apply, the job-source queries (search terms only), legal bases, transfers, a retention table, rights (with where Export/Delete live), and every cookie and browser-storage key.
   - Links: sign-up ("By creating an account you agree…", 18+), sign-in (Google creates accounts there), landing footer, `/app` sidebar, Settings → Your data.
