@@ -116,6 +116,37 @@ def _funnel(user_id, step: str) -> None:
         print("[funnel] %s for user %s not recorded: %s" % (step, user_id, exc))
 
 
+def _start_first_search(user_id) -> bool:
+    """Queue a user's FIRST search the moment setup ends (2026-11-11).
+
+    Finishing onboarding used to save the profile and the schedule and queue
+    nothing, so a new account met an empty deck until its scheduled hour. Only
+    when there is something to search for (at least one title) and no search
+    has ever run for this account - a replayed onboarding starts nothing.
+    Never fails the request that triggered it."""
+    try:
+        c = database.get_db()
+        try:
+            prof = c.execute("SELECT job_titles FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
+            ran = c.execute("SELECT 1 FROM job_runs WHERE user_id=? AND kind='search' LIMIT 1",
+                            (user_id,)).fetchone()
+        finally:
+            c.close()
+        raw = (prof["job_titles"] if prof else "") or ""
+        try:
+            titles = json.loads(raw) if raw.strip().startswith("[") else [t for t in raw.split(",") if t.strip()]
+        except ValueError:
+            titles = []
+        if ran or not titles:
+            return False
+        return bool(jobqueue.enqueue(user_id, "search"))
+    except jobqueue.DailyCapReached as cap:
+        print("[onboarding] first search for user %s not queued: %s" % (user_id, cap))
+    except Exception as exc:
+        print("[onboarding] first search for user %s not queued: %s" % (user_id, exc))
+    return False
+
+
 def funnel_report(days: int = 30) -> dict:
     """Signups in the last `days` days, and how many of THOSE users reached
     each later step. A cohort, so a step can never exceed the one before it
@@ -6271,9 +6302,14 @@ class Handler(BaseHTTPRequestHandler):
                     kwargs["schedule_frequency"] = data["schedule_frequency"]
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
+            # Setup just ended (0 -> 1): start the first search now rather than
+            # at the scheduled hour. A replay (already complete) starts nothing.
+            first_search = False
+            if kwargs.get("onboarding_complete") and not user.get("onboarding_complete"):
+                first_search = _start_first_search(user_id)
             database.write_users_config(BASE_DIR)
             bump_onboarding(user_id, "auto_apply_choice_made")
-            self.send_json({"success": True})
+            self.send_json({"success": True, "first_search_started": first_search})
             return
 
         # ── Dismiss onboarding ──
