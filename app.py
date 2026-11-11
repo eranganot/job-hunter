@@ -3634,6 +3634,8 @@ _AUTH_HEAD = """
     .or span { font-size:.72rem; color:#9ca3af; font-weight:500; }  /* #6b7280 was 3.69:1 */
     .or i { flex:1; height:1px; background:#374151; }
     .alt { text-align:center; font-size:.85rem; color:#9ca3af; margin:1.4rem 0 0; }
+    .legal { text-align:center; font-size:.78rem; color:#9ca3af; margin:1rem 0 0; line-height:1.5; }
+    .legal a { color:#cbd5e1; }
     .alt a { color:#a5b4fc; font-weight:600; text-decoration:none; }
     .alt a:hover { text-decoration:underline; }
     .err { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); color:#fca5a5;
@@ -3698,6 +3700,7 @@ LOGIN_HTML = """<!DOCTYPE html>
       <a class="forgot" href="/forgot-password">Forgot password?</a>
       <button type="submit" class="primary">Sign in</button>
     </form>
+    <p class="legal">New here? Continuing with Google creates an account, under the <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>.</p>
     <p class="alt">Don't have an account? <a href="/register">Create one</a></p>
   </div>
 </div>
@@ -3745,6 +3748,7 @@ REGISTER_HTML = """<!DOCTYPE html>
       </div>
       <button type="submit" class="primary">Create account</button>
     </form>
+    <p class="legal">By creating an account you agree to the <a href="/terms">Terms of Service</a> and the <a href="/privacy">Privacy Policy</a>. You must be 18 or older.</p>
     <p class="alt">Already have an account? <a href="/login">Sign in</a></p>
   </div>
 </div>
@@ -4571,6 +4575,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.redirect(home_url())
             else:
                 self.send_html(landing_html())
+            return
+
+        # Step 6 (2026-11-11): Terms of Service and Privacy Policy, public.
+        if path in ("/terms", "/privacy"):
+            import legal
+            pub = os.environ.get("JH_PUBLIC_URL", "").strip()
+            self.send_html(legal.terms_html(pub) if path == "/terms" else legal.privacy_html(pub))
             return
 
         if path == "/robots.txt":

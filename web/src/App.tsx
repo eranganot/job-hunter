@@ -700,6 +700,7 @@ function DashboardView(p: any) {
           {/* A full-page navigation, not a fetch: /logout clears the session
               cookie in its response, which only a real navigation applies. */}
           <a href="/logout" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><LogOut className="w-[18px] h-[18px] shrink-0" />Sign out</a>
+          <p className="px-3 pt-2 text-xs text-gray-400"><a href="/terms" target="_blank" rel="noopener" className="hover:text-gray-200">Terms</a> &middot; <a href="/privacy" target="_blank" rel="noopener" className="hover:text-gray-200">Privacy</a></p>
         </div>
       </aside>
 
@@ -3279,7 +3280,8 @@ function YourData({ me }: { me: any }) {
   };
   return (
     <div>
-      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><FileText className="w-5 h-5 text-gray-400" />Your data</h3>
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><FileText className="w-5 h-5 text-gray-400" />Your data</h3>
+      <p className="text-xs text-gray-400 mb-3">What we keep and why: <a href="/privacy" target="_blank" rel="noopener" className="text-indigo-300 hover:text-indigo-200">Privacy Policy</a> &middot; <a href="/terms" target="_blank" rel="noopener" className="text-indigo-300 hover:text-indigo-200">Terms of Service</a></p>
       <div className="grid gap-2 sm:grid-cols-2">
         <a href="/api/me/export" className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-gray-200 rounded-xl text-sm font-medium"><ExternalLink className="w-4 h-4" />Export my data</a>
         <button onClick={() => setOpen((v) => !v)} className="flex items-center justify-center gap-2 py-2.5 bg-gray-800 border border-red-500/40 hover:bg-red-500/10 text-red-300 rounded-xl text-sm font-medium"><Trash2 className="w-4 h-4" />Delete my account</button>

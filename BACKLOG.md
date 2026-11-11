@@ -22,7 +22,6 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 8 | Set `APPLY_ENGINE_ENABLED=1` on Railway (`web`) | Real auto-apply; per-system success rates (Admin → Apply results by system) |
 | 5, 10 | **Buy the domain**, add it to Resend | Email verification + password reset (`/forgot-password` 404), landing page + funnel, email notifications to anyone but the owner |
 | 11 | Paddle account approval | Payments (sandbox first) |
-| 6 | Legal placeholders: database region, Sentry region, log retention, liability cap, publication date, paid plans | Publishing Terms / Privacy |
 
 ## Steps — status
 
@@ -32,7 +31,7 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 2 | Link checker | P1 | **Done** (2a/2b, #7, #8) |
 | 4 | Plans, quotas, entitlements (Phase 5) | P1 | **Done** (#19-#21) |
 | 5 | Email verification + password reset | P1 | **Done** (#91); left: confirm both mails reach a non-admin inbox |
-| 6 | Legal + data export / deletion + history hiding | P1 | 6a/6b shipped (#22, #23); legal drafts need the placeholders above |
+| 6 | Legal + data export / deletion + history hiding | P1 | **Done** (#22, #23, Terms/Privacy 2026-11-11); lawyer review before paid plans |
 | 7 | Broad-exception audit | P1 | **Done** (#24); ratchet keeps it |
 | 8 | Un-park auto-apply + apply-flow UX | P2 | **Done except the switch** (#52-#61, #67): first real submit 2026-11-08; questions, security codes, notifications, per-system rates; every user's choice |
 | 9 | Delete legacy HTML | P2 | **Done** (#25) |

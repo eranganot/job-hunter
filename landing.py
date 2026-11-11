@@ -204,7 +204,7 @@ def landing_html(public_url: str = "") -> str:
 
   <footer>
     <span>&copy; 2026 Job Hunter</span>
-    <span><a href="/login">Sign in</a>&nbsp;&middot; <a href="/register">Create account</a>&nbsp;&middot; <a href="mailto:support@job-hunter.work">support@job-hunter.work</a></span>
+    <span><a href="/terms">Terms</a>&nbsp;&middot; <a href="/privacy">Privacy</a>&nbsp;&middot; <a href="/login">Sign in</a>&nbsp;&middot; <a href="/register">Create account</a>&nbsp;&middot; <a href="mailto:support@job-hunter.work">support@job-hunter.work</a></span>
   </footer>
 </div>
 </body>
