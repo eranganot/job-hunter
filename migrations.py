@@ -1151,6 +1151,28 @@ def m0036_daily_picks(conn):
     conn.commit()
 
 
+def m0037_lifecycle_emails(conn):
+    """Lifecycle emails (launch Stage 2 item 7, the owner 2026-11-12): one row per
+    (user, step) sent or skipped; users.lifecycle_opt_out = "stop these emails";
+    app_flags 'lifecycle_since' = now, so only accounts created from this deploy
+    get the sequence (the owner: only new signups). Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS lifecycle_emails (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id  INTEGER NOT NULL,
+        step     TEXT NOT NULL,
+        variant  TEXT,
+        sent_at  TEXT NOT NULL,
+        UNIQUE (user_id, step),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)""", conn))
+    if not _has_column(conn, "users", "lifecycle_opt_out"):
+        conn.execute("ALTER TABLE users ADD COLUMN lifecycle_opt_out INTEGER DEFAULT 0")
+    if not conn.execute("SELECT 1 FROM app_flags WHERE key='lifecycle_since'").fetchone():
+        from datetime import datetime, timezone
+        conn.execute("INSERT INTO app_flags (key, value) VALUES ('lifecycle_since', ?)",
+                     (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1188,6 +1210,7 @@ MIGRATIONS = [
     (34, "job_text_leftovers",          m0034_job_text_leftovers),
     (35, "why_fits_says_you",           m0035_why_fits_says_you),
     (36, "daily_picks",                 m0036_daily_picks),
+    (37, "lifecycle_emails",            m0037_lifecycle_emails),
 ]
 
 

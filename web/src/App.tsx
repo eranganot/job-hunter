@@ -2581,6 +2581,32 @@ function FunnelCard({ steps }: { steps: { step: string; users: number }[] }) {
 /* The resettable test account (testaccount.py): one fixed account the admin can
    put back to brand-new, to walk through onboarding and the first search as a
    new user would. The password exists only in the reply to a reset. */
+/** Lifecycle emails (welcome, day 1, day 3, day 7): send every variant to the
+ *  admin's own inbox, from the sender each one really uses. */
+function LifecycleEmailsCard() {
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any>(null);
+  const send = async () => {
+    setBusy(true);
+    try { setRes(await api.adminLifecycleTest()); } catch (e: any) { setRes({ errors: [e?.message || "Failed"], sent: [] }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h3 className="font-semibold text-white mb-1">Lifecycle emails</h3>
+      <p className="text-xs text-gray-400 mb-3">Welcome, day 1, day 3 (from you) and day 7, every variant, sent to your own inbox.</p>
+      <button onClick={send} disabled={busy} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Sending…" : "Send me every variant"}</button>
+      {res && (
+        <div className="mt-3 text-xs space-y-1">
+          <p className="text-gray-300">Sent {res.sent?.length || 0}{res.errors?.length ? `, ${res.errors.length} failed` : ""}.</p>
+          <p className="text-gray-400">Automatic sending: {res.enabled ? "on" : "off (LIFECYCLE_EMAILS)"} · Noa sender: {res.noa_from_set ? "set" : "not set"} · Eran sender: {res.eran_from_set ? "set" : "not set (ERAN_FROM)"}</p>
+          {(res.errors || []).map((e: string) => <p key={e} className="text-red-300">{e}</p>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TestAccountCard() {
   const [st, setSt] = useState<any>(null);
   const [fresh, setFresh] = useState<{ email: string; password: string } | null>(null);
@@ -2704,6 +2730,7 @@ function AdminPanel({ me }: any) {
           </div>
           {funnel && <FunnelCard steps={funnel} />}
           <TestAccountCard />
+          <LifecycleEmailsCard />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
             <div className="space-y-2">
