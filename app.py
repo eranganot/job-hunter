@@ -4633,6 +4633,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(legal.terms_html(pub) if path == "/terms" else legal.privacy_html(pub))
             return
 
+        if path.startswith("/landing-assets/"):
+            # The landing page's product screenshots (assets/landing/). Only
+            # the files listed here are served - never a path from the URL.
+            _name = path[len("/landing-assets/"):]
+            if _name not in ("shortlist.webp", "dashboard.webp"):
+                self.send_json({"error": "Not found"}, 404)
+                return
+            try:
+                with open(os.path.join(BASE_DIR, "assets", "landing", _name), "rb") as _fh:
+                    _img = _fh.read()
+            except OSError:
+                self.send_json({"error": "Not found"}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/webp")
+            self.send_header("Content-Length", str(len(_img)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(_img)
+            return
+
         if path == "/robots.txt":
             body = ("User-agent: *\nAllow: /$\nDisallow: /app\nDisallow: /api/\n"
                     "Disallow: /reset-password\nDisallow: /verify-email\n").encode()

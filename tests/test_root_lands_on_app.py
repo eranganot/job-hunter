@@ -16,9 +16,11 @@ to a signed-in user while /app showed the new one. LEGACY_UI=1 must still bring
 the old page back - that switch is the reason the legacy code has not been
 deleted yet.
 """
+import urllib.request
+
 import pytest
 
-from tests.test_routes import stack, users  # noqa: F401
+from tests.test_routes import Client, stack, users  # noqa: F401
 
 
 def test_the_bare_domain_sends_a_signed_in_user_to_the_new_ui(stack, users, monkeypatch):
@@ -86,8 +88,32 @@ def test_the_activity_line_is_shown_only_with_a_real_count():
     assert "9,563 job postings" in landing.landing_html("https://x.test", postings_checked=9563)
 
 
-def test_the_headline_font_is_inlined_not_fetched():
+def test_the_landing_page_is_dark_uses_the_app_icon_and_real_screenshots():
+    """2026-11-12 (the owner's review): the app's own design language - dark
+    only, the app icon as the logo, product pictures that are screenshots of
+    the app, and no external stylesheet or font."""
     import landing
     page = landing.landing_html("https://x.test")
-    assert "data:font/woff2;base64," in page
+    assert 'name="color-scheme" content="dark"' in page
+    assert '<img src="/app/icon-192.png"' in page
+    assert "/landing-assets/shortlist.webp" in page and "/landing-assets/dashboard.webp" in page
     assert "fonts.googleapis" not in page and "<link rel=\"stylesheet\"" not in page
+
+
+def test_the_landing_page_speaks_as_we_and_names_the_agent():
+    import landing
+    page = landing.landing_html("https://x.test")
+    assert "Meet your personal AI headhunter agent" in page
+    assert "We work for you" in page
+    assert "it never makes a decision for" in page
+
+
+def test_landing_screenshots_are_served_and_nothing_else_is(stack):
+    c = Client(stack["port"])
+    for name in ("shortlist.webp", "dashboard.webp"):
+        req = urllib.request.Request("http://127.0.0.1:%d/landing-assets/%s" % (stack["port"], name))
+        with urllib.request.urlopen(req) as r:
+            assert r.status == 200 and r.headers["Content-Type"] == "image/webp"
+            assert r.read()[:4] == b"RIFF"
+    assert c.get("/landing-assets/../app.py")[0] in (400, 404)
+    assert c.get("/landing-assets/secret.webp")[0] == 404
