@@ -1096,6 +1096,30 @@ def m0033_job_text_from_html(conn):
     conn.commit()
 
 
+def m0034_job_text_leftovers(conn):
+    """What migration 33 could not reach (2026-11-12, observed on prod after it ran):
+    rows cut at 5,000 characters in the middle of a tag ("We<span c"), and rows the
+    old board-first Greenhouse reader had already stripped of angle brackets
+    ("p strong Who We Are: /strong ... /p"). Descriptions only; idempotent."""
+    import textclean
+    cols = [c for c in ("description", "full_description") if _has_column(conn, "jobs", c)]
+    if not cols:
+        return
+    where = " OR ".join("%s LIKE '%%<%%' OR %s LIKE '%% /p%%' OR %s LIKE '%%/strong%%' OR %s LIKE '%%div class=%%' "
+                        "OR %s LIKE '%% /li%%' OR %s LIKE '%%/span%%'" % ((c,) * 6) for c in cols)
+    rows = conn.execute("SELECT id, %s FROM jobs WHERE %s" % (", ".join(cols), where)).fetchall()
+    fixed = 0
+    for r in rows:
+        old = [r[i + 1] for i in range(len(cols))]
+        new = [textclean.html_to_text(textclean.repair_stripped_tags(v)) if v else v for v in old]
+        if new != old:
+            conn.execute("UPDATE jobs SET %s WHERE id=?" % ", ".join("%s=?" % c for c in cols), new + [r[0]])
+            fixed += 1
+    if fixed:
+        print("[db] jobs: repaired leftover markup in %d row(s)" % fixed)
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1130,6 +1154,7 @@ MIGRATIONS = [
     (31, "beta_shows_all_matches",      m0031_beta_shows_all_matches),
     (32, "unescape_job_text",           m0032_unescape_job_text),
     (33, "job_text_from_html",          m0033_job_text_from_html),
+    (34, "job_text_leftovers",          m0034_job_text_leftovers),
 ]
 
 
