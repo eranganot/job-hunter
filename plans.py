@@ -28,6 +28,11 @@ Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
   The caps are placeholders until a paid source is configured (none is in
   production as of 2026-11-05) - tune them here.
 - Billing (Step 11): monthly, or 6 months upfront at SIX_MONTH_DISCOUNT off.
+- Daily picks (The owner, 2026-11-12, launch campaign): at most MATCHES_PER_DAY
+  new matches reach a user per Israel day, best first. The rest wait, unseen
+  and unmentioned (no blur), and come in on the following days - so a first
+  search of 30 matches is a week of picks, not one day and then nothing.
+  Admin is not capped.
 """
 from __future__ import annotations
 
@@ -38,6 +43,7 @@ PROMOTION_PLAN = "premium"      # what the 11-05 new-user promotion granted
 PROMOTION_DAYS = 30
 NOTICE_DAYS = (7, 1)            # web push this many days before a promotion ends
 SIX_MONTH_DISCOUNT = 0.20       # Step 11 (Paddle); not used until billing ships
+MATCHES_PER_DAY = 7             # 2026-11-12: daily picks, every plan; admin unlimited
 
 # meter -> the period its count resets on
 METERS = {
@@ -54,6 +60,7 @@ PLANS = {
         "search_cadence": "weekly",
         "on_demand_search": 1,
         "matches_per_search": 3,
+        "matches_per_day": MATCHES_PER_DAY,
         # Every plan may turn auto-apply on; each user decides in Settings and
         # it is off until they do (The owner, 2026-11-08). The engine's own switch
         # (APPLY_ENGINE_ENABLED) still has to be on before anything is sent.
@@ -75,6 +82,7 @@ PLANS = {
         "search_cadence": "daily",
         "on_demand_search": 3,
         "matches_per_search": 6,
+        "matches_per_day": MATCHES_PER_DAY,
         "auto_apply": True,             # every plan (2026-11-08)
         "cover_letter": 10,
         "cv_review": 4,
@@ -94,6 +102,7 @@ PLANS = {
         "search_cadence": "daily",      # "daily + on demand"
         "on_demand_search": 10,
         "matches_per_search": UNLIMITED,
+        "matches_per_day": MATCHES_PER_DAY,
         "auto_apply": True,             # every plan (2026-11-08)
         "cover_letter": 30,
         "cv_review": UNLIMITED,
@@ -122,6 +131,7 @@ ADMIN = {
     "search_cadence": "daily",
     "on_demand_search": UNLIMITED,
     "matches_per_search": UNLIMITED,
+    "matches_per_day": UNLIMITED,
     "auto_apply": True,                 # "when on" - the engine has its own switch
     "cover_letter": UNLIMITED,
     "cv_review": UNLIMITED,

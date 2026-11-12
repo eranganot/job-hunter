@@ -440,6 +440,87 @@ def is_locked(conn, user_id: int, job_id: int) -> bool:
     return bool(row) and row[0] == "locked"
 
 
+# ── daily picks (the owner, 2026-11-12) ─────────────────────────────────────
+#
+# At most plans' matches_per_day new jobs reach a user per Israel day. A
+# search's new jobs all go to status 'held' (Noa's reserve), then release()
+# moves the best of the reserve to 'new' until today's count reaches the cap,
+# stamping released_on = today. release() runs after every search and on every
+# app open (/api/me), so a day without a search still brings the next picks.
+#
+# 'held' is not 'locked': nothing about it is shown - no blur, no count, no
+# upgrade prompt. Every route treats a held job as if it did not exist yet.
+# Missed days do not add up (seven a day, not seven per day since the last
+# visit); jobs released earlier and not yet swiped stay in the queue as before.
+
+HELD = "held"
+HOLD_DAYS = 14          # a reserve job older than this is never released: likely filled
+
+
+def israel_day(now: datetime | None = None) -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        return (now or _utcnow()).astimezone(ZoneInfo("Asia/Jerusalem")).strftime("%Y-%m-%d")
+    except (ImportError, KeyError, ValueError):     # no tz database: UTC days are close enough
+        return (now or _utcnow()).strftime("%Y-%m-%d")
+
+
+def daily_cap(user):
+    return limit(user, "matches_per_day")
+
+
+def released_today(conn, user_id: int, day: str | None = None) -> int:
+    return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND released_on=?",
+                            (user_id, day or israel_day())).fetchone()[0] or 0)
+
+
+def hold_new_matches(conn, user, after_id: int) -> int:
+    """Move the jobs a search just inserted (id > after_id, still 'new') into the
+    reserve. No-op for an uncapped user. Returns how many were held."""
+    if daily_cap(user) is None:
+        return 0
+    n = conn.execute("UPDATE jobs SET status=? WHERE user_id=? AND id>? AND status='new'",
+                     (HELD, _get(user, "id"), after_id)).rowcount
+    conn.commit()
+    return max(n or 0, 0)
+
+
+def release(conn, user, now: datetime | None = None) -> list:
+    """Release the best reserve jobs up to today's cap. Returns [(id, url)]
+    released, best first. Skips links already proven dead and jobs older than
+    HOLD_DAYS. An uncapped user (admin) gets the whole reserve."""
+    uid = _get(user, "id")
+    cap = daily_cap(user)
+    day = israel_day(now)
+    room = None if cap is None else cap - released_today(conn, uid, day)
+    if room is not None and room <= 0:
+        return []
+    oldest = ((now or _utcnow()) - timedelta(days=HOLD_DAYS)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT id, url FROM jobs WHERE user_id=? AND status=? AND COALESCE(url_verified, 1)!=0 "
+        "AND COALESCE(found_date, '9999') >= ? ORDER BY " + _RANK + " DESC, id DESC",
+        (uid, HELD, oldest)).fetchall()
+    picked = [(r[0], r[1]) for r in (rows if room is None else rows[:room])]
+    if picked:
+        conn.execute("UPDATE jobs SET status='new', released_on=? WHERE id IN (%s)"
+                     % ",".join("?" * len(picked)), [day] + [i for i, _u in picked])
+        conn.commit()
+    return picked
+
+
+def daily_picks_summary(conn, user) -> dict | None:
+    """For /api/me: today's cap and how many came in today. None = uncapped."""
+    cap = daily_cap(user)
+    if cap is None:
+        return None
+    return {"cap": cap, "today": released_today(conn, _get(user, "id"))}
+
+
+def is_held(conn, user_id: int, job_id: int) -> bool:
+    row = conn.execute("SELECT status FROM jobs WHERE id=? AND user_id=?", (job_id, user_id)).fetchone()
+    return bool(row) and row[0] == HELD
+
+
 # ── history kept (Step 6, the owner 2026-11-05: hidden, not deleted) ───────────
 #
 # Free keeps 30 days of history, Premium 12 months, Expert and admin all of it.

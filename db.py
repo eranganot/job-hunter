@@ -357,7 +357,9 @@ def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
         "applied":  _n("AND status='applied'"),
         "deferred": _n("AND status='deferred'"),
         "rejected": rejected_live + archived_count,
-        "total":    _n("") + archived_count,
+        # Jobs in Noa's reserve (daily picks, status 'held') are not "found"
+        # yet as far as the user is concerned: they count on the day they arrive.
+        "total":    _n("AND COALESCE(status,'')!='held'") + archived_count,
         # Jobs expire_old_jobs() aged out of the review queue after 3 days.
         # They were counted in `total` and in NO bucket, so they were invisible
         # on every screen while still inflating "found" - which is why the
