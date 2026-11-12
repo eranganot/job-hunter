@@ -5,6 +5,7 @@ import sqlite3
 import json
 import os
 import dbdriver
+import textclean
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
@@ -470,6 +471,7 @@ def import_pending_jobs(base_dir: str):
         try:
             inserted = 0
             for j in jobs:
+                j = textclean.clean_job(j)
                 user_id = j.get("user_id", 1)  # default to first user if not specified
                 # rowcount, not `SELECT changes()` (SQLite-only: on Postgres it
                 # raised, aborting the import before the file was removed).
