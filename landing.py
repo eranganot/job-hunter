@@ -1,197 +1,207 @@
 """
 landing.py - the public page at the bare domain, for signed-out visitors.
 
-Rebuilt 2026-11-11 for job seekers (the first version, Step 10, read like a
-product sheet). Positioning: "your personal AI headhunter agent - it works for
-you, not for the companies". Voice: "we" is Job Hunter, "your agent" is what
-does the work. The offer is "Premium is free for a limited time"; the word
-"beta" does not appear on the page.
+Rebuilt 2026-11-12 around Noa, the product's persona (the owner's decision):
+"Meet Noa, your personal AI headhunter agent. She works for you, not for the
+companies." Noa is an AI agent and the page says so (FAQ "Who is Noa?").
 
-Design language is the app's own: dark only, the same slate surfaces, the same
-system type, the app's icon as the logo. The one thing that differs is the
-accent: the app's indigo stays in the logo and in the product screens, and the
-page's buttons use ACCENT (the owner: the purple reads like every other AI
-tool).
+Design (the owner's picks): dark only, deep forest green with butter yellow,
+Fraunces for headings and Inter for text (both SIL OFL, served from
+assets/landing/), Noa speaking in chat bubbles. The app's logo keeps its own
+colours. Product pictures are screenshots of /app run against a demo account
+with invented companies - no real person's data.
 
-Product pictures are real: screenshots of /app run against a demo account
-with invented companies (assets/landing/, served at /landing-assets/). No
-drawn imitations of the interface.
-
-Self-contained like /login: no external stylesheet, no script.
+Three Noa illustrations (a, d, e) are kept for an A/B test. Until the
+analytics PR brings consent and measurement, every visitor sees the first one;
+`?noa=d` / `?noa=e` show the others (for reviewing).
 
 Every claim on this page has to be true of the product today:
 - the search covers tech roles in Israel;
-- applying for you is described as being switched on account by account (the
-  engine runs for admins only);
-- the activity line is drawn from the latest search's own numbers and is left
-  out when there are none (see landing_html's `postings_checked`).
+- applying for you is described as rolling out (no promise);
+- the activity number is the latest search's own count, left out when there
+  is none (see `postings_checked`);
+- the word "beta" never appears: the offer is "Premium is free for a limited
+  time" (accounts are on the Beta plan internally).
+
+Text stays ASCII-safe for app.send_html, which strips U+0080-U+00FF: use
+entities (&copy;) rather than those characters.
 """
 import html
 
-TITLE = "Job Hunter - your personal AI headhunter agent"
-DESCRIPTION = ("Meet your personal AI headhunter agent for tech roles in Israel. It searches company career "
-               "pages and job boards every day, shortlists the roles that fit your CV, and gets each "
-               "application ready.")
-
-# name -> (accent, hover, text on the accent)
-ACCENTS = {
-    "amber":   ("#fbbf24", "#f59e0b", "#0f172a"),
-    "emerald": ("#34d399", "#10b981", "#0f172a"),
-    "coral":   ("#fb7185", "#f43f5e", "#0f172a"),
+NOA_VARIANTS = ("a", "d", "e")
+ASSETS = {                       # every file /landing-assets/ will serve, and its type
+    "job-card.webp": "image/webp",
+    "queue.webp": "image/webp",
+    "analytics.webp": "image/webp",
+    "noa-a.webp": "image/webp",
+    "noa-d.webp": "image/webp",
+    "noa-e.webp": "image/webp",
+    "fraunces-latin-wght.woff2": "font/woff2",
+    "inter-latin-wght.woff2": "font/woff2",
 }
-ACCENT = "amber"
+
+TITLE = "Job Hunter - meet Noa, your personal AI headhunter agent"
+DESCRIPTION = ("Noa is your personal AI headhunter agent for tech roles in Israel. She works for you, not for "
+               "the companies: she reads every opening, brings you only the ones that fit your CV, and gets "
+               "each application ready.")
 
 _CSS = """
+@font-face{font-family:Fraunces;font-style:normal;font-weight:100 900;font-display:swap;
+  src:url(/landing-assets/fraunces-latin-wght.woff2) format('woff2')}
+@font-face{font-family:Inter;font-style:normal;font-weight:100 900;font-display:swap;
+  src:url(/landing-assets/inter-latin-wght.woff2) format('woff2')}
 *,*::before,*::after{box-sizing:border-box}
-:root{--bg:#0f172a;--card:#1e293b;--line:#334155;--ink:#f8fafc;--body:#cbd5e1;--muted:#94a3b8;
-      --accent:__ACCENT__;--accent2:__ACCENT2__;--on:__ON__}
+:root{color-scheme:dark;--bg:#0c1f17;--bg2:#0f251c;--panel:#12291f;--line:#2c4a3c;--text:#c4d4c6;--muted:#8ba593;
+      --strong:#fbf6e6;--accent:#ffd766;--accent2:#ffe28f;--on:#1f1a05;
+      --display:Fraunces,Georgia,'Times New Roman',serif;
+      --body:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
 html{scroll-behavior:smooth}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
-body{margin:0;color:var(--body);background:var(--bg);font-size:1.02rem;line-height:1.6;
-     font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:1.0625rem;line-height:1.6}
 a{color:var(--accent)}
 a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:.4rem}
-.wrap{max-width:70rem;margin:0 auto;padding-left:1.15rem;padding-right:1.15rem}
-@media(min-width:48rem){.wrap{padding-left:2rem;padding-right:2rem}}
-h1,h2,h3{color:var(--ink);margin:0}
-h1{font-size:clamp(2.2rem,5.6vw,3.7rem);line-height:1.06;letter-spacing:-.03em;font-weight:800}
-h2{font-size:clamp(1.65rem,3.8vw,2.4rem);line-height:1.12;letter-spacing:-.02em;font-weight:800;max-width:24ch}
-h3{font-size:1.12rem;line-height:1.3;font-weight:700}
+img{max-width:100%;height:auto;display:block}
+.wrap{max-width:76rem;margin:0 auto;padding-left:1.15rem;padding-right:1.15rem}
+@media(min-width:48rem){.wrap{padding-left:2.25rem;padding-right:2.25rem}}
+h1,h2,h3{font-family:var(--display);color:var(--strong);margin:0;font-weight:600}
+h1{font-size:clamp(2.6rem,6.6vw,4.6rem);line-height:1.0;letter-spacing:-.02em}
+h2{font-size:clamp(1.9rem,4vw,2.9rem);line-height:1.08;letter-spacing:-.015em;max-width:22ch}
+h3{font-size:1.4rem;line-height:1.2}
 p{margin:0}
 
-.top{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding-top:1.1rem;padding-bottom:1.1rem}
-.brand{display:flex;align-items:center;gap:.65rem;color:var(--ink);text-decoration:none;font-weight:700;
-       font-size:1.12rem;white-space:nowrap}
-.brand img{width:2.2rem;height:2.2rem;border-radius:.6rem;display:block}
-.toplinks{display:flex;align-items:center;gap:.2rem}
-.btn{display:inline-flex;align-items:center;justify-content:center;padding:.7rem 1.15rem;border-radius:.8rem;
-     font-weight:700;font-size:.95rem;text-decoration:none;border:1px solid transparent;white-space:nowrap}
-.btn.go{color:var(--on);background:var(--accent)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding-top:1.2rem;padding-bottom:1.2rem}
+.brand{display:flex;align-items:center;gap:.65rem;color:var(--strong);text-decoration:none;font-weight:700;font-size:1.12rem;white-space:nowrap}
+.brand img{width:2.2rem;height:2.2rem;border-radius:.6rem}
+.nav{display:flex;align-items:center;gap:.35rem}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:.75rem 1.25rem;border-radius:.85rem;
+     font-weight:650;font-size:1rem;text-decoration:none;border:1.5px solid transparent;white-space:nowrap}
+.btn.go{background:var(--accent);color:var(--on)}
 .btn.go:hover{background:var(--accent2)}
-.btn.quiet{color:var(--body)}
-.btn.quiet:hover{color:var(--ink)}
-.btn.line{color:var(--ink);border-color:var(--line);background:var(--card)}
-.btn.line:hover{border-color:var(--muted)}
-.btn.big{padding:.95rem 1.6rem;font-size:1.05rem}
-@media(max-width:26rem){.toplinks .btn{padding:.5rem .7rem;font-size:.84rem}.brand{font-size:1rem;gap:.45rem}
-  .brand img{width:1.9rem;height:1.9rem}}
+.btn.ghost{color:var(--strong)}
+.btn.ghost:hover{border-color:var(--line)}
+.btn.line{color:var(--strong);border-color:var(--line)}
+.btn.line:hover{border-color:var(--strong)}
+.btn.big{padding:1rem 1.7rem;font-size:1.1rem}
+@media(max-width:26rem){.nav .btn{padding:.55rem .8rem;font-size:.9rem}.brand{font-size:1rem}.brand img{width:1.9rem;height:1.9rem}}
 
-.hero{display:grid;gap:2.5rem;padding-top:2rem;padding-bottom:3.5rem;align-items:center}
-@media(min-width:60rem){.hero{grid-template-columns:1.15fr .85fr;gap:3rem;padding-top:3.5rem;padding-bottom:5rem}}
-.hero .lead{font-size:1.18rem;line-height:1.55;max-width:34rem;margin:1.4rem 0 1.8rem}
-.ctas{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center}
-.offer-line{margin-top:1.1rem;font-size:.95rem;color:var(--muted)}
-.offer-line b{color:var(--accent)}
+.hero{display:grid;gap:2.75rem;padding-top:2rem;padding-bottom:4rem;align-items:start}
+@media(min-width:62rem){.hero{grid-template-columns:1fr 1fr;gap:3.5rem;padding-top:3rem;padding-bottom:5.5rem}}
+.lead{font-size:1.25rem;line-height:1.5;margin:1.6rem 0 2rem;max-width:33rem}
+.ctas{display:flex;flex-wrap:wrap;gap:.75rem}
+.offer-line{margin-top:1.15rem;font-size:.95rem;color:var(--muted)}
+.offer-line b{color:var(--strong)}
 
-.phone{margin:0 auto;width:min(19.5rem,100%);border:1px solid var(--line);border-radius:2.2rem;padding:.55rem;
-       background:#020617;box-shadow:0 30px 60px -20px rgba(2,6,23,.9)}
-.phone img{display:block;width:100%;height:auto;border-radius:1.7rem}
-.phone figcaption{font-size:.82rem;color:var(--muted);text-align:center;padding:.6rem .4rem .2rem}
-figure{margin:0}
+.chat{display:grid;gap:.9rem}
+.msg{display:flex;gap:.75rem;align-items:flex-start}
+.msg img{width:2.9rem;height:2.9rem;border-radius:50%;flex:none;border:2px solid var(--accent)}
+.bub{background:var(--panel);border:1px solid var(--line);border-radius:.4rem 1.3rem 1.3rem 1.3rem;padding:.95rem 1.15rem;
+     color:var(--strong);font-size:1.08rem;line-height:1.45}
+.bub small{display:block;color:var(--muted);font-size:.8rem;margin-bottom:.25rem}
+.shot{border-radius:1rem;overflow:hidden;border:1px solid var(--line);background:#111827}
+.chat .shot{margin-left:3.65rem}
+.cap{font-size:.85rem;color:var(--muted);margin-top:.55rem}
+.chat .cap{margin-left:3.65rem}
+@media(max-width:30rem){.chat .shot,.chat .cap{margin-left:0}}
 
-.proof{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:#0b1222}
-.proof p{font-weight:700;color:var(--ink);font-size:clamp(1.15rem,2.4vw,1.5rem);line-height:1.35;
-         padding-top:1.5rem;padding-bottom:1.5rem;max-width:46rem}
-.proof b{color:var(--accent)}
-
-.sec{padding-top:3.6rem;padding-bottom:3.6rem}
-@media(min-width:48rem){.sec{padding-top:5rem;padding-bottom:5rem}}
-.sec.tight{padding-top:0}
-.intro{margin:.9rem 0 2.2rem;max-width:38rem}
+.sec{padding-top:4rem;padding-bottom:4rem;border-top:1px solid var(--line)}
+@media(min-width:48rem){.sec{padding-top:5.5rem;padding-bottom:5.5rem}}
+.intro{margin:1rem 0 2.4rem;max-width:38rem;font-size:1.1rem}
 
 .vs{display:grid;gap:1rem}
 @media(min-width:48rem){.vs{grid-template-columns:1fr 1fr;gap:1.4rem}}
-.vs > div{border-radius:1rem;padding:1.4rem;border:1px solid var(--line)}
-.vs .them{background:transparent}
-.vs .us{background:var(--card);border-color:var(--accent)}
-.vs h3{margin-bottom:.7rem}
+.vs > div{border-radius:1.1rem;padding:1.5rem 1.6rem}
+.vs .them{background:var(--bg2);border:1px solid var(--line)}
+.vs .us{background:var(--panel);border:1.5px solid var(--accent)}
+.vs h3{margin-bottom:.8rem;font-size:1.3rem}
 .vs ul{margin:0;padding:0;list-style:none}
-.vs li{padding:.55rem 0;border-top:1px solid var(--line)}
+.vs li{padding:.6rem 0;border-top:1px solid var(--line)}
 .vs li:first-child{border-top:0;padding-top:0}
 .vs .them li{color:var(--muted)}
+.vs .us li{color:var(--strong)}
 
-.steps{list-style:none;margin:0;padding:0;display:grid;gap:1.2rem;counter-reset:s}
-@media(min-width:52rem){.steps{grid-template-columns:repeat(3,1fr);gap:1.4rem}}
-.steps li{counter-increment:s;background:var(--card);border:1px solid var(--line);border-radius:1rem;padding:1.3rem}
-.steps li::before{content:counter(s);display:flex;align-items:center;justify-content:center;width:2.2rem;height:2.2rem;
-                  border-radius:.7rem;background:var(--accent);color:var(--on);font-weight:800;margin-bottom:.9rem}
-.steps p{margin-top:.4rem;font-size:.97rem}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:2rem;counter-reset:s}
+@media(min-width:56rem){.steps{grid-template-columns:repeat(3,1fr);gap:2.4rem}}
+.steps li{counter-increment:s}
+.steps li::before{content:counter(s);font-family:var(--display);font-weight:600;font-size:2.8rem;line-height:1;color:var(--accent);
+                  display:block;margin-bottom:.6rem}
+.steps p{margin-top:.45rem}
 
-.split{display:grid;gap:2.5rem;align-items:center}
-@media(min-width:56rem){.split{grid-template-columns:1fr .8fr;gap:3.5rem}}
-.split dl{margin:1.6rem 0 0}
-.split dt{font-weight:700;color:var(--ink);font-size:1.08rem;margin-top:1.2rem}
+.split{display:grid;gap:2.4rem;align-items:start}
+@media(min-width:60rem){.split{grid-template-columns:.85fr 1.15fr;gap:3.5rem}}
+.split dl{margin:1.8rem 0 0}
+.split dt{font-family:var(--display);font-weight:600;color:var(--strong);font-size:1.25rem;margin-top:1.4rem}
 .split dt:first-child{margin-top:0}
-.split dd{margin:.2rem 0 0;font-size:.97rem}
+.split dd{margin:.3rem 0 0}
 
-.next{background:var(--card);border:1px solid var(--line);border-radius:1.2rem;padding:1.6rem}
-@media(min-width:48rem){.next{padding:2.2rem}}
-.tag{display:inline-block;font-size:.8rem;font-weight:700;color:var(--accent);border:1px solid var(--accent);
-     border-radius:999px;padding:.15rem .7rem;margin-bottom:.9rem}
-.next p{margin-top:.8rem;max-width:44rem}
+.soon{display:grid;gap:1.4rem;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:1.2rem;
+      padding:1.6rem 1.7rem;margin-top:3rem}
+@media(min-width:48rem){.soon{grid-template-columns:auto 1fr;gap:2rem}}
+.tag{display:inline-block;font-size:.85rem;font-weight:650;color:var(--on);background:var(--accent);border-radius:999px;
+     padding:.25rem .8rem;justify-self:start}
+.soon h3{margin-bottom:.4rem}
 
-.offer{border:1px solid var(--accent);border-radius:1.2rem;padding:1.6rem;background:var(--card);
-       display:grid;gap:1.5rem;align-items:center}
-@media(min-width:56rem){.offer{grid-template-columns:1fr auto;gap:3rem;padding:2.4rem}}
+.offer{background:var(--panel);border:1.5px solid var(--accent);border-radius:1.4rem;padding:2rem;display:grid;gap:1.8rem;align-items:center}
+@media(min-width:56rem){.offer{grid-template-columns:1fr auto;gap:3rem;padding:2.8rem 3rem}}
 .offer h2{max-width:none}
-.offer ul{margin:1.1rem 0 0;padding:0;list-style:none;display:grid;gap:.45rem}
-@media(min-width:40rem){.offer ul{grid-template-columns:1fr 1fr;column-gap:2rem}}
-.offer li{padding-left:1.4rem;position:relative}
-.offer li::before{content:"";position:absolute;left:0;top:.55em;width:.6rem;height:.6rem;border-radius:50%;
-                  background:var(--accent)}
-.offer small{display:block;margin-top:1rem;font-size:.9rem;color:var(--muted)}
+.offer ul{margin:1.2rem 0 0;padding:0 0 0 1.2rem;display:grid;gap:.35rem;color:var(--strong)}
+@media(min-width:40rem){.offer ul{grid-template-columns:1fr 1fr;column-gap:2.4rem}}
+.offer small{display:block;margin-top:1rem;font-size:.92rem;color:var(--muted)}
 
-.faq{max-width:46rem;margin-top:1.8rem}
-.faq details{border-top:1px solid var(--line);padding:1rem 0}
+.faq{max-width:48rem;margin-top:2rem}
+.faq details{border-top:1px solid var(--line);padding:1.1rem 0}
 .faq details:last-child{border-bottom:1px solid var(--line)}
-.faq summary{cursor:pointer;font-weight:700;color:var(--ink);font-size:1.08rem;list-style:none;display:flex;
-             justify-content:space-between;gap:1rem}
+.faq summary{cursor:pointer;font-family:var(--display);font-weight:600;color:var(--strong);font-size:1.25rem;
+             list-style:none;display:flex;justify-content:space-between;gap:1rem}
 .faq summary::-webkit-details-marker{display:none}
-.faq summary::after{content:"+";font-weight:500;font-size:1.4rem;line-height:1;color:var(--accent)}
-.faq details[open] summary::after{content:"-"}
-.faq p{margin-top:.6rem}
+.faq summary::after{content:"+";font-family:var(--body);font-weight:400;font-size:1.5rem;line-height:1;color:var(--accent)}
+.faq details[open] summary::after{content:"\\2212"}
+.faq p{margin-top:.65rem;max-width:42rem}
 
-.last{padding-top:1rem;padding-bottom:4rem}
-.last h2{margin-bottom:1.4rem}
-footer{border-top:1px solid var(--line);padding:1.6rem 0 2.4rem;color:var(--muted);font-size:.9rem;
-       display:flex;flex-wrap:wrap;gap:.6rem 1.5rem;justify-content:space-between}
+.last{display:grid;gap:1.6rem;align-items:center}
+@media(min-width:56rem){.last{grid-template-columns:auto 1fr;gap:2.4rem}}
+.last img{width:6.5rem;height:6.5rem;border-radius:50%;border:3px solid var(--accent)}
+.last h2{max-width:24ch;margin-bottom:1.3rem}
+
+footer{border-top:1px solid var(--line);padding-top:1.7rem;padding-bottom:2.5rem;color:var(--muted);font-size:.92rem;
+       display:flex;flex-wrap:wrap;gap:.6rem 1.6rem;justify-content:space-between}
 footer a{color:var(--muted)}
-footer a:hover{color:var(--ink)}
-footer nav{display:flex;flex-wrap:wrap;gap:.4rem 1.1rem}
+footer a:hover{color:var(--strong)}
+footer nav{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
 """
 
 
-def _css(accent: str) -> str:
-    a, a2, on = ACCENTS.get(accent) or ACCENTS[ACCENT]
-    return _CSS.replace("__ACCENT__", a).replace("__ACCENT2__", a2).replace("__ON__", on)
-
-
-def _proof(postings_checked) -> str:
-    """One true sentence about the latest search, or nothing."""
+def _count(postings_checked) -> int:
     try:
         n = int(postings_checked or 0)
     except (TypeError, ValueError):
-        n = 0
-    if n < 1000:
-        return ""
-    return ('<div class="proof"><div class="wrap"><p>Our latest search checked <b>{:,} job postings</b> '
-            'on company career pages and job boards, and kept only the ones that matched.</p></div></div>'
-            ).format(n)
+        return 0
+    return n if n >= 1000 else 0
 
 
-def landing_html(public_url: str = "", postings_checked=None, accent: str = "") -> str:
+def _morning_message(postings_checked) -> str:
+    """Noa's second message. The number is the latest search's real count."""
+    n = _count(postings_checked)
+    read = ("I read {:,} postings in my latest search, and kept only the ones worth your time.".format(n)
+            if n else "I read every new tech posting in Israel for you, and keep only the ones worth your time.")
+    return read + " This one is very you. And one I'd skip, honestly. You can do better."
+
+
+def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -> str:
+    noa = noa if noa in NOA_VARIANTS else NOA_VARIANTS[0]
+    face = "/landing-assets/noa-%s.webp" % noa
     url = html.escape((public_url or "").rstrip("/") + "/", quote=True)
     t = html.escape(TITLE, quote=True)
     d = html.escape(DESCRIPTION, quote=True)
     canon = f'<link rel="canonical" href="{url}"/>' if public_url else ""
     og_url = f'<meta property="og:url" content="{url}"/>' if public_url else ""
+    msg2 = html.escape(_morning_message(postings_checked))
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <meta name="theme-color" content="#0f172a"/>
   <meta name="color-scheme" content="dark"/>
+  <meta name="theme-color" content="#0c1f17"/>
   <title>{t}</title>
   <meta name="description" content="{d}"/>
   {canon}
@@ -205,43 +215,47 @@ def landing_html(public_url: str = "", postings_checked=None, accent: str = "") 
   <meta name="twitter:description" content="{d}"/>
   <link rel="manifest" href="/app/manifest.webmanifest"/>
   <link rel="icon" type="image/png" href="/app/icon-192.png"/>
-  <style>{_css(accent)}</style>
+  <link rel="preload" href="/landing-assets/fraunces-latin-wght.woff2" as="font" type="font/woff2" crossorigin/>
+  <style>{_CSS}</style>
 </head>
-<body>
+<body data-noa="{noa}">
 <header class="wrap top">
-  <a class="brand" href="/"><img src="/app/icon-192.png" alt="" width="35" height="35"/>Job Hunter</a>
-  <div class="toplinks">
-    <a class="btn quiet" href="/login">Sign in</a>
-    <a class="btn go" href="/register">Start my search</a>
-  </div>
+  <a class="brand" href="/"><img src="/app/icon-192.png" alt="" width="36" height="36"/>Job Hunter</a>
+  <nav class="nav" aria-label="Account">
+    <a class="btn ghost" href="/login">Sign in</a>
+    <a class="btn go" href="/register">Meet Noa</a>
+  </nav>
 </header>
 
 <main>
-  <div class="wrap hero">
+  <section class="wrap hero">
     <div>
-      <h1>Meet your personal AI headhunter agent. It works for you, not for the companies.</h1>
-      <p class="lead">We search company career pages and job boards for tech roles in Israel every day, shortlist
-      the ones that fit your CV, and get each application ready for you.</p>
+      <h1>Meet Noa, your personal AI headhunter agent.</h1>
+      <p class="lead">She works for you, not for the companies. Noa reads every tech opening in Israel, brings you only
+      the ones that fit your CV, and gets your application ready.</p>
       <div class="ctas">
-        <a class="btn go big" href="/register">Start my search</a>
-        <a class="btn line big" href="#how">See how it works</a>
+        <a class="btn go big" href="/register">Let Noa work for you</a>
+        <a class="btn line big" href="#how">See how she works</a>
       </div>
       <p class="offer-line"><b>Premium is free for a limited time.</b> Sign up with Google or email. No card.</p>
     </div>
-    <figure class="phone">
-      <img src="/landing-assets/shortlist.webp" width="390" height="844"
-           alt="The Job Hunter app showing a matched role, its match score and the reasons it fits the CV"/>
-      <figcaption>The app, with a demo profile and example companies</figcaption>
-    </figure>
-  </div>
 
-  {_proof(postings_checked)}
+    <div class="chat" aria-label="Noa introduces herself">
+      <div class="msg"><img src="{face}" alt="Noa" width="46" height="46"/>
+        <p class="bub"><small>Noa</small>Hi, I'm Noa. Send me your CV and I'll get to know you. Then I do the searching.</p></div>
+      <div class="msg"><img src="{face}" alt="" width="46" height="46"/>
+        <p class="bub"><small>Noa, every morning</small>{msg2}</p></div>
+      <div class="shot"><img src="/landing-assets/job-card.webp" width="1400" height="986"
+        alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with the reasons it fits and Pass, Approve and Decide later buttons"/></div>
+      <p class="cap">A role Noa found, with her reasons. Example company and data.</p>
+    </div>
+  </section>
 
   <section class="sec">
     <div class="wrap">
-      <h2>Job boards work for employers. We work for you.</h2>
-      <p class="intro">A job board is paid to fill a company's opening. Your agent has one client: you. It reads
-      everything, brings you the few roles that fit, and does the paperwork.</p>
+      <h2>Job boards work for employers. Noa works for you.</h2>
+      <p class="intro">A job board is paid to fill a company's opening. Noa isn't. She reads everything, brings you the few
+      roles that fit, and does the paperwork, the way a headhunter would if she worked only for you.</p>
       <div class="vs">
         <div class="them">
           <h3>Searching on your own</h3>
@@ -253,119 +267,135 @@ def landing_html(public_url: str = "", postings_checked=None, accent: str = "") 
           </ul>
         </div>
         <div class="us">
-          <h3>With your personal AI headhunter agent</h3>
+          <h3>With Noa</h3>
           <ul>
-            <li>A fresh search every day, including companies' own career pages</li>
-            <li>Each role scored against your CV, with the reasons written out</li>
-            <li>A CV and cover letter written for each job you approve</li>
-            <li>Your answers saved once and filled in for you</li>
+            <li>Noa searches every day, including companies' own career pages</li>
+            <li>Every role is scored against your CV, and Noa tells you why it fits</li>
+            <li>Noa writes a CV and cover letter for each role you approve</li>
+            <li>You answer the usual form questions once. Noa remembers them</li>
           </ul>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="sec tight" id="how">
+  <section class="sec" id="how">
     <div class="wrap">
-      <h2>From your CV to a ready application</h2>
-      <p class="intro">Setup takes less than five minutes. After that your personal agent runs on its own, and
-      nothing goes out without your approval.</p>
+      <h2>How Noa works</h2>
+      <p class="intro">Setup is less than five minutes. After that Noa runs on her own, and nothing goes out without your approval.</p>
       <ol class="steps">
-        <li><h3>Hand over your CV</h3>
-            <p>We read your CV and fill in the titles, skills and locations to look for. Change anything you like.</p></li>
-        <li><h3>Your agent searches every day</h3>
-            <p>Company career pages and job boards, on a schedule you choose. We drop dead links and duplicates.</p></li>
-        <li><h3>You approve or pass</h3>
-            <p>Swipe through your shortlist. Teach your agent why you passed, and tomorrow's list gets closer to
-            what you want.</p></li>
+        <li><h3>Tell Noa who you are</h3>
+            <p>Upload your CV and Noa fills in the titles, skills and locations to look for. Change anything you like.</p></li>
+        <li><h3>Noa searches every day</h3>
+            <p>Company career pages and job boards, on a schedule you choose. Dead links and duplicates never reach you.</p></li>
+        <li><h3>You approve, Noa prepares</h3>
+            <p>Swipe through your shortlist and teach Noa why you passed. Tomorrow's list gets closer to you.</p></li>
       </ol>
     </div>
   </section>
 
-  <section class="sec tight">
+  <section class="sec">
     <div class="wrap split">
       <div>
-        <h2>What we prepare for every role you approve</h2>
+        <h2>What Noa prepares for every role you approve</h2>
         <dl>
           <dt>A CV written for that job</dt>
-          <dd>Reordered and reworded around what the role asks for, using only what is already in your CV. We check
-          every line against it.</dd>
+          <dd>Noa reorders and rewords your CV around what the role asks for, using only what is already in it. Anything she
+          can't back up is shown as a gap, never invented.</dd>
           <dt>A cover letter</dt>
           <dd>Written from your full CV and the job description. Edit it or send it as it is.</dd>
           <dt>Your answers, filled in</dt>
           <dd>Notice period, salary expectations and the other questions forms keep asking. You answer once.</dd>
         </dl>
       </div>
-      <figure class="phone">
-        <img src="/landing-assets/dashboard.webp" width="390" height="844" loading="lazy"
-             alt="The Job Hunter dashboard showing approved roles in the queue and applications sent"/>
-        <figcaption>Your queue: approved roles, ready to go</figcaption>
-      </figure>
+      <div>
+        <div class="shot"><img src="/landing-assets/queue.webp" width="1400" height="1065" loading="lazy"
+          alt="The Job Hunter queue: approved roles ranked by match, each marked as ready for auto-apply or to apply yourself"/></div>
+        <p class="cap">Your queue: every role you approved, ranked and ready. Example data.</p>
+      </div>
     </div>
-  </section>
-
-  <section class="sec tight">
     <div class="wrap">
-      <div class="next">
+      <div class="soon">
         <span class="tag">Rolling out</span>
-        <h2>Next: your agent applies for you</h2>
-        <p>On the company application systems we support, your agent can fill in and send the application for the
-        roles you approved. We are switching this on account by account. Until it reaches yours, every application
-        is prepared and one tap away.</p>
+        <div>
+          <h3>Noa can apply for you, too</h3>
+          <p>On the application systems she supports, Noa can fill in and send the application herself, only for roles you
+          approved. It is being switched on gradually, account by account.</p>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="sec tight">
+  <section class="sec">
+    <div class="wrap split">
+      <div>
+        <h2>You always know where you stand</h2>
+        <p class="intro">Noa keeps score honestly: how many roles you approved, how many you really applied to, and what she
+        learned from the ones you passed.</p>
+      </div>
+      <div>
+        <div class="shot"><img src="/landing-assets/analytics.webp" width="1400" height="380" loading="lazy"
+          alt="Job Hunter statistics: roles in the queue, applied, deferred and passed, with approval and applied rates"/></div>
+        <p class="cap">Your numbers, kept by Noa. Example data.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
     <div class="wrap">
       <div class="offer">
         <div>
           <h2>Premium is free for a limited time</h2>
           <ul>
             <li>A new search every day</li>
-            <li>Every match from each search</li>
+            <li>Your best matches from each search</li>
             <li>Tailored CVs and cover letters every month</li>
             <li>Alerts by push, email, Telegram or WhatsApp</li>
           </ul>
           <small>No card needed. You can export or delete your data whenever you want.</small>
         </div>
-        <a class="btn go big" href="/register">Start my search</a>
+        <a class="btn go big" href="/register">Let Noa work for you</a>
       </div>
     </div>
   </section>
 
-  <section class="sec tight">
+  <section class="sec">
     <div class="wrap">
-      <h2>Questions people ask first</h2>
+      <h2>Questions people ask Noa first</h2>
       <div class="faq">
-        <details><summary>Which jobs do you cover?</summary>
-          <p>Tech-industry roles in Israel: product, marketing, sales, customer success, data, design, QA and
-          engineering. We read company career pages and job boards.</p></details>
-        <details><summary>Do you apply to anything without asking me?</summary>
-          <p>No. We shortlist, you decide. Your agent works on your behalf, but it never makes a decision for
-          you.</p></details>
+        <details><summary>Who is Noa?</summary>
+          <p>Noa is Job Hunter's AI agent. She is software, not a person, and she works only for you: no company pays to
+          appear in your list.</p></details>
+        <details><summary>Which jobs does Noa cover?</summary>
+          <p>Tech-industry roles in Israel: product, marketing, sales, customer success, data, design, QA and engineering.
+          She reads company career pages and job boards.</p></details>
+        <details><summary>Does Noa apply to anything without asking me?</summary>
+          <p>No. Noa shortlists, you decide. She works on your behalf, but she never makes a decision for you.</p></details>
         <details><summary>What happens to my CV?</summary>
-          <p>We use it to score jobs against your experience and to write your tailored CV and cover letters. An
-          employer sees it only when you apply. You can export or delete everything from Settings.</p></details>
-        <details><summary>Will the tailored CV invent experience I do not have?</summary>
-          <p>No. We reorder and reword what is in your CV. Anything the job asks for that your CV does not show is
-          listed as a gap, and you can edit the result before it is used.</p></details>
+          <p>Noa uses it to score jobs against your experience and to write your tailored CV and cover letters. An employer
+          sees it only when you apply. You can export or delete everything from Settings.</p></details>
+        <details><summary>Will Noa invent experience I don't have?</summary>
+          <p>No. She reorders and rewords what is in your CV. Anything the job asks for that your CV doesn't show is listed as
+          a gap, and you can edit the result before it's used.</p></details>
         <details><summary>How is this different from job alerts?</summary>
-          <p>Alerts send you every listing that contains a keyword. Your agent reads each posting against your CV,
-          explains the fit, learns from what you pass on, and prepares the application.</p></details>
+          <p>Alerts send you every listing with a keyword. Noa reads each posting against your CV, explains the fit, learns
+          from what you pass on, and prepares the application.</p></details>
         <details><summary>Do I need to install anything?</summary>
-          <p>No. It runs in your browser on phone and computer. You can add it to your home screen and switch on
+          <p>No. Noa works in your browser on phone and computer. You can add Job Hunter to your home screen and turn on
           notifications.</p></details>
         <details><summary>What does it cost?</summary>
-          <p>Premium is free for a limited time and needs no card. If that changes, we will tell you in advance.</p></details>
+          <p>Premium is free for a limited time and needs no card. If that changes, you'll be told in advance.</p></details>
       </div>
     </div>
   </section>
 
-  <section class="last">
-    <div class="wrap">
-      <h2>Let your agent read the listings. You pick the ones worth your time.</h2>
-      <a class="btn go big" href="/register">Start my search</a>
+  <section class="sec">
+    <div class="wrap last">
+      <img src="{face}" alt="" width="104" height="104" loading="lazy"/>
+      <div>
+        <h2>Let Noa read the listings. You pick the ones that deserve you.</h2>
+        <a class="btn go big" href="/register">Let Noa work for you</a>
+      </div>
     </div>
   </section>
 </main>

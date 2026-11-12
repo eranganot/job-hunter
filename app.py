@@ -168,7 +168,7 @@ def funnel_report(days: int = 30) -> dict:
             "steps": [{"step": s, "users": int(got.get(s, 0))} for s in FUNNEL_STEPS]}
 
 
-def landing_html() -> str:
+def landing_html(noa: str = "a") -> str:
     """The public page at `/` (landing.py). Canonical/OG URL only when
     JH_PUBLIC_URL is set, so a Railway preview never claims to be the site."""
     import landing
@@ -179,7 +179,7 @@ def landing_html() -> str:
     except Exception as exc:
         print("[landing] activity line left out: %s" % exc)
         checked = 0
-    return landing.landing_html(os.environ.get("JH_PUBLIC_URL", "").strip(), postings_checked=checked)
+    return landing.landing_html(os.environ.get("JH_PUBLIC_URL", "").strip(), postings_checked=checked, noa=noa)
 
 
 def _paywall_hit(_reason, user):
@@ -4252,7 +4252,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def send_html(self, html: str, code: int = 200):
+    def send_html(self, html: str, code: int = 200, headers=()):
         # Strip mojibake chars (U+0080-U+00FF: garbled box-drawing artifacts in templates)
         import re as _re_mj
         html = _re_mj.sub(r'[\x80-\xff]+', '', html)
@@ -4264,6 +4264,8 @@ class Handler(BaseHTTPRequestHandler):
         body = html.encode('utf-8')
         self.send_response(code)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        for _hn, _hv in headers:
+            self.send_header(_hn, _hv)
         self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
@@ -4668,7 +4670,13 @@ class Handler(BaseHTTPRequestHandler):
             if user:
                 self.redirect(home_url())
             else:
-                self.send_html(landing_html())
+                # Three Noa illustrations are kept for an A/B test (2026-11-12).
+                # No cookie yet: assigning visitors waits for the analytics PR,
+                # which brings consent and measurement. Until then the page
+                # shows the first one; ?noa= shows another, for reviewing.
+                import landing
+                _noa = (qs.get("noa") or [""])[0]
+                self.send_html(landing_html(_noa if _noa in landing.NOA_VARIANTS else landing.NOA_VARIANTS[0]))
             return
 
         # Step 6 (2026-11-11): Terms of Service and Privacy Policy, public.
@@ -4679,10 +4687,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/landing-assets/"):
-            # The landing page's product screenshots (assets/landing/). Only
-            # the files listed here are served - never a path from the URL.
+            # The landing page's pictures and fonts (assets/landing/). Only the
+            # names landing.ASSETS lists are served - never a path from the URL.
+            import landing
             _name = path[len("/landing-assets/"):]
-            if _name not in ("shortlist.webp", "dashboard.webp"):
+            _type = landing.ASSETS.get(_name)
+            if not _type:
                 self.send_json({"error": "Not found"}, 404)
                 return
             try:
@@ -4692,9 +4702,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not found"}, 404)
                 return
             self.send_response(200)
-            self.send_header("Content-Type", "image/webp")
+            self.send_header("Content-Type", _type)
             self.send_header("Content-Length", str(len(_img)))
-            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Cache-Control", "public, max-age=604800")
             self.end_headers()
             self.wfile.write(_img)
             return

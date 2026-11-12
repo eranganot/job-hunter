@@ -78,42 +78,81 @@ def test_the_landing_page_never_says_beta_and_states_the_offer():
     page = landing.landing_html("https://x.test")
     assert "beta" not in page.lower()
     assert "Premium is free for a limited time" in page
-    assert "tech roles in Israel" in page          # who it is for, said up front
+    assert "tech opening in Israel" in page        # who it is for, said up front
 
 
-def test_the_activity_line_is_shown_only_with_a_real_count():
+def test_noa_is_the_product_and_says_she_is_an_ai():
+    """2026-11-12: the persona is the positioning. The page uses her name, and
+    says plainly that she is software."""
     import landing
-    assert "The latest search checked" not in landing.landing_html("https://x.test")
-    assert "The latest search checked" not in landing.landing_html("https://x.test", postings_checked=120)
-    assert "9,563 job postings" in landing.landing_html("https://x.test", postings_checked=9563)
+    page = landing.landing_html("https://x.test")
+    assert "Meet Noa, your personal AI headhunter agent." in page
+    assert "She works for you, not for the companies." in page
+    assert "Let Noa work for you" in page
+    assert "She is software, not a person" in page
+    assert "she never makes a decision for you" in page
 
 
-def test_the_landing_page_is_dark_uses_the_app_icon_and_real_screenshots():
-    """2026-11-12 (the owner's review): the app's own design language - dark
-    only, the app icon as the logo, product pictures that are screenshots of
-    the app, and no external stylesheet or font."""
+def test_the_number_in_noas_message_is_real_or_absent():
+    import landing
+    assert "postings in my latest search" not in landing.landing_html("https://x.test")
+    assert "postings in my latest search" not in landing.landing_html("https://x.test", postings_checked=120)
+    assert "I read 9,563 postings in my latest search" in landing.landing_html("https://x.test", postings_checked=9563)
+
+
+def test_the_page_is_dark_uses_the_app_icon_and_app_screenshots():
     import landing
     page = landing.landing_html("https://x.test")
     assert 'name="color-scheme" content="dark"' in page
     assert '<img src="/app/icon-192.png"' in page
-    assert "/landing-assets/shortlist.webp" in page and "/landing-assets/dashboard.webp" in page
-    assert "fonts.googleapis" not in page and "<link rel=\"stylesheet\"" not in page
+    for name in ("job-card.webp", "queue.webp", "analytics.webp"):
+        assert "/landing-assets/" + name in page
+    assert "<script" not in page
+    assert "fonts.googleapis" not in page and '<link rel="stylesheet"' not in page
 
 
-def test_the_landing_page_speaks_as_we_and_names_the_agent():
+def test_every_noa_variant_has_its_picture_and_only_that_one():
     import landing
-    page = landing.landing_html("https://x.test")
-    assert "Meet your personal AI headhunter agent" in page
-    assert "We work for you" in page
-    assert "it never makes a decision for" in page
+    for v in landing.NOA_VARIANTS:
+        page = landing.landing_html("https://x.test", noa=v)
+        assert "/landing-assets/noa-%s.webp" % v in page
+        others = [o for o in landing.NOA_VARIANTS if o != v]
+        assert not any("/landing-assets/noa-%s.webp" % o in page for o in others)
+    # an unknown variant falls back to the first
+    assert "/landing-assets/noa-a.webp" in landing.landing_html("https://x.test", noa="zz")
 
 
-def test_landing_screenshots_are_served_and_nothing_else_is(stack):
+def test_the_page_has_no_characters_send_html_would_strip():
+    """app.send_html removes U+0080-U+00FF; the page must not rely on them."""
+    import re, landing
+    page = landing.landing_html("https://x.test", postings_checked=9563)
+    assert not re.search(r"[\x80-\xff]", page)
+
+
+def test_one_noa_for_everyone_until_consent_and_a_review_link_shows_another(stack):
+    """No cookie for the A/B test before the consent banner exists: the page
+    shows Noa A and sets nothing; ?noa= shows another one for reviewing."""
+    def get(path):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (stack["port"], path))
+        with urllib.request.urlopen(req) as r:
+            return r.read().decode(), r.headers.get("Set-Cookie")
+    body, set_cookie = get("/")
+    assert set_cookie is None and "/landing-assets/noa-a.webp" in body
+    for v in ("d", "e"):
+        body, set_cookie = get("/?noa=" + v)
+        assert set_cookie is None and "/landing-assets/noa-%s.webp" % v in body
+    assert "/landing-assets/noa-a.webp" in get("/?noa=../x")[0]
+
+
+def test_landing_assets_are_served_with_their_type_and_nothing_else_is(stack):
+    import landing
     c = Client(stack["port"])
-    for name in ("shortlist.webp", "dashboard.webp"):
+    for name, ctype in landing.ASSETS.items():
         req = urllib.request.Request("http://127.0.0.1:%d/landing-assets/%s" % (stack["port"], name))
         with urllib.request.urlopen(req) as r:
-            assert r.status == 200 and r.headers["Content-Type"] == "image/webp"
-            assert r.read()[:4] == b"RIFF"
+            data = r.read()
+            assert r.status == 200 and r.headers["Content-Type"] == ctype, name
+            assert data[:4] in (b"RIFF", b"wOF2"), name
     assert c.get("/landing-assets/../app.py")[0] in (400, 404)
+    assert c.get("/landing-assets/OFL-inter.txt")[0] == 404
     assert c.get("/landing-assets/secret.webp")[0] == 404
