@@ -31,7 +31,6 @@ import html
 NOA_VARIANTS = ("a", "d", "e")
 ASSETS = {                       # every file /landing-assets/ will serve, and its type
     "job-card.webp": "image/webp",
-    "queue.webp": "image/webp",
     "analytics.webp": "image/webp",
     "job-details.webp": "image/webp",
     "noa-a.webp": "image/webp",
@@ -100,7 +99,6 @@ p{margin:0}
 .bub small{display:block;color:var(--muted);font-size:.8rem;margin-bottom:.25rem}
 .shot{border-radius:1rem;overflow:hidden;border:1px solid var(--line);background:#111827}
 .chat .shot{margin-left:3.65rem}
-.shot.wide{margin-top:3rem;max-width:62rem}
 @media(max-width:30rem){.chat .shot{margin-left:0}}
 
 .sec{padding-top:4rem;padding-bottom:4rem;border-top:1px solid var(--line)}
@@ -290,8 +288,6 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         <li><h3>You approve, Noa prepares</h3>
             <p>Swipe through your shortlist and teach Noa why you passed. Tomorrow's list gets closer to you.</p></li>
       </ol>
-      <div class="shot wide"><img src="/landing-assets/queue.webp" width="1400" height="1065" loading="lazy"
-        alt="The Job Hunter queue: approved roles ranked by match, each marked as ready for auto-apply or to apply yourself"/></div>
     </div>
   </section>
 
