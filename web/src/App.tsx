@@ -135,8 +135,11 @@ export function SwipeFlow() {
       api.lockedMatches().then(setLocked).catch(() => setLocked(null));
       setNewJobs(nw.map(toUiJob)); setApprovedJobs(ap.map(toUiJob)); setAppliedJobs(ad.map(toUiJob)); setDeferredJobs(df.map(toUiJob));
       setCurrentIndex(0); setRejectedDelta(0); setUndo(null);
+      // The first search is still running (setup just ended): stay on the
+      // swipe view, which shows "Noa is finding your first matches".
+      if (meRes?.first_search_running && nw.length === 0) { initialRouteDone.current = true; setView("swipe"); }
       // First load only: land on swipe if there are new jobs, else the dashboard.
-      if (!initialRouteDone.current) {
+      else if (!initialRouteDone.current) {
         initialRouteDone.current = true;
         if (nw.length > 0) { setView("swipe"); }
         else { setView("dashboard"); setDashboardTab("queue"); }
@@ -147,6 +150,22 @@ export function SwipeFlow() {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  /* While the first search runs, check every 10 s without the full-page
+     spinner; the moment matches arrive, open the deck on them. */
+  useEffect(() => {
+    if (!me?.first_search_running) return;
+    const t = setInterval(async () => {
+      try {
+        const [m, nw] = await Promise.all([api.me(), api.jobs("new", "match")]);
+        if (nw.length > 0 || !m?.first_search_running) {
+          setMe(m); setNewJobs(nw.map(toUiJob)); setCurrentIndex(0);
+          if (nw.length > 0) setView("swipe");
+        }
+      } catch { /* the next tick tries again */ }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [me?.first_search_running]);
 
   /* The lists were loaded once, at launch. A phone keeps the app open for
      hours, so the queue kept showing jobs as they were then - Figma and Forter
@@ -3713,12 +3732,19 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex items-center justify-center p-6">
       <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center max-w-md w-full">
         <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring" }} className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg shadow-indigo-500/20"><Briefcase className="w-10 h-10 text-white" /></motion.div>
-        <h2 className="text-2xl font-bold text-white mb-2">{empty ? "No new jobs right now" : "All done!"}</h2>
-        <p className="text-gray-400 mb-5">{empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs."}</p>
+        {empty && me?.first_search_running ? (<>
+          <h2 className="text-2xl font-bold text-white mb-2">Noa is finding your first matches</h2>
+          <p className="text-gray-400 mb-3">She's reading today's openings against your CV. This usually takes a few minutes.</p>
+          <Loader2 className="w-6 h-6 animate-spin text-indigo-300 mx-auto mb-3" aria-hidden="true" />
+          <p className="text-gray-400 mb-5">They'll appear here on their own. You can also close the app; we'll email you when they're ready.</p>
+        </>) : (<>
+          <h2 className="text-2xl font-bold text-white mb-2">{empty ? "No new jobs right now" : "All done!"}</h2>
+          <p className="text-gray-400 mb-5">{empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs."}</p>
+        </>)}
         {locked?.count > 0 && <div className="mb-5 text-left"><LockedMatchesCard locked={locked} me={me} /></div>}
         {!empty && (<div className="bg-gray-800 rounded-2xl p-5 mb-5 border border-gray-700 grid grid-cols-3 gap-4"><div><div className="text-2xl font-bold text-green-400 mb-0.5">{approvedCount}</div><div className="text-xs text-gray-400">Approved</div></div><div><div className="text-2xl font-bold text-red-400 mb-0.5">{rejectedCount}</div><div className="text-xs text-gray-400">Passed</div></div><div><div className="text-2xl font-bold text-amber-400 mb-0.5">{deferredCount}</div><div className="text-xs text-gray-400">Deferred</div></div></div>)}
         <div className="space-y-3">
-          <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>
+          {!(empty && me?.first_search_running) && <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
           <button onClick={onViewDashboard} className="w-full py-3.5 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium flex items-center justify-center gap-2"><LayoutGrid className="w-5 h-5" />View Dashboard</button>
           <button onClick={onStartNew} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl font-medium flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4" />Refresh</button>
         </div>
