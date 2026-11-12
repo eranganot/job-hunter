@@ -362,7 +362,7 @@ export function SwipeFlow() {
         approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} stats={stats}
         selectedJob={selectedJob} setSelectedJob={setSelectedJob}
         onOpenSettings={() => setShowSettings(true)} showSettings={showSettings} onCloseSettings={() => setShowSettings(false)}
-        onReload={loadAll} locked={locked}
+        onReload={loadAll} locked={locked} toSwipe={Math.max(newJobs.length - currentIndex, 0)}
       />
     );
   }
@@ -590,7 +590,7 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
               </div>
             )}
           </div>
-          {job.whyFits && (<div className="bg-gradient-to-br from-amber-950/50 to-orange-950/50 rounded-2xl p-4 border-2 border-amber-700"><div className="flex items-center gap-2 mb-2"><div className="w-7 h-7 bg-amber-500 rounded-full flex items-center justify-center"><Sparkles className="w-4 h-4 text-white" /></div><h4 className="font-bold text-amber-400 text-sm">Why this is a strong fit</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
+          {job.whyFits && (<div className="bg-gradient-to-br from-amber-950/50 to-orange-950/50 rounded-2xl p-4 border-2 border-amber-700"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-amber-400 text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
           </div>
           <div className="space-y-5 mt-5 lg:mt-0">
           {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
@@ -660,6 +660,24 @@ const TABS: [DashboardTab, string, any][] = [
 // Admin is a page, not a window floating over Settings. Kept out of TABS so a
 // non-admin never renders it at all.
 const ADMIN_TAB: [DashboardTab, string, any] = ["admin", "Admin", ShieldCheck];
+
+/** Noa's one line at the top of the dashboard: what she brought today. */
+function NoaGreeting({ me, toSwipe, onSwipe }: { me: any; toSwipe: number; onSwipe: () => void }) {
+  const dp = me?.daily_picks;
+  let line: string;
+  if (me?.first_search_running) line = "I'm finding your first matches. They'll be here in a few minutes.";
+  else if (dp && dp.today > 0) line = `I brought you ${dp.today} pick${dp.today === 1 ? "" : "s"} today.`
+    + (toSwipe >= dp.today ? " They're waiting for you." : toSwipe > 0 ? ` ${toSwipe} still to go.` : dp.today >= dp.cap ? " Next ones come in tomorrow." : "");
+  else if (toSwipe > 0) line = `${toSwipe} pick${toSwipe === 1 ? " is" : "s are"} waiting for you.`;
+  else line = "Nothing new yet today. I'll bring your picks with today's search.";
+  return (
+    <div className="flex items-center gap-3 mb-5 p-3 bg-gray-800 rounded-2xl border border-gray-700">
+      <NoaAvatar size={40} />
+      <p className="flex-1 min-w-0 text-sm text-gray-200 leading-snug">{line}</p>
+      {toSwipe > 0 && <button onClick={onSwipe} className="shrink-0 px-3 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl text-sm font-medium">Swipe</button>}
+    </div>
+  );
+}
 
 function DashboardView(p: any) {
   const [showSupport, setShowSupport] = useState(false);
@@ -732,6 +750,7 @@ function DashboardView(p: any) {
         </div>
       </header>
       <div className={`${SHELL} px-5 lg:px-8 py-5`}>
+        <NoaGreeting me={me} toSwipe={p.toSwipe || 0} onSwipe={onBackToSwipe} />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <StatCard label="Queue" value={approvedCount} sub="Ready to apply" icon={<CheckCircle className="w-5 h-5 text-green-500" />} />
           <StatCard label="Applied" value={appliedReal ?? appliedJobs.length}
@@ -1166,7 +1185,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
               actually apply gets made. */}
           {job.whyFits && (
             <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-              <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
+              <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
             </p>
           )}
         </div>
@@ -1412,7 +1431,7 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
             </div>
             {job.whyFits && (
               <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-                <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
+                <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
               </p>
             )}
             {stages && (job.appliedVia === "bulk" || job.appliedVia === "no_url") ? (
@@ -1458,7 +1477,7 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer, onReload }: any) {
           </div>
           {job.whyFits && (
             <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-              <span className="text-amber-400 font-medium">Why this fits: </span>{job.whyFits}
+              <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
             </p>
           )}
         </RankedRow>
@@ -1964,7 +1983,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
         <div className="p-5 space-y-5">
           <div className="flex items-start gap-4"><div className="w-16 h-16 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-2xl flex items-center justify-center shrink-0"><Building2 className="w-8 h-8 text-indigo-400" /></div><div className="flex-1 min-w-0"><h3 className="text-xl font-bold text-white mb-0.5">{job.title}</h3><p className="text-lg text-indigo-400 font-semibold mb-1">{job.company}</p><div className="flex items-center gap-4 text-gray-400 flex-wrap">{job.location && <div className="flex items-center gap-1"><MapPin className="w-4 h-4" /><span className="text-sm">{job.location}</span></div>}{job.timeAgo && <div className="flex items-center gap-1"><Clock className="w-4 h-4" /><span className="text-sm">{job.timeAgo}</span></div>}</div></div></div>
           <div className="grid grid-cols-2 gap-3"><div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-xl p-4 border border-blue-800/50"><div className="text-sm text-gray-400 mb-1">Match Score</div><div className="text-2xl font-bold text-blue-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div></div><div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-xl p-4 border border-green-800/50"><div className="text-sm text-gray-400 mb-1">Your Strength</div><div className="text-2xl font-bold text-green-400">{job.candidateScore === null ? "—" : `${job.candidateScore}%`}</div></div></div>
-          {job.whyFits && <div className="bg-gradient-to-br from-amber-900/20 to-orange-900/20 rounded-xl p-4 border border-amber-800/50"><h4 className="font-bold text-amber-500 mb-1.5 flex items-center gap-2"><Sparkles className="w-5 h-5" />Why this is a strong fit</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
+          {job.whyFits && <div className="bg-gradient-to-br from-amber-900/20 to-orange-900/20 rounded-xl p-4 border border-amber-800/50"><h4 className="font-bold text-amber-500 mb-1.5 flex items-center gap-2"><NoaAvatar size={24} />Why Noa picked this</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
           {job.description && <div><h4 className="font-semibold text-white mb-1.5">About the role</h4><p className="text-gray-400 text-sm leading-relaxed whitespace-pre-line">{job.description}</p></div>}
           {job.applyStatus && job.applyStatus !== "queued" && (
             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
@@ -2789,6 +2808,12 @@ function AdminPanel({ me }: any) {
 // moved to the "Noa is finding your first matches" screen, where it is wanted.
 const OB_STEPS = ["Your CV", "What to look for"] as const;
 const NOA_AVATAR = "/landing-assets/noa-a.webp";
+/** Noa's face, wherever she speaks in the app (the owner approved the places,
+ *  2026-11-12). One source, so the picture he picks changes everywhere. */
+function NoaAvatar({ size = 28, className = "" }: { size?: number; className?: string }) {
+  return <img src={NOA_AVATAR} alt="Noa" width={size} height={size} style={{ width: size, height: size }}
+              className={`rounded-full object-cover shrink-0 bg-gray-700 ${className}`} />;
+}
 // Monday first, because the index IS the stored value: the scheduler compares
 // search_day_of_week against `now.weekday()` (app.py:597), which is Python's
 // 0=Monday..6=Sunday. Labelling this Sunday-first would have shifted every
@@ -3653,8 +3678,8 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex items-center justify-center p-6">
       <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center max-w-md w-full">
-        {waiting
-          ? <img src={NOA_AVATAR} alt="Noa" width={80} height={80} className="w-20 h-20 rounded-full object-cover mx-auto mb-5 bg-gray-700" />
+        {(waiting || picksDone)
+          ? <NoaAvatar size={80} className="mx-auto mb-5 block" />
           : <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring" }} className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg shadow-indigo-500/20"><Briefcase className="w-10 h-10 text-white" /></motion.div>}
         {waiting ? (<>
           <h2 className="text-2xl font-bold text-white mb-2">Noa is finding your first matches</h2>
@@ -3668,10 +3693,10 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
           {perm === "granted" && <p className="text-xs text-green-400 mb-3">I'll ping you on this phone too.</p>}
           {pushMsg && <p className="text-xs text-gray-400 mb-3">{pushMsg}</p>}
         </>) : (<>
-          <h2 className="text-2xl font-bold text-white mb-2">{empty ? (picksDone ? "That's today's picks" : "No new jobs right now") : "All done!"}</h2>
+          <h2 className="text-2xl font-bold text-white mb-2">{picksDone ? "That's today's picks" : (empty ? "No new jobs right now" : "All done!")}</h2>
           <p className="text-gray-400 mb-5">{picksDone
-            ? (empty ? `Noa brings you up to ${me.daily_picks.cap} hand-picked jobs a day. Your next picks come in tomorrow.`
-                     : "You've reviewed today's picks. Noa brings the next ones tomorrow.")
+            ? (empty ? `I bring you up to ${me.daily_picks.cap} hand-picked jobs a day. Your next picks come in tomorrow. See you then!`
+                     : "You've been through today's picks. I'll bring the next ones tomorrow. See you then!")
             : (empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs.")}</p>
         </>)}
         {locked?.count > 0 && <div className="mb-5 text-left"><LockedMatchesCard locked={locked} me={me} /></div>}

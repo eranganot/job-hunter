@@ -154,3 +154,14 @@ def test_the_app_knows_todays_picks_are_done():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     js = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(root, "web_bundle", "assets", "*.js")))
     assert "That's today's picks" in js and "daily_picks" in js
+
+
+def test_noa_speaks_in_the_app():
+    """The owner approved three more places for Noa (2026-11-12): the job card's
+    reason, the dashboard greeting and the end-of-day screen."""
+    import glob, os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    js = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(root, "web_bundle", "assets", "*.js")))
+    for s in ("Why Noa picked this", "I brought you", "See you then!", "/landing-assets/noa-"):
+        assert s in js, s
+    assert "Why this is a strong fit" not in js
