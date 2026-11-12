@@ -333,6 +333,22 @@ def run(args):
         return True if not refused else f"the app refused its Postgres target and is serving SQLite instead: {refused}"
     s.check("the box is not falling back after refusing its configured database", _refused)
 
+    def _admin_alerts():
+        h = H()
+        if h is None:
+            return "no health payload"
+        aa = h.get("admin_alerts")
+        if aa is None:
+            note("(box predates the admin-alert report)")
+            return True
+        note(str(aa.get("via")))
+        if aa.get("target"):
+            return True
+        if args.boot_local:     # a throwaway DB has no admin account yet
+            return True
+        return "nobody receives the new-user alert: " + str(aa.get("via"))
+    s.check("a new signup alerts the admin", _admin_alerts)
+
     def _backend():
         h = H()
         if h is None:
