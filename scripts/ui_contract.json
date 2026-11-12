@@ -67,9 +67,9 @@
       "needle": "Notification channels"
     },
     {
-      "since": "2026-09-15",
-      "what": "queue explains why a job fits",
-      "needle": "Why this fits"
+      "since": "2026-11-12",
+      "what": "queue explains why a job fits (in Noa's words)",
+      "needle": "Why Noa picked this"
     },
     {
       "since": "2026-09-15",
