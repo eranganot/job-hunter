@@ -33,6 +33,7 @@ import auth
 import crypto
 import db as database
 import textclean
+import voice
 import dbdriver
 import entitlements
 import accountdata
@@ -2232,7 +2233,7 @@ def run_job_search(user_id: int):
                             "  product management or any other specific field.\n\n"
                             "Total score = Title + Seniority + Location + CV-Requirements. "
                             "Include jobs scoring >= 30. "
-                            "For fit_reason: one sentence citing which dimensions scored highest and why. "
+                            "For fit_reason: one sentence on why this job fits the job seeker. " + voice.FIT_REASON_RULE + " "
                             "Return ONLY a valid JSON array with fields: "
                             "job_title, company, location, url, publish_date (null if unknown), "
                             "full_description (copy from input), description (2-3 sentences), "
@@ -2506,7 +2507,8 @@ def run_job_search(user_id: int):
                                         "EXCLUDE only clearly wrong roles: pure engineering IC, quota-sales, finance/legal/HR. Product-adjacent leadership is OK.\n\n"
                                         "Include jobs scoring >= 25 (permissive — this is a last-resort fallback). "
                                         "Return ONLY a JSON array. Each item: "
-                                        "{id (from input), score (0-100), reason (one sentence why)}\n\n"
+                                        "{id (from input), score (0-100), reason (one sentence why)}\n"
+                                        + voice.FIT_REASON_RULE.replace("fit_reason", "reason") + "\n\n"
                                         f"Jobs:\n{_batch_json_d}"
                                     )
 
@@ -7438,7 +7440,8 @@ class Handler(BaseHTTPRequestHandler):
                         f"Jobs:\n{jobs_json_rs}\n\n"
                         "Score each job 0-100: Title match (0-30) + Seniority (0-20) + Location (0-20) + CV-Requirements match (0-30). "
                         "Exclude non-PM roles (engineering, sales, design, finance, HR). "
-                        "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown."
+                        "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown.\n"
+                        + voice.FIT_REASON_RULE
                     )
                     try:
                         _parts_rs = []
@@ -7465,7 +7468,7 @@ class Handler(BaseHTTPRequestHandler):
                                         conn2.execute(
                                             "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
                                             (scored_j['candidate_score'], scored_j['candidate_score'],
-                                             scored_j.get('fit_reason', ''), orig['_db_id'])
+                                             voice.second_person(scored_j.get('fit_reason', '')), orig['_db_id'])
                                         )
                                         rescored += 1
                                     else:

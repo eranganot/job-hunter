@@ -1120,6 +1120,27 @@ def m0034_job_text_leftovers(conn):
     conn.commit()
 
 
+def m0035_why_fits_says_you(conn):
+    """"Why this fits" was written about "the candidate" (503 of 527 stored for the
+    admin, 0 saying "you"; the owner, 2026-11-12). Rewrite why_relevant to the
+    second person with voice.second_person; text that never mentions the
+    candidate is left as it is. Idempotent."""
+    import voice
+    if not _has_column(conn, "jobs", "why_relevant"):
+        return
+    rows = conn.execute("SELECT id, why_relevant FROM jobs WHERE lower(why_relevant) LIKE '%candidate%' "
+                        "OR lower(why_relevant) LIKE '%applicant%'").fetchall()
+    fixed = 0
+    for r in rows:
+        new = voice.second_person(r[1])
+        if new != r[1]:
+            conn.execute("UPDATE jobs SET why_relevant=? WHERE id=?", (new, r[0]))
+            fixed += 1
+    if fixed:
+        print("[db] jobs: 'why this fits' rewritten to 'you' in %d row(s)" % fixed)
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1155,6 +1176,7 @@ MIGRATIONS = [
     (32, "unescape_job_text",           m0032_unescape_job_text),
     (33, "job_text_from_html",          m0033_job_text_from_html),
     (34, "job_text_leftovers",          m0034_job_text_leftovers),
+    (35, "why_fits_says_you",           m0035_why_fits_says_you),
 ]
 
 
