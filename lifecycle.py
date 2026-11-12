@@ -186,7 +186,7 @@ def compose(step: str, first: str, st: dict, link: str):
                     "bringing you hand-picked jobs every day:\n\n%s\n\nIf now isn't the time, no hard feelings. "
                     "I'll be here.\n\n%s" % (hi, link, NOA_SIG))
         if st["approved"] > 0:
-            done = "You approved %s" % _s(st["approved"], "job")
+            done = "you approved %s" % _s(st["approved"], "job")
             if st["applied"]:
                 done += " and applied to %s" % _s(st["applied"], "of them", "of them")
             return ("active", "noa", "Your first week with me",
