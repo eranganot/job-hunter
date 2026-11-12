@@ -1,6 +1,6 @@
 """The resettable test account (testaccount.py): admin-only, really brand-new
 after every reset, and never mailed."""
-import re
+import json
 
 import pytest
 
@@ -8,21 +8,21 @@ from tests.test_routes import Client, stack, users  # noqa: F401
 
 
 def _reset(c):
-    st, _loc, body = c.post_form("/admin/test-account/reset", {})
+    st, _loc, body = c.post_json("/api/admin/test-account/reset", {})
     return st, (body.decode() if isinstance(body, bytes) else body)
 
 
 def _creds(body):
-    codes = re.findall(r"<code>([^<]+)</code>", body)
-    return codes[0], codes[1]
+    d = json.loads(body)
+    return d["email"], d["password"]
 
 
 def test_only_an_admin_can_see_or_reset_it(stack, users):
-    assert users["b"].get("/admin/test-account")[0] == 403
+    assert users["b"].get("/api/admin/test-account")[0] == 403
     assert _reset(users["b"])[0] == 403
     anon = Client(stack["port"])
-    assert anon.get("/admin/test-account")[0] == 302
-    assert anon.post_form("/admin/test-account/reset", {})[0] == 302
+    assert anon.get("/api/admin/test-account")[0] in (302, 401)
+    assert anon.post_json("/api/admin/test-account/reset", {})[0] in (302, 401)
     db = stack["db"].get_db()
     try:
         assert db.execute("SELECT COUNT(*) AS n FROM users WHERE email LIKE '%.test' "
@@ -92,3 +92,45 @@ def test_mail_to_a_test_address_is_refused(stack, monkeypatch):
     monkeypatch.setattr(app, "RESEND_API_KEY", "re_test")
     with pytest.raises(RuntimeError, match="test address"):
         app.send_email("test-user@job-hunter.test", "x", "y")
+
+
+def test_the_standalone_page_is_gone(stack, users):
+    """2026-11-12: the feature lives in the Admin page of /app. The address the
+    first version used only redirects into the app, for everyone."""
+    for who in ("admin", "b"):
+        st, loc, body = users[who].get("/admin/test-account")
+        assert st == 302 and loc.startswith("/app"), (who, st, loc)
+        assert "Reset" not in str(body)
+    anon = Client(stack["port"])
+    st, loc, _b = anon.get("/admin/test-account")
+    assert st == 302 and "/login" in loc
+    # the old form address is not a route any more: nothing is reset through it
+    _st, body = _reset(users["admin"])
+    email, password = _creds(body)
+    st, _l, _b = users["admin"].post_form("/admin/test-account/reset", {})
+    assert st != 200
+    c = Client(stack["port"])
+    assert c.post_form("/login", {"email": email, "password": password})[0] == 302   # password unchanged
+
+
+def test_a_reset_does_not_send_the_new_user_alert(stack, users, monkeypatch):
+    """The owner got a "new user" alert for every reset (2026-11-12): #102 moved
+    the alert into auth.create_user's hook, which the reset goes through."""
+    app = stack["app"]
+    sent = []
+    monkeypatch.setattr(app, "notify_admin_new_user", lambda **kw: sent.append(kw))
+    assert _reset(users["admin"])[0] == 200
+    assert sent == []
+    # a real signup still alerts
+    import auth
+    uid, err = auth.create_user("Real Person", "real-person@example.test", "pw-long-enough-1")
+    assert uid and not err
+    assert [k["new_user_email"] for k in sent] == ["real-person@example.test"]
+
+
+def test_the_admin_can_read_its_state(stack, users):
+    _reset(users["admin"])
+    st, _l, body = users["admin"].get("/api/admin/test-account")
+    d = json.loads(body)
+    assert st == 200 and d["email"] == "test-user@job-hunter.test"
+    assert d["exists"] is True and d["onboarding_complete"] is False and d["jobs"] == 0
