@@ -431,6 +431,11 @@ RESEND_VERIFIED_EMAIL = os.environ.get("RESEND_VERIFIED_EMAIL", "") or (ADMIN_EM
 # own verified address, which is why the override below ever existed.
 RESEND_SANDBOX_FROM = "onboarding@resend.dev"
 RESEND_FROM = os.environ.get("RESEND_FROM", "Job Hunter <%s>" % RESEND_SANDBOX_FROM)
+# Job-search mail comes from Noa (the owner, 2026-11-12): "Noa from Job Hunter
+# <noa@job-hunter.work>", replies forwarded to him by a Cloudflare Email Routing
+# rule. Unset = everything stays on RESEND_FROM, so no reply can bounce before
+# that rule exists. Account and security mail always stays on RESEND_FROM.
+NOA_FROM = os.environ.get("NOA_FROM", "").strip()
 # Where "Contact support" messages go (2026-11-09). Defaults to the Resend
 # account's own address, which the sandbox sender can always deliver to - so the
 # form works before the domain is verified in Resend.
@@ -460,7 +465,16 @@ def send_support_message(user: dict, message: str, subject: str = "", user_agent
     send_email(SUPPORT_EMAIL, "[Job Hunter support] %s" % subj, body, reply_to=email)
 
 
-def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", **_kwargs):
+def _sender(as_noa: bool) -> tuple:
+    """(from, reply_to) for a message. Noa only when NOA_FROM is set and the
+    regular sender is on a verified domain (not Resend's sandbox)."""
+    if as_noa and NOA_FROM and RESEND_SANDBOX_FROM not in RESEND_FROM:
+        m = re.search(r"<([^>]+)>", NOA_FROM)
+        return NOA_FROM, (m.group(1) if m else NOA_FROM)
+    return RESEND_FROM, ""
+
+
+def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", as_noa: bool = False, **_kwargs):
     """Send an email notification via the Resend SDK.
 
     This function used to set `actual_to = RESEND_VERIFIED_EMAIL` and DISCARD
@@ -502,8 +516,10 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", **_kwa
             % (RESEND_SANDBOX_FROM, RESEND_VERIFIED_EMAIL or "<unset>", to_addr))
     actual_to = to_addr
     resend.api_key = RESEND_API_KEY
+    _from, _noa_reply = _sender(as_noa)
+    reply_to = reply_to or _noa_reply
     msg = {
-        "from": RESEND_FROM,
+        "from": _from,
         "to": [actual_to],
         "subject": subject,
         "text": body,
@@ -746,7 +762,7 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
     # Web push is the primary channel: it fires on EVERY notification, before
     # (and independent of) the email/Telegram/WhatsApp channels.
     try:
-        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url)
+        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url, title="Noa")   # job news is Noa's (2026-11-12)
         if pr["sent"]:
             results["push"] = "sent to %d device(s)" % pr["sent"] + (
                 ", %d failed" % pr["failed"] if pr["failed"] else "")
@@ -782,7 +798,8 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
             elif channel == "email":
                 if not p["email_address"]:
                     raise RuntimeError("Email is selected but no address is set")
-                send_email(to_addr=p["email_address"], subject="Job Hunter Notification", body=msg_with_link)
+                send_email(to_addr=p["email_address"], subject="Job Hunter Notification", body=msg_with_link,
+                           as_noa=True)
             else:
                 continue
             results[channel] = "sent"
@@ -817,7 +834,7 @@ def push_configured() -> dict:
     return {"keys": bool(VAPID_PUBLIC_KEY and VAPID_PRIVATE_PEM_B64), "library": lib}
 
 
-def send_web_push_to_user(user_id, message, url_suffix="", url=None) -> dict:
+def send_web_push_to_user(user_id, message, url_suffix="", url=None, title="Job Hunter") -> dict:
     """Web Push to a user's registered devices. Returns what happened -
     {configured, devices, sent, failed, errors} - instead of nothing: it used
     to return None on missing keys, a missing library and every failed send
@@ -852,7 +869,7 @@ def send_web_push_to_user(user_id, message, url_suffix="", url=None) -> dict:
     if not rows:
         return out
     body = (message or "").strip().split("\n")[0][:160]
-    payload = json.dumps({"title": "Job Hunter", "body": body, "url": url or _push_link(url_suffix)})
+    payload = json.dumps({"title": title, "body": body, "url": url or _push_link(url_suffix)})
     for r in rows:
         try:
             sub = json.loads(r["subscription"])
@@ -4024,7 +4041,7 @@ def _first_matches_email(user_id: int, found: int) -> None:
                     "means the job titles or locations are narrower than the market.\n\nAdd a title or two (for "
                     "example the same role at one level up or down) and I'll search again tomorrow, or start a "
                     "search now:\n\n%s\n\nNoa\nYour personal AI headhunter agent at Job Hunter" % (first, link))
-        send_email(r["email"], subject, body)
+        send_email(r["email"], subject, body, as_noa=True)
         _track(user_id, "first_matches_email_sent", {"found": int(found)})
     except Exception as exc:
         print("[first-matches] email for user %s not sent: %s" % (user_id, exc))

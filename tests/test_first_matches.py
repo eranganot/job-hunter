@@ -107,3 +107,17 @@ def test_the_cv_fills_linkedin_and_phone_but_never_overwrites(stack, mails, monk
     cv["phone"] = "+972 50 000 0000"
     out = json.loads(c.post_json("/api/analyze-cv", {})[2])
     assert out["profile_filled"] == [] and _me(c)["phone"] == "+972 52 999 9999"
+
+
+def test_job_mail_comes_from_noa_only_once_her_address_is_set(stack, monkeypatch):
+    """The owner, 2026-11-12: job-search mail from Noa, account mail from support@.
+    Until NOA_FROM is set (after the Cloudflare route exists) nothing changes."""
+    app = stack["app"]
+    monkeypatch.setattr(app, "RESEND_FROM", "Job Hunter <support@job-hunter.work>")
+    monkeypatch.setattr(app, "NOA_FROM", "")
+    assert app._sender(True) == ("Job Hunter <support@job-hunter.work>", "")
+    monkeypatch.setattr(app, "NOA_FROM", "Noa from Job Hunter <noa@job-hunter.work>")
+    assert app._sender(True) == ("Noa from Job Hunter <noa@job-hunter.work>", "noa@job-hunter.work")
+    assert app._sender(False) == ("Job Hunter <support@job-hunter.work>", "")      # verification, password
+    monkeypatch.setattr(app, "RESEND_FROM", "Job Hunter <%s>" % app.RESEND_SANDBOX_FROM)
+    assert app._sender(True)[0].endswith("<%s>" % app.RESEND_SANDBOX_FROM)       # never on the sandbox

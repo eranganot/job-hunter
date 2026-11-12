@@ -513,7 +513,7 @@ def test_the_learning_report_is_admin_only_and_answers(stack, users):
 
 def test_the_notification_check_is_admin_only_and_reports_each_channel(stack, users, monkeypatch):
     import app as A
-    monkeypatch.setattr(A, "send_web_push_to_user", lambda u, m, suf="", url=None: {
+    monkeypatch.setattr(A, "send_web_push_to_user", lambda u, m, suf="", url=None, title="Job Hunter": {
         "configured": True, "devices": 0, "sent": 0, "failed": 0, "errors": []})
     # The shared server stubs deliver_notification (offline suite); its real
     # behaviour is tested in test_notifications.py. Here: the route passes it on.

@@ -2807,7 +2807,7 @@ function AdminPanel({ me }: any) {
 // alerts left setup: daily at 11:00 by default (Settings), and the alert offer
 // moved to the "Noa is finding your first matches" screen, where it is wanted.
 const OB_STEPS = ["Your CV", "What to look for"] as const;
-const NOA_AVATAR = "/landing-assets/noa-a.webp";
+const NOA_AVATAR = "/landing-assets/noa-e.webp";   // the owner picked E for the app (2026-11-12); the landing page keeps its A/B test
 /** Noa's face, wherever she speaks in the app (the owner approved the places,
  *  2026-11-12). One source, so the picture he picks changes everywhere. */
 function NoaAvatar({ size = 28, className = "" }: { size?: number; className?: string }) {
