@@ -1069,6 +1069,33 @@ def m0032_unescape_job_text(conn):
     conn.commit()
 
 
+def m0033_job_text_from_html(conn):
+    """Job descriptions were stored as raw HTML (Ashby), escaped HTML (Greenhouse:
+    "&lt;p&gt;"), or half-stripped ("div class=&quot;content-intro&quot; p"), and
+    the app shows them as text (2026-11-12, the owner's screenshot: "<h2>Role
+    Overview</h2><p>..." under About the role). Rows holding a tag or an entity
+    get textclean.html_to_text on title/company/location/description/
+    full_description. Idempotent: clean text has nothing left to match."""
+    import textclean
+    cols = [c for c in ("title", "company", "location", "description", "full_description")
+            if _has_column(conn, "jobs", c)]
+    if not cols:
+        return
+    where = " OR ".join("%s LIKE '%%<%%' OR %s LIKE '%%&%%;%%'" % (c, c) for c in cols)
+    rows = conn.execute("SELECT id, %s FROM jobs WHERE %s" % (", ".join(cols), where)).fetchall()
+    fixed = 0
+    for r in rows:
+        old = [r[i + 1] for i in range(len(cols))]
+        new = [(textclean.html_to_text(v, keep_lines=c in ("description", "full_description")) if v else v)
+               for c, v in zip(cols, old)]
+        if new != old:
+            conn.execute("UPDATE jobs SET %s WHERE id=?" % ", ".join("%s=?" % c for c in cols), new + [r[0]])
+            fixed += 1
+    if fixed:
+        print("[db] jobs: converted HTML to text in %d row(s)" % fixed)
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1102,6 +1129,7 @@ MIGRATIONS = [
     (30, "funnel_events",               m0030_funnel_events),
     (31, "beta_shows_all_matches",      m0031_beta_shows_all_matches),
     (32, "unescape_job_text",           m0032_unescape_job_text),
+    (33, "job_text_from_html",          m0033_job_text_from_html),
 ]
 
 

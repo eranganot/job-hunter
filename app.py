@@ -32,6 +32,7 @@ import functools
 import auth
 import crypto
 import db as database
+import textclean
 import dbdriver
 import entitlements
 import accountdata
@@ -1795,7 +1796,8 @@ def run_job_search(user_id: int):
                             t = j.get("title", "")
                             loc = j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else ""
                             jurl = f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id', '')}"
-                            _gh_content = re.sub(r'<[^>]+>', ' ', j.get("content", "")).strip()[:5000] if j.get("content") else ""
+                            # Escaped HTML: the old tag regex ran before decoding and matched nothing (2026-11-12).
+                            _gh_content = textclean.html_to_text(j.get("content", ""))[:5000] if j.get("content") else ""
                             with _lk:
                                 all_raw.append({"job_title": t, "company": company_name,
                                                 "location": loc, "url": jurl,
@@ -2749,6 +2751,7 @@ def run_job_search(user_id: int):
                                     {"company": j.get("company",""), "title": j.get("job_title","")},
                                     _fb_signals, _fb_prof
                                 )
+                                j = textclean.clean_job(j)   # plain text, whatever HTML the source sent
                                 conn.execute(
                                     "INSERT OR IGNORE INTO jobs "
                                     "(user_id,title,company,location,url,description,why_relevant,source,"
@@ -7492,6 +7495,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 inserted = 0
                 for j in jobs:
+                    j = textclean.clean_job(j)
                     try:
                         conn.execute(
                             "INSERT OR IGNORE INTO jobs "
@@ -7527,6 +7531,7 @@ class Handler(BaseHTTPRequestHandler):
                 inserted = 0
                 for j in jobs:
                     uid = j.get("user_id", 1)
+                    j = textclean.clean_job(j)
                     try:
                         # The INSERT's own rowcount (0 when the row already
                         # existed). It used `SELECT changes()`, a SQLite-only

@@ -22,6 +22,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 import links
+import textclean
 
 BOARD_TTL_S = 3 * 3600
 MAX_BOARDS = 400
@@ -77,10 +78,13 @@ def postings(ats: str, ref: str, get=None) -> list:
             answered = isinstance(d, dict)
             for j in (d or {}).get("jobs", []) if answered else []:
                 loc = j.get("location") or {}
-                text = re.sub(r"<[^>]+>", " ", re.sub(r"&lt;|&gt;", " ", j.get("content") or ""))
+                # Greenhouse's content is HTML escaped once more ("&lt;p&gt;"): turning
+                # &lt;/&gt; into spaces left "div class=&quot;content-intro&quot; p" in
+                # the description (2026-11-12). Decode first, then drop the tags.
+                text = textclean.html_to_text(j.get("content") or "")
                 out.append({"title": j.get("title", ""), "location": loc.get("name", "") if isinstance(loc, dict) else "",
                             "url": j.get("absolute_url") or "https://boards.greenhouse.io/%s/jobs/%s" % (ref, j.get("id", "")),
-                            "description": re.sub(r"\s+", " ", text).strip()[:5000]})
+                            "description": text[:5000]})
         elif ats == "lever":
             d = get("https://api.lever.co/v0/postings/%s?mode=json" % ref)
             answered = isinstance(d, list)
