@@ -3008,6 +3008,9 @@ def _submit_application_guarded(job_url, job_title, company, applicant, cv_path,
         cv_path = _cv_for_apply(user_id, job_id, cv_path)
         run = _new_apply_run(user_id, job_id, job_title, company)
         applicant = {**(applicant or {}), "_await_code": _await_code_for(run, notify=True)}
+    # The engine stops itself 15 s before this deadline, unsent (2026-11-12):
+    # it used to run on after the deadline and could still press Submit.
+    applicant = {**(applicant or {}), "_deadline_s": max(30, _APPLY_DEADLINE_S - 15)}
     try:
         with _APPLY_SEM:
             fut = _APPLY_POOL.submit(

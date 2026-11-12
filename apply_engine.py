@@ -468,6 +468,81 @@ def _answer_and_fill_required(page, fields, applicant) -> int:
     return n
 
 
+# ── Generic form path: the model sees the real fields (2026-11-12) ─────────────
+# Until 2026-11-12 the generic path sent the model page.content()[:8000]. On every
+# page measured (Ashby, Navan's Greenhouse embed, Recruiterflow) the first form
+# field sits at character 26,000-250,000, so the model saw ZERO fields, invented
+# ~40 selectors ("input[name='firstName']", "#salary_expectation"...), and each
+# waited out the 20 s default timeout - 13 minutes a job, past the 150 s deadline,
+# in production logs on 2026-11-11. Now the fields are read from the live page
+# (every frame) and the model answers by field number, so it cannot invent one.
+_FIELDS_JS = r"""() => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const txt = e => (e && (e.innerText || e.textContent) || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const labelOf = e => {
+    let l = '';
+    if (e.id) { const f = document.querySelector('label[for="' + CSS.escape(e.id) + '"]'); if (f) l = txt(f); }
+    if (!l && e.closest('label')) l = txt(e.closest('label'));
+    if (!l) l = e.getAttribute('aria-label') || e.placeholder || '';
+    if (!l) { let p = e.parentElement; for (let i = 0; i < 4 && p && !l; i++, p = p.parentElement) { const q = p.querySelector('label,legend'); if (q) l = txt(q); } }
+    return (l || e.name || e.id || '').slice(0, 120);
+  };
+  const out = [];
+  document.querySelectorAll('[data-jh-f]').forEach(e => e.removeAttribute('data-jh-f'));
+  for (const e of document.querySelectorAll('input,textarea,select')) {
+    const t = (e.type || e.tagName).toLowerCase();
+    if (['hidden', 'submit', 'button', 'image', 'reset'].includes(t) || e.disabled) continue;
+    if (t !== 'file' && !vis(e)) continue;
+    if ((e.name || '').startsWith('g-recaptcha') || (e.name || '').startsWith('h-captcha')) continue;
+    const i = out.length; e.setAttribute('data-jh-f', String(i));
+    const f = {kind: t, label: labelOf(e), required: !!(e.required || e.getAttribute('aria-required') === 'true')};
+    if (t === 'select-one' || t === 'select-multiple' || e.tagName === 'SELECT')
+      f.options = [...e.options].map(o => o.text.trim()).filter(Boolean).slice(0, 25);
+    if (t === 'radio' || t === 'checkbox') f.option = labelOf(e);
+    out.push(f);
+  }
+  const btn = [...document.querySelectorAll('button,input[type=submit]')].filter(vis)
+    .find(b => /submit|apply|send/i.test(b.innerText || b.value || '') || (b.type || '') === 'submit');
+  document.querySelectorAll('[data-jh-submit]').forEach(e => e.removeAttribute('data-jh-submit'));
+  if (btn) btn.setAttribute('data-jh-submit', '1');
+  return {fields: out, submit: btn ? (btn.innerText || btn.value || 'submit').trim().slice(0, 40) : null};
+}"""
+
+
+def _read_form(page) -> tuple[list, object, object]:
+    """Every fillable field on the page and its frames: (fields, frame of the
+    form, frame of the submit button). Each field carries its frame; the DOM is
+    tagged data-jh-f=<n> per frame so a field is found again by number."""
+    best_fields, best_frame, submit_frame = [], None, None
+    for fr in page.frames:
+        try:
+            r = fr.evaluate(_FIELDS_JS)
+        except Exception as e:      # a detached or cross-process frame
+            print(f"[apply-engine] form read skipped a frame: {type(e).__name__}")
+            continue
+        if len(r.get("fields") or []) > len(best_fields):
+            best_fields, best_frame = r["fields"], fr
+            submit_frame = fr if r.get("submit") else submit_frame
+        elif r.get("submit") and submit_frame is None and fr is best_frame:
+            submit_frame = fr
+    return best_fields, best_frame, submit_frame
+
+
+def _past(deadline_at) -> bool:
+    return bool(deadline_at) and time.time() >= deadline_at
+
+
+def _ashby_application_url(url: str) -> str:
+    """Ashby shows the posting at jobs.ashbyhq.com/<org>/<id> and its form at
+    .../<id>/application (measured 2026-11-12: 0 fields on the posting page,
+    10 on /application, including the CV upload)."""
+    u = (url or "").strip()
+    m = re.match(r"^(https?://jobs\.ashbyhq\.com/[^/?#]+/[0-9a-f-]{20,})(/application)?/?([?#].*)?$", u, re.I)
+    if not m or m.group(2):
+        return u
+    return m.group(1) + "/application" + (m.group(3) or "")
+
+
 def _prompt_safe(applicant) -> dict:
     """The applicant for a model prompt: no internal keys ("_job", the
     supervised run's "_await_code" callback) - a function in the dict made
@@ -2260,6 +2335,15 @@ def submit_application(
                     "apply_failure_detail": "No direct ATS match found; job-board listing requires manual application",
                     "error": "Job-board listing — apply manually on the source site"}
     _base["resolved_url"] = actual_url
+    # The caller's deadline (seconds), enforced HERE so the engine stops itself
+    # instead of running on after app.py stopped waiting (seen 2026-11-11: three
+    # abandoned runs still filling forms 7+ minutes past the 150 s deadline).
+    _deadline_at = None
+    try:
+        if isinstance(applicant, dict) and applicant.get("_deadline_s"):
+            _deadline_at = time.time() + float(applicant["_deadline_s"])
+    except (TypeError, ValueError):
+        _deadline_at = None
     # Where the job is, so the required-question step can tell a home-country
     # sponsorship question from one about working abroad (2026-11-07).
     if isinstance(applicant, dict):
@@ -2282,6 +2366,7 @@ def submit_application(
             # 1. Navigate ─────────────────────────────────────────────────────
             try:
                 actual_url = _without_employee_share(actual_url)
+                actual_url = _ashby_application_url(actual_url)
                 page.goto(actual_url, wait_until="domcontentloaded", timeout=30_000)
                 try:
                     page.wait_for_load_state("networkidle", timeout=4_000)
@@ -2368,23 +2453,34 @@ def submit_application(
                 except Exception as e:
                     print(f"[apply-engine] apply-button error: {e}")
 
-            # 4. Ask Claude for form-filling instructions ──────────────────────
+            # 4. Read the real form, then ask the model to fill it by field number.
+            #    A script-built form (Ashby, many careers sites) may need a moment.
+            try:
+                page.wait_for_selector("input:not([type=hidden]), textarea, select", timeout=8_000)
+            except PWTimeout:
+                pass
+            fields, form_frame, submit_frame = _read_form(page)
+            print(f"[apply-engine] generic form: {len(fields)} field(s), submit button: {'yes' if submit_frame else 'no'}")
+            if not fields or form_frame is None:
+                browser.close()
+                return {**_base, "status": "manual_required",
+                        "apply_failure_type": "form_validation",
+                        "apply_failure_detail": "No application form found on the page",
+                        "error": "No application form found on this page - apply on the company's site"}
             try:
                 instructions = _claude_json(
-                    f'Fill job application for "{job_title}" at "{company}".\n\n'
+                    f'Fill a job application for "{job_title}" at "{company}".\n\n'
                     f'Applicant data:\n{json.dumps(_prompt_safe(applicant), indent=2)}\n\n'
-                    f'Page HTML (first 8000 chars):\n{page_html[:8000]}\n\n'
-                    f'Return a JSON ARRAY of interactions (no explanation):\n'
-                    f' {{"action":"fill","selector":"CSS","value":"text"}}\n'
-                    f' {{"action":"select","selector":"CSS","value":"option value or label"}}\n'
-                    f' {{"action":"upload","selector":"CSS","file":"cv"}}\n'
-                    f' {{"action":"check","selector":"CSS"}}\n'
-                    f' {{"action":"click","selector":"CSS"}}\n'
-                    f' {{"action":"submit","selector":"CSS of submit button"}}\n\n'
-                    f'Rules: only include visible/required fields; end with submit.\n'
-                    f'If impossible (login/captcha/no form), return {{"error":"reason"}}',
+                    f'The form\'s fields, numbered:\n{json.dumps(list(enumerate(fields)), ensure_ascii=False)[:12000]}\n\n'
+                    f'Return a JSON ARRAY, one entry per field you can answer from the applicant data:\n'
+                    f' {{"field": <number>, "action": "fill", "value": "text"}}\n'
+                    f' {{"field": <number>, "action": "select", "value": "one of its options"}}\n'
+                    f' {{"field": <number>, "action": "check"}}   (a checkbox/radio to tick)\n'
+                    f' {{"field": <number>, "action": "upload"}}  (the CV, for a file field)\n'
+                    f'Use only the numbers above. Never invent facts the applicant data does not give.\n'
+                    f'If the form cannot be completed (login, captcha), return {{"error":"reason"}}',
                     max_tokens=2048,
-                        timeout=_APPLY_LLM_TIMEOUT,
+                    timeout=_APPLY_LLM_TIMEOUT,
                 )
             except Exception as e:
                 browser.close()
@@ -2400,42 +2496,70 @@ def submit_application(
                 return {**_base, "status": "manual_required",
                         "error": "No form interactions generated"}
 
-            # 5. Execute interactions ──────────────────────────────────────────
-            submitted = False
+            # 5. Execute - each field found by its number, 5 s per action, and
+            #    stop (unsent, so safe to retry) if the deadline arrives first.
+            filled = 0
             for instr in instructions:
+                if _past(_deadline_at):
+                    browser.close()
+                    return {**_base, "status": "failed", "apply_failure_type": "timeout",
+                            "apply_failure_detail": "Stopped before submitting: apply deadline reached while filling the form (nothing was sent)",
+                            "error": "Ran out of time filling the form - nothing was sent"}
+                try:
+                    n = int(instr.get("field"))
+                except (TypeError, ValueError):
+                    continue
+                if not 0 <= n < len(fields):
+                    continue
+                loc = form_frame.locator(f'[data-jh-f="{n}"]')
                 action = instr.get("action", "")
-                sel    = instr.get("selector", "")
                 try:
                     if action == "fill":
-                        page.fill(sel, str(instr.get("value", "")))
+                        loc.fill(str(instr.get("value", "")), timeout=5_000)
                     elif action == "select":
+                        v = str(instr.get("value", ""))
                         try:
-                            page.select_option(sel, value=str(instr.get("value", "")))
-                        except Exception:
-                            page.select_option(sel, label=str(instr.get("value", "")))
-                    elif action == "upload" and instr.get("file") == "cv":
-                        if cv_path and os.path.exists(cv_path):
-                            page.set_input_files(sel, cv_path)
+                            loc.select_option(label=v, timeout=5_000)
+                        except Exception as e:
+                            print(f"[apply-engine] field {n}: no option labelled {v!r} ({type(e).__name__}), trying it as a value")
+                            loc.select_option(value=v, timeout=5_000)
+                    elif action == "upload":
+                        if not (cv_path and os.path.exists(cv_path)):
+                            continue
+                        loc.set_input_files(cv_path, timeout=5_000)
                     elif action == "check":
-                        page.check(sel)
-                    elif action == "click":
-                        page.click(sel)
-                    elif action == "submit":
-                        page.click(sel)
-                        submitted = True
-                        time.sleep(0.2)
+                        loc.check(timeout=5_000, force=True)
+                    else:
+                        continue
+                    filled += 1
                 except Exception as e:
-                    print(f"[apply-engine] instr {instr}: {e}")
+                    print(f"[apply-engine] field {n} ({fields[n].get('label','')[:40]!r}) {action}: {str(e).splitlines()[0][:120]}")
 
-            # Fallback submit if explicit action missed
-            if not submitted:
-                for s in ['button[type="submit"]', 'input[type="submit"]',
-                          'button:has-text("Submit")', 'button:has-text("Apply")']:
+            print(f"[apply-engine] generic form: filled {filled} of {len(instructions)} answer(s)")
+            if filled == 0:
+                browser.close()
+                return {**_base, "status": "manual_required", "apply_failure_type": "form_validation",
+                        "apply_failure_detail": "None of the form's fields could be filled - nothing was sent",
+                        "error": "Could not fill this form - apply on the company's site"}
+            if _past(_deadline_at):
+                browser.close()
+                return {**_base, "status": "failed", "apply_failure_type": "timeout",
+                        "apply_failure_detail": "Stopped before submitting: apply deadline reached (nothing was sent)",
+                        "error": "Ran out of time before submitting - nothing was sent"}
+
+            submitted = False
+            sf = submit_frame or form_frame
+            try:
+                sf.locator('[data-jh-submit="1"]').click(timeout=5_000)
+                submitted = True
+            except Exception as e:
+                print(f"[apply-engine] tagged submit button not clickable ({type(e).__name__}), trying the usual ones")
+                for sel in ['button[type="submit"]', 'input[type="submit"]', 'button:has-text("Submit")']:
                     try:
-                        page.click(s, timeout=3_000)
+                        sf.click(sel, timeout=3_000)
                         submitted = True
                         break
-                    except Exception:
+                    except PWTimeout:
                         continue
 
             if not submitted:
