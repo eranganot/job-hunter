@@ -88,7 +88,7 @@ def test_noa_is_the_product_and_says_she_is_an_ai():
     page = landing.landing_html("https://x.test")
     assert "Meet Noa, your personal AI headhunter agent." in page
     assert "She works for you, not for the companies." in page
-    assert "Let Noa work for you" in page
+    assert page.count(">Meet Noa</a>") == 4 and "Let Noa work for you" not in page
     assert "She is software, not a person" in page
     assert "she never makes a decision for you" in page
 
@@ -105,7 +105,7 @@ def test_the_page_is_dark_uses_the_app_icon_and_app_screenshots():
     page = landing.landing_html("https://x.test")
     assert 'name="color-scheme" content="dark"' in page
     assert '<img src="/app/icon-192.png"' in page
-    for name in ("job-card.webp", "queue.webp", "analytics.webp"):
+    for name in ("job-card.webp", "queue.webp", "job-details.webp", "analytics.webp"):
         assert "/landing-assets/" + name in page
     assert "<script" not in page
     assert "fonts.googleapis" not in page and '<link rel="stylesheet"' not in page

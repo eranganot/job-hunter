@@ -33,6 +33,7 @@ ASSETS = {                       # every file /landing-assets/ will serve, and i
     "job-card.webp": "image/webp",
     "queue.webp": "image/webp",
     "analytics.webp": "image/webp",
+    "job-details.webp": "image/webp",
     "noa-a.webp": "image/webp",
     "noa-d.webp": "image/webp",
     "noa-e.webp": "image/webp",
@@ -99,9 +100,8 @@ p{margin:0}
 .bub small{display:block;color:var(--muted);font-size:.8rem;margin-bottom:.25rem}
 .shot{border-radius:1rem;overflow:hidden;border:1px solid var(--line);background:#111827}
 .chat .shot{margin-left:3.65rem}
-.cap{font-size:.85rem;color:var(--muted);margin-top:.55rem}
-.chat .cap{margin-left:3.65rem}
-@media(max-width:30rem){.chat .shot,.chat .cap{margin-left:0}}
+.shot.wide{margin-top:3rem;max-width:62rem}
+@media(max-width:30rem){.chat .shot{margin-left:0}}
 
 .sec{padding-top:4rem;padding-bottom:4rem;border-top:1px solid var(--line)}
 @media(min-width:48rem){.sec{padding-top:5.5rem;padding-bottom:5.5rem}}
@@ -234,7 +234,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
       <p class="lead">She works for you, not for the companies. Noa reads every tech opening in Israel, brings you only
       the ones that fit your CV, and gets your application ready.</p>
       <div class="ctas">
-        <a class="btn go big" href="/register">Let Noa work for you</a>
+        <a class="btn go big" href="/register">Meet Noa</a>
         <a class="btn line big" href="#how">See how she works</a>
       </div>
       <p class="offer-line"><b>Premium is free for a limited time.</b> Sign up with Google or email. No card.</p>
@@ -247,7 +247,6 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         <p class="bub"><small>Noa, every morning</small>{msg2}</p></div>
       <div class="shot"><img src="/landing-assets/job-card.webp" width="1400" height="986"
         alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with the reasons it fits and Pass, Approve and Decide later buttons"/></div>
-      <p class="cap">A role Noa found, with her reasons. Example company and data.</p>
     </div>
   </section>
 
@@ -291,6 +290,8 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         <li><h3>You approve, Noa prepares</h3>
             <p>Swipe through your shortlist and teach Noa why you passed. Tomorrow's list gets closer to you.</p></li>
       </ol>
+      <div class="shot wide"><img src="/landing-assets/queue.webp" width="1400" height="1065" loading="lazy"
+        alt="The Job Hunter queue: approved roles ranked by match, each marked as ready for auto-apply or to apply yourself"/></div>
     </div>
   </section>
 
@@ -309,9 +310,8 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         </dl>
       </div>
       <div>
-        <div class="shot"><img src="/landing-assets/queue.webp" width="1400" height="1065" loading="lazy"
-          alt="The Job Hunter queue: approved roles ranked by match, each marked as ready for auto-apply or to apply yourself"/></div>
-        <p class="cap">Your queue: every role you approved, ranked and ready. Example data.</p>
+        <div class="shot"><img src="/landing-assets/job-details.webp" width="1400" height="746" loading="lazy"
+          alt="A role's details in Job Hunter: a check that the posting is still open, a cover letter to generate, and a button to tailor your CV for this job"/></div>
       </div>
     </div>
     <div class="wrap">
@@ -336,7 +336,6 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
       <div>
         <div class="shot"><img src="/landing-assets/analytics.webp" width="1400" height="380" loading="lazy"
           alt="Job Hunter statistics: roles in the queue, applied, deferred and passed, with approval and applied rates"/></div>
-        <p class="cap">Your numbers, kept by Noa. Example data.</p>
       </div>
     </div>
   </section>
@@ -354,7 +353,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
           </ul>
           <small>No card needed. You can export or delete your data whenever you want.</small>
         </div>
-        <a class="btn go big" href="/register">Let Noa work for you</a>
+        <a class="btn go big" href="/register">Meet Noa</a>
       </div>
     </div>
   </section>
@@ -394,7 +393,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
       <img src="{face}" alt="" width="104" height="104" loading="lazy"/>
       <div>
         <h2>Let Noa read the listings. You pick the ones that deserve you.</h2>
-        <a class="btn go big" href="/register">Let Noa work for you</a>
+        <a class="btn go big" href="/register">Meet Noa</a>
       </div>
     </div>
   </section>
