@@ -301,7 +301,7 @@ export const api = {
   analyzeCv: () => request<{
     summary?: string; job_titles?: string[]; keywords?: string[];
     locations?: string[]; seniority?: string; experience_years?: number;
-    error?: string;
+    profile_filled?: string[]; error?: string;
   }>("/api/analyze-cv", "POST", {}),
 
   dismissOnboarding: () => request("/api/dismiss-onboarding", "POST", {}),

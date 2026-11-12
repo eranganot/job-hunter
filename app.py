@@ -6395,6 +6395,32 @@ class Handler(BaseHTTPRequestHandler):
                         experience_years=data.get("experience_years", 0),
                         seniority=data.get("seniority", ""),
                     )
+                    # Profile details the CV carries (2026-11-12, the owner): fill
+                    # LinkedIn and phone from the CV, but only where the user has
+                    # not entered their own - analyze_cv extracted both all along
+                    # and this route dropped them.
+                    _pf = database.get_db()
+                    try:
+                        _cur = _pf.execute("SELECT linkedin_url, phone, email_address FROM user_profiles WHERE user_id=?",
+                                           (user_id,)).fetchone()
+                        _urow = _pf.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()
+                    finally:
+                        _pf.close()
+                    _fill = {}
+                    for _k, _src in (("linkedin_url", "linkedin_url"), ("phone", "phone"), ("email_address", "email")):
+                        _v = str(data.get(_src) or "").strip()[:200]
+                        if _k == "email_address" and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", _v):
+                            _v = ""
+                        if _v and not ((_cur[_k] if _cur else "") or "").strip():
+                            _fill[_k] = _v
+                    if _fill:
+                        auth.update_profile(user_id, **_fill)
+                    _filled = sorted(_fill)
+                    _nm = str(data.get("full_name") or "").strip()[:120]
+                    if _nm and not ((_urow["name"] if _urow else "") or "").strip():
+                        auth.update_user(user_id, name=_nm)
+                        _filled.append("name")
+                    data["profile_filled"] = _filled
                     database.write_users_config(BASE_DIR)
                     database.log_activity(user_id, "cv_analyzed",
                         f"AI extracted {len(data.get('job_titles',[]))} job titles, "

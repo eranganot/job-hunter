@@ -209,7 +209,7 @@ def test_the_onboarding_copy_is_in_the_shipped_script():
     rels = re.findall(r'src="[^"]*?(assets/[^"]+\.js)"', html)
     assert rels, "index.html loads no script"
     js = "\n".join((BUNDLE / r).read_text(encoding="utf-8", errors="replace") for r in rels)
-    for needle in ("Set up Job Hunter", "Upload your CV", "Your job profile"):
+    for needle in ("Meet Noa", "Upload your CV (PDF)", "Start my search"):
         assert needle in js, "onboarding string %r is not in the shipped bundle" % needle
 
 
