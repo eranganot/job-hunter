@@ -84,7 +84,7 @@ def export_data(conn, user_id: int) -> dict:
             continue
         sql = "SELECT * FROM %s WHERE user_id=?" % t
         if t == "jobs":
-            sql += " AND COALESCE(status,'') != 'locked'"
+            sql += " AND COALESCE(status,'') NOT IN ('locked','held')"
         out["tables"][t] = [_clean(t, r) for r in _rows(conn, sql, (user_id,))]
     locked = conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='locked'", (user_id,)).fetchone()[0]
     out["held_back_matches"] = {"count": int(locked or 0),

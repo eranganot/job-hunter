@@ -3727,6 +3727,8 @@ function Select({ value, onChange, options, fmt }: { value: string; onChange: (v
 
 function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty, locked, me }: any) {
   const [searchMsg, setSearchMsg] = useState("");
+  // Daily picks (2026-11-12): today's cap reached -> "your next picks come in tomorrow".
+  const picksDone = !!me?.daily_picks && me.daily_picks.today >= me.daily_picks.cap;
   const runSearch = async () => { setSearchMsg("Starting search…"); try { await api.runSearch(); setSearchMsg("Search started — new jobs will appear in a few minutes. Pull to refresh."); } catch (e: any) { setSearchMsg(e?.message || "Couldn't start search."); } };
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex items-center justify-center p-6">
@@ -3738,13 +3740,16 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
           <Loader2 className="w-6 h-6 animate-spin text-indigo-300 mx-auto mb-3" aria-hidden="true" />
           <p className="text-gray-400 mb-5">They'll appear here on their own. You can also close the app; we'll email you when they're ready.</p>
         </>) : (<>
-          <h2 className="text-2xl font-bold text-white mb-2">{empty ? "No new jobs right now" : "All done!"}</h2>
-          <p className="text-gray-400 mb-5">{empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs."}</p>
+          <h2 className="text-2xl font-bold text-white mb-2">{empty ? (picksDone ? "That's today's picks" : "No new jobs right now") : "All done!"}</h2>
+          <p className="text-gray-400 mb-5">{picksDone
+            ? (empty ? `Noa brings you up to ${me.daily_picks.cap} hand-picked jobs a day. Your next picks come in tomorrow.`
+                     : "You've reviewed today's picks. Noa brings the next ones tomorrow.")
+            : (empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs.")}</p>
         </>)}
         {locked?.count > 0 && <div className="mb-5 text-left"><LockedMatchesCard locked={locked} me={me} /></div>}
         {!empty && (<div className="bg-gray-800 rounded-2xl p-5 mb-5 border border-gray-700 grid grid-cols-3 gap-4"><div><div className="text-2xl font-bold text-green-400 mb-0.5">{approvedCount}</div><div className="text-xs text-gray-400">Approved</div></div><div><div className="text-2xl font-bold text-red-400 mb-0.5">{rejectedCount}</div><div className="text-xs text-gray-400">Passed</div></div><div><div className="text-2xl font-bold text-amber-400 mb-0.5">{deferredCount}</div><div className="text-xs text-gray-400">Deferred</div></div></div>)}
         <div className="space-y-3">
-          {!(empty && me?.first_search_running) && <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
+          {!(empty && me?.first_search_running) && !picksDone && <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
           <button onClick={onViewDashboard} className="w-full py-3.5 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium flex items-center justify-center gap-2"><LayoutGrid className="w-5 h-5" />View Dashboard</button>
           <button onClick={onStartNew} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl font-medium flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4" />Refresh</button>
         </div>

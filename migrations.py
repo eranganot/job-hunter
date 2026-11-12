@@ -1141,6 +1141,16 @@ def m0035_why_fits_says_you(conn):
     conn.commit()
 
 
+def m0036_daily_picks(conn):
+    """Daily picks (the owner, 2026-11-12): jobs.released_on = the Israel day a job
+    left Noa's reserve (status 'held') for the queue; at most the plan's
+    matches_per_day per user per day. Existing jobs keep NULL - they never
+    count against a day. Idempotent."""
+    if not _has_column(conn, "jobs", "released_on"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN released_on TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1177,6 +1187,7 @@ MIGRATIONS = [
     (33, "job_text_from_html",          m0033_job_text_from_html),
     (34, "job_text_leftovers",          m0034_job_text_leftovers),
     (35, "why_fits_says_you",           m0035_why_fits_says_you),
+    (36, "daily_picks",                 m0036_daily_picks),
 ]
 
 

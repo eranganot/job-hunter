@@ -105,6 +105,7 @@ export type Me = {
   email: string;
   // Setup ended and the first search has not finished (app.py /api/me).
   first_search_running?: boolean;
+  daily_picks?: { cap: number; today: number } | null;
   role?: string;
   is_admin?: boolean;
   // Step 5: false until the user opens the link we mailed. Applications go out

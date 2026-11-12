@@ -2848,6 +2848,38 @@ def run_job_search(user_id: int):
                                       f"'{entitlements.tier_of(dict(_plan_user))}' plan locked")
                         except Exception as _lk:
                             print(f"[run-search] ERROR could not apply the plan's match limit: {_lk}")
+                        # ── Daily picks (2026-11-12): this search's jobs go to Noa's
+                        # reserve, then today's picks come out of it, best first, up to
+                        # the plan's matches_per_day. What this run shows the user is
+                        # what was released now. A failure here releases everything.
+                        held_n = 0
+                        try:
+                            _dp_user = dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
+                            if entitlements.daily_cap(_dp_user) is not None:
+                                entitlements.hold_new_matches(conn, _dp_user, _batch_after)
+                                _released = entitlements.release(conn, _dp_user)
+                                _new_ids = {r[0] for r in conn.execute(
+                                    "SELECT id FROM jobs WHERE user_id=? AND id>? AND status=?",
+                                    (user_id, _batch_after, entitlements.HELD)).fetchall()}
+                                held_n = len(_new_ids)
+                                # what the user gets now = the released jobs, whichever search found them
+                                new_jobs_info = [{"title": r["title"], "company": r["company"], "url": r["url"],
+                                                  "url_ok": r["url_verified"]} for r in (conn.execute(
+                                    ("SELECT title, company, url, url_verified FROM jobs WHERE id IN (%s) "
+                                     % ",".join("?" * len(_released))) + "ORDER BY " + entitlements._RANK + " DESC",
+                                    [i for i, _u in _released]).fetchall()
+                                    if _released else [])]
+                                inserted = len(_released)
+                                print(f"[run-search] user {user_id}: daily picks - {inserted} released, "
+                                      f"{held_n} new job(s) kept in the reserve")
+                        except Exception as _dp:
+                            print(f"[run-search] ERROR daily picks failed, releasing this search: {_dp}")
+                            try:
+                                conn.execute("UPDATE jobs SET status='new' WHERE user_id=? AND id>? AND status=?",
+                                             (user_id, _batch_after, entitlements.HELD))
+                                conn.commit()
+                            except Exception as _dp2:
+                                print(f"[run-search] ERROR could not release held jobs: {_dp2}")
                         conn.close()
 
                         # ── URL check ALL historical unverified jobs ─────────────────────
@@ -2936,7 +2968,8 @@ def run_job_search(user_id: int):
                                 if _funnel(user_id, "first_search"):
                                     _first_matches_email(user_id, inserted)
                                 database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)"
-                                                      + (f"; {locked_n} more need a higher plan" if locked_n else ""))
+                                                      + (f"; {locked_n} more need a higher plan" if locked_n else "")
+                                                      + (f"; {held_n} kept for the coming days" if held_n else ""))
 
                                 # ── Consolidated search notification ─────────────────────────────
                                 # The FIRST line is what the phone push banner shows, so summarize the
@@ -2958,6 +2991,9 @@ def run_job_search(user_id: int):
                                     if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
                                 elif locked_n:
                                     notif_lines = [f"🔒 {locked_n} new match(es) found — upgrade your plan to see them"]
+                                elif held_n:
+                                    notif_lines = ["✨ Noa found more matches for you. You've had today's picks; "
+                                                   "the next ones come in tomorrow."]
                                 else:
                                     notif_lines = [f"🔍 Search done — no new matches today ({today})"]
                                 if inserted > 0 and locked_n:
@@ -3946,6 +3982,17 @@ def _send_verification(user_id: int, email: str, name: str = "") -> None:
                "Hi%s,\n\nConfirm this is your email address so Job Hunter can send applications and "
                "notifications with it:\n\n%s\n\nThe link works once and expires in 2 days. If you didn't "
                "create a Job Hunter account, ignore this email.\n\nJob Hunter" % ((" " + name.split()[0]) if name else "", link))
+
+
+def _release_daily_picks(conn, user) -> int:
+    """Move today's picks out of Noa's reserve (entitlements.release). Runs on
+    app open and on the job list, so a day without a search still brings the
+    next picks. Never raises: a failure leaves the reserve for the next call."""
+    try:
+        return len(entitlements.release(conn, user))
+    except Exception as exc:
+        print("[daily-picks] release failed for user %s: %s" % (user.get("id"), exc))
+        return 0
 
 
 def _first_matches_email(user_id: int, found: int) -> None:
@@ -5066,6 +5113,17 @@ class Handler(BaseHTTPRequestHandler):
                 if not testaccount.is_test_address(user.get("email")):
                     analytics.app_opened(user["id"])
             out = dict(user)
+            # Daily picks: a new day brings the next picks from Noa's reserve.
+            try:
+                _dc = database.get_db()
+                try:
+                    _release_daily_picks(_dc, user)
+                    out["daily_picks"] = entitlements.daily_picks_summary(_dc, user)
+                finally:
+                    _dc.close()
+            except Exception as _de:
+                print("[me] daily picks unavailable for user %s: %s" % (user["id"], _de))
+                out["daily_picks"] = None
             # Setup ended and the first search has not finished yet: the app
             # shows "Noa is finding your first matches" instead of empty lists.
             try:
@@ -5205,6 +5263,7 @@ class Handler(BaseHTTPRequestHandler):
             conn  = database.get_db()
             try:
                 database.expire_old_jobs(conn, user["id"])
+                _release_daily_picks(conn, user)
                 # A locked match (beyond the plan's per-search limit) is never
                 # sent, whatever status is asked for - only its count, from
                 # /api/jobs/locked (Phase 5b).
@@ -5219,10 +5278,10 @@ class Handler(BaseHTTPRequestHandler):
                     _hargs = (_cut,)
                 if status == "all":
                     rows = conn.execute(
-                        f"SELECT * FROM jobs WHERE user_id=? AND status!='locked'{_hist} ORDER BY {order}",
+                        f"SELECT * FROM jobs WHERE user_id=? AND status NOT IN ('locked','held'){_hist} ORDER BY {order}",
                         (user["id"],) + _hargs
                     ).fetchall()
-                elif status == "locked":
+                elif status in ("locked", "held"):
                     rows = []
                 else:
                     rows = conn.execute(
@@ -6046,6 +6105,15 @@ class Handler(BaseHTTPRequestHandler):
             if _is_locked:
                 self.send_json(entitlements.upgrade_required(
                     "locked_match", user, message="Upgrade your plan to see this match."), 402)
+                return
+            # A job still in Noa's reserve (daily picks) does not exist yet for the user.
+            _hc = database.get_db()
+            try:
+                _is_held = entitlements.is_held(_hc, user_id, int(_lm.group(1)))
+            finally:
+                _hc.close()
+            if _is_held:
+                self.send_json({"error": "Job not found"}, 404)
                 return
 
         # ── Delete my account (Step 6) ────────────────────────────────────────
@@ -7195,6 +7263,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_json(entitlements.upgrade_required(
                         "locked_match", user, message="Upgrade your plan to see this match."), 402)
                     return
+                if str(job_id).isdigit() and entitlements.is_held(conn, user["id"], int(job_id)):
+                    self.send_json({"error": "Job not found"}, 404)
+                    return
                 # WRITES `stage`, NOT `apply_status`. It wrote apply_status until
                 # 2026-09-15, which was wrong in both directions at once:
                 #   - the column the UI READS to highlight the selected stage is
@@ -7272,7 +7343,7 @@ class Handler(BaseHTTPRequestHandler):
                 done       = 0
                 for job_id in ids:
                     job = conn.execute(
-                        "SELECT * FROM jobs WHERE id=? AND user_id=? AND status!='locked'", (job_id, user_id)
+                        "SELECT * FROM jobs WHERE id=? AND user_id=? AND status NOT IN ('locked','held')", (job_id, user_id)
                     ).fetchone()
                     if not job:
                         continue
