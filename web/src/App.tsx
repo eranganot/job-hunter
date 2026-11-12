@@ -3265,12 +3265,14 @@ function PlanPanel({ me }: { me: any }) {
   return (<>
     <div className="bg-gradient-to-br from-indigo-600/20 to-gray-800 rounded-2xl border border-indigo-500/30 p-5">
       <p className="text-xs uppercase tracking-wide text-indigo-300">Your plan</p>
-      <p className="text-2xl font-bold text-white mt-1">{info.label}</p>
+      {/* Beta is an internal plan name (Premium's limits, no end date). Users
+          see Premium, free for a limited time - never "beta" (2026-11-11). */}
+      <p className="text-2xl font-bold text-white mt-1">{info.tier === "beta" ? "Premium" : info.label}</p>
       {promo && <p className="text-sm text-gray-300 mt-2">Free Premium until <b>{fmtPlanDate(info.plan_until)}</b>
         {info.days_left != null && <> ({info.days_left} day{info.days_left === 1 ? "" : "s"} left)</>}.
         After that you move to the {String(info.plan_after || "free").replace(/^./, (c: string) => c.toUpperCase())} plan.</p>}
-      {info.tier === "beta" && <p className="text-sm text-gray-300 mt-2">You're one of our beta users: everything in Premium, free while Job Hunter is in beta.</p>}
-      {info.tier !== "admin" && <p className="text-xs text-gray-400 mt-3">Upgrade options open soon.</p>}
+      {info.tier === "beta" && <p className="text-sm text-gray-300 mt-2">Everything in Premium, free for a limited time. You'll be told well in advance before anything changes.</p>}
+      {info.tier !== "admin" && info.tier !== "beta" && <p className="text-xs text-gray-400 mt-3">Upgrade options open soon.</p>}
     </div>
     <div>
       <h3 className="font-semibold text-white mb-3">Usage</h3>
