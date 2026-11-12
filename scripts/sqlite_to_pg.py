@@ -82,6 +82,7 @@ TABLE_ORDER = [
     # No foreign keys; they only need to come after users.
     "auth_tokens",
     "funnel_events",
+    "lifecycle_emails",
     "billing_events",
 ]
 

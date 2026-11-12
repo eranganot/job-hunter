@@ -465,16 +465,26 @@ def send_support_message(user: dict, message: str, subject: str = "", user_agent
     send_email(SUPPORT_EMAIL, "[Job Hunter support] %s" % subj, body, reply_to=email)
 
 
-def _sender(as_noa: bool) -> tuple:
-    """(from, reply_to) for a message. Noa only when NOA_FROM is set and the
-    regular sender is on a verified domain (not Resend's sandbox)."""
-    if as_noa and NOA_FROM and RESEND_SANDBOX_FROM not in RESEND_FROM:
-        m = re.search(r"<([^>]+)>", NOA_FROM)
-        return NOA_FROM, (m.group(1) if m else NOA_FROM)
+# The day-3 note from the owner (lifecycle.py): "Eran from Job Hunter
+# <eran@job-hunter.work>", replies forwarded to his Gmail. Unset = that email
+# is skipped, never sent from someone else's address.
+ERAN_FROM = os.environ.get("ERAN_FROM", "").strip()
+
+
+def _sender(as_noa=False, who: str = "") -> tuple:
+    """(from, reply_to) for a message. Noa (or Eran) only when NOA_FROM (or
+    ERAN_FROM) is set and the regular sender is on a verified domain (not
+    Resend's sandbox)."""
+    who = who or ("noa" if as_noa else "")
+    addr = {"noa": NOA_FROM, "eran": ERAN_FROM}.get(who, "")
+    if addr and RESEND_SANDBOX_FROM not in RESEND_FROM:
+        m = re.search(r"<([^>]+)>", addr)
+        return addr, (m.group(1) if m else addr)
     return RESEND_FROM, ""
 
 
-def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", as_noa: bool = False, **_kwargs):
+def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", as_noa: bool = False,
+               sender: str = "", headers: dict | None = None, **_kwargs):
     """Send an email notification via the Resend SDK.
 
     This function used to set `actual_to = RESEND_VERIFIED_EMAIL` and DISCARD
@@ -516,7 +526,7 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", as_noa
             % (RESEND_SANDBOX_FROM, RESEND_VERIFIED_EMAIL or "<unset>", to_addr))
     actual_to = to_addr
     resend.api_key = RESEND_API_KEY
-    _from, _noa_reply = _sender(as_noa)
+    _from, _noa_reply = _sender(as_noa, sender)
     reply_to = reply_to or _noa_reply
     msg = {
         "from": _from,
@@ -526,6 +536,8 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", as_noa
     }
     if reply_to:
         msg["reply_to"] = reply_to
+    if headers:
+        msg["headers"] = dict(headers)
     result = resend.Emails.send(msg)
     if result.get("id"):
         print(f"[email/resend] ✅ Sent to {actual_to} — {result['id']}")
@@ -1337,6 +1349,46 @@ def _start_pool_run():
     _POOL_THREAD.start()
 
 
+def _stop_page(title: str, text: str, form: str = "") -> str:
+    """The small page behind "Stop these emails" (lifecycle.py). Self-contained styles."""
+    return ("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
+            "content='width=device-width,initial-scale=1'><title>%s</title><style>"
+            "body{margin:0;background:#0c1f17;color:#fbf6e6;font:16px/1.5 system-ui,sans-serif;"
+            "display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px}"
+            ".c{max-width:28rem;background:#12291f;border:1px solid #2c4a3c;border-radius:16px;padding:28px}"
+            "h1{font-size:1.3rem;margin:0 0 .6rem}p{color:#c4d4c6;margin:0 0 1.2rem}"
+            "button{font:inherit;font-weight:650;border:0;border-radius:12px;padding:.7rem 1.2rem;"
+            "background:#ffd766;color:#1f1a05;cursor:pointer}a{color:#ffd766}</style></head>"
+            "<body><div class='c'><h1>%s</h1><p>%s</p>%s</div></body></html>" % (title, title, text, form))
+
+
+def _lifecycle_send(to, subject, body, sender, unsub):
+    send_email(to, subject, body, sender=sender,
+               headers={"List-Unsubscribe": "<%s>" % unsub,
+                        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"})
+
+
+def _run_lifecycle_emails(now=None) -> dict | None:
+    """Welcome / day 1 / day 3 / day 7 (lifecycle.py). Scheduler-lock holder
+    only, so a second instance never sends twice. Never raises."""
+    import lifecycle
+    import testaccount
+    if not lifecycle.enabled():
+        return None
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return None
+        senders = {"noa": _sender(who="noa")[0] != RESEND_FROM, "eran": _sender(who="eran")[0] != RESEND_FROM}
+        out = lifecycle.run(database.get_db, _lifecycle_send, MOBILE_URL, track=_track, now=now,
+                            is_test=testaccount.is_test_address, senders=senders)
+        if out["sent"] or out["failed"]:
+            print("[lifecycle] sent %(sent)d, skipped %(skipped)d, failed %(failed)d" % out)
+        return out
+    except Exception as exc:
+        print("[lifecycle] ERROR sweep failed: %s" % exc)
+        return None
+
+
 def file_watcher():
     _tick = 0
     while True:
@@ -1370,6 +1422,8 @@ def file_watcher():
                         database.write_users_config(BASE_DIR)
             except Exception as _ple:
                 print(f"[plans] ERROR plan lifecycle sweep failed: {_ple}")
+        if _tick % 10 == 2:  # every ~10 minutes: lifecycle emails (off unless LIFECYCLE_EMAILS=1)
+            _run_lifecycle_emails()
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -4854,6 +4908,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(legal.terms_html(pub) if path == "/terms" else legal.privacy_html(pub))
             return
 
+        # "Stop these emails" from a lifecycle email: a confirm page, never a
+        # change on GET (mail scanners open links). Token = HMAC of the user id.
+        if path == "/email/stop":
+            import lifecycle
+            _u, _t = (qs.get("u") or [""])[0], (qs.get("t") or [""])[0]
+            if not lifecycle.unsubscribe_ok(_u, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete. You can also reply "
+                                          "to any of our emails and ask us to stop."), 400)
+                return
+            self.send_html(_stop_page("Stop these emails?",
+                "You'll stop getting Noa's tips and check-ins. Account emails (like password resets) still come.",
+                "<form method='post' action='/email/stop?u=%s&amp;t=%s'><button type='submit'>Stop these emails"
+                "</button></form>" % (int(_u), _t)))
+            return
+
         if path.startswith("/landing-assets/"):
             # The landing page's pictures and fonts (assets/landing/). Only the
             # names landing.ASSETS lists are served - never a path from the URL.
@@ -5953,6 +6022,28 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path   = parsed.path
 
+        # "Stop these emails" (lifecycle.py): the confirm button, and mail
+        # providers' one-click unsubscribe (RFC 8058), which POSTs from their
+        # servers. Authenticated by the link's token, not a cookie, so it sits
+        # before the cross-site check.
+        if path == "/email/stop":
+            import lifecycle
+            _q = parse_qs(parsed.query)
+            _u, _t = (_q.get("u") or [""])[0], (_q.get("t") or [""])[0]
+            if not lifecycle.unsubscribe_ok(_u, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete."), 400)
+                return
+            _sc = database.get_db()
+            try:
+                _sc.execute("UPDATE users SET lifecycle_opt_out=1 WHERE id=?", (int(_u),))
+                _sc.commit()
+            finally:
+                _sc.close()
+            _track(int(_u), "lifecycle_unsubscribed")
+            self.send_html(_stop_page("Done", "You won't get these emails any more. Noa keeps finding your "
+                                      "picks in the app."))
+            return
+
         # SameSite=Lax already stops the browser sending the session cookie on a
         # cross-site POST. This is the second lock: it costs one header read and
         # does not depend on cookie-policy behaviour staying as it is today.
@@ -6036,6 +6127,32 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Register ──
+        # Lifecycle emails (lifecycle.py): every variant sent to the admin's own
+        # inbox, from the sender it would really use, so the copy is reviewed as
+        # the user will see it. Admin only; works with LIFECYCLE_EMAILS off.
+        if path == "/api/admin/lifecycle-test":
+            user = self.require_auth()
+            if not user:
+                return
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import lifecycle
+            _first = (user.get("name") or "").split()[0] if (user.get("name") or "").strip() else ""
+            _sent, _errs = [], []
+            for _pv in lifecycle.previews(_first, MOBILE_URL.rstrip("/") + "/app",
+                                          lifecycle.unsubscribe_url(MOBILE_URL, user["id"])):
+                try:
+                    send_email(user["email"], "[%s / %s] %s" % (_pv["step"], _pv["variant"], _pv["subject"]),
+                               _pv["body"], sender=_pv["sender"])
+                    _sent.append("%s/%s" % (_pv["step"], _pv["variant"]))
+                except Exception as _le:
+                    _errs.append("%s/%s: %s" % (_pv["step"], _pv["variant"], _le))
+            self.send_json({"sent": _sent, "errors": _errs,
+                            "noa_from_set": bool(NOA_FROM), "eran_from_set": bool(ERAN_FROM),
+                            "enabled": lifecycle.enabled()})
+            return
+
         if path == "/api/admin/test-account/reset":
             user = self.require_auth()
             if not user:
