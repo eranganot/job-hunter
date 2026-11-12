@@ -62,6 +62,11 @@ def clean_job(j: dict) -> dict:
     for k in ("description", "full_description"):
         if isinstance(out.get(k), str):
             out[k] = html_to_text(out[k])
+    # "Why this fits" is read by the job seeker: "you", not "the candidate" (2026-11-12).
+    import voice
+    for k in ("fit_reason", "why_relevant"):
+        if isinstance(out.get(k), str):
+            out[k] = voice.second_person(html_to_text(out[k], keep_lines=False))
     return out
 
 
