@@ -10,6 +10,7 @@ Cloud (Railway):
     Run relay.py on your Mac to bridge scheduled tasks to the cloud.
 """
 
+import analytics
 import hmac
 import html as html_lib
 import json
@@ -108,14 +109,48 @@ def _funnel(user_id, step: str) -> None:
     try:
         c = database.get_db()
         try:
-            c.execute("INSERT INTO funnel_events (user_id, step, created_at) VALUES (?,?,?) "
-                      "ON CONFLICT (user_id, step) DO NOTHING",
-                      (user_id, step, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
+            _cur = c.execute("INSERT INTO funnel_events (user_id, step, created_at) VALUES (?,?,?) "
+                             "ON CONFLICT (user_id, step) DO NOTHING",
+                             (user_id, step, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")))
             c.commit()
+            first_time = (getattr(_cur, "rowcount", 0) or 0) > 0
         finally:
             c.close()
     except Exception as exc:
         print("[funnel] %s for user %s not recorded: %s" % (step, user_id, exc))
+        return
+    if first_time and step in analytics.STEP_EVENTS:
+        _track(user_id, analytics.STEP_EVENTS[step])
+
+
+_ANALYTICS_SKIP: dict = {}
+
+
+def _track(user_id, event: str, props: dict | None = None, **kw) -> None:
+    """Send a product-analytics event for a user (analytics.py), except for the
+    resettable test account. The admin's events carry internal=true so the
+    dashboard can leave them out."""
+    if not analytics.enabled() or not user_id:
+        return
+    try:
+        if user_id not in _ANALYTICS_SKIP:
+            c = database.get_db()
+            try:
+                r = c.execute("SELECT email, role FROM users WHERE id=?", (user_id,)).fetchone()
+            finally:
+                c.close()
+            import testaccount
+            _ANALYTICS_SKIP[user_id] = ("skip" if (not r or testaccount.is_test_address(r["email"]))
+                                        else "internal" if str(r["role"] or "") == "admin" else "")
+        mode = _ANALYTICS_SKIP[user_id]
+        if mode == "skip":
+            return
+        p = dict(props or {})
+        if mode == "internal":
+            p["internal"] = True
+        analytics.capture(user_id, event, p, **kw)
+    except Exception as exc:
+        print("[analytics] %s for user %s not sent: %s" % (event, user_id, exc))
 
 
 def _start_first_search(user_id) -> bool:
@@ -166,6 +201,20 @@ def funnel_report(days: int = 30) -> dict:
     got = {r["step"]: r["n"] for r in rows}
     return {"days": days, "since": since,
             "steps": [{"step": s, "users": int(got.get(s, 0))} for s in FUNNEL_STEPS]}
+
+
+def _register_page(error_html: str, attr: dict) -> str:
+    """The sign-up form, carrying where the visitor came from (utm_*, ref, the
+    landing page's Noa variant) as hidden fields and on the Google link."""
+    page = REGISTER_HTML.replace("{error_block}", error_html)
+    if attr:
+        hidden = "".join('<input type="hidden" name="%s" value="%s"/>' % (k, html_lib.escape(v, quote=True))
+                         for k, v in attr.items())
+        page = page.replace('<form method="POST" action="/register">',
+                            '<form method="POST" action="/register">' + hidden, 1)
+        page = page.replace('href="/auth/google/start"',
+                            'href="/auth/google/start?%s"' % html_lib.escape(analytics.encode_attribution(attr), quote=True), 1)
+    return page
 
 
 def landing_html(noa: str = "a") -> str:
@@ -4556,7 +4605,7 @@ class Handler(BaseHTTPRequestHandler):
             if user:
                 self.redirect(home_url())
             else:
-                self.send_html(REGISTER_HTML.replace("{error_block}", ""))
+                self.send_html(_register_page("", analytics.clean_attribution(qs)))
             return
 
         if path in ("/logout", "/logout/"):
@@ -4577,6 +4626,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             import secrets as _secrets_g, hashlib as _hashlib_g, base64 as _b64_g
             _state    = _secrets_g.token_urlsafe(32)
+            _g_attr = analytics.encode_attribution(analytics.clean_attribution(qs))
+            if _g_attr:   # where a new account came from, carried through Google in `state`
+                _state += "." + _b64_g.urlsafe_b64encode(_g_attr.encode()).decode().rstrip("=")
             _verifier = _secrets_g.token_urlsafe(64)
             _challenge = _b64_g.urlsafe_b64encode(
                 _hashlib_g.sha256(_verifier.encode()).digest()).rstrip(b"=").decode()
@@ -4649,6 +4701,15 @@ class Handler(BaseHTTPRequestHandler):
             if _is_new and _user:
                 _funnel(_user["id"], "signup")
                 _funnel(_user["id"], "verified")       # Google already confirmed the address
+                _g_attr = {}
+                if "." in _state:
+                    try:
+                        _enc = _state.split(".", 1)[1]
+                        _g_attr = analytics.decode_attribution(
+                            _b64.urlsafe_b64decode(_enc + "=" * (-len(_enc) % 4)).decode())
+                    except (ValueError, UnicodeDecodeError):
+                        _g_attr = {}
+                _track(_user["id"], "user_signed_up", dict(_g_attr, method="google"), set_once=_g_attr)
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
             _token = auth.create_session(_user["id"])
@@ -4670,13 +4731,19 @@ class Handler(BaseHTTPRequestHandler):
             if user:
                 self.redirect(home_url())
             else:
-                # Three Noa illustrations are kept for an A/B test (2026-11-12).
-                # No cookie yet: assigning visitors waits for the analytics PR,
-                # which brings consent and measurement. Until then the page
-                # shows the first one; ?noa= shows another, for reviewing.
-                import landing
+                # A/B test of the three Noa illustrations (2026-11-12): a fresh
+                # pick on every view, no cookie. The variant rides on the
+                # sign-up links (landing.py) into the signup event, and every
+                # view is counted server-side with it - so signups per view, per
+                # variant, need no consent. ?noa= forces one (for reviewing).
+                import landing, random
                 _noa = (qs.get("noa") or [""])[0]
-                self.send_html(landing_html(_noa if _noa in landing.NOA_VARIANTS else landing.NOA_VARIANTS[0]))
+                if _noa not in landing.NOA_VARIANTS:
+                    _noa = random.choice(landing.NOA_VARIANTS)
+                analytics.capture_anonymous("landing_viewed", dict(analytics.clean_attribution(qs), noa=_noa,
+                                            referrer=urlparse(self.headers.get("Referer", "")).netloc[:80]),
+                                            self.headers.get("User-Agent", ""))
+                self.send_html(landing_html(_noa))
             return
 
         # Step 6 (2026-11-11): Terms of Service and Privacy Policy, public.
@@ -4957,6 +5024,10 @@ class Handler(BaseHTTPRequestHandler):
             user = self.require_auth()
             if not user:
                 return
+            if analytics.enabled():
+                import testaccount
+                if not testaccount.is_test_address(user.get("email")):
+                    analytics.app_opened(user["id"])
             out = dict(user)
             try:
                 out["plan_info"] = entitlements.plan_info(user)
@@ -5861,28 +5932,26 @@ class Handler(BaseHTTPRequestHandler):
                     f"Too many accounts created from this address. Try again in about {_mins} minute(s).")), 429)
                 return
             body = urllib.parse.parse_qs(self.read_body().decode())
+            _attr    = analytics.clean_attribution(body)
             name     = body.get("name", [""])[0].strip()
             email    = body.get("email", [""])[0]
             password = body.get("password", [""])[0]
             password2 = body.get("password2", [""])[0]
             if not name or not email or not password:
-                html = REGISTER_HTML.replace("{error_block}", error_block("All fields are required."))
-                self.send_html(html)
+                self.send_html(_register_page(error_block("All fields are required."), _attr))
                 return
             if password != password2:
-                html = REGISTER_HTML.replace("{error_block}", error_block("Passwords don't match."))
-                self.send_html(html)
+                self.send_html(_register_page(error_block("Passwords don't match."), _attr))
                 return
             if len(password) < 8:
-                html = REGISTER_HTML.replace("{error_block}", error_block("Password must be at least 8 characters."))
-                self.send_html(html)
+                self.send_html(_register_page(error_block("Password must be at least 8 characters."), _attr))
                 return
             user_id, err = auth.create_user(name, email, password)
             if err:
-                html = REGISTER_HTML.replace("{error_block}", error_block(err))
-                self.send_html(html)
+                self.send_html(_register_page(error_block(err), _attr))
                 return
             _funnel(user_id, "signup")
+            _track(user_id, "user_signed_up", dict(_attr, method="email"), set_once=_attr)
             try:
                 _send_verification(user_id, email.strip().lower(), name)
             except Exception as _ve:
@@ -6432,6 +6501,7 @@ class Handler(BaseHTTPRequestHandler):
             first_search = False
             if kwargs.get("onboarding_complete") and not user.get("onboarding_complete"):
                 first_search = _start_first_search(user_id)
+                _track(user_id, "onboarding_completed", {"first_search_started": first_search})
             database.write_users_config(BASE_DIR)
             bump_onboarding(user_id, "auto_apply_choice_made")
             self.send_json({"success": True, "first_search_started": first_search})
@@ -6696,6 +6766,9 @@ class Handler(BaseHTTPRequestHandler):
                 bump_onboarding(user_id, "first_job_reviewed")
                 if action == "approve":
                     _funnel(user_id, "first_approve")
+                    _track(user_id, "job_approved")
+                elif action == "reject":
+                    _track(user_id, "job_passed", {"reason": (reason or "")[:60]})
 
                 # On approval: kick off a background application ONLY if the user has
                 # auto-apply enabled. Otherwise approving just shortlists the job (moves
@@ -7171,6 +7244,8 @@ class Handler(BaseHTTPRequestHandler):
                 database.log_activity(user_id, f"bulk_{action}", f"{label} {done} job(s) at once")
                 if action == "approve" and done:
                     _funnel(user_id, "first_approve")
+                if done:
+                    _track(user_id, "job_approved" if action == "approve" else "job_passed", {"count": done, "bulk": True})
                 database.write_approved_jobs(BASE_DIR)
                 self.send_json({"success": True, "updated": done})
                 return

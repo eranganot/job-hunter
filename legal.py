@@ -21,7 +21,7 @@ import html
 OPERATOR = "Eran Ganot"
 OPERATOR_PLACE = "Ramat Gan, Israel"
 CONTACT = "support@job-hunter.work"
-EFFECTIVE = "11 November 2026"
+EFFECTIVE = "13 November 2026"
 
 _MARK_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" '
              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -104,7 +104,7 @@ _TERMS = f"""
 <div class="summary">
   <p><b>The short version</b> (the full terms below are what count):</p>
   <ul>
-    <li>Job Hunter is run by one person, {OPERATOR}, in {OPERATOR_PLACE}. It is in beta and free.</li>
+    <li>Job Hunter is run by one person, {OPERATOR}, in {OPERATOR_PLACE}. Premium is free for a limited time.</li>
     <li>You must be 18 or older. You are responsible for what you upload and for every application sent in your name.</li>
     <li>The app finds and scores jobs and prepares applications. Scores are suggestions; it does not promise you interviews or a job.</li>
     <li>You can export your data or delete your account at any time from Settings.</li>
@@ -148,10 +148,10 @@ _TERMS = f"""
 <p>Job listings, career pages and application systems belong to other companies. We do not control them, do not guarantee that listings are accurate, current or still open, and are not responsible for those sites or for employers' conduct. Your use of them is under their own terms.</p>
 
 <h2>7. Price and paid plans</h2>
-<p>During the beta the Service is free. Usage limits apply to each plan and are shown in the app. If we introduce paid plans, they will come with their own pricing and terms, which we will show you before you are charged anything. Nothing becomes paid without your explicit agreement.</p>
+<p>For a limited time the Service, including its Premium plan, is free. Usage limits apply to each plan and are shown in the app. If we introduce paid plans, they will come with their own pricing and terms, which we will show you before you are charged anything. Nothing becomes paid without your explicit agreement.</p>
 
 <h2>8. Availability and changes</h2>
-<p>The Service is in beta. Features may change, be limited or be removed, and the Service may be unavailable at times. We may change or end the Service; if we end it, we will give you reasonable notice where we can so that you can export your data.</p>
+<p>The Service is new and still changing. Features may change, be limited or be removed, and the Service may be unavailable at times. We may change or end the Service; if we end it, we will give you reasonable notice where we can so that you can export your data.</p>
 
 <h2>9. Ending your account</h2>
 <p>You can delete your account at any time from Settings &rarr; Profile &rarr; Your data. Deletion takes effect after a 14-day grace period, during which signing in cancels it; after that your data is removed as described in the Privacy Policy. You can export your data first from the same place.</p>
@@ -218,6 +218,7 @@ _PRIVACY = f"""
   <li>Jobs found for you, their match scores and explanations, tailored CVs, cover letters, and the status and result of each application.</li>
   <li>A record of activity in your account (searches, applications, settings changes) and usage counts used to apply plan limits.</li>
   <li>Technical data: sign-in sessions, IP address and browser details in server logs, and error reports when something breaks.</li>
+  <li>Product analytics: which steps of the app you reach (for example signing up, uploading a CV, approving a first job, coming back on later days), recorded under a random-looking account number, never your name, email or CV. On our public pages, visits are counted too; analytics cookies are set only if you accept them.</li>
 </ul>
 <p>We do not ask for, and ask you not to include in your CV or answers, sensitive information such as health, religion or political views unless you choose to share it with employers.</p>
 
@@ -227,7 +228,7 @@ _PRIVACY = f"""
   <tr><td>Running your account and the features you use: searching, scoring, tailoring, preparing and - when you turn it on - submitting applications; notifications you asked for</td><td>Performance of our contract with you</td></tr>
   <tr><td>Sending service emails: confirming your address, password resets, changes to these policies</td><td>Contract; legitimate interest</td></tr>
   <tr><td>Security, preventing abuse, applying usage limits, fixing errors</td><td>Legitimate interest in a secure, working service</td></tr>
-  <tr><td>Improving the Service using aggregated statistics (for example, how many sign-ups reach a first search, how often pass reasons recur)</td><td>Legitimate interest</td></tr>
+  <tr><td>Improving the Service using aggregated statistics and product analytics (for example, how many sign-ups reach a first search, which pages and campaigns bring people who stay, how often pass reasons recur)</td><td>Legitimate interest; for analytics cookies on our public pages, your consent</td></tr>
   <tr><td>Meeting legal obligations and handling legal claims</td><td>Legal obligation; legitimate interest</td></tr>
 </table></div>
 <p>We do not sell your data, use it for advertising, or make decisions about you that have legal or similarly significant effects without a human: the Service ranks jobs for you, but you decide what to apply for.</p>
@@ -245,6 +246,7 @@ _PRIVACY = f"""
   <tr><td>Resend</td><td>Sending email (confirmation, password reset, notifications)</td><td>Email address, message content</td></tr>
   <tr><td>Cloudflare</td><td>The job-hunter.work domain, network delivery and forwarding mail sent to our support address</td><td>IP address and request data; support emails</td></tr>
   <tr><td>Google (Gmail)</td><td>The mailbox that receives support messages</td><td>Your support messages and email address</td></tr>
+  <tr><td>PostHog (EU region)</td><td>Product analytics: counting visits and which steps of the app people reach</td><td>Pseudonymous account number and events in the app; on public pages, page visits and the campaign link you came from (with analytics cookies only if you accept them); IP addresses are not stored</td></tr>
   <tr><td>Sentry (EU region)</td><td>Error reports when something breaks</td><td>Technical details of the error, account identifier; stack-frame variables are not sent</td></tr>
   <tr><td>Your browser's push service (Google, Apple, Mozilla, Microsoft)</td><td>Push notifications, if you turn them on</td><td>A device push address, notification text</td></tr>
   <tr><td>Telegram; Twilio (WhatsApp)</td><td>Notifications, only if you connect them with your own bot or account</td><td>Notification text, your chat or phone number</td></tr>
@@ -284,16 +286,17 @@ _PRIVACY = f"""
 <p>For anything you cannot do in the app, email <a href="mailto:{CONTACT}">{CONTACT}</a>. We answer within 30 days. You can also complain to a data protection authority: in Israel, the Privacy Protection Authority; in the EU, the authority in your country.</p>
 
 <h2>8. Cookies and local storage</h2>
-<p>We use only what the Service needs to work. No advertising or analytics cookies.</p>
+<p>We use what the Service needs to work, and analytics cookies only if you accept them. No advertising cookies.</p>
 <div class="tbl"><table>
   <tr><th>Name</th><th>What it does</th><th>Lasts</th></tr>
   <tr><td><code>session</code></td><td>Keeps you signed in</td><td>Signs you out after 14 days without use (the cookie itself expires after 30)</td></tr>
   <tr><td><code>g_state</code>, <code>g_verifier</code></td><td>Protect the Google sign-in step</td><td>10 minutes</td></tr>
   <tr><td>Local storage: <code>jh_notify_nudge</code>, <code>jh_vapid_key</code></td><td>Remember whether we asked about notifications, and the push setup</td><td>Until you clear them</td></tr>
   <tr><td>Session storage: <code>jh.nav</code></td><td>Remembers which screen and tab you were on, so a refresh keeps your place</td><td>Until you close the app</td></tr>
+  <tr><td>PostHog: a cookie and local storage named <code>ph_&lt;project key&gt;_posthog</code></td><td>Analytics on our public pages, only after you click Accept on the banner. If you click No thanks, only that choice is stored, and visits are counted without cookies.</td><td>Up to 1 year, or until you clear them</td></tr>
   <tr><td>App cache (service worker)</td><td>Lets the app load quickly and install on your device</td><td>Until the next app version</td></tr>
 </table></div>
-<p>Because these are strictly necessary, we do not ask for consent to them.</p>
+<p>Apart from the PostHog analytics cookie, these are strictly necessary, so we do not ask for consent to them.</p>
 
 <h2>9. Security</h2>
 <p>We protect your data with encrypted connections (HTTPS), hashed passwords, encrypted storage of notification tokens, limits on sign-in and other attempts, and access to production data limited to the operator. No system is perfectly secure; if a breach affects your data, we will tell you and the relevant authorities as the law requires.</p>

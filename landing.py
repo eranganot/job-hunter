@@ -23,10 +23,16 @@ Every claim on this page has to be true of the product today:
 - the word "beta" never appears: the offer is "Premium is free for a limited
   time" (accounts are on the Beta plan internally).
 
+Analytics (analytics.py): the sign-up links carry utm_* / ref and the Noa
+variant; with JH_POSTHOG_KEY set, posthog-js runs in cookieless "on_reject"
+mode behind a consent banner. Every view is also counted server-side.
+
 Text stays ASCII-safe for app.send_html, which strips U+0080-U+00FF: use
 entities (&copy;) rather than those characters.
 """
 import html
+
+import analytics
 
 NOA_VARIANTS = ("a", "d", "e")
 ASSETS = {                       # every file /landing-assets/ will serve, and its type
@@ -221,7 +227,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
   <a class="brand" href="/"><img src="/app/icon-192.png" alt="" width="36" height="36"/>Job Hunter</a>
   <nav class="nav" aria-label="Account">
     <a class="btn ghost" href="/login">Sign in</a>
-    <a class="btn go" href="/register">Meet Noa</a>
+    <a class="btn go" href="/register" data-place="header">Meet Noa</a>
   </nav>
 </header>
 
@@ -232,7 +238,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
       <p class="lead">She works for you, not for the companies. Noa reads every tech opening in Israel, brings you only
       the ones that fit your CV, and gets your application ready.</p>
       <div class="ctas">
-        <a class="btn go big" href="/register">Meet Noa</a>
+        <a class="btn go big" href="/register" data-place="hero">Meet Noa</a>
         <a class="btn line big" href="#how">See how she works</a>
       </div>
       <p class="offer-line"><b>Premium is free for a limited time.</b> Sign up with Google or email. No card.</p>
@@ -349,7 +355,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
           </ul>
           <small>No card needed. You can export or delete your data whenever you want.</small>
         </div>
-        <a class="btn go big" href="/register">Meet Noa</a>
+        <a class="btn go big" href="/register" data-place="offer">Meet Noa</a>
       </div>
     </div>
   </section>
@@ -389,7 +395,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
       <img src="{face}" alt="" width="104" height="104" loading="lazy"/>
       <div>
         <h2>Let Noa read the listings. You pick the ones that deserve you.</h2>
-        <a class="btn go big" href="/register">Meet Noa</a>
+        <a class="btn go big" href="/register" data-place="final">Meet Noa</a>
       </div>
     </div>
   </section>
@@ -404,5 +410,6 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
     </nav>
   </footer>
 </div>
+{analytics.browser_snippet("landing", {"noa_variant": noa})}
 </body>
 </html>"""
