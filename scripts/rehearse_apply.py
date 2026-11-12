@@ -39,6 +39,13 @@ def guard(route, req):
         # Lever parses the attached CV before submit; answer as an empty parse.
         CAPTURED.append({"method": "POST(fake-ok)", "url": req.url, "bytes": len(req.post_data_buffer or b""), "body_head": ""})
         return route.fulfill(status=200, content_type="application/json", body="{}")
+    # Ashby renders its page through GraphQL POSTs; the read operations are let
+    # through (2026-11-12) - anything else on that endpoint (the submit) is not.
+    if req.method == "POST" and "jobs.ashbyhq.com/api/non-user-graphql?op=" in req.url:
+        op = req.url.split("op=", 1)[1].split("&", 1)[0]
+        if op in ("ApiJobPosting", "ApiOrganizationFromHostedJobsPageName", "ApiJobBoardWithTeams",
+                  "ApiJobPostingWithApplicationForm", "ApiOrganization"):
+            return route.continue_()
     if req.method != "GET" and not any(h in req.url for h in ALLOW_WRITE):
         try: body = req.post_data_buffer or b""
         except Exception: body = b""
@@ -119,6 +126,24 @@ if os.environ.get("STUB_GEMINI"):
         # A stand-in for Gemini on the question step (questions.py's prompt):
         # sure about the obvious, deliberately UNSURE about citizenship, so a
         # rehearsal shows both the fill path and the hold-for-the-applicant path.
+        if "The form's fields, numbered:" in prompt:
+            # The generic path (2026-11-12): answer by field number from the label.
+            fl = json.loads(prompt.split("The form's fields, numbered:\n", 1)[1].split("\n\nReturn a JSON ARRAY", 1)[0])
+            FIELDS_SEEN.extend([f for _, f in fl])
+            out = []
+            for n, f in fl:
+                lab = (f.get("label") or "").lower(); kind = f.get("kind")
+                val = ("Rehearsal" if "first" in lab else "Test" if "last" in lab
+                       else "rehearsal@example.com" if "mail" in lab
+                       else applicant["phone"] if "phone" in lab or kind == "tel"
+                       else applicant["linkedin_url"] if "linkedin" in lab
+                       else "Rehearsal Test" if "name" in lab
+                       else "Tel Aviv, Israel" if "location" in lab or "city" in lab else None)
+                if kind == "file":
+                    out.append({"field": n, "action": "upload"})
+                elif val and kind not in ("radio", "checkbox", "select-one"):
+                    out.append({"field": n, "action": "fill", "value": val})
+            return out
         if "ON BEHALF" in prompt:
             qs = json.loads(prompt.split("Questions (JSON array): ", 1)[1].split("\n\nReturn ONLY", 1)[0])
         elif "REQUIRED fields" in prompt:
@@ -153,6 +178,8 @@ if os.environ.get("STUB_GEMINI"):
 
 t0 = time.time()
 os.makedirs(OUT, exist_ok=True)
+# Production's deadline (app.py passes _APPLY_DEADLINE_S - 15).
+applicant["_deadline_s"] = float(os.environ.get("DEADLINE_S", "135"))
 res = ae.submit_application(URL, os.environ.get("JOB_TITLE", "Rehearsal"), os.environ.get("COMPANY", "Rehearsal"),
                             applicant, cv, force=True)
 print("seconds:", round(time.time() - t0, 1))
