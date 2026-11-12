@@ -814,29 +814,62 @@ def send_web_push_to_user(user_id, message, url_suffix="", url=None) -> dict:
     return out
 
 
-def notify_admin_new_user(new_user_email: str, new_user_name: str):
-    """Send a new-signup alert to the admin via ALL their configured channels."""
-    if not ADMIN_EMAIL:
-        return
+def admin_alert_target():
+    """(admin user id, how it was found) for the new-user alert, or (None, why not).
+    ADMIN_EMAIL first; else the oldest account with the admin role. Until
+    2026-11-11 ADMIN_EMAIL was never set on production, and the alert returned
+    early on every signup without a trace - so it no longer depends on it alone,
+    and /api/health reports the result (smoke fails when it is None)."""
     conn = database.get_db()
     try:
-        admin_row = conn.execute(
-            "SELECT id FROM users WHERE lower(email)=lower(?)", (ADMIN_EMAIL,)
-        ).fetchone()
-        if not admin_row:
-            conn.close()
-            print(f"[admin-notify] No admin user row for {ADMIN_EMAIL}")
-            return
-        admin_id = admin_row["id"]
-        conn.close()
-        display = new_user_name or new_user_email
-        message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter."
-        try:
-            deliver_notification(admin_id, message, url_suffix=home_url())
-        except Exception as e:
-            print(f"[admin-notify] failed (non-fatal): {e}")
+        if ADMIN_EMAIL:
+            row = conn.execute("SELECT id FROM users WHERE lower(email)=lower(?)",
+                               (ADMIN_EMAIL,)).fetchone()
+            if row:
+                return row["id"], "ADMIN_EMAIL"
+        row = conn.execute("SELECT id FROM users WHERE role='admin' AND is_active=1 "
+                           "ORDER BY id LIMIT 1").fetchone()
+        if row:
+            return row["id"], "admin role" + ("" if ADMIN_EMAIL else " (ADMIN_EMAIL unset)")
+        return None, "no admin account" + ("" if ADMIN_EMAIL else " and ADMIN_EMAIL unset")
     finally:
         conn.close()
+
+
+def _admin_alerts_health():
+    try:
+        admin_id, how = admin_alert_target()
+        return {"target": admin_id is not None, "via": how}
+    except Exception as e:
+        return {"target": False, "via": "error: %s" % e}
+
+
+def notify_admin_new_user(new_user_email: str, new_user_name: str, provider: str = ""):
+    """Send a new-signup alert to the admin via ALL their configured channels.
+    Called from auth's new-account hook, so every signup path reaches it."""
+    admin_id, how = admin_alert_target()
+    if admin_id is None:
+        print(f"[admin-notify] ERROR no one to alert about new user {new_user_email}: {how}")
+        return
+    display = new_user_name or new_user_email
+    via = {"google": " with Google", "password": " with email and password"}.get(provider, "")
+    message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter{via}."
+    try:
+        res = deliver_notification(admin_id, message, url_suffix=home_url())
+        print(f"[admin-notify] new user {new_user_email}: {res}")
+    except Exception as e:
+        print(f"[admin-notify] ERROR delivery failed for new user {new_user_email}: {e}")
+
+
+# The route harness (tests/test_routes.py `stack`) stubs the public name to keep
+# the suite offline; tests of the alert itself call this one.
+_notify_admin_new_user_impl = notify_admin_new_user
+
+
+@auth.on_user_created
+def _alert_admin_on_signup(user_id, email, name, provider):
+    # Looked up at call time, so a test (or a later reassignment) can replace it.
+    globals()["notify_admin_new_user"](new_user_email=email, new_user_name=name, provider=provider)
 
 
 _LLM_PRUNED_ON = [""]
@@ -4136,6 +4169,7 @@ HEALTH_PUBLIC_KEYS = (
     "status", "uptime_info", "scheduler", "schema_version", "commit", "db_backend",
     "credentials_encrypted", "error_reporting", "sources", "queue", "db_check",
     "worker", "db_backend_refused", "last_search", "paid_pool", "support_inbox",
+    "admin_alerts",
 )
 
 
@@ -4588,13 +4622,6 @@ class Handler(BaseHTTPRequestHandler):
             if _is_new and _user:
                 _funnel(_user["id"], "signup")
                 _funnel(_user["id"], "verified")       # Google already confirmed the address
-                # The admin's new-user alert. /register always sent it; this path
-                # never did, so every Google signup arrived silently (2026-11-11).
-                try:
-                    notify_admin_new_user(new_user_email=_user.get("email") or _email,
-                                          new_user_name=_user.get("name") or _name)
-                except Exception as _ne:
-                    print(f"[admin-notify] google signup hook error: {_ne}")
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
             _token = auth.create_session(_user["id"])
@@ -4761,6 +4788,10 @@ class Handler(BaseHTTPRequestHandler):
                 "paid_pool": _paid_pool_health(),
                 # Contact support has somewhere to go (a yes/no; never the address)
                 "support_inbox": bool(SUPPORT_EMAIL),
+                # Someone receives the new-user alert (a yes/no and how it was
+                # resolved; never the address). ADMIN_EMAIL was unset on
+                # production until 2026-11-11 and every alert vanished silently.
+                "admin_alerts": _admin_alerts_health(),
                 # Queue depth and the age of the oldest running job: a wedged
                 # worker looks exactly like a healthy one from outside without
                 # this. Guarded because a box that predates migration 6 has no
@@ -5763,11 +5794,6 @@ class Handler(BaseHTTPRequestHandler):
                 html = REGISTER_HTML.replace("{error_block}", error_block(err))
                 self.send_html(html)
                 return
-            # Notify admin about new signup (non-blocking)
-            try:
-                notify_admin_new_user(new_user_email=email, new_user_name=name)
-            except Exception as e:
-                print(f"[admin-notify] registration hook error: {e}")
             _funnel(user_id, "signup")
             try:
                 _send_verification(user_id, email.strip().lower(), name)
