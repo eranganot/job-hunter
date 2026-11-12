@@ -91,3 +91,40 @@ def test_migration_33_cleans_stored_jobs_and_leaves_clean_ones():
     assert got == [("Wonderful", "Short", "Role Overview\nOwn retail."),
                    ("Payoneer", "About", "About"),
                    ("R&D Co", "Plain text a < b", "Plain text a < b")]
+
+
+# Production rows still wrong after migration 33 (observed 2026-11-12).
+TAVILY = ('h3 strong span data-ccp-props="{}" The role /span /strong /h3 p Tavily, part of Nebius, is the web '
+          'access layer for AI agents. /p p We build and run our own index. /p p This is a strong team. /p')
+ASHLEY = ("p strong Who We Are: /strong strong br /strong strong br /strong strong THE BIGGEST NAME IN HOME. "
+          "/strong strong br /strong Ashley Digital is the e-commerce engine. /p p We're fast-moving. /p")
+SCALEOPS = 'div class="content-intro" p ScaleOps is redefining autonomous cloud and AI infrastructure.'
+
+
+def test_rows_already_stripped_of_brackets_are_repaired():
+    rep = textclean.repair_stripped_tags
+    assert rep(SCALEOPS) == "ScaleOps is redefining autonomous cloud and AI infrastructure."
+    assert rep(TAVILY) == ("The role\nTavily, part of Nebius, is the web access layer for AI agents.\n"
+                           "We build and run our own index.\nThis is a strong team.")      # the word stays
+    assert rep(ASHLEY) == ("Who We Are:\n\nTHE BIGGEST NAME IN HOME.\nAshley Digital is the e-commerce engine.\n"
+                           "We're fast-moving.")
+    prose = "We need a strong PM with a b2b background, p.s. a div of the org."
+    assert rep(prose) == prose                       # no damage signature: untouched
+
+
+def test_a_tag_cut_off_at_the_length_limit_is_dropped():
+    assert html_to_text("SUMMARY\n\nWe<span c") == "SUMMARY\n\nWe"
+    assert html_to_text("feature adoption.</li") == "feature adoption."
+    assert html_to_text("a < b and 3<4") == "a < b and 3<4"
+
+
+def test_migration_34_repairs_what_33_left():
+    c = _db(33)
+    c.execute("INSERT INTO users (id, name, email, password_hash, salt, created_date) VALUES (1,'u','u@x.test','h','s','2026')")
+    for i, fd in enumerate([SCALEOPS, "Fun!\n\nWe<span c", "Plain, a strong team."]):
+        c.execute("INSERT INTO jobs (user_id, title, company, url, description, full_description, status, found_date) "
+                  "VALUES (1,'PM','Co',?, ?, ?, 'new','2026-11-12')", ("https://x.test/%d" % i, fd[:40], fd))
+    c.commit()
+    migrations.run(c)
+    got = [r[0] for r in c.execute("SELECT full_description FROM jobs ORDER BY id")]
+    assert got == ["ScaleOps is redefining autonomous cloud and AI infrastructure.", "Fun!\n\nWe", "Plain, a strong team."]
