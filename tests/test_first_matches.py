@@ -85,3 +85,25 @@ def test_the_app_shows_the_waiting_screen():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     js = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(root, "web_bundle", "assets", "*.js")))
     assert "Noa is finding your first matches" in js and "first_search_running" in js
+
+
+def test_the_cv_fills_linkedin_and_phone_but_never_overwrites(stack, mails, monkeypatch):
+    """analyze_cv always extracted LinkedIn and phone; /api/analyze-cv dropped
+    them (the owner, 2026-11-12: setup should fill the profile from the CV too)."""
+    app = stack["app"]
+    c, uid = _new_user(stack, "fm-cv@example.test")
+    monkeypatch.setattr(app, "GEMINI_KEY", "test-key", raising=False)
+    monkeypatch.setattr(app, "_cv_file", lambda *_a, **_k: "/tmp/cv.pdf")
+    cv = {"job_titles": ["Data Analyst"], "keywords": ["SQL"], "locations": ["Tel Aviv"], "summary": "s",
+          "linkedin_url": "https://www.linkedin.com/in/maya-cohen", "phone": "+972 50 123 4567",
+          "email": "maya.cohen@gmail.example", "full_name": "Maya R. Cohen"}
+    monkeypatch.setattr(app, "analyze_cv", lambda *_a, **_k: dict(cv))
+    out = json.loads(c.post_json("/api/analyze-cv", {})[2])
+    assert out["profile_filled"] == ["email_address", "linkedin_url", "phone"]   # the name was given at sign-up
+    me = _me(c)
+    assert me["linkedin_url"] == cv["linkedin_url"] and me["phone"] == cv["phone"]
+    assert me["email_address"] == cv["email"] and me["name"] == "Maya Cohen"
+    c.post_json("/api/save-profile", {"phone": "+972 52 999 9999"})        # the user's own number
+    cv["phone"] = "+972 50 000 0000"
+    out = json.loads(c.post_json("/api/analyze-cv", {})[2])
+    assert out["profile_filled"] == [] and _me(c)["phone"] == "+972 52 999 9999"

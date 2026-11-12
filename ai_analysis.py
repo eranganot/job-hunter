@@ -33,6 +33,8 @@ def analyze_cv(pdf_path: str, api_key: str = "", user_id: int | None = None) -> 
         score_label      str        — e.g. "Strong Profile"
         linkedin_url     str        — LinkedIn URL if present in CV, else ""
         phone            str        — phone number if present in CV, else ""
+        full_name        str        — the person's name as written in the CV, else ""
+        email            str        — email address if present in CV, else ""
     """
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"CV file not found: {pdf_path}")
@@ -55,12 +57,14 @@ def analyze_cv(pdf_path: str, api_key: str = "", user_id: int | None = None) -> 
         '  "score": <integer 0-100, overall CV/profile strength for job hunting>,\n'
         '  "score_label": "<Weak Profile|Average Profile|Good Profile|Strong Profile|Excellent Profile>",\n'
         '  "linkedin_url": "<LinkedIn profile URL found in CV, or empty string if not present>",\n'
-        '  "phone": "<phone number found in CV, or empty string if not present>"\n'
+        '  "phone": "<phone number found in CV, or empty string if not present>",\n'
+        '  "full_name": "<the person\'s full name as written in the CV, or empty string>",\n'
+        '  "email": "<email address found in CV, or empty string if not present>"\n'
         "}\n\n"
         "Score guidance: 0-40 weak, 41-60 average, 61-75 good, 76-90 strong, 91-100 excellent. "
         "Score based on: clarity, relevance of experience, skills depth, career progression, "
         "and searchability for the Israeli/global tech market. "
-        "For linkedin_url and phone: extract exactly as written in the CV. "
+        "For linkedin_url, phone, full_name and email: extract exactly as written in the CV, never invent them. "
         "Be specific with job titles — use real market titles. "
         "Return ONLY the JSON object."
     )
@@ -80,6 +84,8 @@ def analyze_cv(pdf_path: str, api_key: str = "", user_id: int | None = None) -> 
         data.setdefault("score_label", "")
         data.setdefault("linkedin_url", "")
         data.setdefault("phone", "")
+        data.setdefault("full_name", "")
+        data.setdefault("email", "")
         # Remove salary fields if returned (no longer part of this response)
         data.pop("salary_min", None)
         data.pop("salary_max", None)

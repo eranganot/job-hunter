@@ -2784,7 +2784,11 @@ function AdminPanel({ me }: any) {
  * cannot be escaped is a support ticket: the data it collects is all reachable
  * from Settings afterwards, and `onboarding_dismissed` means never ask again.
  */
-const OB_STEPS = ["Welcome", "Your CV", "Your profile", "Schedule", "Alerts"] as const;
+// Launch Stage 2 item 5 (2026-11-12): two steps, Noa asking. Schedule and
+// alerts left setup: daily at 11:00 by default (Settings), and the alert offer
+// moved to the "Noa is finding your first matches" screen, where it is wanted.
+const OB_STEPS = ["Your CV", "What to look for"] as const;
+const NOA_AVATAR = "/landing-assets/noa-a.webp";
 // Monday first, because the index IS the stored value: the scheduler compares
 // search_day_of_week against `now.weekday()` (app.py:597), which is Python's
 // 0=Monday..6=Sunday. Labelling this Sunday-first would have shifted every
@@ -2802,26 +2806,16 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
   const [step, setStep] = useState(0);
   const [titles, setTitles] = useState<string[]>(parse(me.job_titles));
   const [keywords, setKeywords] = useState<string[]>(parse(me.keywords));
-  const [locations, setLocations] = useState<string[]>(parse(me.locations));
+  const [locations, setLocations] = useState<string[]>(() => { const l = parse(me.locations); return l.length ? l : ["Tel Aviv"]; });
   const [cvName, setCvName] = useState<string>(me.cv_filename || "");
+  const [cvRead, setCvRead] = useState(false);
+  const [filled, setFilled] = useState<string[]>([]);
   const [cvMsg, setCvMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [freq, setFreq] = useState<string>(me.schedule_frequency || "daily");
-  const [searchHour, setSearchHour] = useState(String(me.search_hour ?? 11));
-  const [searchDow, setSearchDow] = useState<number>(me.search_day_of_week ?? 1);
-  const [perm, setPerm] = useState(pushState());
-  const [pushMsg, setPushMsg] = useState("");
   const [finishing, setFinishing] = useState(false);
+  const first = me?.name ? String(me.name).split(" ")[0] : "";
 
-  const hours = Array.from({ length: 24 }, (_, h) => h);
-  const fmtHour = (h: number) => {
-    const ampm = h < 12 ? "AM" : "PM";
-    const hr = h % 12 === 0 ? 12 : h % 12;
-    return `${String(hr).padStart(2, "0")}:00 ${ampm}`;
-  };
-
-  /* Upload and read in one go. Two buttons here would be two chances to skip
-     the half that matters. */
+  /* Upload and read in one go, then straight on to what Noa read. */
   const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setBusy(true); setCvMsg("Uploading…");
@@ -2830,21 +2824,15 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
       setCvName(info.filename || file.name);
       setCvMsg("Reading your CV…");
       const r = await api.analyzeCv();
-      if (r?.error) { setCvMsg("Uploaded. Couldn't read it automatically — you can fill the next step in yourself."); return; }
+      if (r?.error) { setCvMsg("Got it, but I couldn't read it on my own. Tell me what to look for on the next step."); return; }
       if (r.job_titles?.length) setTitles(r.job_titles);
       if (r.keywords?.length) setKeywords(r.keywords);
       if (r.locations?.length) setLocations(r.locations);
-      setCvMsg("✓ Read your CV — the next step is filled in for you to check.");
+      setFilled(Array.isArray(r.profile_filled) ? r.profile_filled : []);
+      setCvRead(true); setCvMsg(""); setStep(1);
     } catch {
-      setCvMsg("Upload failed. You can add your details by hand instead.");
+      setCvMsg("The upload didn't go through. Try again, or tell me what to look for on the next step.");
     } finally { setBusy(false); }
-  };
-
-  const enableNotifs = async () => {
-    setPushMsg("Enabling…");
-    const r = await enablePush();
-    setPerm(pushState());
-    setPushMsg(r.ok ? "✓ Notifications on" : (r.reason || "Couldn't enable — you can turn these on later in Settings"));
   };
 
   /* Saves before it closes. A wizard that discards what was typed because the
@@ -2856,12 +2844,9 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
         await api.saveProfile({ job_titles: titles, keywords, locations });
       }
       await api.saveSchedule({
-        schedule_frequency: planLimit(me, "search_cadence") === "weekly" ? "weekly" : freq,
-        search_hour: parseInt(searchHour, 10),
-        // Only meaningful weekly, but always sent: leaving it unset meant a
-        // weekly user silently inherited whatever day the column happened to
-        // hold, with nothing on screen saying which.
-        ...(freq === "weekly" ? { search_day_of_week: searchDow } : {}),
+        // Daily at the account's hour (11:00 unless changed); Settings changes it.
+        schedule_frequency: planLimit(me, "search_cadence") === "weekly" ? "weekly" : (me.schedule_frequency || "daily"),
+        search_hour: Number.isFinite(me.search_hour) ? me.search_hour : 11,
         onboarding_complete: 1,
       });
       if (dismissed) await api.dismissOnboarding();
@@ -2869,24 +2854,27 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
     finally { setFinishing(false); onDone(); }
   };
 
-  const next = () => setStep((s) => Math.min(s + 1, OB_STEPS.length));
-  const back = () => setStep((s) => Math.max(s - 1, 0));
   const card = "bg-gray-800 rounded-2xl border border-gray-700 p-5 lg:p-8 lg:max-w-3xl lg:mx-auto";
+  const noaSays = (text: React.ReactNode) => (
+    <div className="flex items-start gap-3 mb-5">
+      <img src={NOA_AVATAR} alt="Noa" width={48} height={48} className="w-12 h-12 rounded-full object-cover shrink-0 bg-gray-700" />
+      <div className="bg-gray-900/60 border border-gray-700 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-200 leading-relaxed">{text}</div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 text-white">
-      <div className={`${SHELL} px-5 lg:px-12 py-8 safe-top`}>
+      {/* pb-56: the fixed "Confirm your email" banner must never cover the last button. */}
+      <div className={`${SHELL} px-5 lg:px-12 pt-8 pb-56 safe-top`}>
         <div className="flex items-center gap-3 mb-6">
           <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl flex items-center justify-center shrink-0"><Briefcase className="w-6 h-6 text-white" /></div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold leading-tight">Set up Job Hunter</h1>
-            <p className="text-xs text-gray-400">{me?.name ? `Welcome, ${String(me.name).split(" ")[0]}` : "A few quick questions"}</p>
+            <h1 className="text-xl font-bold leading-tight">Meet Noa</h1>
+            <p className="text-xs text-gray-400">Your personal AI headhunter agent</p>
           </div>
           <button onClick={() => finish(true)} className="text-xs text-gray-400 hover:text-gray-200 shrink-0">Skip setup</button>
         </div>
 
-        {/* Progress. Named steps, not a bare bar: "3 of 5" says nothing about
-            what is left, and what is left is what decides whether to continue. */}
         <div className="flex items-center gap-1.5 mb-6">
           {OB_STEPS.map((label, i) => (
             <div key={label} className="flex-1">
@@ -2898,26 +2886,10 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
 
         {step === 0 && (
           <div className={card}>
-            <h2 className="text-lg font-semibold mb-2">Your AI job search assistant</h2>
-            <p className="text-sm text-gray-300 mb-4">Job Hunter searches for roles that fit you, scores each one against your CV, and lines up the good ones for you to review. Three things to set up and you're done.</p>
-            <ul className="space-y-2.5 mb-5">
-              {[[FileText, "Your CV", "So matches are scored against your real experience"],
-                [SearchIcon, "What you're looking for", "Titles, skills and locations — read from your CV"],
-                [Bell, "When to run and how to hear about it", "A daily search, and an alert when there is something good"]].map(([Icon, t, s]: any, i) => (
-                <li key={i} className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0 mt-0.5"><Icon className="w-4 h-4 text-indigo-300" /></div>
-                  <div><p className="text-sm font-medium">{t}</p><p className="text-xs text-gray-400">{s}</p></div>
-                </li>
-              ))}
-            </ul>
-            <button onClick={next} className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Get started</button>
-          </div>
-        )}
-
-        {step === 1 && (
-          <div className={card}>
-            <h2 className="text-lg font-semibold mb-1">Upload your CV</h2>
-            <p className="text-sm text-gray-400 mb-4">A PDF. We read it to fill in the next step, and score every job against it.</p>
+            {noaSays(<>
+              <p className="mb-2">Hi{first ? ` ${first}` : ""}, I'm Noa. I work for you, not for the companies.</p>
+              <p>Send me your CV. I'll read it, work out what fits you, and bring you hand-picked jobs every day.</p>
+            </>)}
             {cvName && (
               <div className="flex items-center gap-3 p-3 mb-3 bg-gray-900/60 rounded-xl border border-gray-700">
                 <div className="w-9 h-9 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-indigo-300" /></div>
@@ -2927,92 +2899,37 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
             <label className={`block border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer bg-gray-900/40 hover:border-indigo-500 ${busy ? "opacity-60 pointer-events-none" : ""}`}>
               <input type="file" accept=".pdf" className="hidden" onChange={onPick} />
               {busy ? <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto mb-2" /> : <FileText className="w-6 h-6 text-gray-400 mx-auto mb-2" />}
-              <p className="text-sm text-gray-300">{cvName ? "Choose a different PDF" : "Choose your CV (PDF)"}</p>
-              <p className="text-xs text-gray-400 mt-0.5">Max 5MB</p>
+              <p className="text-sm text-gray-300">{busy ? cvMsg : (cvName ? "Choose a different PDF" : "Upload your CV (PDF)")}</p>
+              {!busy && <p className="text-xs text-gray-400 mt-0.5">Max 5MB</p>}
             </label>
-            {cvMsg && <p className="text-xs text-gray-300 mt-3">{cvMsg}</p>}
-            <div className="flex gap-2 mt-5">
-              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
-              <button onClick={next} disabled={busy} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold disabled:opacity-60">{cvName ? "Next" : "Skip for now"}</button>
-            </div>
+            {cvMsg && !busy && <p className="text-xs text-gray-300 mt-3">{cvMsg}</p>}
+            <button onClick={() => setStep(1)} disabled={busy}
+              className="w-full mt-4 py-3 text-sm text-gray-400 hover:text-gray-200 disabled:opacity-60">
+              {cvName ? "Next" : "I'll add my CV later"}
+            </button>
           </div>
         )}
 
-        {step === 2 && (
+        {step === 1 && (
           <div className={card}>
-            <h2 className="text-lg font-semibold mb-1">Your job profile</h2>
-            <p className="text-sm text-gray-400 mb-4">{cvName ? "Read from your CV. Change anything that looks wrong — this is what the search actually uses." : "What should we search for?"}</p>
+            {noaSays(cvRead
+              ? <><p>Here's what I took from your CV. Fix anything I got wrong; this is exactly what I'll search for.</p>
+                  {filled.length > 0 && <p className="mt-2">I also added your {(() => { const n = filled.map((f) => ({ linkedin_url: "LinkedIn", phone: "phone", email_address: "email", name: "name" } as any)[f] || f); return n.length > 1 ? n.slice(0, -1).join(", ") + " and " + n[n.length - 1] : n[0]; })()} to your profile.</p>}</>
+              : <p>Tell me what to look for. Add a job title or two, and where you want to work.</p>)}
             <div className="space-y-5">
-              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Briefcase className="w-4 h-4 text-indigo-400" />Job titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="VP Product" /></div>
-              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-400" />Skills &amp; keywords</h3><TagInput value={keywords} onChange={setKeywords} noun="skill" example="experimentation" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Briefcase className="w-4 h-4 text-indigo-400" />Job titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="Product Manager" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-400" />Skills &amp; keywords</h3><TagInput value={keywords} onChange={setKeywords} noun="skill" example="SQL" /></div>
               <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><MapPin className="w-4 h-4 text-indigo-400" />Locations</h3><TagInput value={locations} onChange={setLocations} noun="location" example="Tel Aviv" /></div>
             </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
-              <button onClick={next} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Next</button>
-            </div>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div className={card}>
-            <h2 className="text-lg font-semibold mb-1">When should we look?</h2>
-            <p className="text-sm text-gray-400 mb-4">Job Hunter runs on its own and has results waiting for you.</p>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {[["daily", "Every day"], ["weekly", "Once a week"]].map(([id, label]) => (
-                <button key={id} onClick={() => setFreq(id)}
-                  className={`py-3 rounded-xl border text-sm font-medium ${freq === id ? "bg-indigo-600 border-indigo-500" : "bg-gray-900/40 border-gray-700 text-gray-400 hover:bg-gray-700/50"}`}>{label}</button>
-              ))}
-            </div>
-            {freq === "weekly" && (
-              <div className="mb-3">
-                <p className="text-sm font-medium mb-2">Which day?</p>
-                <div className="grid grid-cols-7 gap-1.5">
-                  {DOW.map((d, i) => (
-                    <button key={d} onClick={() => setSearchDow(i)}
-                      className={`py-2.5 rounded-lg border text-xs font-medium ${searchDow === i ? "bg-indigo-600 border-indigo-500" : "bg-gray-900/40 border-gray-700 text-gray-400 hover:bg-gray-700/50"}`}>{d}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <Field label="Search at" sub="Your local time"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field>
-            <div className="flex gap-2 mt-5">
-              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
-              <button onClick={next} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Next</button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className={card}>
-            <h2 className="text-lg font-semibold mb-1">Stay notified</h2>
-            <p className="text-sm text-gray-400 mb-4">Optional. Without it you'll just find the results waiting next time you open the app.</p>
-            {perm !== "unsupported" && (
-              <button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-900/40 border border-gray-700 rounded-xl font-medium disabled:opacity-60 mb-2">
-                {perm === "granted" ? "✓ Push notifications on" : "Enable push notifications"}
+            <p className="text-xs text-gray-400 mt-5">I search every day and bring you up to 7 picks a day. You can change when in Settings.</p>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setStep(0)} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
+              <button onClick={() => finish(false)} disabled={finishing || titles.length === 0}
+                className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
+                {finishing ? <Loader2 className="w-5 h-5 animate-spin" /> : null}{finishing ? "Saving…" : "Start my search"}
               </button>
-            )}
-            {pushMsg && <p className="text-xs text-gray-400 mb-3">{pushMsg}</p>}
-            <NotificationChannels me={me} />
-            <div className="flex gap-2 mt-5">
-              <button onClick={back} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
-              <button onClick={next} className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold">Next</button>
             </div>
-          </div>
-        )}
-
-        {step === 5 && (
-          <div className={`${card} text-center`}>
-            <div className="w-16 h-16 rounded-2xl bg-green-500/15 border border-green-600/40 flex items-center justify-center mx-auto mb-4"><CheckCircle className="w-8 h-8 text-green-400" /></div>
-            <h2 className="text-lg font-semibold mb-1">You're all set</h2>
-            <p className="text-sm text-gray-400 mb-5">
-              {titles.length
-                ? `We'll look for ${titles.slice(0, 2).join(" and ")}${titles.length > 2 ? ` and ${titles.length - 2} more` : ""}${locations.length ? ` in ${locations.slice(0, 2).join(", ")}` : ""}.`
-                : "You can add what you're looking for any time in Settings."}
-            </p>
-            <button onClick={() => finish(false)} disabled={finishing} className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
-              {finishing ? <Loader2 className="w-5 h-5 animate-spin" /> : null}{finishing ? "Saving…" : "Start reviewing jobs"}
-            </button>
+            {titles.length === 0 && <p className="text-xs text-amber-300 mt-2">Add at least one job title so I know what to look for.</p>}
           </div>
         )}
       </div>
@@ -3729,16 +3646,27 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
   const [searchMsg, setSearchMsg] = useState("");
   // Daily picks (2026-11-12): today's cap reached -> "your next picks come in tomorrow".
   const picksDone = !!me?.daily_picks && me.daily_picks.today >= me.daily_picks.cap;
+  const [perm, setPerm] = useState(pushState());
+  const [pushMsg, setPushMsg] = useState("");
+  const waiting = empty && me?.first_search_running;
   const runSearch = async () => { setSearchMsg("Starting search…"); try { await api.runSearch(); setSearchMsg("Search started — new jobs will appear in a few minutes. Pull to refresh."); } catch (e: any) { setSearchMsg(e?.message || "Couldn't start search."); } };
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex items-center justify-center p-6">
       <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center max-w-md w-full">
-        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring" }} className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg shadow-indigo-500/20"><Briefcase className="w-10 h-10 text-white" /></motion.div>
-        {empty && me?.first_search_running ? (<>
+        {waiting
+          ? <img src={NOA_AVATAR} alt="Noa" width={80} height={80} className="w-20 h-20 rounded-full object-cover mx-auto mb-5 bg-gray-700" />
+          : <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring" }} className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg shadow-indigo-500/20"><Briefcase className="w-10 h-10 text-white" /></motion.div>}
+        {waiting ? (<>
           <h2 className="text-2xl font-bold text-white mb-2">Noa is finding your first matches</h2>
-          <p className="text-gray-400 mb-3">She's reading today's openings against your CV. This usually takes a few minutes.</p>
+          <p className="text-gray-400 mb-3">I'm reading today's openings against your CV. This usually takes a few minutes.</p>
           <Loader2 className="w-6 h-6 animate-spin text-indigo-300 mx-auto mb-3" aria-hidden="true" />
-          <p className="text-gray-400 mb-5">They'll appear here on their own. You can also close the app; we'll email you when they're ready.</p>
+          <p className="text-gray-400 mb-5">They'll appear here on their own. You can also close the app; I'll email you when they're ready.</p>
+          {perm !== "unsupported" && perm !== "granted" && (
+            <button onClick={async () => { const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "" : (r.reason || "Couldn't turn them on. You can do it later in Settings.")); }}
+              className="w-full mb-3 py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium flex items-center justify-center gap-2"><Bell className="w-4 h-4" />Ping me on this phone too</button>
+          )}
+          {perm === "granted" && <p className="text-xs text-green-400 mb-3">I'll ping you on this phone too.</p>}
+          {pushMsg && <p className="text-xs text-gray-400 mb-3">{pushMsg}</p>}
         </>) : (<>
           <h2 className="text-2xl font-bold text-white mb-2">{empty ? (picksDone ? "That's today's picks" : "No new jobs right now") : "All done!"}</h2>
           <p className="text-gray-400 mb-5">{picksDone
