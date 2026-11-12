@@ -333,6 +333,8 @@ export const api = {
   adminRescore: () => request<{ rescored?: number; message?: string }>("/api/admin/rescore", "POST", {}),
   adminDedup: () => request<{ removed: number }>("/api/admin/dedup"),
   adminUsers: () => request<any[]>("/api/admin/users"),
+  adminTestAccount: () => request<{ exists: boolean; email: string; created?: string; onboarding_complete?: boolean; jobs?: number }>("/api/admin/test-account"),
+  adminResetTestAccount: () => request<{ success: boolean; email: string; password: string }>("/api/admin/test-account/reset", "POST", {}),
   adminFunnel: (days = 30) => request<{ days: number; steps: { step: string; users: number }[] }>(`/api/admin/funnel?days=${days}`),
   adminSetPlan: (id: number, plan: string, days: number | null, after = "free") =>
     request<{ success: boolean; plan: string; plan_until: string | null; locked: number }>(

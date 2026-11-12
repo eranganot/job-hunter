@@ -873,6 +873,11 @@ _notify_admin_new_user_impl = notify_admin_new_user
 
 @auth.on_user_created
 def _alert_admin_on_signup(user_id, email, name, provider):
+    # The resettable test account is not a signup: the owner asked to hear
+    # about every REAL user (2026-11-12), and each reset creates it again.
+    import testaccount
+    if testaccount.is_test_address(email):
+        return
     # Looked up at call time, so a test (or a later reassignment) can replace it.
     globals()["notify_admin_new_user"](new_user_email=email, new_user_name=name, provider=provider)
 
@@ -4668,7 +4673,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if path == "/admin/test-account":
+        if path == "/api/admin/test-account":
             user = self.require_auth()
             if not user:
                 return
@@ -4681,7 +4686,8 @@ class Handler(BaseHTTPRequestHandler):
                 _st = testaccount.status(_c)
             finally:
                 _c.close()
-            self.send_html(testaccount.page_html(_st))
+            _st["email"] = testaccount.TEST_EMAIL
+            self.send_json(_st)
             return
 
         if path == "/api/admin/funnel":
@@ -4702,7 +4708,8 @@ class Handler(BaseHTTPRequestHandler):
         # notification sent before 2026-09-21 point at them. The browser carries a
         # #new / #applied fragment across the redirect, and /app reads it.
         _legacy = {"/dashboard": "/app", "/onboarding": ONBOARDING_ENTRY,
-                   "/settings": "/app", "/admin": "/app?view=dashboard"}
+                   "/settings": "/app", "/admin": "/app?view=dashboard",
+                   "/admin/test-account": "/app?view=dashboard"}
         if path.rstrip("/") in _legacy:
             user = self.require_auth()
             if not user:
@@ -5784,7 +5791,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Register ──
-        if path == "/admin/test-account/reset":
+        if path == "/api/admin/test-account/reset":
             user = self.require_auth()
             if not user:
                 return
@@ -5795,7 +5802,7 @@ class Handler(BaseHTTPRequestHandler):
             _fresh = testaccount.reset(database.get_db)
             print("[test-account] reset by admin %s: user id %s, removed %s"
                   % (user.get("id"), _fresh["id"], sum(_fresh["removed"].values())))
-            self.send_html(testaccount.page_html({}, fresh=_fresh))
+            self.send_json({"success": True, "email": _fresh["email"], "password": _fresh["password"]})
             return
 
         if path == "/register":
