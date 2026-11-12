@@ -423,6 +423,11 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", **_kwa
     """
     if not RESEND_API_KEY:
         raise RuntimeError("RESEND_API_KEY not configured")
+    # The resettable test account (testaccount.py) lives on the reserved .test
+    # domain (@job-hunter.test): mail to it can only bounce, and bounces cost the
+    # sending domain.
+    if str(to_addr or "").strip().lower().endswith("@job-hunter.test"):
+        raise RuntimeError("not sent: %s is a test address" % to_addr)
     if not to_addr:
         raise RuntimeError("no recipient address")
     try:
@@ -4663,6 +4668,22 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if path == "/admin/test-account":
+            user = self.require_auth()
+            if not user:
+                return
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import testaccount
+            _c = database.get_db()
+            try:
+                _st = testaccount.status(_c)
+            finally:
+                _c.close()
+            self.send_html(testaccount.page_html(_st))
+            return
+
         if path == "/api/admin/funnel":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
@@ -5763,6 +5784,20 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Register ──
+        if path == "/admin/test-account/reset":
+            user = self.require_auth()
+            if not user:
+                return
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import testaccount
+            _fresh = testaccount.reset(database.get_db)
+            print("[test-account] reset by admin %s: user id %s, removed %s"
+                  % (user.get("id"), _fresh["id"], sum(_fresh["removed"].values())))
+            self.send_html(testaccount.page_html({}, fresh=_fresh))
+            return
+
         if path == "/register":
             # Nothing stopped a script creating accounts in a loop. Attempt-based,
             # because here the call IS the abuse - there is no "failure" to count.
