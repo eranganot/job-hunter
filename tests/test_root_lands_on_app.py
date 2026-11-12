@@ -56,7 +56,9 @@ def test_signed_out_gets_the_landing_page(stack, monkeypatch):
     page = body.decode()
     assert 'href="/register"' in page and 'href="/login"' in page
     assert 'property="og:title"' in page and 'name="description"' in page
-    assert "<script" not in page, "the landing page runs no script"
+    # one small inline script (sign-up links keep the campaign tags); with
+    # analytics off, nothing is loaded from anywhere else
+    assert page.count("<script") == 1 and "<script src" not in page and "posthog" not in page
     # send_html strips U+0080-U+00FF (a legacy mojibake filter), so the page
     # spells those characters as entities - a raw one would vanish silently.
     import landing
@@ -110,7 +112,7 @@ def test_the_page_is_dark_uses_the_app_icon_and_app_screenshots():
     assert "queue.webp" not in page
     for name in ():
         assert "/landing-assets/" + name in page
-    assert "<script" not in page
+    assert page.count("<script") == 1 and "<script src" not in page
     assert "fonts.googleapis" not in page and '<link rel="stylesheet"' not in page
 
 
@@ -132,19 +134,24 @@ def test_the_page_has_no_characters_send_html_would_strip():
     assert not re.search(r"[\x80-\xff]", page)
 
 
-def test_one_noa_for_everyone_until_consent_and_a_review_link_shows_another(stack):
-    """No cookie for the A/B test before the consent banner exists: the page
-    shows Noa A and sets nothing; ?noa= shows another one for reviewing."""
+def test_each_view_picks_a_noa_without_a_cookie_and_a_review_link_shows_one(stack):
+    """2026-11-12: the A/B test needs no cookie - a fresh pick per view, the
+    variant carried on the sign-up links; ?noa= shows one for reviewing."""
+    import re
     def get(path):
         req = urllib.request.Request("http://127.0.0.1:%d%s" % (stack["port"], path))
         with urllib.request.urlopen(req) as r:
             return r.read().decode(), r.headers.get("Set-Cookie")
-    body, set_cookie = get("/")
-    assert set_cookie is None and "/landing-assets/noa-a.webp" in body
-    for v in ("d", "e"):
-        body, set_cookie = get("/?noa=" + v)
-        assert set_cookie is None and "/landing-assets/noa-%s.webp" % v in body
-    assert "/landing-assets/noa-a.webp" in get("/?noa=../x")[0]
+    seen = set()
+    for _ in range(40):
+        body, set_cookie = get("/")
+        assert set_cookie is None
+        seen.add(re.search(r'data-noa="(\w)"', body).group(1))
+    assert seen == {"a", "d", "e"}
+    for v in ("a", "d", "e"):
+        body, _c = get("/?noa=" + v)
+        assert "/landing-assets/noa-%s.webp" % v in body and 'data-noa="%s"' % v in body
+    assert re.search(r'data-noa="[ade]"', get("/?noa=../x")[0])
 
 
 def test_landing_assets_are_served_with_their_type_and_nothing_else_is(stack):
