@@ -32,6 +32,8 @@ import functools
 import auth
 import crypto
 import db as database
+import textclean
+import voice
 import dbdriver
 import entitlements
 import accountdata
@@ -880,6 +882,11 @@ _notify_admin_new_user_impl = notify_admin_new_user
 
 @auth.on_user_created
 def _alert_admin_on_signup(user_id, email, name, provider):
+    # The resettable test account is not a signup: the owner asked to hear
+    # about every REAL user (2026-11-12), and each reset creates it again.
+    import testaccount
+    if testaccount.is_test_address(email):
+        return
     # Looked up at call time, so a test (or a later reassignment) can replace it.
     globals()["notify_admin_new_user"](new_user_email=email, new_user_name=name, provider=provider)
 
@@ -1797,7 +1804,8 @@ def run_job_search(user_id: int):
                             t = j.get("title", "")
                             loc = j.get("location", {}).get("name", "") if isinstance(j.get("location"), dict) else ""
                             jurl = f"https://boards.greenhouse.io/{slug}/jobs/{j.get('id', '')}"
-                            _gh_content = re.sub(r'<[^>]+>', ' ', j.get("content", "")).strip()[:5000] if j.get("content") else ""
+                            # Escaped HTML: the old tag regex ran before decoding and matched nothing (2026-11-12).
+                            _gh_content = textclean.html_to_text(j.get("content", ""))[:5000] if j.get("content") else ""
                             with _lk:
                                 all_raw.append({"job_title": t, "company": company_name,
                                                 "location": loc, "url": jurl,
@@ -2232,7 +2240,7 @@ def run_job_search(user_id: int):
                             "  product management or any other specific field.\n\n"
                             "Total score = Title + Seniority + Location + CV-Requirements. "
                             "Include jobs scoring >= 30. "
-                            "For fit_reason: one sentence citing which dimensions scored highest and why. "
+                            "For fit_reason: one sentence on why this job fits the job seeker. " + voice.FIT_REASON_RULE + " "
                             "Return ONLY a valid JSON array with fields: "
                             "job_title, company, location, url, publish_date (null if unknown), "
                             "full_description (copy from input), description (2-3 sentences), "
@@ -2506,7 +2514,8 @@ def run_job_search(user_id: int):
                                         "EXCLUDE only clearly wrong roles: pure engineering IC, quota-sales, finance/legal/HR. Product-adjacent leadership is OK.\n\n"
                                         "Include jobs scoring >= 25 (permissive — this is a last-resort fallback). "
                                         "Return ONLY a JSON array. Each item: "
-                                        "{id (from input), score (0-100), reason (one sentence why)}\n\n"
+                                        "{id (from input), score (0-100), reason (one sentence why)}\n"
+                                        + voice.FIT_REASON_RULE.replace("fit_reason", "reason") + "\n\n"
                                         f"Jobs:\n{_batch_json_d}"
                                     )
 
@@ -2751,6 +2760,7 @@ def run_job_search(user_id: int):
                                     {"company": j.get("company",""), "title": j.get("job_title","")},
                                     _fb_signals, _fb_prof
                                 )
+                                j = textclean.clean_job(j)   # plain text, whatever HTML the source sent
                                 conn.execute(
                                     "INSERT OR IGNORE INTO jobs "
                                     "(user_id,title,company,location,url,description,why_relevant,source,"
@@ -3010,6 +3020,9 @@ def _submit_application_guarded(job_url, job_title, company, applicant, cv_path,
         cv_path = _cv_for_apply(user_id, job_id, cv_path)
         run = _new_apply_run(user_id, job_id, job_title, company)
         applicant = {**(applicant or {}), "_await_code": _await_code_for(run, notify=True)}
+    # The engine stops itself 15 s before this deadline, unsent (2026-11-12):
+    # it used to run on after the deadline and could still press Submit.
+    applicant = {**(applicant or {}), "_deadline_s": max(30, _APPLY_DEADLINE_S - 15)}
     try:
         with _APPLY_SEM:
             fut = _APPLY_POOL.submit(
@@ -4696,7 +4709,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        if path == "/admin/test-account":
+        if path == "/api/admin/test-account":
             user = self.require_auth()
             if not user:
                 return
@@ -4709,7 +4722,8 @@ class Handler(BaseHTTPRequestHandler):
                 _st = testaccount.status(_c)
             finally:
                 _c.close()
-            self.send_html(testaccount.page_html(_st))
+            _st["email"] = testaccount.TEST_EMAIL
+            self.send_json(_st)
             return
 
         if path == "/api/admin/funnel":
@@ -4730,7 +4744,8 @@ class Handler(BaseHTTPRequestHandler):
         # notification sent before 2026-09-21 point at them. The browser carries a
         # #new / #applied fragment across the redirect, and /app reads it.
         _legacy = {"/dashboard": "/app", "/onboarding": ONBOARDING_ENTRY,
-                   "/settings": "/app", "/admin": "/app?view=dashboard"}
+                   "/settings": "/app", "/admin": "/app?view=dashboard",
+                   "/admin/test-account": "/app?view=dashboard"}
         if path.rstrip("/") in _legacy:
             user = self.require_auth()
             if not user:
@@ -5812,7 +5827,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Register ──
-        if path == "/admin/test-account/reset":
+        if path == "/api/admin/test-account/reset":
             user = self.require_auth()
             if not user:
                 return
@@ -5823,7 +5838,7 @@ class Handler(BaseHTTPRequestHandler):
             _fresh = testaccount.reset(database.get_db)
             print("[test-account] reset by admin %s: user id %s, removed %s"
                   % (user.get("id"), _fresh["id"], sum(_fresh["removed"].values())))
-            self.send_html(testaccount.page_html({}, fresh=_fresh))
+            self.send_json({"success": True, "email": _fresh["email"], "password": _fresh["password"]})
             return
 
         if path == "/register":
@@ -7453,7 +7468,8 @@ class Handler(BaseHTTPRequestHandler):
                         f"Jobs:\n{jobs_json_rs}\n\n"
                         "Score each job 0-100: Title match (0-30) + Seniority (0-20) + Location (0-20) + CV-Requirements match (0-30). "
                         "Exclude non-PM roles (engineering, sales, design, finance, HR). "
-                        "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown."
+                        "Return JSON array: job_title, company, url, candidate_score (0-100), fit_reason (1 sentence). No markdown.\n"
+                        + voice.FIT_REASON_RULE
                     )
                     try:
                         _parts_rs = []
@@ -7480,7 +7496,7 @@ class Handler(BaseHTTPRequestHandler):
                                         conn2.execute(
                                             "UPDATE jobs SET candidate_score=?, match_score=?, why_relevant=? WHERE id=?",
                                             (scored_j['candidate_score'], scored_j['candidate_score'],
-                                             scored_j.get('fit_reason', ''), orig['_db_id'])
+                                             voice.second_person(scored_j.get('fit_reason', '')), orig['_db_id'])
                                         )
                                         rescored += 1
                                     else:
@@ -7510,6 +7526,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 inserted = 0
                 for j in jobs:
+                    j = textclean.clean_job(j)
                     try:
                         conn.execute(
                             "INSERT OR IGNORE INTO jobs "
@@ -7545,6 +7562,7 @@ class Handler(BaseHTTPRequestHandler):
                 inserted = 0
                 for j in jobs:
                     uid = j.get("user_id", 1)
+                    j = textclean.clean_job(j)
                     try:
                         # The INSERT's own rowcount (0 when the row already
                         # existed). It used `SELECT changes()`, a SQLite-only

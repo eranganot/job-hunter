@@ -2540,6 +2540,47 @@ function FunnelCard({ steps }: { steps: { step: string; users: number }[] }) {
   );
 }
 
+/* The resettable test account (testaccount.py): one fixed account the admin can
+   put back to brand-new, to walk through onboarding and the first search as a
+   new user would. The password exists only in the reply to a reset. */
+function TestAccountCard() {
+  const [st, setSt] = useState<any>(null);
+  const [fresh, setFresh] = useState<{ email: string; password: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = () => api.adminTestAccount().then(setSt).catch(() => setSt(null));
+  useEffect(() => { load(); }, []);
+  const reset = async () => {
+    if (st?.exists && !window.confirm("Delete everything the test account holds and start it again as a new user?")) return;
+    setBusy(true); setErr("");
+    try { const r = await api.adminResetTestAccount(); setFresh({ email: r.email, password: r.password }); load(); }
+    catch (e: any) { setErr(e?.message || "Reset failed"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><RotateCcw className="w-5 h-5 text-indigo-400" />Test account</h3>
+      <p className="text-xs text-gray-400 mb-3">One account for walking through the app as a new user. Resetting it deletes everything it holds and creates it again, so onboarding starts from the first step and the first search starts when it ends. It gets no email and is not counted as a signup.</p>
+      {fresh ? (
+        <div className="bg-gray-900 border border-emerald-700/60 rounded-xl p-3 text-sm space-y-1.5 mb-3">
+          <p className="text-emerald-300 font-medium">Ready - the account is brand-new.</p>
+          <p className="text-gray-300">Email: <span className="font-mono text-white select-all">{fresh.email}</span></p>
+          <p className="text-gray-300">Password: <span className="font-mono text-white select-all">{fresh.password}</span></p>
+          <p className="text-xs text-gray-400">Shown once. Sign in with it in a private window, so you stay signed in as yourself here.</p>
+        </div>
+      ) : st?.exists ? (
+        <p className="text-sm text-gray-300 mb-3"><span className="font-mono text-white">{st.email}</span> - onboarding {st.onboarding_complete ? "finished" : "not finished"}, {st.jobs ?? 0} jobs. Reset to get a new password.</p>
+      ) : (
+        <p className="text-sm text-gray-300 mb-3">Not created yet. Reset creates it.</p>
+      )}
+      {err && <p className="text-sm text-red-400 mb-2">{err}</p>}
+      <button onClick={reset} disabled={busy} className="px-4 py-2.5 bg-gray-800 border border-gray-700 hover:bg-gray-700 disabled:opacity-50 text-gray-100 rounded-xl text-sm font-medium">
+        {busy ? "Resetting..." : st?.exists ? "Reset to a brand-new user" : "Create the test account"}
+      </button>
+    </div>
+  );
+}
+
 function AdminPanel({ me }: any) {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
@@ -2624,6 +2665,7 @@ function AdminPanel({ me }: any) {
             </div>
           </div>
           {funnel && <FunnelCard steps={funnel} />}
+          <TestAccountCard />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
             <div className="space-y-2">
