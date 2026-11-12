@@ -25,7 +25,7 @@ def env(tmp_path):
 def test_push_fires_with_no_channels(env, monkeypatch):
     app, uid = env
     calls = []
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: calls.append((u, m, suf)) or _PUSHED)
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None, title="Job Hunter": calls.append((u, m, suf)) or _PUSHED)
     app.deliver_notification(uid, "Search Complete - 3 new jobs", "/dashboard#new")
     assert calls, "push must fire even with no channels configured"
     assert calls[0][0] == uid and "Search Complete" in calls[0][1] and calls[0][2] == "/dashboard#new"
@@ -41,7 +41,7 @@ def test_push_fires_alongside_email(env, monkeypatch):
     conn.commit()
     conn.close()
     pushes, emails = [], []
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: pushes.append(u) or _PUSHED)
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None, title="Job Hunter": pushes.append(u) or _PUSHED)
     monkeypatch.setattr(app, "send_email", lambda **k: emails.append(k))
     app.deliver_notification(uid, "Applied to 2 jobs", "/dashboard#applied")
     assert pushes == [uid]      # push fired
@@ -63,7 +63,7 @@ def test_every_selected_channel_fires_not_just_the_first(env, monkeypatch):
     conn.commit()
     conn.close()
     pushes, emails, tgs = [], [], []
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: pushes.append(u) or _PUSHED)
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None, title="Job Hunter": pushes.append(u) or _PUSHED)
     monkeypatch.setattr(app, "send_email", lambda **k: emails.append(k))
     monkeypatch.setattr(app, "send_telegram", lambda t, c, m: tgs.append((t, c)))
     app.deliver_notification(uid, "3 new jobs", "/app")
@@ -83,7 +83,7 @@ def test_whitespace_around_a_channel_does_not_silently_drop_it(env, monkeypatch)
     )
     conn.commit()
     conn.close()
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: _PUSHED)
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None, title="Job Hunter": _PUSHED)
     emails, tgs = [], []
     monkeypatch.setattr(app, "send_email", lambda **k: emails.append(k))
     monkeypatch.setattr(app, "send_telegram", lambda t, c, m: tgs.append(t))
@@ -122,7 +122,7 @@ def test_each_channel_reports_what_really_happened(env, monkeypatch):
                  "email_address='x@e.com', telegram_token='t', telegram_chat_id='c' WHERE user_id=?", (uid,))
     conn.commit()
     conn.close()
-    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None: {
+    monkeypatch.setattr(app, "send_web_push_to_user", lambda u, m, suf="", url=None, title="Job Hunter": {
         "configured": True, "devices": 1, "sent": 0, "failed": 1, "errors": ["410 Gone"]})
 
     def refused(*a):
