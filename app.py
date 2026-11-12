@@ -100,12 +100,12 @@ ONBOARDING_ENTRY = "/app"
 FUNNEL_STEPS = ("signup", "verified", "cv", "first_search", "first_approve", "paywall")
 
 
-def _funnel(user_id, step: str) -> None:
+def _funnel(user_id, step: str) -> bool:
     """Record the first time a user reaches a funnel step (Step 10: signup ->
     verified -> CV -> first search -> first approve -> paywall hit). Only the
     first occurrence counts; never fails the request that triggered it."""
     if not user_id or step not in FUNNEL_STEPS:
-        return
+        return False
     try:
         c = database.get_db()
         try:
@@ -118,9 +118,10 @@ def _funnel(user_id, step: str) -> None:
             c.close()
     except Exception as exc:
         print("[funnel] %s for user %s not recorded: %s" % (step, user_id, exc))
-        return
+        return False
     if first_time and step in analytics.STEP_EVENTS:
         _track(user_id, analytics.STEP_EVENTS[step])
+    return first_time
 
 
 _ANALYTICS_SKIP: dict = {}
@@ -2932,7 +2933,8 @@ def run_job_search(user_id: int):
                                         finally:
                                             conn.close()
 
-                                _funnel(user_id, "first_search")
+                                if _funnel(user_id, "first_search"):
+                                    _first_matches_email(user_id, inserted)
                                 database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)"
                                                       + (f"; {locked_n} more need a higher plan" if locked_n else ""))
 
@@ -3944,6 +3946,41 @@ def _send_verification(user_id: int, email: str, name: str = "") -> None:
                "Hi%s,\n\nConfirm this is your email address so Job Hunter can send applications and "
                "notifications with it:\n\n%s\n\nThe link works once and expires in 2 days. If you didn't "
                "create a Job Hunter account, ignore this email.\n\nJob Hunter" % ((" " + name.split()[0]) if name else "", link))
+
+
+def _first_matches_email(user_id: int, found: int) -> None:
+    """The email a new user gets when their FIRST search ends (2026-11-12):
+    the first matches are the activation moment, and the search takes minutes,
+    so most people have left the page by then. In Noa's voice. Never raises."""
+    try:
+        c = database.get_db()
+        try:
+            r = c.execute("SELECT name, email FROM users WHERE id=?", (user_id,)).fetchone()
+        finally:
+            c.close()
+        if not r or not r["email"]:
+            return
+        import testaccount
+        if testaccount.is_test_address(r["email"]):
+            return
+        first = (" " + (r["name"] or "").split()[0]) if (r["name"] or "").strip() else ""
+        link = MOBILE_URL.rstrip("/") + "/app"
+        if found > 0:
+            subject = "Noa found your first %d match%s" % (found, "" if found == 1 else "es")
+            body = ("Hi%s,\n\nI read today's openings against your CV and kept %d that fit you. "
+                    "Each one comes with my reasons.\n\nHave a look and swipe right on the ones you like. Every "
+                    "pass teaches me what you want, so tomorrow's list gets closer to you:\n\n%s\n\nNoa\n"
+                    "Your personal AI headhunter agent at Job Hunter" % (first, found, link))
+        else:
+            subject = "Noa's first search for you came back empty"
+            body = ("Hi%s,\n\nI searched today's openings and none fit what you asked for yet. That usually "
+                    "means the job titles or locations are narrower than the market.\n\nAdd a title or two (for "
+                    "example the same role at one level up or down) and I'll search again tomorrow, or start a "
+                    "search now:\n\n%s\n\nNoa\nYour personal AI headhunter agent at Job Hunter" % (first, link))
+        send_email(r["email"], subject, body)
+        _track(user_id, "first_matches_email_sent", {"found": int(found)})
+    except Exception as exc:
+        print("[first-matches] email for user %s not sent: %s" % (user_id, exc))
 
 
 def _send_reset(user_id: int, email: str) -> None:
@@ -5029,6 +5066,21 @@ class Handler(BaseHTTPRequestHandler):
                 if not testaccount.is_test_address(user.get("email")):
                     analytics.app_opened(user["id"])
             out = dict(user)
+            # Setup ended and the first search has not finished yet: the app
+            # shows "Noa is finding your first matches" instead of empty lists.
+            try:
+                _fc = database.get_db()
+                try:
+                    _running = _fc.execute("SELECT 1 FROM job_runs WHERE user_id=? AND kind='search' "
+                                           "AND status IN ('queued','running') LIMIT 1", (user["id"],)).fetchone()
+                    _done = _fc.execute("SELECT 1 FROM funnel_events WHERE user_id=? AND step='first_search'",
+                                        (user["id"],)).fetchone()
+                finally:
+                    _fc.close()
+                out["first_search_running"] = bool(_running) and not _done
+            except Exception as _fe:
+                print("[me] first-search state unknown for user %s: %s" % (user["id"], _fe))
+                out["first_search_running"] = False
             try:
                 out["plan_info"] = entitlements.plan_info(user)
                 _pc = database.get_db()
