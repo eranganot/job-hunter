@@ -2801,7 +2801,13 @@ def run_job_search(user_id: int):
                         # Same bar as before for unknown (skip): only 'alive' is inserted.
                         _url_ok[_u] = 1 if _v == "alive" else 0
                         if _v != "alive":
-                            print(f"[run-search] skipped at insert ({_v}): {_why} - {_u[:120]}")
+                            # INFO, said explicitly: a dead or unreachable link is the check
+                            # doing its job. Through print() the level was guessed from the
+                            # words, and a site's own text ("ssl/tls alert handshake failure"
+                            # from careers.genworth.com, 2026-11-13) graded it ERROR and paged
+                            # the owner through Sentry for a correct skip.
+                            _log.get("run-search").info("[run-search] skipped at insert (%s): %s - %s",
+                                                        _v, _why, _u[:120])
                         # Gemini grounding links 404 within days; keep where they LAND,
                         # or the next sweep retires a live job for its expired redirect.
                         if _v == "alive" and _fin and "grounding-api-redirect" in _u:
