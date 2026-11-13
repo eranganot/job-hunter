@@ -78,7 +78,7 @@ def test_every_plan_gets_seven_a_day_and_admin_is_not_capped():
     assert plans.MATCHES_PER_DAY == 7
     for name in ("free", "premium", "beta", "expert"):
         assert plans.row(name)["matches_per_day"] == 7, name
-    assert plans.row("admin")["matches_per_day"] is None
+    assert plans.row("admin")["matches_per_day"] == 7          # the owner, 2026-11-13
 
 
 def test_a_big_first_search_is_a_week_of_picks_best_first(stack):
@@ -124,10 +124,11 @@ def test_missed_days_do_not_pile_up(stack):
     assert len(_release(stack, uid, now=in_a_week)) == 7
 
 
-def test_the_admin_sees_every_match_at_once(stack, users):
+def test_the_admin_gets_daily_picks_like_everyone(stack, users):
+    # The owner, 2026-11-13: "set my cap to 7 as well". Was: admin saw every match at once.
     uid = _uid(stack, "admin@example.test")
     _search(stack, uid, list(range(20)))
-    assert "held" not in _status(stack, uid).values()
+    assert list(_status(stack, uid).values()).count("held") == 20
 
 
 def test_held_jobs_do_not_exist_for_the_user_until_released(stack):
