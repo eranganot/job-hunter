@@ -32,7 +32,7 @@ Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
   new matches reach a user per Israel day, best first. The rest wait, unseen
   and unmentioned (no blur), and come in on the following days - so a first
   search of 30 matches is a week of picks, not one day and then nothing.
-  Admin is not capped.
+  Admin too (The owner, 2026-11-13: "set my cap to 7 as well") - one rule for everyone.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ PROMOTION_PLAN = "premium"      # what the 11-05 new-user promotion granted
 PROMOTION_DAYS = 30
 NOTICE_DAYS = (7, 1)            # web push this many days before a promotion ends
 SIX_MONTH_DISCOUNT = 0.20       # Step 11 (Paddle); not used until billing ships
-MATCHES_PER_DAY = 7             # 2026-11-12: daily picks, every plan; admin unlimited
+MATCHES_PER_DAY = 7             # daily picks: every plan (2026-11-12) and admin (2026-11-13)
 
 # meter -> the period its count resets on
 METERS = {
@@ -131,7 +131,7 @@ ADMIN = {
     "search_cadence": "daily",
     "on_demand_search": UNLIMITED,
     "matches_per_search": UNLIMITED,
-    "matches_per_day": UNLIMITED,
+    "matches_per_day": MATCHES_PER_DAY,  # same daily picks as everyone (owner, 2026-11-13)
     "auto_apply": True,                 # "when on" - the engine has its own switch
     "cover_letter": UNLIMITED,
     "cv_review": UNLIMITED,
