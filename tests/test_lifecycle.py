@@ -38,8 +38,8 @@ def test_every_variant_is_personal_and_signed():
     for p in lifecycle.previews("Maya", "https://job-hunter.work/app"):
         assert p["body"].startswith("Hi Maya,"), p["subject"]
         assert "Stop them here" in p["body"]
-        assert ("Noa\nYour personal AI headhunter agent" in p["body"]) == (p["sender"] == "noa")
-        assert ("Eran\nFounder" in p["body"]) == (p["sender"] == "eran")
+        assert ("Your personal AI headhunter agent at Job Hunter,\nNoa" in p["body"]) == (p["sender"] == "noa")
+        assert ("Eran Ganot\nThe human behind Noa" in p["body"]) == (p["sender"] == "eran")
         assert "beta" not in (p["subject"] + p["body"]).lower()
     assert [p["sender"] for p in lifecycle.previews("", "x") if p["step"] == "day3"] == ["eran", "eran"]
     assert lifecycle.previews("", "x")[0]["body"].startswith("Hi,\n")          # no name, no "Hi ,"

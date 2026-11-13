@@ -4081,20 +4081,30 @@ def _first_matches_email(user_id: int, found: int) -> None:
         import testaccount
         if testaccount.is_test_address(r["email"]):
             return
+        import lifecycle
         first = (" " + (r["name"] or "").split()[0]) if (r["name"] or "").strip() else ""
         link = MOBILE_URL.rstrip("/") + "/app"
         if found > 0:
+            # The owner, 2026-11-13: this is the welcome for everyone who finished
+            # setup, so it names their own three best picks.
+            c = database.get_db()
+            try:
+                top = lifecycle.user_state(c, user_id)["top"]
+            finally:
+                c.close()
+            best = "\n".join("  - %s at %s" % (t, co) if co else "  - %s" % t for t, co in top)
             subject = "Noa found your first %d match%s" % (found, "" if found == 1 else "es")
-            body = ("Hi%s,\n\nI read today's openings against your CV and kept %d that fit you. "
-                    "Each one comes with my reasons.\n\nHave a look and swipe right on the ones you like. Every "
-                    "pass teaches me what you want, so tomorrow's list gets closer to you:\n\n%s\n\nNoa\n"
-                    "Your personal AI headhunter agent at Job Hunter" % (first, found, link))
+            body = ("Hi%s,\n\nI read today's openings against your CV and kept %d that fit you.%s\n\n"
+                    "Each one comes with my reasons. Swipe right on the ones you like, left on the rest. Every "
+                    "swipe teaches me what you want, and I'll bring you up to %d new picks every day.\n\n%s\n\n%s"
+                    % (first, found, (" The best of them:\n\n" + best) if best else "",
+                       __import__("plans").MATCHES_PER_DAY, link, lifecycle.NOA_SIG))
         else:
             subject = "Noa's first search for you came back empty"
             body = ("Hi%s,\n\nI searched today's openings and none fit what you asked for yet. That usually "
                     "means the job titles or locations are narrower than the market.\n\nAdd a title or two (for "
                     "example the same role at one level up or down) and I'll search again tomorrow, or start a "
-                    "search now:\n\n%s\n\nNoa\nYour personal AI headhunter agent at Job Hunter" % (first, link))
+                    "search now:\n\n%s\n\n%s" % (first, link, lifecycle.NOA_SIG))
         send_email(r["email"], subject, body, as_noa=True)
         _track(user_id, "first_matches_email_sent", {"found": int(found)})
     except Exception as exc:

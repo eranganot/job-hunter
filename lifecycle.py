@@ -29,8 +29,9 @@ SEND_AT = (11, 30)                     # Israel time
 WELCOME_AFTER = timedelta(hours=1)     # only if setup is still unfinished by then
 WELCOME_UNTIL = timedelta(hours=24)
 
-NOA_SIG = "Noa\nYour personal AI headhunter agent at Job Hunter"
-ERAN_SIG = "Eran\nFounder, Job Hunter"
+# The owner's sign-offs (2026-11-13): Noa signs like a letter; Eran as "The human behind Noa".
+NOA_SIG = "Your personal AI headhunter agent at Job Hunter,\nNoa"
+ERAN_SIG = "Eran Ganot\nThe human behind Noa"
 
 
 def enabled() -> bool:
