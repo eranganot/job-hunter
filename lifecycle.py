@@ -29,8 +29,9 @@ SEND_AT = (11, 30)                     # Israel time
 WELCOME_AFTER = timedelta(hours=1)     # only if setup is still unfinished by then
 WELCOME_UNTIL = timedelta(hours=24)
 
-NOA_SIG = "Noa\nYour personal AI headhunter agent at Job Hunter"
-ERAN_SIG = "Eran\nFounder, Job Hunter"
+# The owner's sign-offs (2026-11-13): Noa signs like a letter; Eran as "The human behind Noa".
+NOA_SIG = "Your personal AI headhunter agent at Job Hunter,\nNoa"
+ERAN_SIG = "Eran Ganot\nThe human behind Noa"
 
 
 def enabled() -> bool:
@@ -186,7 +187,7 @@ def compose(step: str, first: str, st: dict, link: str):
                     "bringing you hand-picked jobs every day:\n\n%s\n\nIf now isn't the time, no hard feelings. "
                     "I'll be here.\n\n%s" % (hi, link, NOA_SIG))
         if st["approved"] > 0:
-            done = "You approved %s" % _s(st["approved"], "job")
+            done = "you approved %s" % _s(st["approved"], "job")
             if st["applied"]:
                 done += " and applied to %s" % _s(st["applied"], "of them", "of them")
             return ("active", "noa", "Your first week with me",

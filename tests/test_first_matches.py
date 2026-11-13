@@ -59,7 +59,7 @@ def test_the_email_goes_once_in_noas_voice(stack, mails):
     assert app._funnel(uid, "first_search") is False                  # second time: no email path
     (to, subj, body), = [m for m in mails if "Noa" in m[1]]
     assert to == "fm-2@example.test" and subj == "Noa found your first 7 matches"
-    assert body.startswith("Hi Maya,") and "/app" in body and body.rstrip().endswith("Job Hunter")
+    assert body.startswith("Hi Maya,") and "/app" in body and body.rstrip().endswith("at Job Hunter,\nNoa")
 
 
 def test_an_empty_first_search_says_what_to_change(stack, mails):
@@ -121,3 +121,21 @@ def test_job_mail_comes_from_noa_only_once_her_address_is_set(stack, monkeypatch
     assert app._sender(False) == ("Job Hunter <support@job-hunter.work>", "")      # verification, password
     monkeypatch.setattr(app, "RESEND_FROM", "Job Hunter <%s>" % app.RESEND_SANDBOX_FROM)
     assert app._sender(True)[0].endswith("<%s>" % app.RESEND_SANDBOX_FROM)       # never on the sandbox
+
+
+def test_the_first_matches_email_names_the_three_best(stack, mails, monkeypatch):
+    """The owner, 2026-11-13: the first-matches email is the welcome for everyone
+    who finished setup, so it lists their own three best picks."""
+    app = stack["app"]
+    _c, uid = _new_user(stack, "fm-top@example.test")
+    db = stack["db"].get_db()
+    for t, co, sc in (("Data Analyst", "Orbitly", 90), ("BI Analyst", "Kesef Labs", 80),
+                      ("Data Scientist", "Tavor AI", 85), ("Junior Analyst", "Shuk.io", 40)):
+        db.execute("INSERT INTO jobs (user_id,title,company,url,status,match_score) VALUES (?,?,?,?, 'new', ?)",
+                   (uid, t, co, "https://x.test/" + t, sc))
+    db.commit(); db.close()
+    app._first_matches_email(uid, 4)
+    body = mails[-1][2]
+    assert "The best of them:" in body
+    assert body.index("Data Analyst at Orbitly") < body.index("Data Scientist at Tavor AI") < body.index("BI Analyst at Kesef Labs")
+    assert "Junior Analyst" not in body and "up to 7 new picks every day" in body
