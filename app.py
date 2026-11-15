@@ -820,14 +820,16 @@ def _is_admin_id(user_id) -> bool:
 
 
 def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None,
-                         subject: str = "", body: str = "", email: bool = True) -> dict:
+                         subject: str = "", body: str = "", email: bool = True, from_noa: bool = True) -> dict:
     """Deliver to every channel the user has; return {channel: "sent" | "FAILED: ..." | ...}.
     Each outcome is also logged (activity_log, type notification).
 
     `message` is the push text. `body`, when given, is what email / Telegram /
     WhatsApp carry instead (a complete message with its own link and signature),
     and `subject` is the email's subject. `email=False` skips the email channel -
-    for the first search, whose "first matches" email has already gone."""
+    for the first search, whose "first matches" email has already gone.
+    `from_noa=False` is for account and admin news: the push is titled "Job Hunter"
+    and carries the app icon instead of Noa's name and picture."""
     message = repair_mojibake(message)
     results = {}
     conn = database.get_db()
@@ -840,7 +842,8 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
     # Web push is the primary channel: it fires on EVERY notification, before
     # (and independent of) the email/Telegram/WhatsApp channels.
     try:
-        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url, title="Noa")   # job news is Noa's (2026-11-12)
+        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url,
+                                   title="Noa" if from_noa else "Job Hunter")   # job news is Noa's (2026-11-12)
         if pr["sent"]:
             results["push"] = "sent to %d device(s)" % pr["sent"] + (
                 ", %d failed" % pr["failed"] if pr["failed"] else "")
@@ -950,7 +953,9 @@ def send_web_push_to_user(user_id, message, url_suffix="", url=None, title="Job 
     if not rows:
         return out
     body = (message or "").strip().split("\n")[0][:160]
-    payload = json.dumps({"title": title, "body": body, "url": url or _push_link(url_suffix)})
+    # "from" picks the picture in the service worker (web/public/sw.js): Noa's for her pushes.
+    payload = json.dumps({"title": title, "body": body, "url": url or _push_link(url_suffix),
+                          "from": "noa" if title == "Noa" else "app"})
     for r in rows:
         try:
             sub = json.loads(r["subscription"])
@@ -1017,7 +1022,7 @@ def notify_admin_new_user(new_user_email: str, new_user_name: str, provider: str
     via = {"google": " with Google", "password": " with email and password"}.get(provider, "")
     message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter{via}."
     try:
-        res = deliver_notification(admin_id, message, url_suffix=home_url())
+        res = deliver_notification(admin_id, message, url_suffix=home_url(), from_noa=False)
         print(f"[admin-notify] new user {new_user_email}: {res}")
     except Exception as e:
         print(f"[admin-notify] ERROR delivery failed for new user {new_user_email}: {e}")
@@ -1141,7 +1146,7 @@ def _llm_breach_alert(message: str):
         print(f"[llm-alert] log failed: {e}")
     if admin_id:
         try:
-            deliver_notification(admin_id, message, url_suffix=home_url())
+            deliver_notification(admin_id, message, url_suffix=home_url(), from_noa=False)
         except Exception as e:
             print(f"[llm-alert] notify failed (non-fatal): {e}")
 
@@ -1218,7 +1223,7 @@ def check_notifications():
         message = data.get("message", "Job Hunter notification")
         user_id = data.get("user_id", 1)
         os.remove(notify_file)
-        deliver_notification(user_id, message)
+        deliver_notification(user_id, message, from_noa=False)
     except Exception as e:
         print(f"[notify] Error: {e}")
 
@@ -2844,11 +2849,9 @@ def run_job_search(user_id: int, by_user: bool = False):
                     all_jobs_data.append(j)
 
                 if not all_jobs_data:
+                    # Nothing new: nothing is sent (2026-11-15). This early exit was missed when the
+                    # daily message was rewritten (#130) and still pushed "No new jobs found this run".
                     database.log_activity(user_id, "jobs_searched", "Search returned no new results")
-                    try:
-                        deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix=home_url() + "#new")
-                    except Exception as _dn_err:
-                        print(f"[run-search] deliver_notification error: {_dn_err}")
                     return
 
                 # ── URL check for new jobs ───────────────────────────────────────
@@ -6493,7 +6496,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             res = deliver_notification(
                 user_id, "\U0001F514 Job Hunter notification check \u2014 if you can read this, this channel works.",
-                url_suffix="/app")
+                url_suffix="/app", from_noa=False)
             self.send_json({"results": res or {}, **_notify_status(user_id)})
             return
 
@@ -8070,7 +8073,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             message = data.get("message", "Job Hunter notification")
             user_id = int(data.get("user_id", 1))
-            deliver_notification(user_id, message)
+            deliver_notification(user_id, message, from_noa=False)
             self.send_json({"success": True})
             return
 

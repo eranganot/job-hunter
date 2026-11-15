@@ -1,13 +1,15 @@
 // Job Hunter service worker — scope is /app/ (served at /app/sw.js).
 // It only ever sees /app/* requests; /api/* is out of scope and always hits
 // the network live. Bump VERSION on each deploy to invalidate the old cache.
-const VERSION = "jh-v95";
+const VERSION = "jh-v96";
 const CACHE = `jobhunter-${VERSION}`;
 const SHELL = [
   "/app/",
   "/app/manifest.webmanifest",
   "/app/icon-192.png",
   "/app/icon-512.png",
+  "/app/noa-192.png",
+  "/app/badge-96.png",
 ];
 
 self.addEventListener("install", (e) => {
@@ -59,8 +61,11 @@ self.addEventListener("push", (e) => {
   e.waitUntil(
     self.registration.showNotification(title, {
       body,
-      icon: "/app/icon-192.png",
-      badge: "/app/icon-192.png",
+      // A push from Noa (job news) shows her picture; account and admin pushes keep the app icon.
+      // iPhone ignores `icon` and always shows the app's own. `badge` is Android's small status-bar
+      // mark: it paints every opaque pixel one colour, so it must be a white-on-transparent shape.
+      icon: data.from === "noa" ? "/app/noa-192.png" : "/app/icon-192.png",
+      badge: "/app/badge-96.png",
       data: { url },
     })
   );
