@@ -114,6 +114,23 @@ p{margin:0}
 .shot{border-radius:1rem;overflow:hidden;border:1px solid var(--line);background:#111827}
 .chat .shot{margin-left:3.65rem}
 @media(max-width:30rem){.chat .shot{margin-left:0}}
+/* One column (phones, small tablets): Noa's morning message and the top of the job card sit straight
+   under the main button, so the first screen shows her and the product; "See how she works" and the
+   small print follow. The two columns' children are laid out as one list and ordered here. */
+@media(max-width:61.99rem){
+  .hero{display:flex;flex-direction:column;gap:0}
+  .hero .pitch,.hero .chat,.hero .ctas{display:contents}
+  .hero h1{order:1}
+  .hero .lead{order:2;margin-bottom:1.4rem}
+  .hero .btn.go{order:3;align-self:flex-start}
+  .hero .m2{order:4;margin-top:1.4rem}
+  .hero .shot{order:5;margin-top:.9rem}
+  .hero .btn.line{order:6;align-self:flex-start;margin-top:1.2rem}
+  .hero .under-cta{order:7}
+  .hero .offer-line{order:8}
+  .hero .m1{display:none}
+}
+@media(max-width:39.99rem){.hero .shot{max-height:15rem}}
 
 .sec{padding-top:4rem;padding-bottom:4rem;border-top:1px solid var(--line)}
 @media(min-width:48rem){.sec{padding-top:5.5rem;padding-bottom:5.5rem}}
@@ -284,7 +301,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
 
 <main>
   <section class="wrap hero">
-    <div>
+    <div class="pitch">
       <h1>Meet Noa, your personal AI headhunter agent.</h1>
       <p class="lead">She works for you, not for the companies. Noa reads thousands of tech openings in Israel, including
       companies' own career pages, brings you only the ones that fit your CV, and gets your application ready.</p>
@@ -297,9 +314,9 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
     </div>
 
     <div class="chat" aria-label="Noa introduces herself">
-      <div class="msg"><img src="{face}" alt="Noa" width="46" height="46"/>
+      <div class="msg m1"><img src="{face}" alt="Noa" width="46" height="46"/>
         <p class="bub"><small>Noa</small>Hi, I'm Noa. Send me your CV and I'll get to know you. Then I do the searching.</p></div>
-      <div class="msg"><img src="{face}" alt="" width="46" height="46"/>
+      <div class="msg m2"><img src="{face}" alt="Noa" width="46" height="46"/>
         <p class="bub"><small>Noa, every morning</small>{msg2}</p></div>
       <div class="shot"><img src="/landing-assets/job-card.webp" width="1400" height="986"
         alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with the reasons it fits and Pass, Approve and Decide later buttons"/></div>
