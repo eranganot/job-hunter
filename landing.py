@@ -329,8 +329,8 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         </dl>
       </div>
       <div>
-        <div class="shot"><img src="/landing-assets/job-details.webp" width="1400" height="746" loading="lazy"
-          alt="A role's details in Job Hunter: a check that the posting is still open, a cover letter to generate, and a button to tailor your CV for this job"/></div>
+        <div class="shot"><img src="/landing-assets/job-details.webp" width="1400" height="1657" loading="lazy"
+          alt="A role's details in Job Hunter: a finished cover letter, and a tailored CV with a list of what the job asks for, three points the CV backs up and one it does not"/></div>
       </div>
     </div>
     <div class="wrap">
@@ -353,8 +353,8 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         learned from the ones you passed.</p>
       </div>
       <div>
-        <div class="shot"><img src="/landing-assets/analytics.webp" width="1400" height="380" loading="lazy"
-          alt="Job Hunter statistics: roles in the queue, applied, deferred and passed, with approval and applied rates"/></div>
+        <div class="shot"><img src="/landing-assets/analytics.webp" width="1400" height="252" loading="lazy"
+          alt="Job Hunter statistics: 6 roles in the queue, 9 applications sent, 2 deferred and 14 passed"/></div>
       </div>
     </div>
   </section>
