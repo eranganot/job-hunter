@@ -22,7 +22,7 @@ Claude works in a cloud workspace with **push access to `github.com/eranganot/jo
 - The legacy server-rendered UI (`/dashboard`, `/settings`, `/onboarding`, `/admin`, the frozen Tailwind blob, `LEGACY_UI`) was **deleted in Step 9 (2026-11-05)**. Those URLs only redirect into `/app`. `/login` and `/register` are still server-rendered (`LOGIN_HTML` / `REGISTER_HTML`, self-contained styles) — they are not legacy.
 
 ## Domain facts
-- Auto-apply is **OFF in production** (`APPLY_ENGINE_ENABLED` unset ⇒ `apply_engine.submit_application` no-ops), root cause open — see `APPLY_ENGINE_INVESTIGATION.md`. That workstream is parked by the owner's decision; do not re-enable it without him.
+- Auto-apply is **on for admins only in production** since 2026-11-09 (`APPLY_ENGINE_ENABLED` set; `_engine_on_for(user)` = the switch AND (admin OR `APPLY_ENGINE_FOR_ALL`)). It still fails on most jobs (0 of 21 sent on 2026-11-12; Comeet's 423 open) - see `STATUS.md` and `APPLY_ENGINE_INVESTIGATION.md`. Do not set `APPLY_ENGINE_FOR_ALL` or widen it without the owner.
 - The apply engine can only auto-submit to **direct ATS URLs** (Greenhouse, Lever, Workday, Comeet, SmartRecruiters, Ashby, company `/careers`). Job-board listings (LinkedIn/Indeed/Glassdoor) are correctly flagged `manual_required` — by design, not a bug.
 - "Submitted N" in summaries must reflect real submits, not manual-flagged jobs — keep wording honest.
 - All LLM calls route through **Gemini** (Anthropic removed).

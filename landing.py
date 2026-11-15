@@ -42,6 +42,7 @@ ASSETS = {                       # every file /landing-assets/ will serve, and i
     "noa-a.webp": "image/webp",
     "noa-d.webp": "image/webp",
     "noa-e.webp": "image/webp",
+    "share.png": "image/png",        # the link-preview picture; drawn by scripts/make_share_image.py
     "fraunces-latin-wght.woff2": "font/woff2",
     "inter-latin-wght.woff2": "font/woff2",
 }
@@ -50,6 +51,9 @@ TITLE = "Job Hunter - meet Noa, your personal AI headhunter agent"
 DESCRIPTION = ("Noa is your personal AI headhunter agent for tech roles in Israel. She works for you, not for "
                "the companies: she reads every opening, brings you only the ones that fit your CV, and gets "
                "each application ready.")
+
+SHARE_ALT = ("Meet Noa, your personal AI headhunter agent. She works for you, not for the companies. "
+             "Premium is free for a limited time.")
 
 _CSS = """
 @font-face{font-family:Fraunces;font-style:normal;font-weight:100 900;font-display:swap;
@@ -198,6 +202,16 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
     d = html.escape(DESCRIPTION, quote=True)
     canon = f'<link rel="canonical" href="{url}"/>' if public_url else ""
     og_url = f'<meta property="og:url" content="{url}"/>' if public_url else ""
+    # The link preview (Facebook, LinkedIn, WhatsApp, X) needs an absolute picture address, so it is
+    # only offered when JH_PUBLIC_URL is set; without one the small text card stays.
+    share = url + "landing-assets/share.png"
+    og_image = (f'<meta property="og:image" content="{share}"/>\n'
+                f'  <meta property="og:image:type" content="image/png"/>\n'
+                f'  <meta property="og:image:width" content="1200"/>\n'
+                f'  <meta property="og:image:height" content="630"/>\n'
+                f'  <meta property="og:image:alt" content="{html.escape(SHARE_ALT, quote=True)}"/>\n'
+                f'  <meta name="twitter:image" content="{share}"/>') if public_url else ""
+    card = "summary_large_image" if public_url else "summary"
     msg2 = html.escape(_morning_message(postings_checked))
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -214,7 +228,8 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
   <meta property="og:title" content="{t}"/>
   <meta property="og:description" content="{d}"/>
   {og_url}
-  <meta name="twitter:card" content="summary"/>
+  {og_image}
+  <meta name="twitter:card" content="{card}"/>
   <meta name="twitter:title" content="{t}"/>
   <meta name="twitter:description" content="{d}"/>
   <link rel="manifest" href="/app/manifest.webmanifest"/>
