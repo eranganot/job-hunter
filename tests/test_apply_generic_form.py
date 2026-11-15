@@ -219,5 +219,9 @@ def test_comeet_423_is_its_bot_check_not_the_applicant():
     assert r["status"] == "manual_required" and r["apply_failure_type"] == "captcha"
     assert "nothing was sent" in r["error"] and "automated browser" in r["error"]
     assert r["apply_failure_type"] not in ae.RETRYABLE_FAILURES
+    # ...and carries what was filled, for the "finish it yourself" sheet (2026-11-15).
+    sheet = [{"label": "First name", "value": "Dana"}, {"label": "Personal note", "value": "Hi"}]
+    assert ae._comeet_verdict(423, "", sheet)["prepared"] == sheet
+    assert ae._comeet_verdict(423, "")["prepared"] == []
     assert ae._comeet_verdict(200, "{}")["status"] == "confirmed"
     assert ae._comeet_verdict(400, "bad")["apply_failure_type"] == "form_validation"

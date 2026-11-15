@@ -833,6 +833,10 @@ function RouteBadge({ job }: { job: UiJob }) {
   // the app fills everything and you press Submit from the ready-to-paste sheet.
   if (r === "auto" && /jobs\.lever\.co/i.test(job.url || "")) return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
     title="Lever shows the app's browser a human check. The app prepares every answer; you open the job and press Submit."><Zap className="w-3 h-3" />Prepared · you press Submit</span>;
+  // Comeet refuses the app's browser with HTTP 423 - never once accepted - while the
+  // owner's own application went through (2026-11-15). Same sheet as Lever.
+  if (r === "auto" && /comeet\.(com|co)\//i.test(job.url || "")) return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
+    title="Comeet doesn't accept the app's automated browser. The app prepares every answer; you open the job and press Submit."><Zap className="w-3 h-3" />Prepared · you press Submit</span>;
   if (r === "auto") return <span className={`${pill} bg-emerald-900/40 border-emerald-700 text-emerald-300`}
     title="A form system Job Hunter fills in and submits for you."><Zap className="w-3 h-3" />Auto-apply ready</span>;
   if (r === "site") return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
