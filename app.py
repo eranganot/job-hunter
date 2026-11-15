@@ -5347,6 +5347,24 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(_data)
             return
 
+        # "Noa's picks": this week's new roles per role family, as ready-to-post text (noaspicks.py).
+        if path == "/api/admin/noas-picks":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                days = max(1, min(30, int(qs.get("days", ["7"])[0])))
+            except ValueError:
+                days = 7
+            import noaspicks
+            conn = database.get_db()
+            try:
+                self.send_json(noaspicks.report(conn, MOBILE_URL, days))
+            finally:
+                conn.close()
+            return
+
         if path == "/api/admin/apply-rates":
             user = self.require_auth()
             if not user or user.get("role") != "admin":

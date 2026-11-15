@@ -339,6 +339,12 @@ export const api = {
   adminTestAccount: () => request<{ exists: boolean; email: string; created?: string; onboarding_complete?: boolean; jobs?: number }>("/api/admin/test-account"),
   adminLifecycleTest: () => request<{ sent: string[]; errors: string[]; noa_from_set: boolean; eran_from_set: boolean; enabled: boolean }>("/api/admin/lifecycle-test", "POST", {}),
   adminResetTestAccount: () => request<{ success: boolean; email: string; password: string }>("/api/admin/test-account/reset", "POST", {}),
+  adminNoasPicks: (days = 7) => request<{
+    days: number; considered: number; min_roles: number;
+    families: { key: string; label: string; label_he: string; count: number; listed: number; post_en: string; post_he: string }[];
+    too_few: { key: string; count: number }[];
+    skipped: Record<string, number>;
+  }>(`/api/admin/noas-picks?days=${days}`),
   adminFunnel: (days = 30) => request<{ days: number; steps: { step: string; users: number }[] }>(`/api/admin/funnel?days=${days}`),
   adminSetPlan: (id: number, plan: string, days: number | null, after = "free") =>
     request<{ success: boolean; plan: string; plan_until: string | null; locked: number }>(

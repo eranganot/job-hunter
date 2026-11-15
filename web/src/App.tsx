@@ -2624,6 +2624,61 @@ function LifecycleEmailsCard() {
   );
 }
 
+/** "Noa's picks" (noaspicks.py): this week's new roles per role family as post text,
+ *  Hebrew for Facebook groups and English for LinkedIn. Real openings only - found this
+ *  week, with a company name and a link to the employer's own page. */
+function NoasPicksCard() {
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any>(null);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
+  const load = async () => {
+    setBusy(true); setErr("");
+    try { setRes(await api.adminNoasPicks(7)); } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(false); }
+  };
+  const copy = async (id: string, text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(""), 1500); }
+    catch { setErr("Could not copy - select the text and copy it by hand."); }
+  };
+  const left = res ? Object.entries(res.skipped || {}).filter(([, n]) => (n as number) > 0) : [];
+  const why: Record<string, string> = { no_company: "no company name", not_employer_link: "job-board link",
+    closed: "closed or dead link", no_family: "outside the role families", duplicate: "duplicates" };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:col-span-2">
+      <h3 className="font-semibold text-white mb-1">Noa's picks posts</h3>
+      <p className="text-xs text-gray-400 mb-3">This week's new roles per role family, ready to post: Hebrew for Facebook groups, English for LinkedIn. Only roles with a company name and a link to the employer's own page.</p>
+      <button onClick={load} disabled={busy} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Building…" : res ? "Build again" : "Build this week's posts"}</button>
+      {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
+      {res && (
+        <div className="mt-3 space-y-4">
+          <p className="text-xs text-gray-400">
+            {res.families.length ? `${res.families.length} role famil${res.families.length === 1 ? "y has" : "ies have"} enough roles for a post.` : `No role family has ${res.min_roles} roles to list this week.`}
+            {left.length > 0 && ` Left out: ${left.map(([k, n]) => `${n} ${why[k] || k}`).join(", ")}.`}
+            {res.too_few?.length > 0 && ` Too few for a post: ${res.too_few.map((t: any) => `${t.key} (${t.count})`).join(", ")}.`}
+          </p>
+          {res.families.map((f: any) => (
+            <div key={f.key} className="border border-gray-700 rounded-lg p-3">
+              <p className="text-sm text-white font-medium mb-2">{f.label} <span className="text-gray-400 font-normal">· {f.count} this week, {f.listed} listed</span></p>
+              <div className="grid md:grid-cols-2 gap-3">
+                {([["he", "Hebrew (Facebook groups)", f.post_he, "rtl"], ["en", "English (LinkedIn)", f.post_en, "ltr"]] as const).map(([lang, title, text, dir]) => (
+                  <div key={lang}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-gray-400">{title}</span>
+                      <button onClick={() => copy(f.key + lang, text)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">{copied === f.key + lang ? "Copied" : "Copy"}</button>
+                    </div>
+                    <textarea readOnly dir={dir} value={text} rows={10} className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TestAccountCard() {
   const [st, setSt] = useState<any>(null);
   const [fresh, setFresh] = useState<{ email: string; password: string } | null>(null);
@@ -2748,6 +2803,7 @@ function AdminPanel({ me }: any) {
           {funnel && <FunnelCard steps={funnel} />}
           <TestAccountCard />
           <LifecycleEmailsCard />
+          <NoasPicksCard />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
             <div className="space-y-2">
