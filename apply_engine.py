@@ -484,7 +484,15 @@ _FIELDS_JS = r"""() => {
     if (e.id) { const f = document.querySelector('label[for="' + CSS.escape(e.id) + '"]'); if (f) l = txt(f); }
     if (!l && e.closest('label')) l = txt(e.closest('label'));
     if (!l) l = e.getAttribute('aria-label') || e.placeholder || '';
-    if (!l) { let p = e.parentElement; for (let i = 0; i < 4 && p && !l; i++, p = p.parentElement) { const q = p.querySelector('label,legend'); if (q) l = txt(q); } }
+    // A parent's label counts only when it is not another field's (label[for] naming a
+    // different element): Ashby's "Autofill from resume" file input has no label of its
+    // own, and the walk used to return the next field's "Name" (2026-11-15, JOB-HUNTER-Q).
+    // ...nor one wrapping another control (PointFive: <label><input type=radio> Yes - I consent…</label>).
+    const own = q => { const f = q.getAttribute && q.getAttribute('for');
+      if (f && f !== e.id) return false;
+      return ![...q.querySelectorAll('input,select,textarea')].some(c => c !== e); };
+    if (!l) { let p = e.parentElement; for (let i = 0; i < 4 && p && !l; i++, p = p.parentElement) { const q = [...p.querySelectorAll('label,legend')].find(own); if (q) l = txt(q); } }
+    if (!l && !e.name && !e.id) { let p = e.parentElement; for (let i = 0; i < 3 && p && !l; i++, p = p.parentElement) l = txt(p).slice(0, 80); }
     return (l || e.name || e.id || '').slice(0, 120);
   };
   const out = [];
@@ -526,6 +534,47 @@ def _read_form(page) -> tuple[list, object, object]:
         elif r.get("submit") and submit_frame is None and fr is best_frame:
             submit_frame = fr
     return best_fields, best_frame, submit_frame
+
+
+def _is_smartrecruiters(url: str) -> bool:
+    return bool(re.match(r"^https?://(jobs\.smartrecruiters\.com|www\.smartr\.me)/", url or "", re.I))
+
+
+# DataDome's challenge page. SmartRecruiters' apply page showed it to a headless
+# browser in place of the form (2026-11-15: oneclick-ui -> a geo.captcha-delivery.com
+# frame, 0 fields).
+_BOT_WALL_HOSTS = ("captcha-delivery.com",)
+
+
+def _open_smartrecruiters_form(page):
+    """Open the posting's "I'm interested" link (jobs.smartrecruiters.com/oneclick-ui/...).
+    Returns a result dict when the engine must stop here (no link, or a bot check in
+    place of the form), or None when the page now holds the application form."""
+    href = None
+    try:
+        href = page.evaluate("""() => {
+          const a = [...document.querySelectorAll('a[href*="/oneclick-ui/"]')];
+          const own = a.find(x => x.href.startsWith(location.origin)) || a[0];
+          return own ? own.href : null;
+        }""")
+    except Exception as exc:
+        print(f"[apply-engine] SmartRecruiters: link read failed ({type(exc).__name__})")
+    if not href:
+        return {"status": "manual_required", "apply_failure_type": "form_validation",
+                "apply_failure_detail": "SmartRecruiters posting without an \"I'm interested\" link",
+                "error": "No application link on this SmartRecruiters page - apply on the company's site"}
+    try:
+        page.goto(href, wait_until="domcontentloaded", timeout=20_000)
+        page.wait_for_selector("input:not([type=hidden]), textarea, select, iframe", timeout=10_000)
+    except PWTimeout:
+        pass
+    page.wait_for_timeout(1_500)
+    if any(h in (f.url or "") for f in page.frames for h in _BOT_WALL_HOSTS):
+        return {"status": "manual_required", "apply_failure_type": "captcha",
+                "apply_failure_detail": "SmartRecruiters bot check (DataDome) in place of the form",
+                "error": "SmartRecruiters showed the app's automated browser a bot check, so nothing "
+                         "was sent. When you open the link yourself you normally won't see it - just apply there."}
+    return None
 
 
 def _past(deadline_at) -> bool:
@@ -2421,6 +2470,20 @@ def submit_application(
                 res["resolved_url"] = actual_url
                 return _add_failure_type(res)
 
+            # SmartRecruiters: the posting page has no form, and its only way in
+            # is an "I'm interested" link to /oneclick-ui/... that sits below the
+            # description - outside the 1,500 characters the button question shows
+            # the model, so the engine never opened it (all 3 SmartRecruiters jobs
+            # "No application form found", 2026-11-15). Follow the link itself.
+            if _is_smartrecruiters(actual_url):
+                print(f"[apply-engine] Detected SmartRecruiters")
+                sr = _open_smartrecruiters_form(page)
+                if sr is not None:
+                    browser.close()
+                    return {**_base, **sr}
+                page_text = page.evaluate("document.body.innerText") or ""
+                lower = page_text.lower()
+
             # 3. Click Apply button if no form visible yet ─────────────────────
             page_html = page.content()
             if not page.query_selector("form"):
@@ -2451,7 +2514,12 @@ def submit_application(
                                         "apply_failure_detail": "Login required after clicking Apply",
                                         "error": "Login required after clicking Apply"}
                 except Exception as e:
-                    print(f"[apply-engine] apply-button error: {e}")
+                    # Not an error of the app: the model answered in prose ("I cannot
+                    # find an Apply button…") or a click missed, and the form is read
+                    # next anyway. Graded by its words this paged Sentry (JOB-HUNTER-S/T,
+                    # 2026-11-15); the level is now explicit.
+                    _log.get("apply-engine").warning(
+                        "[apply-engine] apply-button check: %s", str(e).splitlines()[0][:200])
 
             # 4. Read the real form, then ask the model to fill it by field number.
             #    A script-built form (Ashby, many careers sites) may need a moment.
@@ -2513,6 +2581,12 @@ def submit_application(
                     continue
                 loc = form_frame.locator(f'[data-jh-f="{n}"]')
                 action = instr.get("action", "")
+                if fields[n].get("kind") == "file" and action != "upload":
+                    # A file input takes only the CV; "fill" on one raised and paged
+                    # Sentry (JOB-HUNTER-Q, 2026-11-15).
+                    _log.get("apply-engine").info(
+                        "[apply-engine] field %s is a file input; ignoring %r", n, action)
+                    continue
                 try:
                     if action == "fill":
                         loc.fill(str(instr.get("value", "")), timeout=5_000)

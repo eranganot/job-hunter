@@ -29,6 +29,19 @@ FORM_PAGE = """<!doctype html><html><head>%s</head><body><h1>Senior PM</h1>
 <label for="cv">Resume</label><input id="cv" name="a3" type="file">
 <button type="submit">Submit application</button></form></body></html>""" % PADDING
 NO_FORM_PAGE = "<!doctype html><html><body><h1>About us</h1><p>A news article.</p></body></html>"
+# SmartRecruiters (2026-11-15): no form on the posting; the way in is an "I'm
+# interested" link to /oneclick-ui/..., below a long description.
+SR_POSTING = ("<!doctype html><html><body><h1>Product Manager</h1><p>%s</p>" % ("Job description. " * 200)
+              + "<a href='/oneclick-ui/%s/publication/1'>I'm interested</a></body></html>")
+WALL_PAGE = "<!doctype html><html><body><iframe src='/dd/captcha'></iframe></body></html>"
+# Ashby's application page (2026-11-15): an "Autofill from resume" file input with no
+# label of its own, next to the Name label (for=...) and radio options wrapped in labels.
+ASHBY_PAGE = """<!doctype html><html><body><form action="/submit" method="post">
+<div><div><p>Autofill from resume</p><input type="file"></div>
+<div><label for="nm">First name</label><input id="nm" name="a1" required></div>
+<div><label><input type="radio" name="wa" value="y"> Yes - I consent to WhatsApp</label></div></div>
+<label for="em">Email</label><input id="em" name="a2" type="email" required>
+<button type="submit">Submit application</button></form></body></html>"""
 POSTS = []
 
 
@@ -37,7 +50,9 @@ class _H(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        body = (NO_FORM_PAGE if self.path.startswith("/article") else FORM_PAGE).encode()
+        body = (NO_FORM_PAGE if self.path.startswith("/article") else SR_POSTING % self.path.split("/")[2]
+                if self.path.startswith("/sr/") else WALL_PAGE if self.path.startswith("/oneclick-ui/walled")
+                else ASHBY_PAGE if self.path.startswith("/ashby") else FORM_PAGE).encode()
         self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
         self.wfile.write(body)
 
@@ -138,3 +153,60 @@ def test_the_app_hands_the_engine_its_deadline():
     src = open(os.path.join(os.path.dirname(__file__), "..", "app.py"), encoding="utf-8").read()
     body = src[src.index("def _submit_application_guarded"):src.index("def _supervised_live_apply")]
     assert '"_deadline_s": max(30, _APPLY_DEADLINE_S - 15)' in body
+
+
+@browser_only
+def test_a_field_reads_only_its_own_label_and_a_file_input_is_never_typed_into(site, monkeypatch):
+    # JOB-HUNTER-Q: the autofill input was sent as "Name" and the model's "fill" on it raised.
+    seen = []
+    _model(monkeypatch, seen)
+    real = ae._claude_json
+
+    def fake(prompt, **kw):
+        out = real(prompt, **kw)
+        if isinstance(out, list):
+            out = [{"field": 0, "action": "fill", "value": "Dana"}] + out   # the model's mistake
+        return out
+    monkeypatch.setattr(ae, "_claude_json", fake)
+    res = ae.submit_application(site + "/ashby/1", "Senior PM", "Acme", {**APPLICANT, "_deadline_s": 60},
+                                None, force=True)
+    labels = [f["label"] for f in seen]
+    assert labels[0].startswith("Autofill from resume") and labels[1] == "First name"
+    assert "Yes - I consent to WhatsApp" in labels[2] and labels[3] == "Email"
+    assert res["status"] == "confirmed", res
+    assert len(POSTS) == 1 and "a1=Dana" in POSTS[0]
+
+
+def test_smartrecruiters_postings_are_recognised():
+    assert ae._is_smartrecruiters("https://jobs.smartrecruiters.com/wix2/744000155517674")
+    assert ae._is_smartrecruiters("https://www.smartr.me/oneclick-ui/company/Wix2/publication/x")
+    assert not ae._is_smartrecruiters("https://jobs.lever.co/x/1")
+
+
+@browser_only
+def test_smartrecruiters_follows_its_interested_link_to_the_form(site, monkeypatch):
+    monkeypatch.setattr(ae, "_is_smartrecruiters", lambda u: "/sr/" in u)
+    _model(monkeypatch, [])
+    res = ae.submit_application(site + "/sr/acme", "Senior PM", "Acme", {**APPLICANT, "_deadline_s": 60},
+                                None, force=True)
+    assert res["status"] == "confirmed", res
+    assert len(POSTS) == 1
+
+
+@browser_only
+def test_smartrecruiters_bot_check_is_reported_as_one_and_nothing_is_sent(site, monkeypatch):
+    # Observed 2026-11-15: oneclick-ui showed a DataDome (captcha-delivery.com) frame, 0 fields.
+    monkeypatch.setattr(ae, "_is_smartrecruiters", lambda u: "/sr/" in u)
+    monkeypatch.setattr(ae, "_BOT_WALL_HOSTS", ("/dd/captcha",))
+    _model(monkeypatch, [])
+    res = ae.submit_application(site + "/sr/walled", "Senior PM", "Acme", {**APPLICANT, "_deadline_s": 60},
+                                None, force=True)
+    assert res["status"] == "manual_required" and res["apply_failure_type"] == "captcha", res
+    assert "bot check" in res["error"] and POSTS == []
+
+
+def test_the_apply_button_check_never_pages_sentry():
+    # JOB-HUNTER-S/T: a prose answer to the button question was graded ERROR by its words.
+    src = open(os.path.join(os.path.dirname(__file__), "..", "apply_engine.py"), encoding="utf-8").read()
+    assert 'print(f"[apply-engine] apply-button error' not in src
+    assert '.warning(\n                        "[apply-engine] apply-button check' in src
