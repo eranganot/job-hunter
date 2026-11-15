@@ -208,3 +208,21 @@ def test_landing_copy_after_the_panel_review():
     assert "Built and run by Eran Ganot" in page
     assert "five minutes" not in page
     assert not [ch for ch in page if 0x80 <= ord(ch) <= 0xff]
+
+
+def test_product_pictures_show_finished_work_and_their_real_size():
+    """GTM row 3 (2026-11-15): the details picture shows a written cover letter and a tailored CV, not
+    an empty box, and the statistics picture has no approval-rate tile. The page states each picture's
+    real size, so nothing jumps while it loads."""
+    import os, re, struct
+    import landing
+    page = landing.landing_html("https://x.test")
+    assert "a cover letter to generate" not in page and "approval and applied rates" not in page
+    assert "a finished cover letter" in page
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "landing")
+    for name in ("job-details.webp", "analytics.webp", "job-card.webp"):
+        w, h = map(int, re.search(r'%s" width="(\d+)" height="(\d+)"' % re.escape(name), page).groups())
+        with open(os.path.join(base, name), "rb") as f:
+            head = f.read(30)
+        assert head[:4] == b"RIFF" and head[12:16] == b"VP8 ", name      # lossy WebP: size at bytes 26-30
+        assert struct.unpack("<HH", head[26:30]) == (w, h), name
