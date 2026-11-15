@@ -2624,6 +2624,185 @@ function LifecycleEmailsCard() {
   );
 }
 
+/* ── "Noa's picks" post image ─────────────────────────────────────────────────
+   A 1080x1080 picture for the post, drawn here in the browser from the same roles
+   the text lists, so the picture never shows something the list does not have.
+   It uses the landing page's colours, fonts and Noa's picture; Hebrew is Heebo. */
+const PICKS_FONTS: [string, string][] = [
+  ["JH Fraunces", "/landing-assets/fraunces-latin-wght.woff2"],
+  ["JH Inter", "/landing-assets/inter-latin-wght.woff2"],
+  ["JH Heebo", "/landing-assets/heebo-hebrew-wght.woff2"],
+];
+let picksFontsReady: Promise<unknown> | null = null;
+function loadPicksFonts() {
+  if (!picksFontsReady) {
+    picksFontsReady = Promise.all(PICKS_FONTS.map(async ([name, url]) => {
+      const f = new FontFace(name, `url(${url})`, { weight: "100 900" });
+      await f.load();
+      (document as any).fonts.add(f);
+    }));
+  }
+  return picksFontsReady;
+}
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((ok, fail) => { const im = new Image(); im.onload = () => ok(im); im.onerror = fail; im.src = src; });
+}
+function fitText(ctx: CanvasRenderingContext2D, text: string, max: number) {
+  if (ctx.measureText(text).width <= max) return text;
+  let t = text;
+  while (t.length > 4 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1);
+  return t.trimEnd() + "…";
+}
+async function drawPicksImage(lang: "he" | "en", fam: { label: string; label_he: string; listed: number; roles: { title: string; company: string }[] }) {
+  await loadPicksFonts();
+  const [noa, logo] = await Promise.all([loadImage(NOA_AVATAR), loadImage("/app/icon-192.png")]);
+  const S = 1080, c = document.createElement("canvas");
+  c.width = S; c.height = S;
+  const x = c.getContext("2d")!;
+  const he = lang === "he";
+  const text = "#fbf6e6", soft = "#c4d4c6", accent = "#ffd766", line = "#2c4a3c", panel = "#12291f";
+  x.fillStyle = "#0c1f17"; x.fillRect(0, 0, S, S);
+  // brand, top left
+  x.drawImage(logo, 72, 64, 64, 64);
+  x.direction = "ltr"; x.textAlign = "left"; x.textBaseline = "alphabetic";
+  x.fillStyle = text; x.font = '700 36px "JH Inter"'; x.fillText("Job Hunter", 152, 110);
+  // Noa, top right, in the yellow ring the page uses
+  x.save(); x.beginPath(); x.arc(928, 152, 86, 0, Math.PI * 2); x.fillStyle = accent; x.fill();
+  x.beginPath(); x.arc(928, 152, 80, 0, Math.PI * 2); x.clip(); x.drawImage(noa, 848, 72, 160, 160); x.restore();
+  // headline
+  const edge = he ? S - 72 : 72;
+  x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left";
+  x.fillStyle = text;
+  const l1 = he ? `${fam.listed} משרות ${fam.label_he}` : `${fam.listed} ${fam.label} roles`;
+  let size = he ? 76 : 68;                      // shrink a long family name to fit, never cut it
+  const big = () => (he ? `800 ${size}px "JH Heebo", "JH Inter"` : `600 ${size}px "JH Fraunces"`);
+  x.font = big();
+  while (size > 40 && x.measureText(l1).width > S - 144) { size -= 2; x.font = big(); }
+  x.fillText(l1, edge, 330);
+  x.fillStyle = accent; x.font = he ? '500 44px "JH Heebo", "JH Inter"' : '500 40px "JH Inter"';
+  x.fillText(he ? "שנועה מצאה השבוע" : "Noa found this week", edge, 396);
+  // up to five of the roles, as the employers wrote them (left to right in both languages)
+  const rows = fam.roles.slice(0, 5);
+  let y = 446;
+  x.direction = "ltr"; x.textAlign = "left";
+  for (const r of rows) {
+    x.fillStyle = panel; x.strokeStyle = line; x.lineWidth = 2;
+    x.beginPath(); (x as any).roundRect(72, y, S - 144, 78, 18); x.fill(); x.stroke();
+    x.fillStyle = text; x.font = '600 30px "JH Inter"';
+    const title = fitText(x, r.title, 560);
+    x.fillText(title, 100, y + 50);
+    const used = x.measureText(title).width;
+    x.fillStyle = soft; x.font = '400 28px "JH Inter"';
+    x.fillText(fitText(x, "·  " + r.company, S - 144 - 56 - used - 20), 100 + used + 20, y + 50);
+    y += 90;
+  }
+  const more = fam.listed - rows.length;
+  if (more > 0) {
+    x.fillStyle = soft; x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left";
+    x.font = he ? '400 30px "JH Heebo", "JH Inter"' : '400 28px "JH Inter"';
+    x.fillText(he ? `ועוד ${more} בפוסט` : `and ${more} more in the post`, edge, y + 34);
+  }
+  // footer: the line the page leads with, and the address
+  x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left"; x.fillStyle = text;
+  x.font = he ? '500 32px "JH Heebo", "JH Inter"' : '500 30px "JH Inter"';
+  x.fillText(he ? "נועה עובדת בשבילכם." : "Noa works for you.", edge, S - 64);
+  x.direction = "ltr"; x.textAlign = he ? "left" : "right"; x.fillStyle = accent; x.font = '700 30px "JH Inter"';
+  x.fillText("job-hunter.work", he ? 72 : S - 72, S - 64);
+  return c;
+}
+
+/** "Noa's picks" (noaspicks.py): this week's new roles per role family as post text and a
+ *  post image. Two voices (the page speaks as Noa; your own profile speaks about her), Hebrew
+ *  for Facebook and English for LinkedIn. Real openings only - found this week, with a company
+ *  name and a link to the employer's own page. */
+function NoasPicksCard() {
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<any>(null);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
+  const [shift, setShift] = useState(0);
+  const [pics, setPics] = useState<Record<string, string>>({});
+  // Your own changes to a post, kept until the posts are built again: what you see is what Copy copies.
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const load = async (s = shift) => {
+    setBusy(true); setErr("");
+    try { setRes(await api.adminNoasPicks(7, s)); setShift(s); setEdits({}); } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(false); }
+  };
+  const copy = async (id: string, text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(""), 1500); }
+    catch { setErr("Could not copy - select the text and copy it by hand."); }
+  };
+  const picture = async (f: any, lang: "he" | "en") => {
+    const id = f.key + lang;
+    try {
+      const canvas = await drawPicksImage(lang, f);
+      const url = canvas.toDataURL("image/png");
+      setPics((p) => ({ ...p, [id]: url }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `noas-picks-${f.key}-${lang}.png`; a.click();
+    } catch { setErr("Could not draw the image."); }
+  };
+  const left = res ? Object.entries(res.skipped || {}).filter(([, n]) => (n as number) > 0) : [];
+  const why: Record<string, string> = { no_company: "no company name", not_employer_link: "job-board link",
+    closed: "closed or dead link", no_family: "outside the role families", duplicate: "duplicates" };
+  const place: Record<string, string> = { "page-he": "Page · Facebook · Noa's voice", "page-en": "Page · LinkedIn · Noa's voice",
+    "personal-he": "Your profile · Facebook groups", "personal-en": "Your profile · LinkedIn" };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:col-span-2">
+      <h3 className="font-semibold text-white mb-1">Noa's picks posts</h3>
+      <p className="text-xs text-gray-400 mb-3">This week's new roles per role family, ready to post, with an image. The page speaks as Noa; your own profile speaks about her. Edit any post before you copy it. Only roles with a company name and a link to the employer's own page.</p>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => load(shift)} disabled={busy} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Building…" : res ? "Build again" : "Build this week's posts"}</button>
+        {res && <button onClick={() => load(shift + 1)} disabled={busy} className="px-4 py-2 bg-gray-700 rounded-lg text-sm font-medium disabled:opacity-60">Next wording</button>}
+      </div>
+      {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
+      {res && (
+        <div className="mt-3 space-y-4">
+          <p className="text-xs text-gray-400">
+            {res.families.length ? `${res.families.length} role famil${res.families.length === 1 ? "y has" : "ies have"} enough roles for a post.` : `No role family has ${res.min_roles} roles to list this week.`}
+            {left.length > 0 && ` Left out: ${left.map(([k, n]) => `${n} ${why[k] || k}`).join(", ")}.`}
+            {res.too_few?.length > 0 && ` Too few for a post: ${res.too_few.map((t: any) => `${t.key} (${t.count})`).join(", ")}.`}
+          </p>
+          {res.families.map((f: any) => (
+            <div key={f.key} className="border border-gray-700 rounded-lg p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p className="text-sm text-white font-medium">{f.label} <span className="text-gray-400 font-normal">· {f.listed} listed of {f.found} found this week</span></p>
+                <div className="flex gap-2">
+                  <button onClick={() => picture(f, "he")} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">Image · Hebrew</button>
+                  <button onClick={() => picture(f, "en")} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">Image · English</button>
+                </div>
+              </div>
+              {(pics[f.key + "he"] || pics[f.key + "en"]) && (
+                <div className="flex gap-3 mb-3">
+                  {(["he", "en"] as const).map((l) => pics[f.key + l] && <img key={l} src={pics[f.key + l]} alt={`Post image, ${l === "he" ? "Hebrew" : "English"}`} className="w-40 h-40 rounded border border-gray-700" />)}
+                </div>
+              )}
+              <div className="grid md:grid-cols-2 gap-3">
+                {f.posts.map((p: any) => {
+                  const id = `${f.key}-${p.voice}-${p.lang}`;
+                  return (
+                    <div key={id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-400">{place[`${p.voice}-${p.lang}`]} · wording {p.version}</span>
+                        <span className="flex gap-2">
+                          {edits[id] !== undefined && edits[id] !== p.text && <button onClick={() => setEdits((e) => { const n = { ...e }; delete n[id]; return n; })} className="text-xs px-2 py-1 text-gray-400">Undo my edits</button>}
+                          <button onClick={() => copy(id, edits[id] ?? p.text)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">{copied === id ? "Copied" : "Copy"}</button>
+                        </span>
+                      </div>
+                      <textarea dir={p.lang === "he" ? "rtl" : "ltr"} value={edits[id] ?? p.text} onChange={(e) => setEdits((x) => ({ ...x, [id]: e.target.value }))} rows={8} aria-label={`${place[`${p.voice}-${p.lang}`]} post text`} className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans" />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TestAccountCard() {
   const [st, setSt] = useState<any>(null);
   const [fresh, setFresh] = useState<{ email: string; password: string } | null>(null);
@@ -2748,6 +2927,7 @@ function AdminPanel({ me }: any) {
           {funnel && <FunnelCard steps={funnel} />}
           <TestAccountCard />
           <LifecycleEmailsCard />
+          <NoasPicksCard />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
             <div className="space-y-2">

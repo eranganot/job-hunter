@@ -51,6 +51,7 @@ ASSETS = {                       # every file /landing-assets/ will serve, and i
     "share.png": "image/png",        # the link-preview picture; drawn by scripts/make_share_image.py
     "fraunces-latin-wght.woff2": "font/woff2",
     "inter-latin-wght.woff2": "font/woff2",
+    "heebo-hebrew-wght.woff2": "font/woff2",   # Hebrew, for the Noa's-picks post images drawn in /app (SIL OFL)
 }
 
 TITLE = "Job Hunter - meet Noa, your personal AI headhunter agent"
