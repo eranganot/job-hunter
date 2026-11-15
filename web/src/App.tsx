@@ -78,6 +78,19 @@ export function SwipeFlow() {
   // until Step 11, so that tab is where an upgrade starts for now).
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined);
   const openUpgrade = () => { setSettingsTab("plan"); setShowSettings(true); };
+  // "?view=titles" (Noa's "let's widen the net" emails): open Settings on the job titles.
+  // Read once, then taken out of the address so a refresh does not reopen it.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("view") !== "titles") return;
+      setSettingsTab("prefs");
+      setShowSettings(true);
+      params.delete("view");
+      const rest = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (rest ? "?" + rest : "") + window.location.hash);
+    } catch { /* ignore */ }
+  }, []);
   // Set the moment onboarding finishes, so the next render leaves the flow even
   // though /api/me has not come back yet. Without it the wizard reappears for
   // one frame on top of the dashboard.

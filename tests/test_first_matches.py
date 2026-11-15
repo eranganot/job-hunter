@@ -66,8 +66,11 @@ def test_an_empty_first_search_says_what_to_change(stack, mails):
     app = stack["app"]
     _c, uid = _new_user(stack, "fm-3@example.test")
     app._first_matches_email(uid, 0)
-    (_to, subj, body), = [m for m in mails if "Noa" in m[1]]
-    assert "came back empty" in subj and "Add a title" in body
+    (_to, subj, body), = [m for m in mails if "one more thing" in m[1]]
+    # Noa owns it (email review 4): not "came back empty", and the link opens the job titles
+    assert subj == "I need one more thing from you, Maya"
+    assert "came back empty" not in subj + body and "a title or two more" in body
+    assert "/app?view=titles" in body and body.rstrip().endswith("at Job Hunter,\nNoa")
 
 
 def test_the_test_account_gets_no_email(stack, users, mails):

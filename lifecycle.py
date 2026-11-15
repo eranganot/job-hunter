@@ -115,6 +115,7 @@ def user_state(conn, user_id: int) -> dict:
         "to_swipe": int(one("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='new'")),
         "picked": int(one("SELECT COUNT(*) FROM jobs WHERE user_id=? AND released_on IS NOT NULL")),
         "approved": int(one("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status IN ('approved','applied')")),
+        "to_apply": int(one("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='approved'")),
         # Real applications only: never the bulk "mark applied" (CLAUDE.md: keep wording honest).
         "applied": int(one("SELECT COUNT(*) FROM jobs WHERE user_id=? AND status='applied' "
                            "AND COALESCE(applied_via,'') IN ('engine','manual')")),
@@ -128,11 +129,28 @@ def _s(n, word, plural=None):
     return "%d %s" % (n, word if n == 1 else (plural or word + "s"))
 
 
+def titles_link(link: str) -> str:
+    """The app's link, opening Settings on the job titles (`?view=titles`, read in web/src/App.tsx)."""
+    return link + ("&" if "?" in link else "?") + "view=titles"
+
+
+def apply_nudge(st: dict) -> str:
+    """For someone who approved jobs and applied to none: point at the step that counts.
+    Empty when it does not apply. Counts jobs still in 'approved', so it never says a job
+    "is waiting" that was marked applied in bulk."""
+    n = st.get("to_apply", 0)
+    if not n or st.get("applied"):
+        return ""
+    return ("%s you approved %s waiting for an application. Open one and I'll write the cover letter "
+            "and tailor your CV." % (_s(n, "job"), "is" if n == 1 else "are"))
+
+
 def compose(step: str, first: str, st: dict, link: str):
     """(variant, sender, subject, body) - body without the footer - or None to
     skip. `first` is the first name or ''. sender is 'noa' or 'eran'."""
     hi = "Hi %s," % first if first else "Hi,"
     name = first or "you"
+    nudge = apply_nudge(st)
     picks = "\n".join("  - %s at %s" % (t, c) if c else "  - %s" % t for t, c in st.get("top", []))
 
     if step == "welcome":
@@ -160,7 +178,11 @@ def compose(step: str, first: str, st: dict, link: str):
             return ("empty", "noa", "Let's widen the net, %s" % name,
                     "%s\n\nI haven't found anything that fits what you asked for yet. That usually means the "
                     "titles are narrower than the market.\n\nAdd a title or two (the same role one level up or "
-                    "down works well) and I'll search again:\n\n%s\n\n%s" % (hi, link, NOA_SIG))
+                    "down works well) and I'll search again:\n\n%s\n\n%s" % (hi, titles_link(link), NOA_SIG))
+        if nudge:                                # approved, applied to none: the step that counts
+            return ("active", "noa", "Nice start, %s" % name,
+                    "%s\n\nYou've already been through your picks. %s\n\n"
+                    "Your next picks come in with today's search.\n\n%s\n\n%s" % (hi, nudge, link, NOA_SIG))
         return ("active", "noa", "Nice start, %s" % name,
                 "%s\n\nYou've already been through your picks. %s\n\nOpen any job you approved and I'll "
                 "prepare what you need to apply: a cover letter and your CV tailored to that role.\n\n"
@@ -194,8 +216,16 @@ def compose(step: str, first: str, st: dict, link: str):
                     "%s\n\nOne week in. I brought you %s, and you were busy: %s.\n\n%s\n\n"
                     "Keep going. Today's picks are in:\n\n%s\n\n%s"
                     % (hi, _s(st["picked"], "pick"), done,
-                       "%s still waiting for you." % _s(st["to_swipe"], "job") if st["to_swipe"] else
-                       "Every swipe sharpens the next picks.", link, NOA_SIG))
+                       nudge or ("%s still waiting for you." % _s(st["to_swipe"], "job") if st["to_swipe"] else
+                                 "Every swipe sharpens the next picks."), link, NOA_SIG))
+        if st["picked"] == 0:
+            # Setup done, a week of searches, nothing found. "quiet" below would say "I've kept
+            # picking for you this week" - untrue for this user (email review, 2026-11-13).
+            return ("empty", "noa", "Let's widen the net, %s" % name,
+                    "%s\n\nA week in, and I haven't found the right ones for you yet. That usually means the job "
+                    "titles or locations are narrower than the market.\n\nAdd a title or two (the same role one "
+                    "level up or down works well) and I'll search again tomorrow:\n\n%s\n\n%s"
+                    % (hi, titles_link(link), NOA_SIG))
         return ("quiet", "noa", "Should I keep looking, %s?" % name,
                 "%s\n\nI've kept picking for you this week%s, but you haven't approved any yet.\n\n"
                 "If they're off, tell me what to change: update your job titles or locations in Settings and "
@@ -275,7 +305,7 @@ def run(get_db, send, base_url: str, track=None, now: datetime | None = None,
 _TOP = [("Senior Product Manager", "Lumen Health"), ("Product Manager, Growth", "Orbitly"),
         ("Product Manager - Payments", "Kesef Labs")]
 _BASE = {"setup_done": True, "has_cv": True, "to_swipe": 0, "picked": 7, "approved": 0, "applied": 0,
-         "activated": False, "top": []}
+         "activated": False, "top": [], "to_apply": 0}
 SAMPLES = [
     ("welcome", "setup", {"setup_done": False, "picked": 0}),
     ("day1", "setup", {"setup_done": False, "picked": 0}),
@@ -287,6 +317,7 @@ SAMPLES = [
     ("day7", "setup", {"setup_done": False, "picked": 0}),
     ("day7", "active", {"picked": 28, "approved": 9, "applied": 2, "activated": True, "to_swipe": 4}),
     ("day7", "quiet", {"picked": 28, "to_swipe": 12}),
+    ("day7", "empty", {"picked": 0}),
 ]
 
 
