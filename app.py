@@ -759,9 +759,77 @@ def _notify_status(user_id) -> dict:
     return st
 
 
-def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None) -> dict:
+def _notify_search_result(user_id, inserted, new_jobs_info, locked_n=0, held_n=0, by_user=False,
+                          first_search=False, admin_lines=()):
+    """What the user hears when a search ends (rewritten 2026-11-15, dailymsg.py).
+
+    New picks: a push naming the best one, and Noa's letter (email / Telegram /
+    WhatsApp) with up to three picks and why each fits. The first search sends no
+    email here: "Noa found your first matches" has gone. A search the USER started
+    that only added to tomorrow's reserve gets a one-line push. Nothing new, or a
+    scheduled run that only fed the reserve: nothing. Link re-check counts
+    (`admin_lines`) are added only to an admin's own letter. Returns the
+    deliver_notification result, or None when nothing was sent."""
+    import dailymsg
+    push, subject, body = "", "", ""
+    if inserted > 0:
+        try:
+            urls = [i.get("url") for i in new_jobs_info if i.get("url")]
+            c = database.get_db()
+            try:
+                top = [(r["title"], r["company"], r["why_relevant"]) for r in (c.execute(
+                    ("SELECT title, company, why_relevant FROM jobs WHERE user_id=? AND url IN (%s) "
+                     % ",".join("?" * len(urls))) + "ORDER BY " + entitlements._RANK + " DESC LIMIT 3",
+                    [user_id] + urls).fetchall() if urls else [])]
+                row = c.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone()
+            finally:
+                c.close()
+            if not top:
+                top = [(i.get("title"), i.get("company"), "") for i in new_jobs_info[:3]]
+            name = ((row["name"] if row else "") or "").strip()
+            m = dailymsg.new_picks(name.split()[0] if name else "", top, inserted, MOBILE_URL.rstrip("/") + "/app")
+            push, subject, body = m["push"], m["subject"], m["body"]
+        except Exception as exc:
+            print(f"[run-search] ERROR could not write Noa's message, sending the short one: {exc}")
+            push = f"Today's {inserted} are in." if inserted > 1 else "Today's pick is in."
+        if locked_n and body:
+            body += f"\n\n+{locked_n} more found - upgrade your plan to see them."
+    elif locked_n:
+        push = f"{locked_n} new match(es) found - upgrade your plan to see them"
+    elif held_n and by_user:
+        push = dailymsg.saved_for_tomorrow()
+    if not push:
+        return None
+    if body and admin_lines and _is_admin_id(user_id):
+        body += "\n\n--\nAdmin only: " + " ".join(admin_lines)
+    return deliver_notification(user_id, push, url_suffix=home_url() + "#new", subject=subject, body=body,
+                                email=bool(body) and not first_search)
+
+
+def _is_admin_id(user_id) -> bool:
+    try:
+        c = database.get_db()
+        try:
+            r = c.execute("SELECT role FROM users WHERE id=?", (user_id,)).fetchone()
+        finally:
+            c.close()
+        return bool(r) and (r["role"] or "").lower() == "admin"
+    except Exception as exc:
+        print(f"[notify] ERROR could not read the role of user {user_id}: {exc}")
+        return False
+
+
+def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None,
+                         subject: str = "", body: str = "", email: bool = True, from_noa: bool = True) -> dict:
     """Deliver to every channel the user has; return {channel: "sent" | "FAILED: ..." | ...}.
-    Each outcome is also logged (activity_log, type notification)."""
+    Each outcome is also logged (activity_log, type notification).
+
+    `message` is the push text. `body`, when given, is what email / Telegram /
+    WhatsApp carry instead (a complete message with its own link and signature),
+    and `subject` is the email's subject. `email=False` skips the email channel -
+    for the first search, whose "first matches" email has already gone.
+    `from_noa=False` is for account and admin news: the push is titled "Job Hunter"
+    and carries the app icon instead of Noa's name and picture."""
     message = repair_mojibake(message)
     results = {}
     conn = database.get_db()
@@ -774,7 +842,8 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
     # Web push is the primary channel: it fires on EVERY notification, before
     # (and independent of) the email/Telegram/WhatsApp channels.
     try:
-        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url, title="Noa")   # job news is Noa's (2026-11-12)
+        pr = send_web_push_to_user(user_id, message, url_suffix, url=push_url,
+                                   title="Noa" if from_noa else "Job Hunter")   # job news is Noa's (2026-11-12)
         if pr["sent"]:
             results["push"] = "sent to %d device(s)" % pr["sent"] + (
                 ", %d failed" % pr["failed"] if pr["failed"] else "")
@@ -795,7 +864,7 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
     if not channels or channels == ["none"]:
         return results
     dashboard_url = f"{MOBILE_URL}{url_suffix}"
-    msg_with_link = message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
+    msg_with_link = repair_mojibake(body) if body else message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
     for channel in channels:
         try:
             if channel == "telegram":
@@ -808,10 +877,13 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
                 send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
                               p["whatsapp_number"], msg_with_link)
             elif channel == "email":
+                if not email:
+                    results[channel] = "skipped: another email covered this"
+                    continue
                 if not p["email_address"]:
                     raise RuntimeError("Email is selected but no address is set")
-                send_email(to_addr=p["email_address"], subject="Job Hunter Notification", body=msg_with_link,
-                           as_noa=True)
+                send_email(to_addr=p["email_address"], subject=subject or "Job Hunter Notification",
+                           body=msg_with_link, as_noa=True)
             else:
                 continue
             results[channel] = "sent"
@@ -881,7 +953,9 @@ def send_web_push_to_user(user_id, message, url_suffix="", url=None, title="Job 
     if not rows:
         return out
     body = (message or "").strip().split("\n")[0][:160]
-    payload = json.dumps({"title": title, "body": body, "url": url or _push_link(url_suffix)})
+    # "from" picks the picture in the service worker (web/public/sw.js): Noa's for her pushes.
+    payload = json.dumps({"title": title, "body": body, "url": url or _push_link(url_suffix),
+                          "from": "noa" if title == "Noa" else "app"})
     for r in rows:
         try:
             sub = json.loads(r["subscription"])
@@ -948,7 +1022,7 @@ def notify_admin_new_user(new_user_email: str, new_user_name: str, provider: str
     via = {"google": " with Google", "password": " with email and password"}.get(provider, "")
     message = f"\U0001F680 New User Alert: {display} ({new_user_email}) has joined Job-Hunter{via}."
     try:
-        res = deliver_notification(admin_id, message, url_suffix=home_url())
+        res = deliver_notification(admin_id, message, url_suffix=home_url(), from_noa=False)
         print(f"[admin-notify] new user {new_user_email}: {res}")
     except Exception as e:
         print(f"[admin-notify] ERROR delivery failed for new user {new_user_email}: {e}")
@@ -1072,7 +1146,7 @@ def _llm_breach_alert(message: str):
         print(f"[llm-alert] log failed: {e}")
     if admin_id:
         try:
-            deliver_notification(admin_id, message, url_suffix=home_url())
+            deliver_notification(admin_id, message, url_suffix=home_url(), from_noa=False)
         except Exception as e:
             print(f"[llm-alert] notify failed (non-fatal): {e}")
 
@@ -1149,7 +1223,7 @@ def check_notifications():
         message = data.get("message", "Job Hunter notification")
         user_id = data.get("user_id", 1)
         os.remove(notify_file)
-        deliver_notification(user_id, message)
+        deliver_notification(user_id, message, from_noa=False)
     except Exception as e:
         print(f"[notify] Error: {e}")
 
@@ -1572,8 +1646,10 @@ def _paid_pool_health():
         return {"error": ("%s: %s" % (type(exc).__name__, exc))[:160]}
 
 @_attribute_gemini_to
-def run_job_search(user_id: int):
-    """Search for new jobs via multi-round Anthropic web-search (one call per job title)."""
+def run_job_search(user_id: int, by_user: bool = False):
+    """Search for new jobs via multi-round Anthropic web-search (one call per job title).
+    `by_user`: the user pressed "search" (not the scheduler) - it decides whether a run
+    that only added to the reserve says so."""
     if user_id in _search_running:
         return
     _search_running.add(user_id)
@@ -2773,11 +2849,9 @@ def run_job_search(user_id: int):
                     all_jobs_data.append(j)
 
                 if not all_jobs_data:
+                    # Nothing new: nothing is sent (2026-11-15). This early exit was missed when the
+                    # daily message was rewritten (#130) and still pushed "No new jobs found this run".
                     database.log_activity(user_id, "jobs_searched", "Search returned no new results")
-                    try:
-                        deliver_notification(user_id, f"🔍 Search Complete — {today}\n\nNo new jobs found this run.", url_suffix=home_url() + "#new")
-                    except Exception as _dn_err:
-                        print(f"[run-search] deliver_notification error: {_dn_err}")
                     return
 
                 # ── URL check for new jobs ───────────────────────────────────────
@@ -3042,51 +3116,30 @@ def run_job_search(user_id: int):
                                         finally:
                                             conn.close()
 
-                                if _funnel(user_id, "first_search"):
+                                _first_search = bool(_funnel(user_id, "first_search"))
+                                if _first_search:
                                     _first_matches_email(user_id, inserted)
                                 database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)"
                                                       + (f"; {locked_n} more need a higher plan" if locked_n else "")
                                                       + (f"; {held_n} kept for the coming days" if held_n else ""))
 
-                                # ── Consolidated search notification ─────────────────────────────
-                                # The FIRST line is what the phone push banner shows, so summarize the
-                                # result there (count + top companies) instead of just "Search Complete".
-                                if inserted > 0:
-                                    _uniq_co = []
-                                    for _ci in new_jobs_info:
-                                        _cco = (_ci.get("company") or "").strip()
-                                        if _cco and _cco not in _uniq_co:
-                                            _uniq_co.append(_cco)
-                                    _co_str = ", ".join(_uniq_co[:4]) + ("…" if len(_uniq_co) > 4 else "")
-                                    _headline = f"🎯 {inserted} new role(s) for review"
-                                    if _co_str:
-                                        _headline += f" — {_co_str}"
-                                    notif_lines = [_headline, ""]
-                                    for info in new_jobs_info[:10]:
-                                        icon = "🔗" if info["url_ok"]==1 else ("⚠️" if info["url_ok"]==0 else "")
-                                        notif_lines.append(f"  • {info['title']} @ {info['company']} {icon}".rstrip())
-                                    if len(new_jobs_info)>10: notif_lines.append(f"  … and {len(new_jobs_info)-10} more")
-                                elif locked_n:
-                                    notif_lines = [f"🔒 {locked_n} new match(es) found — upgrade your plan to see them"]
-                                elif held_n:
-                                    notif_lines = ["✨ Noa found more matches for you. You've had today's picks; "
-                                                   "the next ones come in tomorrow."]
-                                else:
-                                    notif_lines = [f"🔍 Search done — no new matches today ({today})"]
-                                if inserted > 0 and locked_n:
-                                    notif_lines.append(f"\n🔒 +{locked_n} more found — upgrade your plan to see them")
+                                # ── What the user hears about this search (rewritten 2026-11-15) ──
+                                # Noa says what she found and why (dailymsg.py). A day with nothing new
+                                # sends nothing; link re-check counts never go to users.
+                                _admin_lines = []
                                 if (hist_alive+hist_dead)>0:
-                                    notif_lines.append(f"\n🔄 Re-checked {hist_alive+hist_dead} existing job URL(s):")
-                                    notif_lines.append(f"  ✅ {hist_alive} alive  ❌ {hist_dead} dead")
+                                    _admin_lines.append(f"Re-checked {hist_alive+hist_dead} existing job link(s): "
+                                                        f"{hist_alive} alive, {hist_dead} dead.")
                                 if reval_dead>0:
-                                    _rmsg = f"⚠️ {reval_dead} previously-'Verified' link(s) now dead (parked/closed/expired)"
-                                    if reval_removed>0:
-                                        _rmsg += f" — {reval_removed} auto-removed from review"
-                                    notif_lines.append(_rmsg)
+                                    _admin_lines.append(f"{reval_dead} previously verified link(s) are now dead"
+                                                        + (f"; {reval_removed} removed from review." if reval_removed>0 else "."))
+                                if _admin_lines:
+                                    print(f"[run-search] user {user_id}: link checks - " + " ".join(_admin_lines))
                                 try:
-                                    deliver_notification(user_id, "\n".join(notif_lines), url_suffix=home_url() + "#new")
+                                    _notify_search_result(user_id, inserted, new_jobs_info, locked_n, held_n,
+                                                          by_user, _first_search, _admin_lines)
                                 except Exception as _dn_err:
-                                    print(f"[run-search] deliver_notification error: {_dn_err}")
+                                    print(f"[run-search] ERROR the search notification failed: {_dn_err}")
                                 print(f"[run-search] user {user_id}: inserted={inserted} hist_checked={hist_alive+hist_dead}")
                             finally:
                                 conn.close()
@@ -3106,11 +3159,9 @@ def run_job_search(user_id: int):
         _tb_str = _tb.format_exc()
         print(f"[run-search] Error: {type(e).__name__}: {e}\n{_tb_str}")
         err_summary = f"{type(e).__name__}: {str(e)[:120]}"
+        # The user is told nothing (2026-11-15): a raw error helps no one, and the next
+        # scheduled search retries. The ERROR line above reaches Sentry, which alerts the owner.
         database.log_activity(user_id, "jobs_searched", f"Job search failed — {err_summary}")
-        try:
-            deliver_notification(user_id, f"\u274c Job search failed\n\n{err_summary}\n\nWill retry at next scheduled time.", url_suffix=home_url())
-        except Exception as _ne:
-            print(f"[run-search] Notification also failed: {_ne}")
     finally:
         _search_running.discard(user_id)
         # Step 1b: give the new (and still-open) jobs the company's own link.
@@ -6445,7 +6496,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             res = deliver_notification(
                 user_id, "\U0001F514 Job Hunter notification check \u2014 if you can read this, this channel works.",
-                url_suffix="/app")
+                url_suffix="/app", from_noa=False)
             self.send_json({"results": res or {}, **_notify_status(user_id)})
             return
 
@@ -7672,7 +7723,7 @@ class Handler(BaseHTTPRequestHandler):
             # A row, not a thread. Pressing the button twice while one is in
             # flight is now a no-op rather than a second Gemini-spending search.
             try:
-                _run_id = jobqueue.enqueue(uid, "search")
+                _run_id = jobqueue.enqueue(uid, "search", payload={"by_user": True})
             except jobqueue.DailyCapReached as _cap:
                 # 429, not 403: this clears by itself at midnight UTC, and the
                 # message says so rather than reading as a permanent refusal.
@@ -8022,7 +8073,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             message = data.get("message", "Job Hunter notification")
             user_id = int(data.get("user_id", 1))
-            deliver_notification(user_id, message)
+            deliver_notification(user_id, message, from_noa=False)
             self.send_json({"success": True})
             return
 
@@ -8132,7 +8183,8 @@ if __name__ == "__main__":
     # Handlers are registered from here, not imported by the worker, so that
     # worker.py stays free of app.py - which is what makes moving it to its own
     # process later a CMD change rather than a refactor.
-    worker.register("search", lambda user_id, _payload=None: run_job_search(user_id))
+    worker.register("search", lambda user_id, _payload=None: run_job_search(
+        user_id, by_user=bool((_payload or {}).get("by_user"))))
     worker.register("apply", lambda user_id, _payload=None: run_job_apply(user_id))
     worker.register("links", lambda user_id, _payload=None: run_link_resolve(user_id))
     worker.start_background()
