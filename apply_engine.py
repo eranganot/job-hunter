@@ -1030,7 +1030,7 @@ def _wait_comeet_frame(page, ms: int = 8000):
     return None
 
 
-def _comeet_verdict(status: int, body: str) -> dict:
+def _comeet_verdict(status: int, body: str, prepared: list | None = None) -> dict:
     """Comeet's answer to the application request (careers-api/.../apply).
 
     423 is Comeet refusing the app's automated browser, not the applicant
@@ -1045,7 +1045,7 @@ def _comeet_verdict(status: int, body: str) -> dict:
                 "confirmation_text": f"Comeet accepted the application (HTTP {status})"}
     if status == 423:
         return {"success": False, "status": "manual_required", "confirmation_text": "",
-                "apply_failure_type": "captcha",
+                "apply_failure_type": "captcha", "prepared": prepared or [],
                 "apply_failure_detail": "Comeet refused the app's automated browser (HTTP 423)",
                 "error": "Comeet doesn't accept applications from the app's automated browser, so nothing "
                          "was sent. Applying yourself from the link works - your details are fine."}
@@ -1128,6 +1128,9 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
             except Exception as exc:
                 print(f"[apply-engine] Comeet response hook: {type(exc).__name__}")
         page.on("response", _on_response)
+        # What was filled, read before Submit (Comeet may reset the form after
+        # refusing it): the user's ready-to-paste sheet when Comeet answers 423.
+        prepared = _form_snapshot(frame)
         frame.click('button:has-text("SUBMIT APPLICATION")', timeout=5_000)
         for _ in range(20):                           # the request answers within seconds
             if api:
@@ -1136,7 +1139,7 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
         if api:
             status, body = api[-1]
             print(f"[apply-engine] Comeet apply answered HTTP {status}")
-            return _comeet_verdict(status, body)
+            return _comeet_verdict(status, body, prepared)
 
         # Comeet-specific verdict. _verify_submission would call a page without
         # a visible error and without a <form> "submitted"; here success needs
@@ -1239,7 +1242,8 @@ _SNAPSHOT_JS = r"""() => {
 
 def _form_snapshot(page) -> list:
     """[{label, value}] of everything filled in on the form - for the user's
-    ready-to-paste sheet when the app could not send it (Lever's human check)."""
+    ready-to-paste sheet when the app could not send it (Lever's human check,
+    Comeet's 423). `page` may be a frame: Comeet's form lives in one."""
     try:
         return [{"label": re.sub(r"\s*[*✱]\s*$", "", x["label"]).strip(), "value": x["value"]}
                 for x in (page.evaluate(_SNAPSHOT_JS) or []) if x.get("label") and x.get("value")]
