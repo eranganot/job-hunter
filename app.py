@@ -6344,6 +6344,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             print(f"[account] user {user_id} requested deletion; scheduled {when} UTC")
+            # The date and how to cancel, by email (GTM row 8). The request stands whether or
+            # not the email goes out, so a mail failure is logged, never returned.
+            try:
+                _subj, _txt = accountdata.deletion_email(user.get("name") or "", when,
+                                                         MOBILE_URL.rstrip("/") + "/login")
+                send_email(user.get("email") or "", _subj, _txt)
+            except Exception as _mail_err:
+                print(f"[account] ERROR deletion email for user {user_id} not sent: {_mail_err}")
             body = json.dumps({"success": True, "delete_after": when,
                                "grace_days": accountdata.GRACE_DAYS}).encode()
             self.send_response(200)

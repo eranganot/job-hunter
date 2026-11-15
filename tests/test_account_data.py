@@ -150,3 +150,45 @@ def test_admin_is_never_purged_even_if_a_row_says_so():
               "VALUES (1,'a','a@x','h','s','2026','admin','2026-01-01 00:00:00')")
     c.commit()
     assert accountdata.purge_due(c) == []
+
+
+# ── the email that says when, and how to cancel (GTM row 8, 2026-11-15) ────
+
+def test_the_deletion_email_names_the_date_and_how_to_cancel():
+    import accountdata
+    # 14 days after 15 Nov 2026 21:30 UTC is 23:30 on 29 Nov in Israel: the date is the user's, not UTC's
+    subject, body = accountdata.deletion_email("Maya Levi", "2026-11-29 21:30:00", "https://job-hunter.work/login")
+    assert subject == "Your Job Hunter account will be deleted on 29 November"
+    assert body.startswith("Hi Maya,\n\nYou asked to delete your Job Hunter account. "
+                           "It will be deleted on Sunday, 29 November 2026, 14 days from now.")
+    assert "Nothing is deleted before that date." in body
+    assert "Sign in before then and the deletion is cancelled" in body and "https://job-hunter.work/login" in body
+    assert "Didn't ask for this? Sign in now to cancel it, then change your password" in body
+    assert body.endswith("Job Hunter") and "Noa\n" not in body          # an account email, not one of Noa's
+    # past midnight in Israel it is the next day there
+    assert "Monday, 30 November 2026" in accountdata.deletion_email("", "2026-11-29 22:30:00", "L")[1]
+    assert accountdata.deletion_email("", "2026-11-29 22:30:00", "L")[1].startswith("Hi,\n\n")
+
+
+def test_requesting_deletion_sends_that_email_and_a_mail_failure_does_not_block_it(stack, monkeypatch):  # noqa: F811
+    app, db = stack["app"], stack["db"]
+    sent = []
+    monkeypatch.setattr(app, "send_email", lambda to, subject, body, **k: sent.append((to, subject, body, k)))
+    c = _register(stack, "dated@example.test")
+    st, _l, body = c.post_json("/api/account/delete", {"confirm_email": "dated@example.test"})
+    assert st == 200
+    (to, subject, text, kw), = [m for m in sent if "will be deleted" in m[1]]
+    assert to == "dated@example.test" and "/login" in text and not kw.get("as_noa")
+    assert "14 days from now" in text
+
+    def boom(*a, **k):
+        raise RuntimeError("mail is down")
+    monkeypatch.setattr(app, "send_email", boom)
+    c2 = _register(stack, "dated2@example.test")
+    st, _l, body = c2.post_json("/api/account/delete", {"confirm_email": "dated2@example.test"})
+    assert st == 200 and json.loads(body)["delete_after"]                # the request still stands
+    conn = db.get_db()
+    try:
+        assert conn.execute("SELECT delete_after FROM users WHERE id=?", (_uid(db, "dated2@example.test"),)).fetchone()[0]
+    finally:
+        conn.close()
