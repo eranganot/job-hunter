@@ -197,3 +197,14 @@ def test_a_search_that_finds_nothing_sends_nothing():
     import app
     src = inspect.getsource(app.run_job_search)
     assert "No new jobs found this run" not in src.replace('still pushed "No new jobs found this run"', "")
+
+
+def test_the_push_test_comes_from_noa():
+    """The owner pressed the test after row 6 and saw the app icon: correct for an account push, but
+    the test is how a user checks what THEIR pushes will look like, and those are Noa's."""
+    import inspect
+    import app
+    src = inspect.getsource(app)
+    at = src.index('if path == "/api/push/test":')
+    block = src[at:at + 700]
+    assert 'title="Noa"' in block and "It's Noa. Push is working" in block
