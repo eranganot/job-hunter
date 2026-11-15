@@ -814,7 +814,8 @@ def _is_admin_id(user_id) -> bool:
         finally:
             c.close()
         return bool(r) and (r["role"] or "").lower() == "admin"
-    except Exception:
+    except Exception as exc:
+        print(f"[notify] ERROR could not read the role of user {user_id}: {exc}")
         return False
 
 
