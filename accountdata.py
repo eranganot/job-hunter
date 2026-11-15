@@ -118,6 +118,33 @@ def request_deletion(conn, user_id: int, now=None) -> str:
     return when
 
 
+def deletion_email(name: str, delete_after: str, sign_in_url: str):
+    """(subject, body) of the email sent the moment a deletion is requested (2026-11-15).
+
+    Until now the only word of the 14 days was one line on the sign-in page, shown
+    once. The email says the DATE (in Israel time, where the users are), that
+    nothing is deleted before it, that signing in cancels it, and what to do if
+    the request was not theirs - the request needs only an open session and the
+    account's own email address, so someone at an unlocked phone could make it."""
+    from zoneinfo import ZoneInfo
+    when = datetime.strptime(delete_after[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    local = when.astimezone(ZoneInfo("Asia/Jerusalem"))
+    day = "%s, %d %s %d" % (local.strftime("%A"), local.day, local.strftime("%B"), local.year)
+    first = (name or "").strip().split()[0] if (name or "").strip() else ""
+    subject = "Your Job Hunter account will be deleted on %d %s" % (local.day, local.strftime("%B"))
+    body = (
+        "Hi%s,\n\n"
+        "You asked to delete your Job Hunter account. It will be deleted on %s, %d days from now.\n\n"
+        "Nothing is deleted before that date. Changed your mind? Sign in before then and the deletion is "
+        "cancelled, with everything as you left it:\n\n%s\n\n"
+        "On that date we delete your profile, your CV, your jobs and everything Noa prepared for you. "
+        "It can't be undone afterwards.\n\n"
+        "Didn't ask for this? Sign in now to cancel it, then change your password in Settings.\n\n"
+        "Job Hunter"
+        % ((" " + first) if first else "", day, GRACE_DAYS, sign_in_url))
+    return subject, body
+
+
 def cancel_deletion(conn, user_id: int) -> bool:
     """True if a pending deletion was cancelled (called on every sign-in)."""
     cur = conn.execute("UPDATE users SET delete_after=NULL WHERE id=? AND delete_after IS NOT NULL", (user_id,))
