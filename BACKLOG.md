@@ -11,8 +11,8 @@ Priority: **P0** security/correctness Â· **P1** reliability or launch-blocking Â
 | # | Step | Item | Pri | Value | Effort | State (2026-11-08) |
 |---|---|---|---|---|---|---|
 | 1 | 16 | **Board-first search** (Step 1, part 2): search the job boards the app already knows (Comeet, Greenhouse, Lever, Ashby, SmartRecruiters, Workday, plus every board the careers-map learns) for the user's titles, so new jobs arrive with a direct link instead of being fixed later. Includes **resolve-before-show**: run the link lookups at intake, so a job reaches the swipe deck already direct where possible | P1 | High | M-L | Not started. Why: the main search brings ~45% board/aggregator links (by_source, 2026-11-07) and the share of open jobs follows the share of incoming ones |
-| 2 | 1 | **Direct-link target**: decide after one week of board-first data. Today 58.1%; with the current tools ~65% (measured hit rates); 70% needs #1; **80%+** also needs the LinkedIn-only rule (#3) | P1 | High | S | Waiting on #1's data |
-| 3 | 17 | **LinkedIn-only jobs that cannot be resolved:** keep in the queue (as today, badge + 5-point penalty), move to a separate "Apply on LinkedIn" list not counted in the share and never auto-applied, or drop. **The owner decides with #1's numbers**; recommendation: a separate list | P1 | High | S-M | Decision pending |
+| 2 | 1 | **Direct-link target**: decide after one week of board-first data. Today 58.1%; with the current tools ~65% (measured hit rates); 70% needs #1; **80%+** also needs the LinkedIn-only rule (#3) | P1 | High | S | Week 1 measured (71.9% of open jobs direct; >=65% of new); by-source split fixed 2026-11-15 - target still to set |
+| 3 | 17 | **LinkedIn-only jobs that cannot be resolved:** keep in the queue as today (badge + 5-point penalty) | P1 | High | S | **Decided 2026-11-15: keep as now** |
 | 4 | 15 | Lever hCaptcha: does it block real submits? | P2 | Med | S-M | After #1 (The owner's order, 2026-11-08) |
 
 ## Waiting on the owner

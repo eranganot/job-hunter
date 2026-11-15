@@ -145,3 +145,37 @@ def test_scale_blocking_keeps_it_linear_enough():
                              JobSource.GREENHOUSE))
     canon = Deduplicator().merge(jobs)
     assert len(canon) == 300
+
+
+def test_dedup_keeps_the_callers_source_name():
+    """Found 2026-11-15: every source name outside JobSource came back from
+    deduplicate_raw as "unknown" - the board-first search's "board-comeet" etc.
+    included - so 562 of 947 jobs stored in a week had no usable source and the
+    link report could not credit the board-first search."""
+    from ingestion import integration
+    raw = [
+        {"job_title": "Senior PM", "company": "Acme", "source": "board-comeet",
+         "url": "https://www.comeet.com/jobs/acme/A1/senior-pm/X1"},
+        {"job_title": "Product Lead", "company": "Beta", "source": "board-ashby",
+         "url": "https://jobs.ashbyhq.com/beta/1"},
+        {"job_title": "PM", "company": "Gamma", "source": "greenhouse",
+         "url": "https://boards.greenhouse.io/gamma/jobs/1"},
+        {"job_title": "Head of Product", "company": "Delta", "source": "",
+         "url": "https://example.test/jobs/9"},
+    ]
+    got = {d["company"]: d["source"] for d in integration.deduplicate_raw(raw)}
+    assert got == {"Acme": "board-comeet", "Beta": "board-ashby",
+                   "Gamma": "greenhouse", "Delta": "unknown"}
+
+
+def test_a_merged_duplicate_keeps_the_winners_source_name():
+    from ingestion import integration
+    raw = [
+        {"job_title": "Senior Product Manager", "company": "Acme", "source": "linkedin",
+         "url": "https://www.linkedin.com/jobs/view/123"},
+        {"job_title": "Senior Product Manager", "company": "Acme", "source": "board-greenhouse",
+         "url": "https://boards.greenhouse.io/acme/jobs/77", "description": "x" * 400},
+    ]
+    out = integration.deduplicate_raw(raw)
+    assert len(out) == 1
+    assert out[0]["url"].startswith("https://boards.greenhouse.io") and out[0]["source"] == "board-greenhouse"

@@ -249,6 +249,10 @@ class NormalizedJob(BaseModel):
 
     apply_type: ApplyType = ApplyType.UNKNOWN
     source: JobSource = JobSource.UNKNOWN
+    # The caller's own source name, kept verbatim. JobSource is a fixed list;
+    # names outside it ("board-comeet", "secrettlv", ...) used to come back
+    # from dedup as "unknown" - 562 of 947 jobs stored 2026-11-08..15.
+    source_label: str = ""
     source_tier: SourceTier = SourceTier.FREE
     source_category: SourceCategory = SourceCategory.SEARCH
     source_job_id: Optional[str] = None
@@ -325,6 +329,7 @@ class NormalizedJob(BaseModel):
             posted_at=_coerce_date(d.get("publish_date") or d.get("posted_at")),
             apply_type=infer_apply_type(url, source),
             source=source,
+            source_label=(d.get("source") or "").strip(),
             source_category=_CATEGORY_BY_SOURCE.get(source, SourceCategory.SEARCH),
             source_tier=_TIER_BY_SOURCE.get(source, SourceTier.FREE),
             extra={"_legacy": {k: d[k] for k in d
@@ -352,6 +357,7 @@ class CanonicalJob(BaseModel):
     apply_type: ApplyType = ApplyType.UNKNOWN
 
     primary_source: JobSource = JobSource.UNKNOWN
+    source_label: str = ""                 # the winner's own name (see NormalizedJob)
     sources: list[SourceProvenance] = Field(default_factory=list)
     duplicate_count: int = 1
     dedup_confidence: float = 1.0          # 1.0 = exact URL, lower = fuzzy match
@@ -367,6 +373,7 @@ class CanonicalJob(BaseModel):
             url=job.url, description=job.description,
             full_description=job.full_description, posted_at=job.posted_at,
             apply_type=job.apply_type, primary_source=job.source,
+            source_label=job.source_label,
             sources=[job.provenance()], duplicate_count=1, dedup_confidence=1.0,
         )
 
@@ -380,7 +387,7 @@ class CanonicalJob(BaseModel):
             "url": self.url,
             "description": self.description or self.title,
             "full_description": self.full_description or self.description or "",
-            "source": self.primary_source.value,
+            "source": self.source_label or self.primary_source.value,
             "publish_date": self.posted_at.isoformat() if self.posted_at else None,
             # observability extras (ignored by old code, handy for debugging/UI)
             "_duplicate_count": self.duplicate_count,
