@@ -136,3 +136,51 @@ def test_off_unless_switched_on(monkeypatch):
     assert not lifecycle.enabled()
     monkeypatch.setenv("LIFECYCLE_EMAILS", "1")
     assert lifecycle.enabled()
+
+
+def test_day7_does_not_claim_picks_that_never_came():
+    """Email review 2 (2026-11-13): a user who finished setup and got NO picks all week was told
+    "I've kept picking for you this week, but you haven't approved any yet"."""
+    st = dict(lifecycle._BASE, picked=0)
+    variant, sender, subject, body = lifecycle.compose("day7", "Maya", st, "https://x.test/app")
+    assert (variant, sender) == ("empty", "noa") and subject == "Let's widen the net, Maya"
+    assert "kept picking" not in body and "haven't found the right ones" in body
+    assert "https://x.test/app?view=titles" in body
+    # with picks and no approval it is still "quiet"
+    assert lifecycle.compose("day7", "Maya", dict(lifecycle._BASE, picked=28, to_swipe=12), "L")[0] == "quiet"
+    # day 1's empty email opens the titles too
+    assert "L?view=titles" in lifecycle.compose("day1", "Maya", dict(lifecycle._BASE, picked=0), "L")[3]
+
+
+def test_approved_but_not_applied_is_pointed_at_applying():
+    """Email review 3: with 6 approved and 0 applied, day 7 said "Every swipe sharpens the next picks"
+    and nothing about the step that counts. Day 1 gets the same nudge."""
+    st = dict(lifecycle._BASE, picked=28, approved=6, to_apply=6, applied=0, activated=True)
+    line = "6 jobs you approved are waiting for an application. Open one and I'll write the cover letter and tailor your CV."
+    for step in ("day1", "day7"):
+        variant, _s, _subj, body = lifecycle.compose(step, "Maya", st, "L")
+        assert variant == "active" and line in body, step
+        assert "Every swipe sharpens" not in body
+    one = lifecycle.compose("day7", "Maya", dict(st, approved=1, to_apply=1), "L")[3]
+    assert "1 job you approved is waiting for an application." in one
+    # someone who has applied gets the recap, not the nudge
+    done = lifecycle.compose("day7", "Maya", dict(st, applied=2, to_apply=4), "L")[3]
+    assert "waiting for an application" not in done and "applied to 2 of them" in done
+    # approved jobs all marked applied in bulk (no real application, none left to apply to): no nudge
+    assert lifecycle.apply_nudge(dict(st, to_apply=0)) == ""
+
+
+def test_user_state_counts_jobs_still_to_apply_to(life):
+    import db as database
+    conn = database.get_db()
+    try:
+        uid = conn.execute("SELECT id FROM users ORDER BY id DESC LIMIT 1").fetchone()[0]
+        before = lifecycle.user_state(conn, uid)
+        for i, status in enumerate(("approved", "approved", "applied", "new")):
+            conn.execute("INSERT INTO jobs (user_id, title, company, url, status, found_date) "
+                         "VALUES (?,?,?,?,?,datetime('now'))", (uid, "T", "C", "https://x.test/to-apply-%d" % i, status))
+        conn.commit()
+        st = lifecycle.user_state(conn, uid)
+    finally:
+        conn.close()
+    assert st["to_apply"] - before["to_apply"] == 2 and st["approved"] - before["approved"] == 3

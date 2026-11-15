@@ -4157,11 +4157,13 @@ def _first_matches_email(user_id: int, found: int) -> None:
                     % (first, found, (" The best of them:\n\n" + best) if best else "",
                        __import__("plans").MATCHES_PER_DAY, link, lifecycle.NOA_SIG))
         else:
-            subject = "Noa's first search for you came back empty"
-            body = ("Hi%s,\n\nI searched today's openings and none fit what you asked for yet. That usually "
-                    "means the job titles or locations are narrower than the market.\n\nAdd a title or two (for "
-                    "example the same role at one level up or down) and I'll search again tomorrow, or start a "
-                    "search now:\n\n%s\n\n%s" % (first, link, lifecycle.NOA_SIG))
+            # Noa owns it (email review, 2026-11-13): "came back empty" was a weak first
+            # impression. The link opens Settings on the job titles.
+            subject = "I need one more thing from you%s" % (("," + first) if first else "")
+            body = ("Hi%s,\n\nI read today's openings against your CV and none of them fit what you asked for "
+                    "yet. That usually means the job titles or locations are narrower than the market.\n\n"
+                    "Give me a title or two more (the same role one level up or down works well) and I'll search "
+                    "again:\n\n%s\n\n%s" % (first, lifecycle.titles_link(link), lifecycle.NOA_SIG))
         send_email(r["email"], subject, body, as_noa=True)
         _track(user_id, "first_matches_email_sent", {"found": int(found)})
     except Exception as exc:
