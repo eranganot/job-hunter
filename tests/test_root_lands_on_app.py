@@ -247,3 +247,18 @@ def test_landing_assets_carry_their_file_hash_so_a_replaced_picture_is_not_serve
             assert hashlib.sha1(f.read()).hexdigest()[:8] == v, name
     c = Client(stack["port"])
     assert c.get("/landing-assets/job-details.webp?v=%s" % landing._version("job-details.webp"))[0] == 200
+
+
+def test_mobile_hero_shows_noa_and_the_job_card_under_the_main_button():
+    """GTM row 4 (2026-11-15): on one column the order is headline, lead, main button, Noa's morning
+    message, the job card, then "See how she works". Done with CSS order, so the desktop page and the
+    reading order for screen readers are unchanged."""
+    import re
+    import landing
+    page = landing.landing_html("https://x.test")
+    css = page[page.index("<style>"):page.index("</style>")]
+    block = css[css.index("@media(max-width:61.99rem)"):]
+    order = {sel: int(n) for sel, n in re.findall(r"\.hero ([.\w ]+?)\{order:(\d+)", block)}
+    assert order[".btn.go"] < order[".m2"] < order[".shot"] < order[".btn.line"]
+    assert ".hero .pitch,.hero .chat,.hero .ctas{display:contents}" in block
+    assert 'class="pitch"' in page and 'class="msg m1"' in page and 'class="msg m2"' in page
