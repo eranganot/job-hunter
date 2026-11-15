@@ -87,6 +87,7 @@ DESCRIPTION = ("We are looking for a senior product manager to own activation an
 
 # title, company, status, applied_via
 JOBS = [("Senior Product Manager, Growth", "Northwind Labs", "approved", None)]
+JOBS += [("Senior Product Manager, Growth", "Northwind Labs", "new", None)]      # the same role, still to swipe
 JOBS += [(t, c, "approved", None) for t, c in (
     ("Product Manager, Onboarding", "Orbitly"), ("Senior Product Manager", "Lumen Health"),
     ("Product Lead, Activation", "Kesef Labs"), ("Group Product Manager", "Tavor Systems"),
@@ -151,6 +152,9 @@ def seed(db_path):
     for i, (title, company, status, via) in enumerate(JOBS):
         found = (now - datetime.timedelta(days=1 + i % 9)).strftime("%Y-%m-%d %H:%M:%S")
         main = i == 0
+        rank = i
+        if status == "new":
+            found, rank = now.strftime("%Y-%m-%d %H:%M:%S"), 0
         cur = conn.execute(
             "INSERT INTO jobs (user_id, title, company, location, url, description, full_description, why_relevant, "
             "source, found_date, status, applied_date, applied_via, rejected_by, url_verified, match_score, "
@@ -161,7 +165,7 @@ def seed(db_path):
              "Six years in B2C product match the 5+ they ask for. You led onboarding experiments end to end, which is "
              "the core of this role, and you have managed product managers before.",
              "greenhouse", found, status, found if status == "applied" else None, via,
-             "user" if status == "rejected" else None, 1, 92 - i % 20, 92 - i % 15,
+             "user" if status == "rejected" else None, 1, 92 - rank % 20, 92 - rank % 15,
              COVER_LETTER if main else None, "open" if main else None, found if main else None, found[:10]))
         first = first or cur.lastrowid
     conn.execute("INSERT INTO tailored_cvs (user_id, job_id, content, created_at, edited, use_for_apply) "
@@ -175,12 +179,9 @@ def seed(db_path):
     return first
 
 
-def save_webp(png_bytes, name, box=None):
+def save_webp(png_bytes, name, w=1400):
     from PIL import Image
     im = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-    if box:
-        im = im.crop(box)
-    w = 1400
     im = im.resize((w, round(im.size[1] * w / im.size[0])), Image.LANCZOS)
     path = os.path.join(OUT, name)
     im.save(path, "WEBP", quality=82, method=6)
@@ -198,13 +199,68 @@ def main():
         with sync_playwright() as p:
             kw = {"executable_path": os.environ["CHROMIUM"]} if os.environ.get("CHROMIUM") else {}
             b = p.chromium.launch(**kw)
-            ctx = b.new_context(viewport={"width": 780, "height": 1000}, device_scale_factor=2,
-                                timezone_id="Asia/Jerusalem", locale="en-GB")
-            ctx.add_cookies([{"name": name, "value": value, "url": base}])
-            take(ctx.new_page(), base)
+            for wide in (False, True):
+                ctx = b.new_context(viewport={"width": 780 if wide else 390, "height": 1000},
+                                    device_scale_factor=2 if wide else 3,
+                                    timezone_id="Asia/Jerusalem", locale="en-GB")
+                ctx.add_cookies([{"name": name, "value": value, "url": base}])
+                pg = ctx.new_page()
+                if wide:
+                    take(pg, base)
+                else:
+                    take_phone(pg, base, os.path.join(tmp, "jobs.db"))
+                ctx.close()
             b.close()
     finally:
         proc.terminate()
+
+
+PHONE_W = 780       # the phone pictures are saved 780px wide: 2x the widest phone column
+
+
+def _span(first, last, pad=10):
+    """A clip from the top of one box to the bottom of another."""
+    return {"x": first["x"] - pad, "y": first["y"] - pad, "width": first["width"] + 2 * pad,
+            "height": last["y"] + last["height"] - first["y"] + 2 * pad}
+
+
+def take_phone(pg, base, db_path):
+    """The same three pictures as a phone shows them (390px wide), for visitors on phones."""
+    # 1. the swipe card: with a job still to review, /app opens on it
+    pg.goto(base + "/app")
+    pg.wait_for_selector("text=Why Noa picked this")
+    pg.wait_for_timeout(500)
+    card = pg.locator("text=Northwind Labs").first.locator("xpath=ancestor::div[contains(@class,'rounded')][last()]")
+    top = pg.locator("text=Northwind Labs").first.locator("xpath=../..").bounding_box()
+    why = pg.locator("text=Why Noa picked this").locator("xpath=../..").bounding_box()
+    box = card.bounding_box()
+    clip = {"x": box["x"], "y": top["y"] - 26, "width": box["width"], "height": why["y"] + why["height"] - top["y"] + 50}
+    save_webp(pg.screenshot(clip=clip), "job-card-mobile.webp", PHONE_W)
+
+    # 2. swipe it away (in the database), so the dashboard and its tiles show
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM jobs WHERE status='new'")
+    conn.commit()
+    conn.close()
+    pg.goto(base + "/app")
+    pg.wait_for_timeout(2500)
+    if not pg.locator("text=6 in queue").count():        # the "all caught up" screen: go to the dashboard
+        pg.locator("button:has(svg.lucide-layout-grid)").first.click()
+    pg.wait_for_selector("text=6 in queue")
+    a = pg.locator("text=Ready to apply").locator("xpath=..").bounding_box()
+    z = pg.locator("text=You passed").locator("xpath=..").bounding_box()
+    clip = {"x": a["x"] - 10, "y": a["y"] - 10, "width": z["x"] + z["width"] - a["x"] + 20,
+            "height": z["y"] + z["height"] - a["y"] + 20}
+    save_webp(pg.screenshot(clip=clip), "analytics-mobile.webp", PHONE_W)
+
+    # 3. the role's details: the cover letter down to the end of "How your CV meets this job"
+    pg.set_viewport_size({"width": 390, "height": 4200})
+    pg.click("text=Senior Product Manager, Growth")
+    pg.wait_for_selector("text=How your CV meets this job")
+    pg.wait_for_timeout(600)
+    top = pg.locator("h4:has-text('Cover letter')").locator("xpath=..").bounding_box()
+    end = pg.locator("text=How your CV meets this job").locator("xpath=..").bounding_box()
+    save_webp(pg.screenshot(clip=_span(top, end)), "job-details-mobile.webp", PHONE_W)
 
 
 def take(pg, base):
