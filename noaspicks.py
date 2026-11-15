@@ -137,17 +137,18 @@ def _link(base: str, source: str, medium: str, family: str) -> str:
 # (first person; she always says she is an AI), "personal" is the owner's own profile speaking
 # ABOUT Noa. Several versions of each, rotated week by week so a group never sees the same
 # post twice running. {n} = roles listed, {family} / {family_he} = the role family.
-# Drafts for the owner's edit and approval: the doc "Noa's picks posts - text versions for
-# approval" (2026-11-16) is the source; change the text there first, then here.
+# Approved by the owner 2026-11-16 (doc: "Noa's picks posts - text versions for approval"),
+# with one rule for every post: stay positive - it ends "works for you", WITHOUT "not for the
+# companies" (employers and recruiters read these groups too). The landing page keeps its line.
 VERSIONS = {
     "page": (
         {"key": "A",
          "he_open": "היי, אני נועה. אלה {n} משרות {family_he} שמצאתי השבוע, כל אחת בעמוד הקריירה של החברה עצמה:",
          "he_close": "רוצים שאחפש גם בשבילכם? אני סוכנת AI אישית לחיפוש עבודה: שולחים לי קורות חיים, ואני מביאה כל בוקר "
-                     "רק את המשרות שמתאימות לכם. אני עובדת בשבילכם, לא בשביל החברות.",
+                     "רק את המשרות שמתאימות לכם. אני עובדת בשבילכם.",
          "en_open": "Hi, I'm Noa. Here are {n} {family} roles I found this week, each on the company's own careers page:",
          "en_close": "Want me to search for you too? I'm a personal AI headhunter agent: send me your CV, and every "
-                     "morning I bring you only the roles that fit. I work for you, not for the companies."},
+                     "morning I bring you only the roles that fit. I work for you."},
         {"key": "B",
          "he_open": "{n} משרות {family_he} מהשבוע האחרון. עברתי על אלפי מודעות והשארתי רק את אלה שמובילות ישר "
                     "לעמוד הקריירה של החברה:",
@@ -161,22 +162,22 @@ VERSIONS = {
          "he_open": "נמאס לגלול בין לוחות דרושים? עשיתי את זה בשבילכם. {n} משרות {family_he} שמצאתי השבוע, "
                     "ישר מאתרי החברות:",
          "he_close": "אני נועה, סוכנת AI אישית לחיפוש עבודה. תנו לי את קורות החיים שלכם, ואביא לכם כל בוקר עד 7 משרות "
-                     "שמתאימות בדיוק לכם. אני עובדת בשבילכם, לא בשביל החברות.",
+                     "שמתאימות בדיוק לכם. אני עובדת בשבילכם.",
          "en_open": "Tired of scrolling job boards? I did it for you. {n} {family} roles I found this week, straight "
                     "from the companies' own sites:",
          "en_close": "I'm Noa, a personal AI headhunter agent. Give me your CV, and every morning I'll bring you up "
-                     "to 7 roles that fit you. I work for you, not for the companies."},
+                     "to 7 roles that fit you. I work for you."},
     ),
     "personal": (
         {"key": "D",
          "he_open": "בניתי סוכנת AI בשם נועה שמחפשת עבודה במקום מחפשי העבודה. אלה {n} משרות {family_he} שהיא מצאה "
                     "השבוע, כל אחת בעמוד הקריירה של החברה עצמה:",
          "he_close": "רוצים רשימה כזו כל בוקר, מותאמת לקורות החיים שלכם? נועה פתוחה לכולם, וכרגע בחינם. "
-                     "היא עובדת בשבילכם, לא בשביל החברות.",
+                     "היא עובדת בשבילכם.",
          "en_open": "I built an AI agent called Noa that does the job search for the job seeker. Here are {n} "
                     "{family} roles she found this week, each on the company's own careers page:",
          "en_close": "Want a list like this every morning, matched to your CV? Noa is open to everyone, and free "
-                     "for now. She works for you, not for the companies."},
+                     "for now. She works for you."},
         {"key": "E",
          "he_open": "מי שחיפש עבודה יודע כמה שעות הולכות על גלילה בלוחות דרושים. נועה, סוכנת ה-AI שבניתי, עושה את זה "
                     "במקומכם. {n} משרות {family_he} שהיא מצאה השבוע, ישר מאתרי החברות:",

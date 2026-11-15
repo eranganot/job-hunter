@@ -138,3 +138,19 @@ def test_the_admin_gets_this_weeks_posts_and_nobody_else_does(stack, users):  # 
     assert st == 200 and json.loads(body)["families"][0]["posts"][0]["version"] != f["posts"][0]["version"]
     assert users["a"].get("/api/admin/noas-picks")[0] == 403
     assert Client(stack["port"]).get("/api/admin/noas-picks")[0] in (302, 401)
+
+
+def test_posts_stay_positive_no_not_for_the_companies():
+    """The owner, 2026-11-16: the posts end "...she works for you." - without the contrast."""
+    import os
+    f = noaspicks.build(ROWS3, "https://x.test", week=0)["families"][0]
+    for shift in range(3):
+        for p in noaspicks.build(ROWS3, "https://x.test", week=0, shift=shift)["families"][0]["posts"]:
+            assert "not for the companies" not in p["text"] and "לא בשביל החברות" not in p["text"], p["version"]
+    assert any("work for you." in p["text"] or "works for you." in p["text"] for p in f["posts"])
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "web", "src", "App.tsx"), encoding="utf-8").read()
+    draw = src[src.index("async function drawPicksImage"):src.index("function NoasPicksCard")]
+    assert "not for the companies" not in draw and "לא בשביל החברות" not in draw
+    card = src[src.index("function NoasPicksCard"):src.index("function TestAccountCard")]
+    assert "readOnly" not in card and "edits[id] ?? p.text" in card          # the post can be edited before copying

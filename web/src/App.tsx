@@ -2705,7 +2705,7 @@ async function drawPicksImage(lang: "he" | "en", fam: { label: string; label_he:
   // footer: the line the page leads with, and the address
   x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left"; x.fillStyle = text;
   x.font = he ? '500 32px "JH Heebo", "JH Inter"' : '500 30px "JH Inter"';
-  x.fillText(he ? "נועה עובדת בשבילכם, לא בשביל החברות." : "Noa works for you, not for the companies.", edge, S - 64);
+  x.fillText(he ? "נועה עובדת בשבילכם." : "Noa works for you.", edge, S - 64);
   x.direction = "ltr"; x.textAlign = he ? "left" : "right"; x.fillStyle = accent; x.font = '700 30px "JH Inter"';
   x.fillText("job-hunter.work", he ? 72 : S - 72, S - 64);
   return c;
@@ -2722,9 +2722,11 @@ function NoasPicksCard() {
   const [copied, setCopied] = useState("");
   const [shift, setShift] = useState(0);
   const [pics, setPics] = useState<Record<string, string>>({});
+  // Your own changes to a post, kept until the posts are built again: what you see is what Copy copies.
+  const [edits, setEdits] = useState<Record<string, string>>({});
   const load = async (s = shift) => {
     setBusy(true); setErr("");
-    try { setRes(await api.adminNoasPicks(7, s)); setShift(s); } catch (e: any) { setErr(e?.message || "Failed"); }
+    try { setRes(await api.adminNoasPicks(7, s)); setShift(s); setEdits({}); } catch (e: any) { setErr(e?.message || "Failed"); }
     finally { setBusy(false); }
   };
   const copy = async (id: string, text: string) => {
@@ -2749,7 +2751,7 @@ function NoasPicksCard() {
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:col-span-2">
       <h3 className="font-semibold text-white mb-1">Noa's picks posts</h3>
-      <p className="text-xs text-gray-400 mb-3">This week's new roles per role family, ready to post, with an image. The page speaks as Noa; your own profile speaks about her. Only roles with a company name and a link to the employer's own page.</p>
+      <p className="text-xs text-gray-400 mb-3">This week's new roles per role family, ready to post, with an image. The page speaks as Noa; your own profile speaks about her. Edit any post before you copy it. Only roles with a company name and a link to the employer's own page.</p>
       <div className="flex flex-wrap gap-2">
         <button onClick={() => load(shift)} disabled={busy} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Building…" : res ? "Build again" : "Build this week's posts"}</button>
         {res && <button onClick={() => load(shift + 1)} disabled={busy} className="px-4 py-2 bg-gray-700 rounded-lg text-sm font-medium disabled:opacity-60">Next wording</button>}
@@ -2783,9 +2785,12 @@ function NoasPicksCard() {
                     <div key={id}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs text-gray-400">{place[`${p.voice}-${p.lang}`]} · wording {p.version}</span>
-                        <button onClick={() => copy(id, p.text)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">{copied === id ? "Copied" : "Copy"}</button>
+                        <span className="flex gap-2">
+                          {edits[id] !== undefined && edits[id] !== p.text && <button onClick={() => setEdits((e) => { const n = { ...e }; delete n[id]; return n; })} className="text-xs px-2 py-1 text-gray-400">Undo my edits</button>}
+                          <button onClick={() => copy(id, edits[id] ?? p.text)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">{copied === id ? "Copied" : "Copy"}</button>
+                        </span>
                       </div>
-                      <textarea readOnly dir={p.lang === "he" ? "rtl" : "ltr"} value={p.text} rows={8} className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans" />
+                      <textarea dir={p.lang === "he" ? "rtl" : "ltr"} value={edits[id] ?? p.text} onChange={(e) => setEdits((x) => ({ ...x, [id]: e.target.value }))} rows={8} aria-label={`${place[`${p.voice}-${p.lang}`]} post text`} className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans" />
                     </div>
                   );
                 })}
