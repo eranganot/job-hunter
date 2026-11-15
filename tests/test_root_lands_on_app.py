@@ -80,7 +80,7 @@ def test_the_landing_page_never_says_beta_and_states_the_offer():
     page = landing.landing_html("https://x.test")
     assert "beta" not in page.lower()
     assert "Premium is free for a limited time" in page
-    assert "tech opening in Israel" in page        # who it is for, said up front
+    assert "tech openings in Israel" in page       # who it is for, said up front
 
 
 def test_noa_is_the_product_and_says_she_is_an_ai():
@@ -189,3 +189,22 @@ def test_landing_assets_are_served_with_their_type_and_nothing_else_is(stack):
     assert c.get("/landing-assets/../app.py")[0] in (400, 404)
     assert c.get("/landing-assets/OFL-inter.txt")[0] == 404
     assert c.get("/landing-assets/secret.webp")[0] == 404
+
+
+def test_landing_copy_after_the_panel_review():
+    """GTM row 2 (2026-11-15): no "every opening" claim, the two lines under the button, the two new
+    questions, and the founder's name in the footer."""
+    import landing
+    page = landing.landing_html("https://x.test")
+    low = page.lower()
+    for claim in ("every tech opening", "every opening", "every new tech posting"):
+        assert claim not in low
+    assert "thousands of tech openings in Israel" in page
+    assert "every" not in landing._morning_message(None).split("for you")[0]
+    assert "2-minute setup &middot; first picks today" in page
+    assert "No employer sees your CV until you apply." in page
+    assert "<summary>Will my employer know I'm looking?</summary>" in page
+    assert "<summary>What doesn't Noa do (yet)?</summary>" in page
+    assert "Built and run by Eran Ganot" in page
+    assert "five minutes" not in page
+    assert not [ch for ch in page if 0x80 <= ord(ch) <= 0xff]

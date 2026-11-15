@@ -49,7 +49,7 @@ ASSETS = {                       # every file /landing-assets/ will serve, and i
 
 TITLE = "Job Hunter - meet Noa, your personal AI headhunter agent"
 DESCRIPTION = ("Noa is your personal AI headhunter agent for tech roles in Israel. She works for you, not for "
-               "the companies: she reads every opening, brings you only the ones that fit your CV, and gets "
+               "the companies: she reads thousands of openings, brings you only the ones that fit your CV, and gets "
                "each application ready.")
 
 SHARE_ALT = ("Meet Noa, your personal AI headhunter agent. She works for you, not for the companies. "
@@ -98,7 +98,8 @@ p{margin:0}
 @media(min-width:62rem){.hero{grid-template-columns:1fr 1fr;gap:3.5rem;padding-top:3rem;padding-bottom:5.5rem}}
 .lead{font-size:1.25rem;line-height:1.5;margin:1.6rem 0 2rem;max-width:33rem}
 .ctas{display:flex;flex-wrap:wrap;gap:.75rem}
-.offer-line{margin-top:1.15rem;font-size:.95rem;color:var(--muted)}
+.under-cta{margin-top:1rem;font-size:.95rem;color:var(--text)}
+.offer-line{margin-top:.6rem;font-size:.95rem;color:var(--muted)}
 .offer-line b{color:var(--strong)}
 
 .chat{display:grid;gap:.9rem}
@@ -190,7 +191,7 @@ def _morning_message(postings_checked) -> str:
     """Noa's second message. The number is the latest search's real count."""
     n = _count(postings_checked)
     read = ("I read {:,} postings in my latest search, and kept only the ones worth your time.".format(n)
-            if n else "I read every new tech posting in Israel for you, and keep only the ones worth your time.")
+            if n else "I read the new tech postings in Israel for you, and keep only the ones worth your time.")
     return read + " This one is very you. And one I'd skip, honestly. You can do better."
 
 
@@ -250,12 +251,13 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
   <section class="wrap hero">
     <div>
       <h1>Meet Noa, your personal AI headhunter agent.</h1>
-      <p class="lead">She works for you, not for the companies. Noa reads every tech opening in Israel, brings you only
-      the ones that fit your CV, and gets your application ready.</p>
+      <p class="lead">She works for you, not for the companies. Noa reads thousands of tech openings in Israel, including
+      companies' own career pages, brings you only the ones that fit your CV, and gets your application ready.</p>
       <div class="ctas">
         <a class="btn go big" href="/register" data-place="hero">Meet Noa</a>
         <a class="btn line big" href="#how">See how she works</a>
       </div>
+      <p class="under-cta">2-minute setup &middot; first picks today<br/>Private. No employer sees your CV until you apply.</p>
       <p class="offer-line"><b>Premium is free for a limited time.</b> Sign up with Google or email. No card.</p>
     </div>
 
@@ -300,7 +302,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
   <section class="sec" id="how">
     <div class="wrap">
       <h2>How Noa works</h2>
-      <p class="intro">Setup is less than five minutes. After that Noa runs on her own, and nothing goes out without your approval.</p>
+      <p class="intro">Setup takes about two minutes. After that Noa runs on her own, and nothing goes out without your approval.</p>
       <ol class="steps">
         <li><h3>Tell Noa who you are</h3>
             <p>Upload your CV and Noa fills in the titles, skills and locations to look for. Change anything you like.</p></li>
@@ -390,12 +392,20 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
         <details><summary>What happens to my CV?</summary>
           <p>Noa uses it to score jobs against your experience and to write your tailored CV and cover letters. An employer
           sees it only when you apply. You can export or delete everything from Settings.</p></details>
+        <details><summary>Will my employer know I'm looking?</summary>
+          <p>No. Your account is private: there is no public profile, employers can't search Job Hunter for people, and Noa
+          never contacts a company about you. A company sees your details only when you apply to it yourself, or tell Noa
+          to.</p></details>
         <details><summary>Will Noa invent experience I don't have?</summary>
           <p>No. She reorders and rewords what is in your CV. Anything the job asks for that your CV doesn't show is listed as
           a gap, and you can edit the result before it's used.</p></details>
         <details><summary>How is this different from job alerts?</summary>
           <p>Alerts send you every listing with a keyword. Noa reads each posting against your CV, explains the fit, learns
           from what you pass on, and prepares the application.</p></details>
+        <details><summary>What doesn't Noa do (yet)?</summary>
+          <p>She doesn't talk to hiring managers, put in a word for you or negotiate an offer, the way a human headhunter
+          would. She reads the openings, picks the few that fit, and gets each application ready. Sending applications for
+          you is rolling out and works only on some companies' application systems.</p></details>
         <details><summary>Do I need to install anything?</summary>
           <p>No. Noa works in your browser on phone and computer. You can add Job Hunter to your home screen and turn on
           notifications.</p></details>
@@ -418,7 +428,7 @@ def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") ->
 
 <div class="wrap">
   <footer>
-    <span>&copy; 2026 Job Hunter</span>
+    <span>&copy; 2026 Job Hunter &middot; Built and run by Eran Ganot, in Israel</span>
     <nav aria-label="Footer">
       <a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/login">Sign in</a>
       <a href="/register">Create account</a><a href="mailto:support@job-hunter.work">support@job-hunter.work</a>
