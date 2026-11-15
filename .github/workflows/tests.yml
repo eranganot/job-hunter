@@ -39,6 +39,21 @@ jobs:
         run: |
           pytest tests/ -v --tb=short
 
+  # JH-8 (2026-11-15): pypdf 6.17.0 sat in production with 18 known CVEs for a
+  # week because nothing checked. Fails the run on any advisory in
+  # requirements.txt; the deploy does not wait for CI, so this is a signal.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --strict
+
   # Phase 2b: the same schema and the same call idioms against a real Postgres.
   # Without this job the two engines are free to drift apart, and the drift
   # would only surface during the migration in Phase 2c - with real data.
