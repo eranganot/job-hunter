@@ -6483,7 +6483,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/push/test":
             # Reports what happened; it used to answer success whatever happened.
-            r = send_web_push_to_user(user_id, "Test notification from Job Hunter \u2014 push is working!", "/app")
+            # From Noa (2026-11-15): nearly every push a user gets is hers, so the test shows what
+            # those will look like - her name and picture - not the app icon.
+            r = send_web_push_to_user(user_id, "It's Noa. Push is working: this is where you'll hear from me.",
+                                      "/app", title="Noa")
             ok = r["sent"] > 0
             self.send_json({"success": ok, **r, "error": "" if ok else (
                 "; ".join(r["errors"]) or "This account has no device with notifications on")}, 200 if ok else 502)
