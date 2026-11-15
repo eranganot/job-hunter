@@ -122,8 +122,10 @@ def test_a_shared_link_shows_the_large_picture_card():
     import os, struct
     import landing
     page = landing.landing_html("https://x.test")
-    assert '<meta property="og:image" content="https://x.test/landing-assets/share.png"/>' in page
-    assert '<meta name="twitter:image" content="https://x.test/landing-assets/share.png"/>' in page
+    v = landing._version("share.png")
+    assert len(v) == 8
+    assert '<meta property="og:image" content="https://x.test/landing-assets/share.png?v=%s"/>' % v in page
+    assert '<meta name="twitter:image" content="https://x.test/landing-assets/share.png?v=%s"/>' % v in page
     assert '<meta name="twitter:card" content="summary_large_image"/>' in page
     assert 'og:image:width" content="1200"' in page and 'og:image:height" content="630"' in page
     assert 'property="og:image:alt"' in page
@@ -221,8 +223,27 @@ def test_product_pictures_show_finished_work_and_their_real_size():
     assert "a finished cover letter" in page
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "landing")
     for name in ("job-details.webp", "analytics.webp", "job-card.webp"):
-        w, h = map(int, re.search(r'%s" width="(\d+)" height="(\d+)"' % re.escape(name), page).groups())
+        w, h = map(int, re.search(r'%s\?v=[0-9a-f]{8}" width="(\d+)" height="(\d+)"' % re.escape(name), page).groups())
         with open(os.path.join(base, name), "rb") as f:
             head = f.read(30)
         assert head[:4] == b"RIFF" and head[12:16] == b"VP8 ", name      # lossy WebP: size at bytes 26-30
         assert struct.unpack("<HH", head[26:30]) == (w, h), name
+
+
+def test_landing_assets_carry_their_file_hash_so_a_replaced_picture_is_not_served_stale(stack):
+    """2026-11-15: job-details.webp was replaced under the same name and Cloudflare kept serving the old
+    file (a week's cache). Every asset address now ends ?v=<hash of the file>, and the server still
+    serves the file whatever the query says."""
+    import hashlib, os, re
+    import landing
+    page = landing.landing_html("https://x.test")
+    found = re.findall(r"/landing-assets/([A-Za-z0-9._-]+?)\?v=([0-9a-f]{8})", page)
+    assert {n for n, _v in found} >= {"job-card.webp", "job-details.webp", "analytics.webp", "noa-a.webp",
+                                      "share.png", "fraunces-latin-wght.woff2", "inter-latin-wght.woff2"}
+    assert not re.search(r"/landing-assets/[A-Za-z0-9._-]+(?=[\"')])", page)      # none left without a version
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "landing")
+    for name, v in found:
+        with open(os.path.join(base, name), "rb") as f:
+            assert hashlib.sha1(f.read()).hexdigest()[:8] == v, name
+    c = Client(stack["port"])
+    assert c.get("/landing-assets/job-details.webp?v=%s" % landing._version("job-details.webp"))[0] == 200
