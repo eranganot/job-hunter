@@ -51,32 +51,66 @@ def test_at_most_two_roles_per_company_and_ten_per_post_newest_first():
     assert got["roles"][0]["found"] == "2026-11-14"
 
 
-def test_the_posts_say_what_is_true_in_both_languages():
-    rows = [_row("Senior Product Manager", "Lumen Health", "https://boards.greenhouse.io/lumen/jobs/1"),
-            _row("Product Manager, Growth", "Orbitly", "https://jobs.lever.co/orbitly/2"),
-            _row("Product Owner", "Kesef Labs", "https://kesef.example/careers/3"),
-            _row("Backend Developer", "Kesef Labs", "https://kesef.example/careers/9")]     # one role: not a post
-    out = noaspicks.build(rows, "https://job-hunter.work")
+ROWS3 = [_row("Senior Product Manager", "Lumen Health", "https://boards.greenhouse.io/lumen/jobs/1"),
+         _row("Product Manager, Growth", "Orbitly", "https://jobs.lever.co/orbitly/2"),
+         _row("Product Owner", "Kesef Labs", "https://kesef.example/careers/3"),
+         _row("Backend Developer", "Kesef Labs", "https://kesef.example/careers/9")]     # one role: not a post
+
+
+def _post(f, voice, lang):
+    return [p for p in f["posts"] if (p["voice"], p["lang"]) == (voice, lang)][0]
+
+
+def test_each_family_gets_four_posts_two_voices_two_languages():
+    out = noaspicks.build(ROWS3, "https://job-hunter.work", week=0)
     (f,) = out["families"]
-    assert f["key"] == "product" and f["count"] == 3 and out["too_few"] == [{"key": "software", "count": 1}]
-    en, he = f["post_en"], f["post_he"]
-    assert en.startswith("3 Product Management roles Noa found this week, each on the company's own careers page:")
-    assert "• Senior Product Manager, Lumen Health\nhttps://boards.greenhouse.io/lumen/jobs/1" in en
-    assert "She works for you, not for the companies." in en and "more this week" not in en
-    assert en.endswith("https://job-hunter.work/?utm_source=linkedin&utm_medium=post&utm_campaign=noas_picks&utm_content=product")
-    assert he.startswith("3 משרות ניהול מוצר שנועה מצאה השבוע")
-    assert "• Senior Product Manager | Lumen Health\nhttps://boards.greenhouse.io/lumen/jobs/1" in he
-    assert "היא עובדת בשבילכם, לא בשביל החברות." in he
-    assert he.endswith("https://job-hunter.work/?utm_source=facebook&utm_medium=group&utm_campaign=noas_picks&utm_content=product")
-    for text in (en, he):                       # found, never "posted": the app does not know the posting date
-        assert "posted" not in text.lower() and "פורסמ" not in text
+    assert f["key"] == "product" and f["listed"] == 3 and out["too_few"] == [{"key": "software", "count": 1}]
+    assert [(p["voice"], p["lang"]) for p in f["posts"]] == [("page", "he"), ("page", "en"),
+                                                           ("personal", "he"), ("personal", "en")]
+    he, en = _post(f, "page", "he")["text"], _post(f, "page", "en")["text"]
+    assert "\u2022 Senior Product Manager | Lumen Health\nhttps://boards.greenhouse.io/lumen/jobs/1" in he
+    assert "\u2022 Senior Product Manager, Lumen Health\nhttps://boards.greenhouse.io/lumen/jobs/1" in en
+    # each place has its own source tags, so the funnel can tell the page from the owner's profile
+    assert he.endswith("?utm_source=facebook&utm_medium=page&utm_campaign=noas_picks&utm_content=product")
+    assert en.endswith("?utm_source=linkedin&utm_medium=page&utm_campaign=noas_picks&utm_content=product")
+    assert _post(f, "personal", "he")["text"].endswith("utm_source=facebook&utm_medium=group&utm_campaign=noas_picks&utm_content=product")
+    assert _post(f, "personal", "en")["text"].endswith("utm_source=linkedin&utm_medium=post&utm_campaign=noas_picks&utm_content=product")
 
 
-def test_more_than_ten_says_how_many_more():
+def test_the_page_speaks_as_noa_and_the_owner_speaks_about_her():
+    """The owner, 2026-11-16: posted from his own account it must not be Noa's voice; from the
+    Job Hunter page it should be. And Noa always says she is an AI."""
+    for v in noaspicks.VERSIONS["page"]:
+        he, en = v["he_open"] + v["he_close"], v["en_open"] + v["en_close"]
+        assert ("מצאתי" in he or "עברתי" in he) and ("I found" in en or "I read" in en), v["key"]     # first person
+        assert "AI" in he and "AI" in en, v["key"]
+    for v in noaspicks.VERSIONS["personal"]:
+        he, en = v["he_open"] + v["he_close"], v["en_open"] + v["en_close"]
+        assert "שהיא מצאה" in he and "she found" in en and "בניתי" in he and "I built" in en, v["key"]
+        assert "אני נועה" not in he and "I'm Noa" not in en, v["key"]
+    for voice in noaspicks.VERSIONS.values():
+        for v in voice:                           # found, never "posted": the app does not know the posting date
+            for text in v.values():
+                assert "posted" not in text.lower() and "פורסמ" not in text
+                assert "{" not in text.format(n=10, family="Product Management", family_he="ניהול מוצר")
+
+
+def test_the_wording_rotates_week_by_week_and_on_request():
+    keys = lambda **kw: _post(noaspicks.build(ROWS3, "https://x.test", **kw)["families"][0], "page", "en")["version"]  # noqa: E731
+    seen = [keys(week=w) for w in range(6)]
+    assert seen[:3] == seen[3:] and len(set(seen[:3])) == 3            # three versions, each in turn
+    assert keys(week=0, shift=1) == keys(week=1)                       # "Next wording" = next week's
+
+
+def test_the_number_in_the_post_is_the_number_listed_never_more_than_ten():
+    """The owner, 2026-11-16: "22 picks is too much - how about 10?"."""
     rows = [_row("Product Manager", "Co %d" % i, "https://co%d.example/careers/1" % i) for i in range(13)]
-    f = noaspicks.build(rows, "https://x.test")["families"][0]
-    assert f["count"] == 13 and f["listed"] == 10
-    assert "And 3 more this week." in f["post_en"] and "ועוד 3 משרות השבוע." in f["post_he"]
+    f = noaspicks.build(rows, "https://x.test", week=0)["families"][0]
+    assert f["found"] == 13 and f["listed"] == 10 and noaspicks.LIST_MAX == 10
+    for p in f["posts"]:
+        assert p["text"].count("\u2022") == 10
+        assert "10 " in p["text"].split("\n")[0] and "13" not in p["text"]
+        assert "more this week" not in p["text"] and "ועוד" not in p["text"]
 
 
 def test_the_admin_gets_this_weeks_posts_and_nobody_else_does(stack, users):  # noqa: F811
@@ -98,6 +132,9 @@ def test_the_admin_gets_this_weeks_posts_and_nobody_else_does(stack, users):  # 
     out = json.loads(body)
     assert st == 200 and out["days"] == 7
     f = [x for x in out["families"] if x["key"] == "product"][0]
-    assert f["count"] == 3 and "Old Co" not in f["post_en"]            # three weeks old: not "this week"
+    assert f["listed"] == 3 and len(f["posts"]) == 4
+    assert all("Old Co" not in p["text"] for p in f["posts"])            # three weeks old: not "this week"
+    st, _l, body = users["admin"].get("/api/admin/noas-picks?shift=1")
+    assert st == 200 and json.loads(body)["families"][0]["posts"][0]["version"] != f["posts"][0]["version"]
     assert users["a"].get("/api/admin/noas-picks")[0] == 403
     assert Client(stack["port"]).get("/api/admin/noas-picks")[0] in (302, 401)

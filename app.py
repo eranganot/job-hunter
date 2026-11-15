@@ -5360,7 +5360,11 @@ class Handler(BaseHTTPRequestHandler):
             import noaspicks
             conn = database.get_db()
             try:
-                self.send_json(noaspicks.report(conn, MOBILE_URL, days))
+                try:
+                    _shift = max(0, min(50, int(qs.get("shift", ["0"])[0])))
+                except ValueError:
+                    _shift = 0
+                self.send_json(noaspicks.report(conn, MOBILE_URL, days, shift=_shift))
             finally:
                 conn.close()
             return

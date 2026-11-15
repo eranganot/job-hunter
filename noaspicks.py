@@ -16,7 +16,8 @@ What goes in, so the post makes no claim it cannot back:
     (links.classify: direct_ats / company) - never a job board or aggregator;
   * not known to be closed or dead.
 One role per (company, title), newest first, at most two per company so one
-employer does not fill the post, at most LIST_MAX listed.
+employer does not fill the post, at most LIST_MAX (10) listed - and the number the
+post states is the number it lists (the owner, 2026-11-16: "22 is too much").
 
 Pure functions plus one read; app.py serves it to the admin only.
 """
@@ -132,53 +133,110 @@ def _link(base: str, source: str, medium: str, family: str) -> str:
                                                 "utm_campaign": "noas_picks", "utm_content": family})
 
 
-def post_en(label: str, total: int, roles: list, base: str, family: str) -> str:
-    """LinkedIn / English groups. `total` is how many roles the week had; `roles` the ones named."""
-    lines = ["%d %s roles Noa found this week, each on the company's own careers page:" % (total, label), ""]
+# The wording around the list. Two voices: "page" is the Job Hunter page speaking as Noa
+# (first person; she always says she is an AI), "personal" is the owner's own profile speaking
+# ABOUT Noa. Several versions of each, rotated week by week so a group never sees the same
+# post twice running. {n} = roles listed, {family} / {family_he} = the role family.
+# Drafts for the owner's edit and approval: the doc "Noa's picks posts - text versions for
+# approval" (2026-11-16) is the source; change the text there first, then here.
+VERSIONS = {
+    "page": (
+        {"key": "A",
+         "he_open": "היי, אני נועה. אלה {n} משרות {family_he} שמצאתי השבוע, כל אחת בעמוד הקריירה של החברה עצמה:",
+         "he_close": "רוצים שאחפש גם בשבילכם? אני סוכנת AI אישית לחיפוש עבודה: שולחים לי קורות חיים, ואני מביאה כל בוקר "
+                     "רק את המשרות שמתאימות לכם. אני עובדת בשבילכם, לא בשביל החברות.",
+         "en_open": "Hi, I'm Noa. Here are {n} {family} roles I found this week, each on the company's own careers page:",
+         "en_close": "Want me to search for you too? I'm a personal AI headhunter agent: send me your CV, and every "
+                     "morning I bring you only the roles that fit. I work for you, not for the companies."},
+        {"key": "B",
+         "he_open": "{n} משרות {family_he} מהשבוע האחרון. עברתי על אלפי מודעות והשארתי רק את אלה שמובילות ישר "
+                    "לעמוד הקריירה של החברה:",
+         "he_close": "זו הרשימה הכללית. את הרשימה האישית שלכם, לפי קורות החיים, אני מכינה כל בוקר. "
+                     "נועה, סוכנת AI אישית לחיפוש עבודה.",
+         "en_open": "{n} {family} roles from the past week. I read thousands of postings and kept only the ones that "
+                    "lead straight to the company's own careers page:",
+         "en_close": "That's the general list. Your personal one, matched to your CV, I prepare every morning. "
+                     "Noa, a personal AI headhunter agent."},
+        {"key": "C",
+         "he_open": "נמאס לגלול בין לוחות דרושים? עשיתי את זה בשבילכם. {n} משרות {family_he} שמצאתי השבוע, "
+                    "ישר מאתרי החברות:",
+         "he_close": "אני נועה, סוכנת AI אישית לחיפוש עבודה. תנו לי את קורות החיים שלכם, ואביא לכם כל בוקר עד 7 משרות "
+                     "שמתאימות בדיוק לכם. אני עובדת בשבילכם, לא בשביל החברות.",
+         "en_open": "Tired of scrolling job boards? I did it for you. {n} {family} roles I found this week, straight "
+                    "from the companies' own sites:",
+         "en_close": "I'm Noa, a personal AI headhunter agent. Give me your CV, and every morning I'll bring you up "
+                     "to 7 roles that fit you. I work for you, not for the companies."},
+    ),
+    "personal": (
+        {"key": "D",
+         "he_open": "בניתי סוכנת AI בשם נועה שמחפשת עבודה במקום מחפשי העבודה. אלה {n} משרות {family_he} שהיא מצאה "
+                    "השבוע, כל אחת בעמוד הקריירה של החברה עצמה:",
+         "he_close": "רוצים רשימה כזו כל בוקר, מותאמת לקורות החיים שלכם? נועה פתוחה לכולם, וכרגע בחינם. "
+                     "היא עובדת בשבילכם, לא בשביל החברות.",
+         "en_open": "I built an AI agent called Noa that does the job search for the job seeker. Here are {n} "
+                    "{family} roles she found this week, each on the company's own careers page:",
+         "en_close": "Want a list like this every morning, matched to your CV? Noa is open to everyone, and free "
+                     "for now. She works for you, not for the companies."},
+        {"key": "E",
+         "he_open": "מי שחיפש עבודה יודע כמה שעות הולכות על גלילה בלוחות דרושים. נועה, סוכנת ה-AI שבניתי, עושה את זה "
+                    "במקומכם. {n} משרות {family_he} שהיא מצאה השבוע, ישר מאתרי החברות:",
+         "he_close": "זו הרשימה הכללית. לכל מי שנרשם היא מכינה רשימה אישית לפי קורות החיים, כל בוקר. מוזמנים לנסות:",
+         "en_open": "Anyone who has looked for a job knows how many hours go into scrolling job boards. Noa, the AI "
+                    "agent I built, does that part for you. {n} {family} roles she found this week, straight from "
+                    "the companies' own sites:",
+         "en_close": "That's the general list. For everyone who signs up she prepares a personal one, matched to "
+                     "their CV, every morning. You're welcome to try her:"},
+    ),
+}
+# where each voice + language is posted, for the link's source tags
+_PLACES = {("page", "he"): ("facebook", "page"), ("page", "en"): ("linkedin", "page"),
+           ("personal", "he"): ("facebook", "group"), ("personal", "en"): ("linkedin", "post")}
+
+
+def write_post(voice: str, lang: str, version: dict, label: str, label_he: str, roles: list,
+               base: str, family: str) -> str:
+    """One post: the version's opening, the roles, its closing, the sign-up link.
+    The number in the text is the number of roles LISTED (at most LIST_MAX)."""
+    fill = {"n": len(roles), "family": label, "family_he": label_he}
+    sep = " | " if lang == "he" else ", "
+    lines = [version[lang + "_open"].format(**fill), ""]
     for r in roles:
-        lines += ["• %s, %s" % (r["title"], r["company"]), r["url"], ""]
-    more = total - len(roles)
-    if more > 0:
-        lines += ["And %d more this week." % more, ""]
-    lines += ["Want a list like this every morning, matched to your CV? Meet Noa, your personal AI headhunter "
-              "agent. She works for you, not for the companies.",
-              _link(base, "linkedin", "post", family)]
+        lines += ["\u2022 %s%s%s" % (r["title"], sep, r["company"]), r["url"], ""]
+    source, medium = _PLACES[(voice, lang)]
+    lines += [version[lang + "_close"].format(**fill), _link(base, source, medium, family)]
     return "\n".join(lines)
 
 
-def post_he(label_he: str, total: int, roles: list, base: str, family: str) -> str:
-    """Hebrew Facebook groups. Job titles and company names stay as the employer wrote them."""
-    lines = ["%d משרות %s שנועה מצאה השבוע, כל אחת בעמוד הקריירה של החברה עצמה:" % (total, label_he), ""]
-    for r in roles:
-        lines += ["• %s | %s" % (r["title"], r["company"]), r["url"], ""]
-    more = total - len(roles)
-    if more > 0:
-        lines += ["ועוד %d משרות השבוע." % more, ""]
-    lines += ["רוצים רשימה כזו כל בוקר, מותאמת לקורות החיים שלכם? הכירו את נועה, סוכנת ה-AI האישית שלכם "
-              "לחיפוש עבודה. היא עובדת בשבילכם, לא בשביל החברות.",
-              _link(base, "facebook", "group", family)]
-    return "\n".join(lines)
+def _turn(voice: str, family_index: int, week: int, shift: int = 0) -> dict:
+    """Which version this week: it moves one on every week, offset per family so two families
+    posted the same day do not open with the same line. `shift` lets the admin take the next one."""
+    versions = VERSIONS[voice]
+    return versions[(week + family_index + shift) % len(versions)]
 
 
-def build(rows, base_url: str, days: int = 7) -> dict:
+def build(rows, base_url: str, days: int = 7, week: int = 0, shift: int = 0) -> dict:
     listed, skipped = pick(rows)
     families = []
-    for key, en, he, _p in FAMILIES:
+    for i, (key, en, he, _p) in enumerate(FAMILIES):
         got = listed.get(key)
         if not got or len(got["roles"]) < MIN_ROLES:
             continue
-        families.append({"key": key, "label": en, "label_he": he, "count": got["all"],
-                         "listed": len(got["roles"]), "roles": got["roles"],
-                         "post_en": post_en(en, got["all"], got["roles"], base_url, key),
-                         "post_he": post_he(he, got["all"], got["roles"], base_url, key)})
-    families.sort(key=lambda f: -f["count"])
+        posts = []
+        for voice in ("page", "personal"):
+            v = _turn(voice, i, week, shift)
+            for lang in ("he", "en"):
+                posts.append({"voice": voice, "lang": lang, "version": v["key"],
+                              "text": write_post(voice, lang, v, en, he, got["roles"], base_url, key)})
+        families.append({"key": key, "label": en, "label_he": he, "found": got["all"],
+                         "listed": len(got["roles"]), "roles": got["roles"], "posts": posts})
+    families.sort(key=lambda f: -f["found"])
     thin = sorted(({"key": k, "count": v["all"]} for k, v in listed.items() if len(v["roles"]) < MIN_ROLES),
                   key=lambda x: -x["count"])
     return {"days": days, "families": families, "too_few": thin, "skipped": skipped,
-            "considered": len(rows), "min_roles": MIN_ROLES}
+            "considered": len(rows), "min_roles": MIN_ROLES, "list_max": LIST_MAX}
 
 
-def report(conn, base_url: str, days: int = 7, now=None) -> dict:
+def report(conn, base_url: str, days: int = 7, now=None, shift: int = 0) -> dict:
     """Read the last `days` days of found jobs, every account, and build the posts."""
     days = max(1, min(30, int(days or 7)))
     since = ((now or datetime.now(timezone.utc)) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
@@ -187,6 +245,6 @@ def report(conn, base_url: str, days: int = 7, now=None) -> dict:
         "SELECT " + ", ".join(cols) + " FROM jobs "
         "WHERE found_date >= ? AND COALESCE(url, '') != '' "
         "ORDER BY found_date DESC LIMIT 5000", (since,)).fetchall()]
-    out = build(rows, base_url, days)
+    out = build(rows, base_url, days, week=(now or datetime.now(timezone.utc)).isocalendar()[1], shift=shift)
     out["since"] = since
     return out
