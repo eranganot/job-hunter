@@ -10,8 +10,8 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 
 | # | Step | Item | Pri | Value | Effort | State (2026-11-08) |
 |---|---|---|---|---|---|---|
-| 1 | 16 | **Board-first search** (Step 1, part 2): search the job boards the app already knows (Comeet, Greenhouse, Lever, Ashby, SmartRecruiters, Workday, plus every board the careers-map learns) for the user's titles, so new jobs arrive with a direct link instead of being fixed later. Includes **resolve-before-show**: run the link lookups at intake, so a job reaches the swipe deck already direct where possible | P1 | High | M-L | Not started. Why: the main search brings ~45% board/aggregator links (by_source, 2026-11-07) and the share of open jobs follows the share of incoming ones |
-| 2 | 1 | **Direct-link target**: decide after one week of board-first data. Today 58.1%; with the current tools ~65% (measured hit rates); 70% needs #1; **80%+** also needs the LinkedIn-only rule (#3) | P1 | High | S | Week 1 measured (71.9% of open jobs direct; >=65% of new); by-source split fixed 2026-11-15 - target still to set |
+| 1 | 16 | **Board-first search** (Step 1, part 2): search the job boards the app already knows (Comeet, Greenhouse, Lever, Ashby, SmartRecruiters, Workday, plus every board the careers-map learns) for the user's titles, so new jobs arrive with a direct link instead of being fixed later. Includes **resolve-before-show**: run the link lookups at intake, so a job reaches the swipe deck already direct where possible | P1 | High | M-L | **Done** (#71, 2026-11-08); source labels fixed #126 |
+| 2 | 1 | **Direct-link target** | P1 | High | S | **Decided 2026-11-15: ~75%, good enough for now** (71.9% of open jobs direct after week 1, from 58.1%). Improving it further is tech debt, below |
 | 3 | 17 | **LinkedIn-only jobs that cannot be resolved:** keep in the queue as today (badge + 5-point penalty) | P1 | High | S | **Decided 2026-11-15: keep as now** |
 | 4 | 15 | Lever hCaptcha: does it block real submits? | P2 | Med | S-M | After #1 (The owner's order, 2026-11-08) |
 
@@ -44,6 +44,12 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 ## Done since 2026-10-25
 - **Step 0 — housekeeping** (#2, #6): PR shipping, `scripts/smoke.py`, Sentry on in production (`error_reporting: on`).
 - **Step 3 — Big-Tech sources** (#11, #14): Google, Apple, Microsoft restored with per-source health; **Meta removed** (robots.txt prohibits automated collection; it had reported `ok, 0` every run).
+
+## Tech debt
+
+| Item | Why it matters | Where to start |
+|---|---|---|
+| **Raise the direct-link share past ~75%** (owner, 2026-11-15: good enough for now, improve later) | Every job without a direct link is one the apply engine cannot submit and the user has to chase on LinkedIn. Week 1: 71.9% of open jobs direct; the remaining ~28% are mostly LinkedIn-only listings from small Israeli companies (498 of 581 non-direct) | (1) Read the now-true by-source split (#126) after a week to see which source brings the non-direct jobs. (2) Grow the board list the board-first search knows (learned companies: 172). (3) Better company-name matching in the resolver - its dry run hit 1 of 36 (2.8%), with 14 not reached in time. (4) Unresolvable LinkedIn-only jobs stay in the queue (owner, 2026-11-15) |
 
 ## Parked
 
