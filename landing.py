@@ -42,6 +42,9 @@ ASSETS = {                       # every file /landing-assets/ will serve, and i
     "job-card.webp": "image/webp",
     "analytics.webp": "image/webp",
     "job-details.webp": "image/webp",
+    "job-card-mobile.webp": "image/webp",      # the same three screens as a phone shows them (390px wide),
+    "analytics-mobile.webp": "image/webp",     # offered to phones through <picture>; a desktop screenshot
+    "job-details-mobile.webp": "image/webp",   # shrunk to a phone's width is too small to read
     "noa-a.webp": "image/webp",
     "noa-d.webp": "image/webp",
     "noa-e.webp": "image/webp",
@@ -130,7 +133,6 @@ p{margin:0}
   .hero .offer-line{order:8}
   .hero .m1{display:none}
 }
-@media(max-width:39.99rem){.hero .shot{max-height:15rem}}
 
 .sec{padding-top:4rem;padding-bottom:4rem;border-top:1px solid var(--line)}
 @media(min-width:48rem){.sec{padding-top:5.5rem;padding-bottom:5.5rem}}
@@ -318,8 +320,10 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         <p class="bub"><small>Noa</small>Hi, I'm Noa. Send me your CV and I'll get to know you. Then I do the searching.</p></div>
       <div class="msg m2"><img src="{face}" alt="Noa" width="46" height="46"/>
         <p class="bub"><small>Noa, every morning</small>{msg2}</p></div>
-      <div class="shot"><img src="/landing-assets/job-card.webp" width="1400" height="986"
-        alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with the reasons it fits and Pass, Approve and Decide later buttons"/></div>
+      <div class="shot"><picture>
+        <source media="(max-width:39.99rem)" srcset="/landing-assets/job-card-mobile.webp" width="780" height="1277"/>
+        <img src="/landing-assets/job-card.webp" width="1400" height="986"
+        alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with Noa's reasons it fits"/></picture></div>
     </div>
   </section>
 
@@ -381,8 +385,10 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         </dl>
       </div>
       <div>
-        <div class="shot"><img src="/landing-assets/job-details.webp" width="1400" height="1657" loading="lazy"
-          alt="A role's details in Job Hunter: a finished cover letter, and a tailored CV with a list of what the job asks for, three points the CV backs up and one it does not"/></div>
+        <div class="shot"><picture>
+          <source media="(max-width:39.99rem)" srcset="/landing-assets/job-details-mobile.webp" width="780" height="1694"/>
+          <img src="/landing-assets/job-details.webp" width="1400" height="1657" loading="lazy"
+          alt="A role's details in Job Hunter: a finished cover letter, and a tailored CV with a list of what the job asks for, three points the CV backs up and one it does not"/></picture></div>
       </div>
     </div>
     <div class="wrap">
@@ -405,8 +411,10 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         learned from the ones you passed.</p>
       </div>
       <div>
-        <div class="shot"><img src="/landing-assets/analytics.webp" width="1400" height="252" loading="lazy"
-          alt="Job Hunter statistics: 6 roles in the queue, 9 applications sent, 2 deferred and 14 passed"/></div>
+        <div class="shot"><picture>
+          <source media="(max-width:39.99rem)" srcset="/landing-assets/analytics-mobile.webp" width="780" height="531"/>
+          <img src="/landing-assets/analytics.webp" width="1400" height="252" loading="lazy"
+          alt="Job Hunter statistics: 6 roles in the queue, 9 applications sent, 2 deferred and 14 passed"/></picture></div>
       </div>
     </div>
   </section>
@@ -482,8 +490,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
   <footer>
     <span>&copy; 2026 Job Hunter &middot; Built and run by Eran Ganot, in Israel</span>
     <nav aria-label="Footer">
-      <a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/login">Sign in</a>
-      <a href="/register">Create account</a><a href="mailto:support@job-hunter.work">support@job-hunter.work</a>
+      <a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="mailto:support@job-hunter.work">support@job-hunter.work</a>
     </nav>
   </footer>
 </div>

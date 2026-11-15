@@ -262,3 +262,24 @@ def test_mobile_hero_shows_noa_and_the_job_card_under_the_main_button():
     assert order[".btn.go"] < order[".m2"] < order[".shot"] < order[".btn.line"]
     assert ".hero .pitch,.hero .chat,.hero .ctas{display:contents}" in block
     assert 'class="pitch"' in page and 'class="msg m1"' in page and 'class="msg m2"' in page
+
+
+def test_phones_get_phone_pictures_and_the_footer_has_no_account_links():
+    """2026-11-15 (the owner): a desktop screenshot shrunk to a phone is too small to read, so each of
+    the three product pictures has a 390px-wide version offered through <picture>. And the footer no
+    longer repeats "Sign in" / "Create account": the header and the page's buttons already carry them."""
+    import os, re, struct
+    import landing
+    page = landing.landing_html("https://x.test")
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "landing")
+    for name in ("job-card", "job-details", "analytics"):
+        m = re.search(r'<source media="\(max-width:39\.99rem\)" srcset="/landing-assets/%s-mobile\.webp\?v=[0-9a-f]{8}" '
+                      r'width="(\d+)" height="(\d+)"/>\s*<img src="/landing-assets/%s\.webp' % (name, name), page)
+        assert m, name
+        with open(os.path.join(base, name + "-mobile.webp"), "rb") as f:
+            head = f.read(30)
+        assert struct.unpack("<HH", head[26:30]) == tuple(map(int, m.groups())), name
+        assert landing.ASSETS[name + "-mobile.webp"] == "image/webp"
+    footer = page[page.index("<footer>"):page.index("</footer>")]
+    assert "/login" not in footer and "/register" not in footer
+    assert '<a class="btn ghost" href="/login">Sign in</a>' in page          # the header keeps it
