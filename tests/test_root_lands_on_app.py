@@ -116,6 +116,29 @@ def test_the_page_is_dark_uses_the_app_icon_and_app_screenshots():
     assert "fonts.googleapis" not in page and '<link rel="stylesheet"' not in page
 
 
+def test_a_shared_link_shows_the_large_picture_card():
+    """GTM row 1 (2026-11-15): a link pasted into Facebook, LinkedIn, WhatsApp or X shows a 1200x630
+    picture. The address must be absolute, so it is offered only when the site knows its own address."""
+    import os, struct
+    import landing
+    page = landing.landing_html("https://x.test")
+    assert '<meta property="og:image" content="https://x.test/landing-assets/share.png"/>' in page
+    assert '<meta name="twitter:image" content="https://x.test/landing-assets/share.png"/>' in page
+    assert '<meta name="twitter:card" content="summary_large_image"/>' in page
+    assert 'og:image:width" content="1200"' in page and 'og:image:height" content="630"' in page
+    assert 'property="og:image:alt"' in page
+    # no public address (a preview deploy): no picture claim, the small card stays
+    bare = landing.landing_html("")
+    assert "og:image" not in bare and "twitter:image" not in bare
+    assert '<meta name="twitter:card" content="summary"/>' in bare
+    # the committed file really is 1200x630 and small enough for every network (WhatsApp wants < 300 KB)
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "landing", "share.png")
+    with open(path, "rb") as f:
+        head = f.read(24)
+    assert head[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", head[16:24]) == (1200, 630)
+    assert os.path.getsize(path) < 300_000
+
+
 def test_every_noa_variant_has_its_picture_and_only_that_one():
     import landing
     for v in landing.NOA_VARIANTS:
@@ -162,7 +185,7 @@ def test_landing_assets_are_served_with_their_type_and_nothing_else_is(stack):
         with urllib.request.urlopen(req) as r:
             data = r.read()
             assert r.status == 200 and r.headers["Content-Type"] == ctype, name
-            assert data[:4] in (b"RIFF", b"wOF2"), name
+            assert data[:4] in (b"RIFF", b"wOF2", b"\x89PNG"), name
     assert c.get("/landing-assets/../app.py")[0] in (400, 404)
     assert c.get("/landing-assets/OFL-inter.txt")[0] == 404
     assert c.get("/landing-assets/secret.webp")[0] == 404
