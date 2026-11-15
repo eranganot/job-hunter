@@ -161,3 +161,39 @@ def test_push_reports_missing_keys_and_no_devices(env, monkeypatch):
     monkeypatch.setattr(app, "VAPID_PUBLIC_KEY", "")
     r = app.send_web_push_to_user(uid, "x")
     assert r["configured"] is False and "VAPID" in r["errors"][0]
+
+
+def test_noas_pushes_carry_her_name_and_picture_and_account_pushes_the_app_icon(env, monkeypatch):
+    """GTM row 6 (2026-11-15): a push from Noa shows Noa, an account or admin push shows Job Hunter.
+    The server says who it is from; the service worker picks the picture."""
+    import inspect, os, struct
+    app, uid = env
+    src = inspect.getsource(app.send_web_push_to_user)
+    titles = []
+    monkeypatch.setattr(app, "send_web_push_to_user",
+                        lambda u, m, suf="", url=None, title="Job Hunter": titles.append(title) or _PUSHED)
+    app.deliver_notification(uid, "Today's 7 are in.")                       # job news
+    app.deliver_notification(uid, "New User Alert", from_noa=False)          # admin / account news
+    assert titles == ["Noa", "Job Hunter"]
+    assert '"from": "noa" if title == "Noa" else "app"' in src
+    # admin alerts and the channel check are not Noa's
+    for fn in (app._notify_admin_new_user_impl,):
+        assert "from_noa=False" in inspect.getsource(fn)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for where in ("web/public", "web_bundle"):
+        sw = open(os.path.join(root, where, "sw.js"), encoding="utf-8").read()
+        assert 'icon: data.from === "noa" ? "/app/noa-192.png" : "/app/icon-192.png"' in sw, where
+        assert 'badge: "/app/badge-96.png"' in sw and 'badge: "/app/icon-192.png"' not in sw, where
+        for name, size in (("noa-192.png", (192, 192)), ("badge-96.png", (96, 96))):
+            with open(os.path.join(root, where, name), "rb") as f:
+                head = f.read(26)
+            assert head[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", head[16:24]) == size, (where, name)
+            assert head[25] == 6, (where, name)          # colour type 6 = RGBA: the badge needs transparency
+
+
+def test_a_search_that_finds_nothing_sends_nothing():
+    """The early exit of run_job_search still pushed "No new jobs found this run" after #130."""
+    import inspect
+    import app
+    src = inspect.getsource(app.run_job_search)
+    assert "No new jobs found this run" not in src.replace('still pushed "No new jobs found this run"', "")
