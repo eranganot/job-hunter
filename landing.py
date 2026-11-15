@@ -30,7 +30,10 @@ mode behind a consent banner. Every view is also counted server-side.
 Text stays ASCII-safe for app.send_html, which strips U+0080-U+00FF: use
 entities (&copy;) rather than those characters.
 """
+import hashlib
 import html
+import os
+import re
 
 import analytics
 
@@ -195,7 +198,39 @@ def _morning_message(postings_checked) -> str:
     return read + " This one is very you. And one I'd skip, honestly. You can do better."
 
 
+_VERSIONS = {}
+
+
+def _version(name: str) -> str:
+    """First 8 hex characters of the file's SHA-1, read once per process."""
+    if name not in _VERSIONS:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "landing", name), "rb") as f:
+                _VERSIONS[name] = hashlib.sha1(f.read()).hexdigest()[:8]
+        except OSError:
+            _VERSIONS[name] = ""
+    return _VERSIONS[name]
+
+
+def _versioned(page: str) -> str:
+    """Every /landing-assets/<file> address gets ?v=<hash of the file>.
+
+    The files are served with a week's cache and Cloudflare keeps them at its edge, so a picture
+    replaced under the same name kept being served as the OLD picture (2026-11-15: job-details.webp
+    answered with the previous file, `cf-cache-status: HIT`, `age: 75673`, while the page already
+    stated the new picture's size). A changed file now has a new address; an unchanged one keeps its
+    address and its cache."""
+    def add(m):
+        v = _version(m.group(1))
+        return m.group(0) + ("?v=" + v if v else "")
+    return re.sub(r"/landing-assets/([A-Za-z0-9._-]+)(?![A-Za-z0-9._?-])", add, page)
+
+
 def landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -> str:
+    return _versioned(_landing_html(public_url, postings_checked, noa))
+
+
+def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -> str:
     noa = noa if noa in NOA_VARIANTS else NOA_VARIANTS[0]
     face = "/landing-assets/noa-%s.webp" % noa
     url = html.escape((public_url or "").rstrip("/") + "/", quote=True)
