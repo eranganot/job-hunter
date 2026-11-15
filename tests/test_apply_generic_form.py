@@ -210,3 +210,14 @@ def test_the_apply_button_check_never_pages_sentry():
     src = open(os.path.join(os.path.dirname(__file__), "..", "apply_engine.py"), encoding="utf-8").read()
     assert 'print(f"[apply-engine] apply-button error' not in src
     assert '.warning(\n                        "[apply-engine] apply-button check' in src
+
+
+def test_comeet_423_is_its_bot_check_not_the_applicant():
+    # 2026-11-15: every production Comeet attempt got 423; the owner's own
+    # application to a Comeet job (IRONSCALES) with the same details went through.
+    r = ae._comeet_verdict(423, '{"status":423,"message":""}')
+    assert r["status"] == "manual_required" and r["apply_failure_type"] == "captcha"
+    assert "nothing was sent" in r["error"] and "automated browser" in r["error"]
+    assert r["apply_failure_type"] not in ae.RETRYABLE_FAILURES
+    assert ae._comeet_verdict(200, "{}")["status"] == "confirmed"
+    assert ae._comeet_verdict(400, "bad")["apply_failure_type"] == "form_validation"

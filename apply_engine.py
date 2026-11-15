@@ -1030,6 +1030,30 @@ def _wait_comeet_frame(page, ms: int = 8000):
     return None
 
 
+def _comeet_verdict(status: int, body: str) -> dict:
+    """Comeet's answer to the application request (careers-api/.../apply).
+
+    423 is Comeet refusing the app's automated browser, not the applicant
+    (2026-11-15): every production Comeet attempt since the answer was read
+    (2026-11-10) got 423 - none was ever accepted - while the owner's own
+    application to a Comeet job (IRONSCALES), with the same details, went
+    through. Comeet's client sends an invisible reCAPTCHA v3 token with every
+    application and shows 423 only as "Unexpected error"; a duplicate is 102,
+    not 423. Nothing was sent, and retrying from the same browser does not help."""
+    if 200 <= status < 300:
+        return {"success": True, "status": "confirmed", "error": "",
+                "confirmation_text": f"Comeet accepted the application (HTTP {status})"}
+    if status == 423:
+        return {"success": False, "status": "manual_required", "confirmation_text": "",
+                "apply_failure_type": "captcha",
+                "apply_failure_detail": "Comeet refused the app's automated browser (HTTP 423)",
+                "error": "Comeet doesn't accept applications from the app's automated browser, so nothing "
+                         "was sent. Applying yourself from the link works - your details are fine."}
+    return {"success": False, "status": "failed", "confirmation_text": "",
+            "apply_failure_type": "form_validation" if 400 <= status < 500 else "other",
+            "error": f"Comeet refused the application (HTTP {status}): {body[:200]}"}
+
+
 def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
     """Comeet (rehearsal against a live Cyera posting, 2026-11-07): the posting
     page has no form; "APPLY FOR THIS JOB" loads one in an iframe from
@@ -1112,12 +1136,7 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
         if api:
             status, body = api[-1]
             print(f"[apply-engine] Comeet apply answered HTTP {status}")
-            if 200 <= status < 300:
-                return {"success": True, "status": "confirmed", "error": "",
-                        "confirmation_text": f"Comeet accepted the application (HTTP {status})"}
-            return {"success": False, "status": "failed", "confirmation_text": "",
-                    "apply_failure_type": "form_validation" if 400 <= status < 500 else "other",
-                    "error": f"Comeet refused the application (HTTP {status}): {body[:200]}"}
+            return _comeet_verdict(status, body)
 
         # Comeet-specific verdict. _verify_submission would call a page without
         # a visible error and without a <form> "submitted"; here success needs
