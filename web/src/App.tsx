@@ -2654,72 +2654,84 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, max: number) {
   return t.trimEnd() + "…";
 }
 type PicksFam = { headline_en: string; headline_he: string; listed: number; roles: { title: string; company: string }[] };
-/** The Story version: the same square picture, centred on a 1080x1920 canvas so it stays clear
- *  of the top and bottom bars Instagram draws over a Story. */
-async function drawPicksStory(lang: "he" | "en", fam: PicksFam) {
-  const square = await drawPicksImage(lang, fam);
-  const c = document.createElement("canvas");
-  c.width = 1080; c.height = 1920;
-  const x = c.getContext("2d")!;
-  x.fillStyle = "#0c1f17"; x.fillRect(0, 0, 1080, 1920);
-  x.drawImage(square, 0, 420);
-  return c;
-}
-async function drawPicksImage(lang: "he" | "en", fam: PicksFam) {
+/** The Story version (1080x1920) is its own layout, not the square on a taller canvas (the owner,
+ *  16 Nov: "you just added more background"): Noa large at the top, everything centred, six roles,
+ *  and nothing in the top ~220px or bottom ~290px, where Instagram draws its bars over a Story. */
+function drawPicksStory(lang: "he" | "en", fam: PicksFam) { return drawPicks(lang, fam, "story"); }
+function drawPicksImage(lang: "he" | "en", fam: PicksFam) { return drawPicks(lang, fam, "square"); }
+
+async function drawPicks(lang: "he" | "en", fam: PicksFam, format: "square" | "story") {
   await loadPicksFonts();
   const [noa, logo] = await Promise.all([loadImage(NOA_AVATAR), loadImage("/app/icon-192.png")]);
-  const S = 1080, c = document.createElement("canvas");
-  c.width = S; c.height = S;
+  const story = format === "story";
+  const W = 1080, H = story ? 1920 : 1080, M = 72;
+  const c = document.createElement("canvas");
+  c.width = W; c.height = H;
   const x = c.getContext("2d")!;
   const he = lang === "he";
   const text = "#fbf6e6", soft = "#c4d4c6", accent = "#ffd766", line = "#2c4a3c", panel = "#12291f";
-  x.fillStyle = "#0c1f17"; x.fillRect(0, 0, S, S);
-  // brand, top left
-  x.drawImage(logo, 72, 64, 64, 64);
+  // where things sit in each format
+  const L = story
+    ? { brandY: 220, noa: { cx: W / 2, cy: 500, r: 150 }, head: 790, sub: 856, rows: 6, rowY: 906, rowH: 80, step: 92,
+        footY: 1570, addrY: 1626, center: true, headSize: he ? 88 : 78 }
+    : { brandY: 64, noa: { cx: 928, cy: 152, r: 80 }, head: 330, sub: 396, rows: 5, rowY: 446, rowH: 78, step: 90,
+        footY: H - 64, addrY: H - 64, center: false, headSize: he ? 76 : 68 };
+  x.fillStyle = "#0c1f17"; x.fillRect(0, 0, W, H);
+  // brand
+  x.drawImage(logo, M, L.brandY, 64, 64);
   x.direction = "ltr"; x.textAlign = "left"; x.textBaseline = "alphabetic";
-  x.fillStyle = text; x.font = '700 36px "JH Inter"'; x.fillText("Job Hunter", 152, 110);
-  // Noa, top right, in the yellow ring the page uses
-  x.save(); x.beginPath(); x.arc(928, 152, 86, 0, Math.PI * 2); x.fillStyle = accent; x.fill();
-  x.beginPath(); x.arc(928, 152, 80, 0, Math.PI * 2); x.clip(); x.drawImage(noa, 848, 72, 160, 160); x.restore();
-  // headline
-  const edge = he ? S - 72 : 72;
-  x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left";
-  x.fillStyle = text;
+  x.fillStyle = text; x.font = '700 36px "JH Inter"'; x.fillText("Job Hunter", M + 80, L.brandY + 46);
+  // Noa, in the yellow ring the page uses
+  const n = L.noa;
+  x.save(); x.beginPath(); x.arc(n.cx, n.cy, n.r + 6, 0, Math.PI * 2); x.fillStyle = accent; x.fill();
+  x.beginPath(); x.arc(n.cx, n.cy, n.r, 0, Math.PI * 2); x.clip();
+  x.drawImage(noa, n.cx - n.r, n.cy - n.r, n.r * 2, n.r * 2); x.restore();
+  // text that follows the language: centred in a Story, from the reading edge in the square
+  const para = (font: string, colour: string, t: string, y: number) => {
+    x.font = font; x.fillStyle = colour; x.direction = he ? "rtl" : "ltr";
+    if (L.center) { x.textAlign = "center"; x.fillText(t, W / 2, y); }
+    else { x.textAlign = he ? "right" : "left"; x.fillText(t, he ? W - M : M, y); }
+  };
+  // headline: shrink a long family name to fit, never cut it
   const l1 = he ? fam.headline_he : fam.headline_en;
-  let size = he ? 76 : 68;                      // shrink a long family name to fit, never cut it
+  let size = L.headSize;
   const big = () => (he ? `800 ${size}px "JH Heebo", "JH Inter"` : `600 ${size}px "JH Fraunces"`);
-  x.font = big();
-  while (size > 40 && x.measureText(l1).width > S - 144) { size -= 2; x.font = big(); }
-  x.fillText(l1, edge, 330);
-  x.fillStyle = accent; x.font = he ? '500 44px "JH Heebo", "JH Inter"' : '500 40px "JH Inter"';
-  x.fillText(he ? "שנועה מצאה השבוע" : "Noa found this week", edge, 396);
-  // up to five of the roles, as the employers wrote them (left to right in both languages)
-  const rows = fam.roles.slice(0, 5);
-  let y = 446;
-  x.direction = "ltr"; x.textAlign = "left";
+  x.font = big(); x.direction = he ? "rtl" : "ltr";
+  while (size > 40 && x.measureText(l1).width > W - 2 * M) { size -= 2; x.font = big(); }
+  para(big(), text, l1, L.head);
+  para(he ? `500 ${story ? 48 : 44}px "JH Heebo", "JH Inter"` : `500 ${story ? 44 : 40}px "JH Inter"`, accent,
+       he ? "שנועה מצאה השבוע" : "Noa found this week", L.sub);
+  // the roles, as the employers wrote them (left to right in both languages)
+  const rows = fam.roles.slice(0, L.rows);
+  let y = L.rowY;
   for (const r of rows) {
+    x.direction = "ltr"; x.textAlign = "left";
     x.fillStyle = panel; x.strokeStyle = line; x.lineWidth = 2;
-    x.beginPath(); (x as any).roundRect(72, y, S - 144, 78, 18); x.fill(); x.stroke();
+    x.beginPath(); (x as any).roundRect(M, y, W - 2 * M, L.rowH, 18); x.fill(); x.stroke();
     x.fillStyle = text; x.font = '600 30px "JH Inter"';
     const title = fitText(x, r.title, 560);
-    x.fillText(title, 100, y + 50);
+    x.fillText(title, M + 28, y + L.rowH / 2 + 11);
     const used = x.measureText(title).width;
     x.fillStyle = soft; x.font = '400 28px "JH Inter"';
-    x.fillText(fitText(x, "·  " + r.company, S - 144 - 56 - used - 20), 100 + used + 20, y + 50);
-    y += 90;
+    x.fillText(fitText(x, "·  " + r.company, W - 2 * M - 56 - used - 20), M + 28 + used + 20, y + L.rowH / 2 + 11);
+    y += L.step;
   }
   const more = fam.listed - rows.length;
-  if (more > 0) {
-    x.fillStyle = soft; x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left";
-    x.font = he ? '400 30px "JH Heebo", "JH Inter"' : '400 28px "JH Inter"';
-    x.fillText(he ? `ועוד ${more} בפוסט` : `and ${more} more in the post`, edge, y + 34);
+  if (more > 0) para(he ? '400 30px "JH Heebo", "JH Inter"' : '400 28px "JH Inter"', soft,
+                     story ? (he ? `ועוד ${more} בפוסט האחרון שלנו` : `and ${more} more in our latest post`)
+                           : (he ? `ועוד ${more} בפוסט` : `and ${more} more in the post`), y + 34);
+  // footer: the positioning line and the address
+  const foot = he ? "נועה עובדת בשבילכם." : "Noa works for you.";
+  const footFont = he ? `500 ${story ? 40 : 32}px "JH Heebo", "JH Inter"` : `500 ${story ? 36 : 30}px "JH Inter"`;
+  if (story) {
+    para(footFont, text, foot, L.footY);
+    x.direction = "ltr"; x.textAlign = "center"; x.fillStyle = accent; x.font = '700 36px "JH Inter"';
+    x.fillText("job-hunter.work", W / 2, L.addrY);
+  } else {
+    para(footFont, text, foot, L.footY);
+    x.direction = "ltr"; x.textAlign = he ? "left" : "right"; x.fillStyle = accent; x.font = '700 30px "JH Inter"';
+    x.fillText("job-hunter.work", he ? M : W - M, L.addrY);
   }
-  // footer: the line the page leads with, and the address
-  x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left"; x.fillStyle = text;
-  x.font = he ? '500 32px "JH Heebo", "JH Inter"' : '500 30px "JH Inter"';
-  x.fillText(he ? "נועה עובדת בשבילכם." : "Noa works for you.", edge, S - 64);
-  x.direction = "ltr"; x.textAlign = he ? "left" : "right"; x.fillStyle = accent; x.font = '700 30px "JH Inter"';
-  x.fillText("job-hunter.work", he ? 72 : S - 72, S - 64);
   return c;
 }
 

@@ -154,7 +154,7 @@ def test_posts_stay_positive_no_not_for_the_companies():
     assert any("work for you." in p["text"] or "works for you." in p["text"] for p in f["posts"])
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src = open(os.path.join(root, "web", "src", "App.tsx"), encoding="utf-8").read()
-    draw = src[src.index("async function drawPicksImage"):src.index("function NoasPicksCard")]
+    draw = src[src.index("async function drawPicks("):src.index("function NoasPicksCard")]
     assert "not for the companies" not in draw and "לא בשביל החברות" not in draw
     card = src[src.index("function NoasPicksCard"):src.index("function TestAccountCard")]
     assert "readOnly" not in card and "edits[id] ?? p.text" in card          # the post can be edited before copying
@@ -204,3 +204,14 @@ def test_the_instagram_caption_names_roles_without_links():
     assert "http" not in cap and "\u2022 Senior Product Manager | Lumen Health" in cap
     assert "הקישור להרשמה בביו." in cap and "#דרושים" in cap
     assert "לא בשביל החברות" not in cap
+
+
+def test_the_story_is_its_own_layout_not_the_square_on_a_taller_canvas():
+    """The owner, 2026-11-16: the first Story was the square image with more background around it."""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "web", "src", "App.tsx"), encoding="utf-8").read()
+    story = src[src.index("function drawPicksStory"):src.index("function drawPicksImage")]
+    assert 'drawPicks(lang, fam, "story")' in story and "drawImage(square" not in src
+    draw = src[src.index("async function drawPicks("):src.index('/** "Noa\'s picks" (noaspicks.py)')]
+    assert "H = story ? 1920 : 1080" in draw and "rows: 6" in draw
