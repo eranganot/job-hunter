@@ -45,6 +45,20 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 - **Step 0 — housekeeping** (#2, #6): PR shipping, `scripts/smoke.py`, Sentry on in production (`error_reporting: on`).
 - **Step 3 — Big-Tech sources** (#11, #14): Google, Apple, Microsoft restored with per-source health; **Meta removed** (robots.txt prohibits automated collection; it had reported `ok, 0` every run).
 
+## Running cost at scale (owner, 2026-11-16) — not scheduled
+
+Measured on production from the `llm_usage` ledger, at Google's list price: Gemini is about **$2 a day for 6-7 accounts searched daily = ~$0.30 per user per day, $9-10 per user per month**; 94% of it is scoring search results (`search_scoring`), and about two thirds of the bill is output tokens. Hosting (~$18/month for this project) and the paid job sources ($0 inside their free allowances) do not grow with users at this size. At the campaign's 100 users that is ~$950/month of Gemini. Each idea is to be measured on production before it is relied on; the saving figures are estimates until then.
+
+| # | Idea | Why it should help | Effort | Risk / what to check |
+|---|---|---|---|---|
+| C1 | **Pause the daily search for users who stopped coming back** (no approve/pass in N days; resume on the next visit; Noa says so) | Only 3 of the 6-9 accounts searched daily made a decision in the last 30 days - the rest is spend nobody sees. Close to GTM row 26 ("pause or keep going?"), but automatic | S-M | A returning user must get picks quickly; pick N with the day-7 return number |
+| C2 | **Gemini batch mode for the scheduled scoring** | Half price (2.5 Flash batch: $0.15 in / $1.25 out per 1M); the daily search is scheduled, so a slower answer is fine | M | Batch is asynchronous (up to 24 h): the first search after sign-up and user-pressed searches stay on the live API |
+| C3 | **Score with 2.5 Flash-Lite** ($0.10 in / $0.40 out per 1M) | ~3x cheaper input, ~6x cheaper output | S to switch, M to prove | Pick quality: score the same day's results with both models and compare the kept set and the approve rate before switching |
+| C4 | **Shorter scoring output** - e.g. write "why it fits" only for jobs that are kept, drop per-job prose for rejects | Output is ~2/3 of the bill | S-M | "Why Noa picked this" must stay as good on kept jobs |
+| C5 | **Score a posting once per CV profile, not once per user per day** - cache by (job, profile hash) so repeat sightings cost nothing | The same boards are re-read daily (10,992 postings read in one run on 2026-11-16) | M | Cache invalidation when the CV or titles change |
+
+Together these could plausibly bring a user to about $1-2 a month. Order suggested: C1 (no quality risk), C4, C2, then C3 behind a measured comparison. The number to watch is Admin → Today → Running cost per active user.
+
 ## Tech debt
 
 | Item | Why it matters | Where to start |
