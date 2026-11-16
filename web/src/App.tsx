@@ -736,6 +736,70 @@ function RunningCostCard({ c }: { c: any }) {
   );
 }
 
+/** The launch numbers (kpis.py): last 7 days, with the 7 days before. */
+const KPI_ROWS: [string, string, string, string][] = [
+  ["active_applicants", "Active applicants", "", "Sent at least one real application. The one to steer by."],
+  ["weekly_active_swipers", "Active swipers", "", "Approved or passed on at least one job."],
+  ["approve_rate", "Approve rate", "%", "Approved of swiped, averaged over people who swiped."],
+  ["applied_rate", "Applied rate", "%", "Real applications of approved; marking applied in bulk is not counted."],
+  ["activation_48h", "Activation in 48h", "%", "Sign-ups who approved a job within 48 hours (sign-ups at least 2 days old)."],
+  ["time_to_first_picks", "Time to first picks", " min", "Median minutes from sign-up to the first search finishing."],
+  ["day7_return", "Day-7 return", "%", "Of the sign-ups 8 to 15 days ago, swiped again 6 to 8 days after signing up."],
+];
+function KpiCard({ k }: { k: any }) {
+  if (!k) return <p className="text-sm text-gray-400">Loading the launch numbers…</p>;
+  const show = (v: any, unit: string) => v == null ? "–" : `${v}${unit}`;
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Gauge className="w-5 h-5 text-indigo-400" />Launch numbers <span className="text-xs font-normal text-gray-400">last 7 days · the 7 before</span></h3>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+        {KPI_ROWS.map(([key, label, unit, help], i) => {
+          const r = k.kpis?.[key] || {};
+          const up = r.value != null && r.prev != null ? (r.value > r.prev ? "▲" : r.value < r.prev ? "▼" : "") : "";
+          return (
+            <div key={key} title={help} className={`bg-gray-800 rounded-xl border py-3 px-3 ${i === 0 ? "border-indigo-500/50" : "border-gray-700"}`}>
+              <div className="text-xs text-gray-400">{label}</div>
+              <div className="text-xl font-bold text-white mt-0.5">{show(r.value, unit)}</div>
+              <div className="text-xs text-gray-400 mt-0.5">
+                {up && <span className={key === "time_to_first_picks" ? (up === "▲" ? "text-red-400" : "text-green-400") : (up === "▲" ? "text-green-400" : "text-red-400")}>{up} </span>}
+                before: {show(r.prev, unit)}{r.of != null && r.n != null ? ` · ${r.n} of ${r.of}` : r.of != null ? ` · ${r.of} ${r.of === 1 ? "person" : "people"}` : ""}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-xs text-gray-400 mt-2">Hover a number for its definition. People only: not admins, not the test account. "–" = nobody to count yet.</p>
+    </div>
+  );
+}
+
+/** Sign-ups by channel and by landing-page Noa (kpis.by_source). */
+function SourcesCard({ s }: { s: any }) {
+  if (!s) return <p className="text-sm text-gray-400">Loading sign-ups by source…</p>;
+  const Table = ({ title, rows }: { title: string; rows: any[] }) => (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
+      <h4 className="font-semibold text-white mb-2">{title}</h4>
+      {rows.length === 0 ? <p className="text-sm text-gray-400">No sign-ups in the last {s.days} days.</p> : (
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-xs text-gray-400"><th className="py-1 font-normal">Source</th><th className="font-normal text-right">Sign-ups</th><th className="font-normal text-right">Activated</th><th className="font-normal text-right">Applying this week</th></tr></thead>
+          <tbody>{rows.map((r: any) => (
+            <tr key={r.name} className="border-t border-gray-700/60 text-gray-200">
+              <td className="py-1.5">{r.name}</td><td className="text-right">{r.signups}</td>
+              <td className="text-right">{r.activated} <span className="text-gray-400">({Math.round(100 * r.activated / r.signups)}%)</span></td>
+              <td className="text-right">{r.applicants}</td>
+            </tr>))}</tbody>
+        </table>)}
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      <Table title={`Sign-ups by source · last ${s.days} days`} rows={s.sources || []} />
+      <Table title="The landing page's Noa (A/B test)" rows={s.noa_variants || []} />
+      <p className="text-xs text-gray-400">Source = the link's utm_source / utm_medium, "referral" for an invite link, "direct" with neither. Accounts from before 16 Nov read "before tracking". Visits per Noa are in PostHog; this shows what each one brought in. Ad spend per channel joins this table once ads run, read from Meta.</p>
+    </div>
+  );
+}
+
 /** Noa's one line at the top of the dashboard: what she brought today. */
 function NoaGreeting({ me, toSwipe, onSwipe }: { me: any; toSwipe: number; onSwipe: () => void }) {
   const dp = me?.daily_picks;
@@ -3012,7 +3076,11 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
   const myId = me?.id;
   const [funnel, setFunnel] = useState<{ step: string; users: number }[] | null>(null);
   const [cost, setCost] = useState<any>(null);
+  const [kpi, setKpi] = useState<any>(null);
+  const [sources, setSources] = useState<any>(null);
   const load = () => {
+    api.adminKpis().then(setKpi).catch(() => setKpi(null));
+    api.adminSources(30).then(setSources).catch(() => setSources(null));
     api.adminFunnel(30).then((f) => setFunnel(f.steps)).catch(() => setFunnel(null));
     api.adminRunningCost(30).then(setCost).catch(() => setCost(null));
     api.adminQueueStats().then(setStats).catch(() => {});
@@ -3097,8 +3165,9 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
               <Stat n={newThisWeek} label="New in the last 7 days" color="text-white" />
               <Stat n={people.length} label="Total users" color="text-white" />
             </div>
-            <p className="text-xs text-gray-400 mt-2">Not counting admins or the test account. The launch numbers (funnel, approve and applied rates, the leading KPIs) arrive here next.</p>
+            <p className="text-xs text-gray-400 mt-2">Not counting admins or the test account.</p>
           </div>
+          <KpiCard k={kpi} />
           <RunningCostCard c={cost} />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-indigo-400" />Queue overview</h3>
@@ -3115,6 +3184,7 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
 
       {section === "growth" && (<>
           {funnel ? <FunnelCard steps={funnel} /> : <p className="text-sm text-gray-400">Loading the funnel…</p>}
+          <SourcesCard s={sources} />
       </>)}
 
       {section === "content" && (<>

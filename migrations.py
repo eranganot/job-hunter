@@ -1173,6 +1173,17 @@ def m0037_lifecycle_emails(conn):
     conn.commit()
 
 
+def m0038_signup_attr(conn):
+    """Where each sign-up came from (GTM row 10a part 2, 2026-11-16): the
+    utm_* / ref / Noa-variant attribution the sign-up already carries, kept on
+    the account as JSON so Admin -> Growth can break sign-ups, activation and
+    applicants down by channel without asking PostHog. NULL for accounts from
+    before this migration. Idempotent."""
+    if not _has_column(conn, "users", "signup_attr"):
+        conn.execute("ALTER TABLE users ADD COLUMN signup_attr TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1211,6 +1222,7 @@ MIGRATIONS = [
     (35, "why_fits_says_you",           m0035_why_fits_says_you),
     (36, "daily_picks",                 m0036_daily_picks),
     (37, "lifecycle_emails",            m0037_lifecycle_emails),
+    (38, "signup_attr",                 m0038_signup_attr),
 ]
 
 

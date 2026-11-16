@@ -688,3 +688,27 @@ def test_running_cost_is_admin_only(stack, users):
     assert st == 200 and "per_active_user_usd" in json.loads(body)
     st, _l, _b = users["b"].get("/api/admin/running-cost")
     assert st == 403
+
+
+def test_signup_keeps_where_it_came_from_and_the_kpis_are_admin_only(stack, users):
+    """GTM row 10a part 2: Growth breaks sign-ups down by source, so the source
+    is kept on the account at sign-up."""
+    from tests.test_routes import Client
+    import ratelimit
+    ratelimit.reset_all()
+    c = Client(stack["port"])
+    st, _loc, _b = c.post_form("/register", {
+        "name": "src", "email": "src@example.test", "password": "correct-horse-1", "password2": "correct-horse-1",
+        "utm_source": "facebook", "utm_medium": "group", "noa": "b"})
+    assert st == 302
+    conn = stack["db"].get_db()
+    raw = conn.execute("SELECT signup_attr FROM users WHERE email='src@example.test'").fetchone()[0]
+    conn.close()
+    assert json.loads(raw) == {"noa": "b", "utm_medium": "group", "utm_source": "facebook"}
+    for path in ("/api/admin/kpis", "/api/admin/sources?days=30"):
+        st, _l, body = users["admin"].get(path)
+        assert st == 200, path
+        st, _l, _b = users["b"].get(path)
+        assert st == 403, path
+    _s, _l, body = users["admin"].get("/api/admin/sources?days=30")
+    assert any(r["name"] == "facebook / group" for r in json.loads(body)["sources"])
