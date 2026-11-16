@@ -189,14 +189,16 @@ def funnel_report(days: int = 30) -> dict:
     """Signups in the last `days` days, and how many of THOSE users reached
     each later step. A cohort, so a step can never exceed the one before it
     by counting older users. Accounts from before 2026-11-09 have no signup
-    event and are not in it."""
+    event and are not in it, and neither is the resettable test account."""
+    import testaccount
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     c = database.get_db()
     try:
         rows = c.execute(
             "SELECT f.step, COUNT(*) AS n FROM funnel_events f "
             "WHERE f.user_id IN (SELECT user_id FROM funnel_events WHERE step='signup' AND created_at >= ?) "
-            "GROUP BY f.step", (since,)).fetchall()
+            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email)=?) "
+            "GROUP BY f.step", (since, testaccount.TEST_EMAIL)).fetchall()
     finally:
         c.close()
     got = {r["step"]: r["n"] for r in rows}
@@ -5042,6 +5044,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(_st)
             return
 
+        if path == "/api/admin/running-cost":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import costreport
+            import testaccount
+            try:
+                days = int(qs.get("days", ["30"])[0])
+            except ValueError:
+                days = 30
+            _c = database.get_db()
+            try:
+                _t = _c.execute("SELECT id FROM users WHERE LOWER(email)=?", (testaccount.TEST_EMAIL,)).fetchall()
+                out = costreport.report(_c, days, test_user_ids=[r["id"] for r in _t],
+                                        paid_sources=paidpool.status(_c))
+            finally:
+                _c.close()
+            self.send_json(out)
+            return
+
         if path == "/api/admin/funnel":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
@@ -6029,7 +6052,10 @@ class Handler(BaseHTTPRequestHandler):
                 FROM users u ORDER BY u.created_date DESC
             """).fetchall()
                 conn.close()
-                self.send_json([dict(r) for r in rows])
+                import testaccount
+                # is_test: the resettable test account is not a person; the
+                # Admin counts leave it out (owner, 2026-11-16).
+                self.send_json([dict(r, is_test=testaccount.is_test_address(r["email"])) for r in rows])
                 return
             finally:
                 conn.close()
