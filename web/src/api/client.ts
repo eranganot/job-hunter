@@ -349,6 +349,8 @@ export const api = {
     too_few: { key: string; count: number }[];
     skipped: Record<string, number>;
   }>(`/api/admin/noas-picks?days=${days}&shift=${shift}`),
+  adminKpis: () => request<any>(`/api/admin/kpis`),
+  adminSources: (days = 30) => request<any>(`/api/admin/sources?days=${days}`),
   adminRunningCost: (days = 30) => request<any>(`/api/admin/running-cost?days=${days}`),
   adminFunnel: (days = 30) => request<{ days: number; steps: { step: string; users: number }[] }>(`/api/admin/funnel?days=${days}`),
   adminSetPlan: (id: number, plan: string, days: number | null, after = "free") =>

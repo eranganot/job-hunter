@@ -185,6 +185,20 @@ def _start_first_search(user_id) -> bool:
     return False
 
 
+def _save_signup_attr(user_id, attr) -> None:
+    """Keep where a sign-up came from on the account (migration 38), for Admin ->
+    Growth. Never raises: a sign-up must not fail over a statistic."""
+    try:
+        c = database.get_db()
+        try:
+            c.execute("UPDATE users SET signup_attr=? WHERE id=?", (json.dumps(attr or {}, sort_keys=True), user_id))
+            c.commit()
+        finally:
+            c.close()
+    except Exception as exc:
+        print("[funnel] signup source for user %s not saved: %s" % (user_id, exc))
+
+
 def funnel_report(days: int = 30) -> dict:
     """Signups in the last `days` days, and how many of THOSE users reached
     each later step. A cohort, so a step can never exceed the one before it
@@ -4935,6 +4949,7 @@ class Handler(BaseHTTPRequestHandler):
                             _b64.urlsafe_b64decode(_enc + "=" * (-len(_enc) % 4)).decode())
                     except (ValueError, UnicodeDecodeError):
                         _g_attr = {}
+                _save_signup_attr(_user["id"], _g_attr)
                 _track(_user["id"], "user_signed_up", dict(_g_attr, method="google"), set_once=_g_attr)
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
@@ -5042,6 +5057,28 @@ class Handler(BaseHTTPRequestHandler):
                 _c.close()
             _st["email"] = testaccount.TEST_EMAIL
             self.send_json(_st)
+            return
+
+        if path in ("/api/admin/kpis", "/api/admin/sources"):
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import kpis
+            import testaccount
+            _c = database.get_db()
+            try:
+                if path == "/api/admin/kpis":
+                    out = kpis.today(_c, testaccount.TEST_EMAIL)
+                else:
+                    try:
+                        _d = max(1, min(90, int(qs.get("days", ["30"])[0])))
+                    except ValueError:
+                        _d = 30
+                    out = kpis.by_source(_c, testaccount.TEST_EMAIL, _d)
+            finally:
+                _c.close()
+            self.send_json(out)
             return
 
         if path == "/api/admin/running-cost":
@@ -6313,6 +6350,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(_register_page(error_block(err), _attr))
                 return
             _funnel(user_id, "signup")
+            _save_signup_attr(user_id, _attr)
             _track(user_id, "user_signed_up", dict(_attr, method="email"), set_once=_attr)
             try:
                 _send_verification(user_id, email.strip().lower(), name)
