@@ -3206,6 +3206,14 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
                       <p className="text-xs text-gray-400 truncate">{u.email}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {/* Paused for inactivity (inactive.py): no daily search until they come back. */}
+                      {u.search_paused_at && (
+                        <button onClick={async () => { await api.adminResumeSearch(u.id); load(); }}
+                          title={`Daily search paused on ${String(u.search_paused_at).slice(0, 10)} after 14 days without activity. Click to resume.`}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 hover:bg-amber-500/30">
+                          Search paused · resume
+                        </button>
+                      )}
                       <span className={`text-[10px] px-2 py-0.5 rounded-full ${u.is_active ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}>{u.is_active ? "Active" : "Inactive"}</span>
                       {/* No switch on your own row: disabling yourself is an
                           unrecoverable lockout, and the server refuses it too. */}

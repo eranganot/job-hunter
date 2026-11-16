@@ -755,3 +755,45 @@ def test_meta_events_follow_the_cookie_and_only_the_cookie(stack, users, monkeyp
     n = len(calls)
     A._meta_event(_H(), _user_id(stack["db"], "no@example.test"), "FirstApprove")
     assert len(calls) == n                                  # never accepted: nothing sent
+
+
+def test_a_paused_user_is_skipped_by_the_scheduler_and_resumes_on_opening_the_app(stack, users, monkeypatch):
+    """GTM row 26: paused for inactivity = no scheduled search; opening the app
+    (or the email link, or the admin) resumes and queues a search at once."""
+    import app as A
+    import inactive
+    import jobqueue
+    uid = _user_id(stack["db"], "bob@example.test")
+    queued = []
+    monkeypatch.setattr(jobqueue, "enqueue", lambda u, kind, **kw: queued.append((u, kind)) or 1)
+
+    def pause():
+        conn = stack["db"].get_db()
+        conn.execute("UPDATE users SET search_paused_at='2026-12-20 09:00:00' WHERE id=?", (uid,))
+        conn.commit(); conn.close()
+
+    def paused():
+        conn = stack["db"].get_db()
+        v = conn.execute("SELECT search_paused_at FROM users WHERE id=?", (uid,)).fetchone()[0]
+        conn.close()
+        return v
+
+    pause()
+    _s, _l, body = users["admin"].get("/api/admin/users")
+    assert [u for u in json.loads(body) if u["id"] == uid][0]["search_paused_at"]
+    st, _l, _b = users["b"].get("/api/me")                               # opening the app
+    assert st == 200 and paused() is None and queued == [(uid, "search")]
+    users["b"].get("/api/me")
+    assert queued == [(uid, "search")]                                   # not paused: nothing more is queued
+    pause()
+    st, _l, body = Client(stack["port"]).get("/email/resume?u=%d&t=%s" % (uid, inactive.resume_token(uid)))
+    assert st == 200 and b"searching again" in body and paused() is None
+    st, _l, _b = Client(stack["port"]).get("/email/resume?u=%d&t=bad" % uid)
+    assert st == 400
+    pause()
+    st, _l, body = users["admin"].post_json("/api/admin/users/%d/resume-search" % uid, {})
+    assert st == 200 and json.loads(body)["resumed"] is True and paused() is None
+    st, _l, _b = users["b"].post_json("/api/admin/users/%d/resume-search" % uid, {})
+    assert st == 403
+    src = open(A.__file__, encoding="utf-8").read()
+    assert "run_search = not row[12]" in src and "u.search_paused_at " in src
