@@ -1392,7 +1392,7 @@ def _check_scheduled_jobs() -> None:
             rows = conn.execute(
                 "SELECT u.id, p.search_hour, p.apply_hour, "
                 "p.schedule_frequency, p.search_day_of_week, p.apply_day_of_week, p.weekdays_only, p.auto_apply_enabled, "
-                "u.role, u.plan, u.plan_until, u.plan_after "
+                "u.role, u.plan, u.plan_until, u.plan_after, u.search_paused_at "
                 "FROM users u JOIN user_profiles p ON p.user_id = u.id "
                 "WHERE u.is_active = 1"
             ).fetchall()
@@ -1412,7 +1412,9 @@ def _check_scheduled_jobs() -> None:
                     continue
                 # Search: check hour + frequency/day
                 if current_hour == sh and not _scheduler_already_ran(uid, 'jobs_searched', today):
-                    run_search = True
+                    # Paused for inactivity (inactive.py): no scheduled search, no Gemini
+                    # spend, until the user comes back.
+                    run_search = not row[12]
                     if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
                         run_search = False
                     if run_search:
@@ -1504,6 +1506,53 @@ def _lifecycle_send(to, subject, body, sender, unsub):
                         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"})
 
 
+def _resume_search(user_id, how: str) -> bool:
+    """A user paused for inactivity came back (opened the app, clicked the email's
+    link, or the admin resumed them): clear the pause, restart the 14-day clock and
+    queue a search now so they are not left waiting for picks. True if they were
+    paused. Never raises."""
+    try:
+        c = database.get_db()
+        try:
+            cur = c.execute("UPDATE users SET search_paused_at=NULL WHERE id=? AND search_paused_at IS NOT NULL",
+                            (user_id,))
+            c.commit()
+            was = (getattr(cur, "rowcount", 0) or 0) > 0
+        finally:
+            c.close()
+        if not was:
+            return False
+        database.log_activity(user_id, "search_resumed", "Search resumed (%s)" % how)
+        _track(user_id, "search_resumed", {"how": how})
+        try:
+            jobqueue.enqueue(user_id, "search")
+        except Exception as exc:              # a cap or a run already queued: the next scheduled one will do
+            print("[inactive] search for returning user %s not queued: %s" % (user_id, exc))
+        return True
+    except Exception as exc:
+        print("[inactive] resume for user %s failed: %s" % (user_id, exc))
+        return False
+
+
+def _run_inactive_sweep(now=None) -> dict | None:
+    """Pause the daily search of users inactive for 14 days and email them once
+    from Eran (inactive.py). Scheduler-lock holder only. Never raises."""
+    import inactive
+    import lifecycle
+    import testaccount
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return None
+        can_email = lifecycle.enabled() and _sender(who="eran")[0] != RESEND_FROM
+        out = inactive.run(database.get_db, _lifecycle_send, MOBILE_URL, now=now,
+                           is_test=testaccount.is_test_address, can_email=can_email, track=_track)
+        if out["paused"]:
+            print("[inactive] paused %(paused)d, emailed %(emailed)d, failed %(failed)d" % out)
+        return out
+    except Exception as exc:
+        print("[inactive] ERROR sweep failed: %s" % exc)
+
+
 def _run_lifecycle_emails(now=None) -> dict | None:
     """Welcome / day 1 / day 3 / day 7 (lifecycle.py). Scheduler-lock holder
     only, so a second instance never sends twice. Never raises."""
@@ -1560,6 +1609,8 @@ def file_watcher():
                 print(f"[plans] ERROR plan lifecycle sweep failed: {_ple}")
         if _tick % 10 == 2:  # every ~10 minutes: lifecycle emails (off unless LIFECYCLE_EMAILS=1)
             _run_lifecycle_emails()
+        if _tick % 60 == 7:  # ~hourly: users who stopped coming back (inactive.py)
+            _run_inactive_sweep()
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -5058,6 +5109,20 @@ class Handler(BaseHTTPRequestHandler):
                 "</button></form>" % (int(_u), _t)))
             return
 
+        if path == "/email/resume":
+            # The "keep looking for me" link in the inactivity email (inactive.py): signed,
+            # so it works without signing in; it only un-pauses and queues a search.
+            import inactive
+            _u, _t = (qs.get("u") or [""])[0], (qs.get("t") or [""])[0]
+            if not inactive.resume_ok(_u, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete. Opening the app "
+                                          "does the same thing."), 400)
+                return
+            _resume_search(int(_u), "email link")
+            self.send_html(_stop_page("Noa is searching again", "Your next picks will be in the app shortly.",
+                                      "<p><a href='/app'>Open Job Hunter</a></p>"))
+            return
+
         if path.startswith("/landing-assets/"):
             # The landing page's pictures and fonts (assets/landing/). Only the
             # names landing.ASSETS lists are served - never a path from the URL.
@@ -5379,6 +5444,7 @@ class Handler(BaseHTTPRequestHandler):
                 import testaccount
                 if not testaccount.is_test_address(user.get("email")):
                     analytics.app_opened(user["id"])
+            _resume_search(user["id"], "opened the app")      # a no-op unless paused for inactivity
             out = dict(user)
             # Daily picks: a new day brings the next picks from Noa's reserve.
             try:
@@ -6133,7 +6199,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 rows = conn.execute("""
                 SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_date,
-                       u.plan, u.plan_until, u.plan_after, u.plan_source,
+                       u.plan, u.plan_until, u.plan_after, u.plan_source, u.search_paused_at,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='locked')   AS stats_locked,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='new')      AS stats_new,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='approved') AS stats_approved,
@@ -6355,6 +6421,14 @@ class Handler(BaseHTTPRequestHandler):
                     _sent.append("%s/%s" % (_pv["step"], _pv["variant"]))
                 except Exception as _le:
                     _errs.append("%s/%s: %s" % (_pv["step"], _pv["variant"], _le))
+            try:                                   # the inactivity email (inactive.py), from Eran
+                import inactive
+                _is, _ib = inactive.compose(_first, inactive.resume_url(MOBILE_URL, user["id"]))
+                send_email(user["email"], "[inactive14 / sent] %s" % _is,
+                           _ib + lifecycle.footer("eran", lifecycle.unsubscribe_url(MOBILE_URL, user["id"])), sender="eran")
+                _sent.append("inactive14/sent")
+            except Exception as _le:
+                _errs.append("inactive14/sent: %s" % _le)
             self.send_json({"sent": _sent, "errors": _errs,
                             "noa_from_set": bool(NOA_FROM), "eran_from_set": bool(ERAN_FROM),
                             "enabled": lifecycle.enabled()})
@@ -7803,6 +7877,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, **out})
             return
 
+        m = re.match(r"^/api/admin/users/(\d+)/resume-search$", path)
+        if m:
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            self.send_json({"success": True, "resumed": _resume_search(int(m.group(1)), "by the admin")})
+            return
+
         m = re.match(r"^/api/admin/users/(\d+)/toggle$", path)
         if m:
             if user.get("role") != "admin":
@@ -7879,6 +7961,7 @@ class Handler(BaseHTTPRequestHandler):
             # flight is now a no-op rather than a second Gemini-spending search.
             try:
                 _run_id = jobqueue.enqueue(uid, "search", payload={"by_user": True})
+                database.log_activity(uid, "search_requested", "Search started by the user")
             except jobqueue.DailyCapReached as _cap:
                 # 429, not 403: this clears by itself at midnight UTC, and the
                 # message says so rather than reading as a permanent refusal.

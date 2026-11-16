@@ -363,6 +363,8 @@ export const api = {
     request<{ success: boolean; delete_after: string; grace_days: number }>("/api/account/delete", "POST", { confirm_email }),
   // Returns the NEW state, so the row renders what is rather than what it
   // guessed. 400 with code "cannot_disable_self" if you aim it at yourself.
+  adminResumeSearch: (id: number) =>
+    request<{ success?: boolean; resumed?: boolean }>(`/api/admin/users/${id}/resume-search`, "POST", {}),
   adminToggleUser: (id: number) =>
     request<{ success?: boolean; is_active?: number; error?: string; code?: string }>(
       `/api/admin/users/${id}/toggle`, "POST", {}),

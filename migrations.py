@@ -1211,6 +1211,14 @@ def m0041_meta_ids(conn):
     conn.commit()
 
 
+def m0042_search_paused(conn):
+    """Inactive users (inactive.py, GTM row 26): when the daily search was paused
+    for a user who stopped coming back. NULL = searching. Idempotent."""
+    if not _has_column(conn, "users", "search_paused_at"):
+        conn.execute("ALTER TABLE users ADD COLUMN search_paused_at TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1253,6 +1261,7 @@ MIGRATIONS = [
     (39, "auto_apply_owner_only",       m0039_auto_apply_owner_only),
     (40, "release_kind",                m0040_release_kind),
     (41, "meta_ids",                    m0041_meta_ids),
+    (42, "search_paused",               m0042_search_paused),
 ]
 
 
