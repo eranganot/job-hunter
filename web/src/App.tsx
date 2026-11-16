@@ -2653,7 +2653,19 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, max: number) {
   while (t.length > 4 && ctx.measureText(t + "…").width > max) t = t.slice(0, -1);
   return t.trimEnd() + "…";
 }
-async function drawPicksImage(lang: "he" | "en", fam: { label: string; label_he: string; listed: number; roles: { title: string; company: string }[] }) {
+type PicksFam = { headline_en: string; headline_he: string; listed: number; roles: { title: string; company: string }[] };
+/** The Story version: the same square picture, centred on a 1080x1920 canvas so it stays clear
+ *  of the top and bottom bars Instagram draws over a Story. */
+async function drawPicksStory(lang: "he" | "en", fam: PicksFam) {
+  const square = await drawPicksImage(lang, fam);
+  const c = document.createElement("canvas");
+  c.width = 1080; c.height = 1920;
+  const x = c.getContext("2d")!;
+  x.fillStyle = "#0c1f17"; x.fillRect(0, 0, 1080, 1920);
+  x.drawImage(square, 0, 420);
+  return c;
+}
+async function drawPicksImage(lang: "he" | "en", fam: PicksFam) {
   await loadPicksFonts();
   const [noa, logo] = await Promise.all([loadImage(NOA_AVATAR), loadImage("/app/icon-192.png")]);
   const S = 1080, c = document.createElement("canvas");
@@ -2673,7 +2685,7 @@ async function drawPicksImage(lang: "he" | "en", fam: { label: string; label_he:
   const edge = he ? S - 72 : 72;
   x.direction = he ? "rtl" : "ltr"; x.textAlign = he ? "right" : "left";
   x.fillStyle = text;
-  const l1 = he ? `${fam.listed} משרות ${fam.label_he}` : `${fam.listed} ${fam.label} roles`;
+  const l1 = he ? fam.headline_he : fam.headline_en;
   let size = he ? 76 : 68;                      // shrink a long family name to fit, never cut it
   const big = () => (he ? `800 ${size}px "JH Heebo", "JH Inter"` : `600 ${size}px "JH Fraunces"`);
   x.font = big();
@@ -2733,14 +2745,14 @@ function NoasPicksCard() {
     try { await navigator.clipboard.writeText(text); setCopied(id); setTimeout(() => setCopied(""), 1500); }
     catch { setErr("Could not copy - select the text and copy it by hand."); }
   };
-  const picture = async (f: any, lang: "he" | "en") => {
-    const id = f.key + lang;
+  const picture = async (f: any, lang: "he" | "en", story = false) => {
+    const id = f.key + lang + (story ? "-story" : "");
     try {
-      const canvas = await drawPicksImage(lang, f);
+      const canvas = story ? await drawPicksStory(lang, f) : await drawPicksImage(lang, f);
       const url = canvas.toDataURL("image/png");
       setPics((p) => ({ ...p, [id]: url }));
       const a = document.createElement("a");
-      a.href = url; a.download = `noas-picks-${f.key}-${lang}.png`; a.click();
+      a.href = url; a.download = `noas-picks-${f.key}-${lang}${story ? "-story" : ""}.png`; a.click();
     } catch { setErr("Could not draw the image."); }
   };
   const left = res ? Object.entries(res.skipped || {}).filter(([, n]) => (n as number) > 0) : [];
@@ -2767,15 +2779,17 @@ function NoasPicksCard() {
           {res.families.map((f: any) => (
             <div key={f.key} className="border border-gray-700 rounded-lg p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <p className="text-sm text-white font-medium">{f.label} <span className="text-gray-400 font-normal">· {f.listed} listed of {f.found} found this week</span></p>
-                <div className="flex gap-2">
+                <p className="text-sm text-white font-medium">{f.label} <span className="text-gray-400 font-normal">· {f.key === "mixed" ? `${f.listed} listed, a few from each family` : `${f.listed} listed of ${f.found} found this week`}</span></p>
+                <div className="flex flex-wrap gap-2">
                   <button onClick={() => picture(f, "he")} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">Image · Hebrew</button>
                   <button onClick={() => picture(f, "en")} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">Image · English</button>
+                  <button onClick={() => picture(f, "he", true)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">Story · Hebrew</button>
                 </div>
               </div>
-              {(pics[f.key + "he"] || pics[f.key + "en"]) && (
+              {(pics[f.key + "he"] || pics[f.key + "en"] || pics[f.key + "he-story"]) && (
                 <div className="flex gap-3 mb-3">
                   {(["he", "en"] as const).map((l) => pics[f.key + l] && <img key={l} src={pics[f.key + l]} alt={`Post image, ${l === "he" ? "Hebrew" : "English"}`} className="w-40 h-40 rounded border border-gray-700" />)}
+                  {pics[f.key + "he-story"] && <img src={pics[f.key + "he-story"]} alt="Story image, Hebrew" className="h-40 rounded border border-gray-700" />}
                 </div>
               )}
               <div className="grid md:grid-cols-2 gap-3">
@@ -2790,10 +2804,25 @@ function NoasPicksCard() {
                           <button onClick={() => copy(id, edits[id] ?? p.text)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">{copied === id ? "Copied" : "Copy"}</button>
                         </span>
                       </div>
-                      <textarea dir={p.lang === "he" ? "rtl" : "ltr"} value={edits[id] ?? p.text} onChange={(e) => setEdits((x) => ({ ...x, [id]: e.target.value }))} rows={8} aria-label={`${place[`${p.voice}-${p.lang}`]} post text`} className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans" />
+                      <textarea dir={p.lang === "he" ? "rtl" : "ltr"} value={edits[id] ?? p.text} onChange={(e) => setEdits((x) => ({ ...x, [id]: e.target.value }))} rows={8} aria-label={`${place[`${p.voice}-${p.lang}`]} post text`} className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans [overflow-wrap:anywhere]" />
                     </div>
                   );
                 })}
+                {(() => {
+                  const id = `${f.key}-instagram`;
+                  return (
+                    <div className="md:col-span-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-gray-400">Page · Instagram caption · Hebrew (links don't work in captions: "link in bio")</span>
+                        <span className="flex gap-2">
+                          {edits[id] !== undefined && edits[id] !== f.instagram && <button onClick={() => setEdits((e) => { const n = { ...e }; delete n[id]; return n; })} className="text-xs px-2 py-1 text-gray-400">Undo my edits</button>}
+                          <button onClick={() => copy(id, edits[id] ?? f.instagram)} className="text-xs px-2 py-1 bg-gray-700 rounded text-gray-200">{copied === id ? "Copied" : "Copy"}</button>
+                        </span>
+                      </div>
+                      <textarea dir="rtl" value={edits[id] ?? f.instagram} onChange={(e) => setEdits((x) => ({ ...x, [id]: e.target.value }))} rows={8} aria-label="Instagram caption" className="w-full text-xs bg-gray-900 border border-gray-700 rounded p-2 text-gray-200 font-sans [overflow-wrap:anywhere]" />
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}
