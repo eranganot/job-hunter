@@ -1191,6 +1191,16 @@ def m0038_signup_attr(conn):
     conn.commit()
 
 
+def m0040_release_kind(conn):
+    """A search the user starts brings its own picks (the owner, 2026-11-16):
+    jobs.release_kind = 'search' for a job a user-started search released, on
+    top of the day's picks; NULL for the daily picks (and every older row), so
+    only those count toward the day's 7. Idempotent."""
+    if not _has_column(conn, "jobs", "release_kind"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN release_kind TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1231,6 +1241,7 @@ MIGRATIONS = [
     (37, "lifecycle_emails",            m0037_lifecycle_emails),
     (38, "signup_attr",                 m0038_signup_attr),
     (39, "auto_apply_owner_only",       m0039_auto_apply_owner_only),
+    (40, "release_kind",                m0040_release_kind),
 ]
 
 

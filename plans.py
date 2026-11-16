@@ -34,6 +34,8 @@ Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
   and unmentioned (no blur), and come in on the following days - so a first
   search of 30 matches is a week of picks, not one day and then nothing.
   Admin too (The owner, 2026-11-13: "set my cap to 7 as well") - one rule for everyone.
+  A search the user starts brings up to MATCHES_PER_DAY more of its own, on top
+  of the day's (The owner, 2026-11-16: "the cap should be per search").
 """
 from __future__ import annotations
 

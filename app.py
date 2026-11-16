@@ -782,8 +782,9 @@ def _notify_search_result(user_id, inserted, new_jobs_info, locked_n=0, held_n=0
     New picks: a push naming the best one, and Noa's letter (email / Telegram /
     WhatsApp) with up to three picks and why each fits. The first search sends no
     email here: "Noa found your first matches" has gone. A search the USER started
-    that only added to tomorrow's reserve gets a one-line push. Nothing new, or a
-    scheduled run that only fed the reserve: nothing. Link re-check counts
+    brings its own picks (up to 7, on top of today's - 2026-11-16): "I found N
+    more", push and chat channels, no email - they are in the app. Nothing new,
+    or a run that only fed the reserve: nothing. Link re-check counts
     (`admin_lines`) are added only to an admin's own letter. Returns the
     deliver_notification result, or None when nothing was sent."""
     import dailymsg
@@ -803,23 +804,23 @@ def _notify_search_result(user_id, inserted, new_jobs_info, locked_n=0, held_n=0
             if not top:
                 top = [(i.get("title"), i.get("company"), "") for i in new_jobs_info[:3]]
             name = ((row["name"] if row else "") or "").strip()
-            m = dailymsg.new_picks(name.split()[0] if name else "", top, inserted, MOBILE_URL.rstrip("/") + "/app")
+            m = (dailymsg.more_picks if by_user else dailymsg.new_picks)(
+                name.split()[0] if name else "", top, inserted, MOBILE_URL.rstrip("/") + "/app")
             push, subject, body = m["push"], m["subject"], m["body"]
         except Exception as exc:
             print(f"[run-search] ERROR could not write Noa's message, sending the short one: {exc}")
-            push = f"Today's {inserted} are in." if inserted > 1 else "Today's pick is in."
+            push = (f"I found {inserted} more for you." if by_user
+                    else f"Today's {inserted} are in." if inserted > 1 else "Today's pick is in.")
         if locked_n and body:
             body += f"\n\n+{locked_n} more found - upgrade your plan to see them."
     elif locked_n:
         push = f"{locked_n} new match(es) found - upgrade your plan to see them"
-    elif held_n and by_user:
-        push = dailymsg.saved_for_tomorrow()
     if not push:
         return None
     if body and admin_lines and _is_admin_id(user_id):
         body += "\n\n--\nAdmin only: " + " ".join(admin_lines)
     return deliver_notification(user_id, push, url_suffix=home_url() + "#new", subject=subject, body=body,
-                                email=bool(body) and not first_search)
+                                email=bool(body) and not first_search and not by_user)
 
 
 def _is_admin_id(user_id) -> bool:
@@ -3017,14 +3018,16 @@ def run_job_search(user_id: int, by_user: bool = False):
                             print(f"[run-search] ERROR could not apply the plan's match limit: {_lk}")
                         # ── Daily picks (2026-11-12): this search's jobs go to Noa's
                         # reserve, then today's picks come out of it, best first, up to
-                        # the plan's matches_per_day. What this run shows the user is
-                        # what was released now. A failure here releases everything.
+                        # the plan's matches_per_day. A search the user started brings up
+                        # to that many of its own, on top of today's (2026-11-16). What
+                        # this run shows the user is what was released now. A failure
+                        # here releases everything.
                         held_n = 0
                         try:
                             _dp_user = dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
                             if entitlements.daily_cap(_dp_user) is not None:
                                 entitlements.hold_new_matches(conn, _dp_user, _batch_after)
-                                _released = entitlements.release(conn, _dp_user)
+                                _released = entitlements.release(conn, _dp_user, by_user=by_user)
                                 _new_ids = {r[0] for r in conn.execute(
                                     "SELECT id FROM jobs WHERE user_id=? AND id>? AND status=?",
                                     (user_id, _batch_after, entitlements.HELD)).fetchall()}

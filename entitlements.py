@@ -452,6 +452,13 @@ def is_locked(conn, user_id: int, job_id: int) -> bool:
 # upgrade prompt. Every route treats a held job as if it did not exist yet.
 # Missed days do not add up (seven a day, not seven per day since the last
 # visit); jobs released earlier and not yet swiped stay in the queue as before.
+#
+# A search the USER starts (the owner, 2026-11-16: "the cap should be per
+# search, not per day ... give the option to run the search again") brings up
+# to MATCHES_PER_DAY picks of its own, best of the reserve first, on top of the
+# day's picks: release(..., by_user=True) stamps release_kind = 'search', and
+# only the daily ones (release_kind NULL) count toward the day. The scheduled
+# search and app opens keep the 7-a-day rhythm.
 
 HELD = "held"
 HOLD_DAYS = 14          # a reserve job older than this is never released: likely filled
@@ -469,8 +476,14 @@ def daily_cap(user):
     return limit(user, "matches_per_day")
 
 
+SEARCH_RELEASE = "search"   # jobs.release_kind of a user-started search's picks
+
+
 def released_today(conn, user_id: int, day: str | None = None) -> int:
-    return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND released_on=?",
+    """How many of the day's picks came in today. A user-started search's own
+    picks (release_kind 'search') are extra and do not count."""
+    return int(conn.execute("SELECT COUNT(*) FROM jobs WHERE user_id=? AND released_on=? "
+                            "AND release_kind IS NULL",
                             (user_id, day or israel_day())).fetchone()[0] or 0)
 
 
@@ -485,14 +498,23 @@ def hold_new_matches(conn, user, after_id: int) -> int:
     return max(n or 0, 0)
 
 
-def release(conn, user, now: datetime | None = None) -> list:
+def release(conn, user, now: datetime | None = None, by_user: bool = False) -> list:
     """Release the best reserve jobs up to today's cap. Returns [(id, url)]
     released, best first. Skips links already proven dead and jobs older than
-    HOLD_DAYS. An uncapped user (admin) gets the whole reserve."""
+    HOLD_DAYS. An uncapped user gets the whole reserve.
+
+    `by_user`: a search the user started - up to the cap of its own, whatever
+    today's picks were, stamped release_kind 'search' so it does not use up
+    the day's picks."""
     uid = _get(user, "id")
     cap = daily_cap(user)
     day = israel_day(now)
-    room = None if cap is None else cap - released_today(conn, uid, day)
+    if cap is None:
+        room = None
+    elif by_user:
+        room = cap
+    else:
+        room = cap - released_today(conn, uid, day)
     if room is not None and room <= 0:
         return []
     oldest = ((now or _utcnow()) - timedelta(days=HOLD_DAYS)).strftime("%Y-%m-%d")
@@ -502,8 +524,9 @@ def release(conn, user, now: datetime | None = None) -> list:
         (uid, HELD, oldest)).fetchall()
     picked = [(r[0], r[1]) for r in (rows if room is None else rows[:room])]
     if picked:
-        conn.execute("UPDATE jobs SET status='new', released_on=? WHERE id IN (%s)"
-                     % ",".join("?" * len(picked)), [day] + [i for i, _u in picked])
+        conn.execute("UPDATE jobs SET status='new', released_on=?, release_kind=? WHERE id IN (%s)"
+                     % ",".join("?" * len(picked)),
+                     [day, SEARCH_RELEASE if by_user else None] + [i for i, _u in picked])
         conn.commit()
     return picked
 

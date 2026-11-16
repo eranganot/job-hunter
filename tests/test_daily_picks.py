@@ -57,10 +57,10 @@ def _status(stack, uid):
         db.close()
 
 
-def _release(stack, uid, now=None):
+def _release(stack, uid, now=None, by_user=False):
     db = stack["db"].get_db()
     try:
-        return entitlements.release(db, _user(stack, uid), now=now)
+        return entitlements.release(db, _user(stack, uid), now=now, by_user=by_user)
     finally:
         db.close()
 
@@ -150,11 +150,45 @@ def test_held_jobs_do_not_exist_for_the_user_until_released(stack):
     assert stats["total"] == 7 and stats["new"] == 7
 
 
+def test_a_search_the_user_starts_brings_up_to_seven_more_on_top_of_todays(stack):
+    """The owner, 2026-11-16: "the cap should be per search and not per day ... I do
+    want to give the option to run the search again"."""
+    _c, uid = _fresh_user(stack, "dp-6@example.test")
+    _search(stack, uid, list(range(60, 80)))               # 20 in the reserve
+    assert len(_release(stack, uid)) == 7                   # today's 7
+    assert _release(stack, uid) == []                       # the day's picks are done
+    more = _search(stack, uid, [95, 96, 97])                # the user searches again
+    out = _release(stack, uid, by_user=True)
+    assert len(out) == 7                                    # its own 7, best of the reserve first
+    assert [i for i, _u in out][:3] == [more[2], more[1], more[0]]
+    db = stack["db"].get_db()
+    try:
+        assert entitlements.released_today(db, uid) == 7    # the extra 7 do not use up the day
+        kinds = [r[0] for r in db.execute(
+            "SELECT release_kind FROM jobs WHERE user_id=? AND status='new'", (uid,))]
+    finally:
+        db.close()
+    assert sorted(kinds, key=str) == sorted([None] * 7 + ["search"] * 7, key=str)
+    assert len(_release(stack, uid, by_user=True)) == 7     # and again: another 7
+    assert _release(stack, uid) == []                       # the app opening still adds nothing today
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+    assert len(_release(stack, uid, now=tomorrow)) == 2     # tomorrow's picks: what is left
+
+
+def test_a_user_search_before_the_days_picks_leaves_the_day_untouched(stack):
+    _c, uid = _fresh_user(stack, "dp-7@example.test")
+    _search(stack, uid, list(range(10)))
+    assert len(_release(stack, uid, by_user=True)) == 7
+    assert len(_release(stack, uid)) == 3                   # the day's picks still come: the 3 left
+
+
 def test_the_app_knows_todays_picks_are_done():
     import glob, os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     js = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(root, "web_bundle", "assets", "*.js")))
     assert "That's today's picks" in js and "daily_picks" in js
+    # 2026-11-16: the end-of-day screen offers another search again
+    assert "Want more now?" in js
 
 
 def test_noa_speaks_in_the_app():
@@ -163,6 +197,6 @@ def test_noa_speaks_in_the_app():
     import glob, os
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     js = "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(root, "web_bundle", "assets", "*.js")))
-    for s in ("Why Noa picked this", "I brought you", "See you then!", "/landing-assets/noa-"):
+    for s in ("Why Noa picked this", "I brought you", "That's today's picks", "/landing-assets/noa-"):
         assert s in js, s
     assert "Why this is a strong fit" not in js
