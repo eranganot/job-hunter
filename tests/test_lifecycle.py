@@ -184,3 +184,20 @@ def test_user_state_counts_jobs_still_to_apply_to(life):
     finally:
         conn.close()
     assert st["to_apply"] - before["to_apply"] == 2 and st["approved"] - before["approved"] == 3
+
+
+def test_the_stuck_emails_invite_a_reply():
+    """Reply plan (email review 7, GTM row 15): someone who is stuck is asked to
+    just reply; the line says a person reads it, since Noa is an AI."""
+    import lifecycle as L
+    base = {"setup_done": True, "has_cv": True, "to_swipe": 0, "picked": 0, "approved": 0,
+            "to_apply": 0, "applied": 0, "activated": False, "top": []}
+    stuck = [("day1", base), ("day7", base), ("day7", dict(base, picked=9, to_swipe=2))]
+    for step, st in stuck:
+        variant, sender, _subj, body = L.compose(step, "Dana", st, "https://x/app")
+        assert sender == "noa" and variant in ("empty", "quiet")
+        assert L.REPLY_INVITE in body and body.rstrip().endswith("Noa"), (step, variant)
+    assert "person on the team" in L.REPLY_INVITE
+    # Not on the emails to someone who is doing fine.
+    _v, _s, _subj, body = L.compose("day7", "Dana", dict(base, picked=9, approved=3), "https://x/app")
+    assert L.REPLY_INVITE not in body

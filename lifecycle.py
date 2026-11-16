@@ -145,6 +145,12 @@ def apply_nudge(st: dict) -> str:
             "and tailor your CV." % (_s(n, "job"), "is" if n == 1 else "are"))
 
 
+# Reply plan (email review 7, GTM row 15): the emails to someone who is stuck invite a
+# reply. Replies to Noa's address reach the owner, who answers within a day, signed as
+# the team, and logs each one as research.
+REPLY_INVITE = "Or just reply and tell me what you're looking for. A person on the team reads every reply."
+
+
 def compose(step: str, first: str, st: dict, link: str):
     """(variant, sender, subject, body) - body without the footer - or None to
     skip. `first` is the first name or ''. sender is 'noa' or 'eran'."""
@@ -178,7 +184,7 @@ def compose(step: str, first: str, st: dict, link: str):
             return ("empty", "noa", "Let's widen the net, %s" % name,
                     "%s\n\nI haven't found anything that fits what you asked for yet. That usually means the "
                     "titles are narrower than the market.\n\nAdd a title or two (the same role one level up or "
-                    "down works well) and I'll search again:\n\n%s\n\n%s" % (hi, titles_link(link), NOA_SIG))
+                    "down works well) and I'll search again:\n\n%s\n\n%s\n\n%s" % (hi, titles_link(link), REPLY_INVITE, NOA_SIG))
         if nudge:                                # approved, applied to none: the step that counts
             return ("active", "noa", "Nice start, %s" % name,
                     "%s\n\nYou've already been through your picks. %s\n\n"
@@ -224,14 +230,14 @@ def compose(step: str, first: str, st: dict, link: str):
             return ("empty", "noa", "Let's widen the net, %s" % name,
                     "%s\n\nA week in, and I haven't found the right ones for you yet. That usually means the job "
                     "titles or locations are narrower than the market.\n\nAdd a title or two (the same role one "
-                    "level up or down works well) and I'll search again tomorrow:\n\n%s\n\n%s"
-                    % (hi, titles_link(link), NOA_SIG))
+                    "level up or down works well) and I'll search again tomorrow:\n\n%s\n\n%s\n\n%s"
+                    % (hi, titles_link(link), REPLY_INVITE, NOA_SIG))
         return ("quiet", "noa", "Should I keep looking, %s?" % name,
                 "%s\n\nI've kept picking for you this week%s, but you haven't approved any yet.\n\n"
                 "If they're off, tell me what to change: update your job titles or locations in Settings and "
-                "I'll adjust tomorrow's picks.\n\n%s\n\n%s"
+                "I'll adjust tomorrow's picks.\n\n%s\n\n%s\n\n%s"
                 % (hi, " and %s waiting" % ("one is" if st["to_swipe"] == 1 else "%d are" % st["to_swipe"])
-                   if st["to_swipe"] else "", link, NOA_SIG))
+                   if st["to_swipe"] else "", link, REPLY_INVITE, NOA_SIG))
     return None
 
 
