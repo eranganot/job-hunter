@@ -75,7 +75,9 @@ def test_every_cookie_and_storage_key_listed_is_real_and_none_is_missing():
         assert "<code>%s</code>" % k in p, "localStorage key %r is not in the Privacy Policy" % k
     nav = re.findall(r'const NAV_KEY = "([^"]+)"', web)
     assert nav and "<code>%s</code>" % nav[0] in p, "the sessionStorage key is not in the Privacy Policy"
-    assert web.count("sessionStorage.setItem(") == 1, "a new sessionStorage key: add it to the policy"
+    adm = re.findall(r'const ADMIN_KEY = "([^"]+)"', web)
+    assert adm and "<code>%s</code>" % adm[0] in p, "the Admin sessionStorage key is not in the Privacy Policy"
+    assert web.count("sessionStorage.setItem(") == 2, "a new sessionStorage key: add it to the policy"
     assert "document.cookie" not in web and "indexedDB" not in web, "a new client-side store: add it to the policy"
 
 

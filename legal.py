@@ -293,6 +293,7 @@ _PRIVACY = f"""
   <tr><td><code>g_state</code>, <code>g_verifier</code></td><td>Protect the Google sign-in step</td><td>10 minutes</td></tr>
   <tr><td>Local storage: <code>jh_notify_nudge</code>, <code>jh_vapid_key</code></td><td>Remember whether we asked about notifications, and the push setup</td><td>Until you clear them</td></tr>
   <tr><td>Session storage: <code>jh.nav</code></td><td>Remembers which screen and tab you were on, so a refresh keeps your place</td><td>Until you close the app</td></tr>
+  <tr><td>Session storage: <code>jh.admin</code> (admins only)</td><td>Remembers which part of the Admin page was open</td><td>Until you close the app</td></tr>
   <tr><td>PostHog: a cookie and local storage named <code>ph_&lt;project key&gt;_posthog</code></td><td>Analytics on our public pages, only after you click Accept on the banner. If you click No thanks, only that choice is stored, and visits are counted without cookies.</td><td>Up to 1 year, or until you clear them</td></tr>
   <tr><td>App cache (service worker)</td><td>Lets the app load quickly and install on your device</td><td>Until the next app version</td></tr>
 </table></div>

@@ -649,3 +649,19 @@ def test_auto_apply_starts_off_for_everyone_but_the_admin(stack):
     rows = conn.execute("SELECT u.role, p.auto_apply_enabled FROM user_profiles p JOIN users u ON u.id=p.user_id").fetchall()
     conn.close()
     assert rows and all((r["auto_apply_enabled"] == 1) == (r["role"] == "admin") for r in rows), [dict(r) for r in rows]
+
+
+def test_application_instructions_are_the_owners_alone(stack, users):
+    """The owner, 2026-11-16: "my text should be mine only, other users should get a
+    general one or an empty one". Instructions are kept per account: another user
+    reads an empty box and saving theirs leaves the owner's untouched."""
+    import app as A
+    mine = "Current salary: do not answer.\nWilling to relocate: no."
+    st, _l, _b = users["admin"].post_json("/api/application-answers", {"standing_notes": mine})
+    assert st == 200
+    _s, _l, body = users["b"].get("/api/application-answers")
+    assert json.loads(body)["standing_notes"] == ""
+    users["b"].post_json("/api/application-answers", {"standing_notes": "Notice period: 60 days."})
+    assert A._standing_answers(_user_id(stack["db"], "admin@example.test"))["standing_notes"] == mine
+    _s, _l, body = users["admin"].get("/api/application-answers")
+    assert json.loads(body)["standing_notes"] == mine
