@@ -1310,7 +1310,7 @@ function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: 
                        ...(canAutoApply && me?.auto_apply_live ? [[sending ? "Sending…" : "Auto-apply selected", applySelected, "bg-indigo-600 hover:bg-indigo-700 text-white"]] : []),
                        ["Remove from queue", bulk.run("reject", "Removed"), "bg-red-600/80 hover:bg-red-600 text-white"]]} />
             <div className="space-y-2">{jobs.map((job: UiJob, i: number) => (
-              <QueueJobCard key={job.id} job={job} rank={i + 1} onSelect={onSelectJob}
+              <QueueJobCard canAutoApply={canAutoApply} key={job.id} job={job} rank={i + 1} onSelect={onSelectJob}
                             onMarkApplied={onMarkApplied} onRemove={onRemove}
                             selected={bulk.sel.has(job.id)} onToggle={bulk.toggle} />
             ))}</div>
@@ -1319,7 +1319,7 @@ function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: 
   );
 }
 
-function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, onToggle }: any) {
+function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, onToggle, canAutoApply }: any) {
   return (
     <div className={`bg-gray-800 rounded-xl border overflow-hidden ${selected ? "border-indigo-500" : "border-gray-700"}`}>
       <div className="flex items-start gap-3 p-3.5 hover:bg-gray-700/30 cursor-pointer" onClick={() => onSelect(job)}>
@@ -1339,7 +1339,7 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
             <span className="text-sm text-gray-400 truncate">{job.company}</span>
             {job.location && <span className="text-xs text-gray-400 truncate">{job.location}</span>}
           </div>
-          <div className="flex items-center gap-2 mt-1 flex-wrap"><RouteBadge job={job} />{!(["board", "account"].includes(job.applyRoute) && (!job.applyStatus || job.applyStatus === "queued")) && <ApplyBadge job={job} />}<FeedbackBadge job={job} />{job.applyRoute !== "board" && <LinkBadge job={job} />}</div>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">{canAutoApply && <RouteBadge job={job} />}{!(["board", "account"].includes(job.applyRoute) && (!job.applyStatus || job.applyStatus === "queued")) && <ApplyBadge job={job} />}<FeedbackBadge job={job} />{job.applyRoute !== "board" && <LinkBadge job={job} />}</div>
           {job.applyStatus === "manual_required" && <p className="text-xs text-amber-200/90 mt-1 line-clamp-2">{manualReason(job)}</p>}
           {/* Written by the scorer and shown on the swipe card, then dropped the
               moment a job reached the queue - which is where the decision to
@@ -4055,9 +4055,10 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
               </Field>
               <Field label="Job search" sub="Find and score new jobs"><Select value={searchHour} onChange={setSearchHour} options={hours} fmt={fmtHour} /></Field>
               {freq === "weekly" && <DayPicker label="Search day" value={searchDow} onChange={setSearchDow} />}
-              <Field label="Auto-apply time" sub="When approved applications go out"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field>
-              {freq === "weekly" && <DayPicker label="Apply day" value={applyDow} onChange={setApplyDow} />}
-              <div className={`p-3.5 rounded-xl border ${canAutoApply ? "bg-gray-800 border-gray-700" : "bg-gray-800/50 border-gray-700/60"}`}>
+              {/* Auto-apply is the owner's only (2026-11-16): users see no control for it. */}
+              {canAutoApply && <Field label="Auto-apply time" sub="When approved applications go out"><Select value={applyHour} onChange={setApplyHour} options={hours} fmt={fmtHour} /></Field>}
+              {canAutoApply && freq === "weekly" && <DayPicker label="Apply day" value={applyDow} onChange={setApplyDow} />}
+              {canAutoApply && <div className={`p-3.5 rounded-xl border ${canAutoApply ? "bg-gray-800 border-gray-700" : "bg-gray-800/50 border-gray-700/60"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-white text-sm flex items-center gap-1.5">
@@ -4083,8 +4084,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
                 {!canAutoApply && (
                   <p className="text-xs text-indigo-300 mt-2">Auto-apply is part of a paid plan — you are on {plan}.</p>
                 )}
-                {gateMsg && canAutoApply === false && <p className="text-xs text-gray-400 mt-1">{gateMsg}</p>}
-              </div>
+              </div>}
             </div>
           </div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>

@@ -102,9 +102,9 @@ def limit(user, key):
 def can_auto_apply(user) -> bool:
     """May this user have the app apply on their behalf without asking?
 
-    Since 2026-11-08 every plan may (The owner: the users decide, in Settings; off
-    until they do). The check stays at the chokepoint for a plan that drops it
-    later. Note this answers only "is it allowed to be ON" -
+    Since 2026-11-16 only the admin may (the owner: auto-apply sent 0 of 15 on
+    his own queue and is not offered to users until it works) - no plan row
+    has it. Note this answers only "is it allowed to be ON" -
     whether the engine then does anything is a separate switch
     (APPLY_ENGINE_ENABLED), and the user's own toggle is a third. All three
     have to agree before a form is ever submitted.

@@ -23,7 +23,8 @@ Decisions behind the numbers (matrix doc, 2026-11-05, and 2026-11-09):
   push goes out NOTICE_DAYS before one ends.
 - Matches per search: Free 3, Premium 6, Expert all; the rest are shown as
   blurred placeholders whose content never leaves the server.
-- Auto-apply is not sold while it is parked: admin only.
+- Auto-apply is admin only (the owner, 2026-11-16: "not good enough and cannot
+  be launched to users"). No plan has it; Settings does not show it to users.
 - Paid job sources are credit-capped; Expert's cap is higher than Premium's.
   The caps are placeholders until a paid source is configured (none is in
   production as of 2026-11-05) - tune them here.
@@ -61,10 +62,10 @@ PLANS = {
         "on_demand_search": 1,
         "matches_per_search": 3,
         "matches_per_day": MATCHES_PER_DAY,
-        # Every plan may turn auto-apply on; each user decides in Settings and
-        # it is off until they do (The owner, 2026-11-08). The engine's own switch
-        # (APPLY_ENGINE_ENABLED) still has to be on before anything is sent.
-        "auto_apply": True,
+        # Auto-apply is the owner's only (2026-11-16): 0 of 15 sent on his own
+        # queue, so it is not offered to users in any plan until it works.
+        # Only the ADMIN row below has it.
+        "auto_apply": False,
         "cover_letter": 0,
         "cv_review": 2,
         "tailored_cv": 2,
@@ -83,7 +84,7 @@ PLANS = {
         "on_demand_search": 3,
         "matches_per_search": 6,
         "matches_per_day": MATCHES_PER_DAY,
-        "auto_apply": True,             # every plan (2026-11-08)
+        "auto_apply": False,            # owner only (2026-11-16)
         "cover_letter": 10,
         "cv_review": 4,
         "tailored_cv": 10,
@@ -103,7 +104,7 @@ PLANS = {
         "on_demand_search": 10,
         "matches_per_search": UNLIMITED,
         "matches_per_day": MATCHES_PER_DAY,
-        "auto_apply": True,             # every plan (2026-11-08)
+        "auto_apply": False,            # owner only (2026-11-16)
         "cover_letter": 30,
         "cv_review": UNLIMITED,
         "tailored_cv": 30,
