@@ -13,7 +13,8 @@ What goes in, so the post makes no claim it cannot back:
     the app knows when it found a role, not when the employer published it);
   * a company name (about a fifth of stored jobs have none - left out);
   * a link to the employer's own page or its application system
-    (links.classify: direct_ats / company) - never a job board or aggregator;
+    (an application system, or a site whose address names the company - see
+    employer_link) - never a job board, directory, aggregator or agency;
   * not known to be closed or dead.
 One role per (company, title), newest first, at most two per company so one
 employer does not fill the post, at most LIST_MAX (10) listed - and the number the
@@ -30,7 +31,7 @@ from urllib.parse import urlencode, urlsplit
 import links
 
 LIST_MAX = 10          # roles named in one post
-MIN_ROLES = 3          # fewer than this is not a post
+MIN_ROLES = 5          # fewer than this is not a post (the owner, 2026-11-16: "a minimum of 4 or 5")
 PER_COMPANY = 2
 
 # (key, English label, Hebrew label, title patterns). ORDER MATTERS: the first family whose
@@ -81,6 +82,44 @@ def _url_key(url: str) -> str:
     return (p.netloc.lower().removeprefix("www.") + p.path.rstrip("/")).lower()
 
 
+# Recruitment agencies list a client's role on their OWN site, so the link passes the
+# employer check below while the "company" is the agency, not the employer. Seen in the first
+# production run (2026-11-16): JRG Partners. Extend this as more turn up.
+AGENCY_HOSTS = ("jrgpartners.com",)
+_AGENCY_WORDS = re.compile(r"\b(recruit\w*|staffing|headhunt\w*|executive search|placement|"
+                           r"השמה|גיוס)\b", re.I)
+
+
+def _letters(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def employer_link(url: str, company: str) -> bool:
+    """Does the link go to THIS employer's own page or its application system?
+
+    links.classify() calls every host it does not recognise "company" - the right default for
+    the apply engine, too loose for a post that says "each on the company's own careers page":
+    the first production run (2026-11-16) listed bayitil.com, a directory of companies, as
+    i-BrainTech's page. So a "company" link counts only when its address names the company
+    (monday.com for monday.com, careers.google.com for Google, checkpoint.com for Check Point).
+    Application systems (Greenhouse, Lever, Comeet, Workday, ...) carry the employer in the
+    path and are trusted as links.classify finds them. Agencies are never the employer."""
+    kind = links.classify(url)
+    if kind not in ("direct_ats", "company"):
+        return False
+    host = links.host_of(url) or ""
+    if any(host == h or host.endswith("." + h) for h in AGENCY_HOSTS) or _AGENCY_WORDS.search(company or ""):
+        return False
+    if kind == "direct_ats":
+        return True
+    host_letters = _letters(host)
+    name = _letters(company)
+    if len(name) >= 3 and name in host_letters:
+        return True
+    words = [w for w in re.findall(r"[a-z0-9]+", (company or "").lower()) if len(w) >= 3 and w not in ("com", "ltd", "inc", "the", "labs", "group", "technologies", "tech", "systems")]
+    return any(w in host_letters for w in words)
+
+
 def pick(rows, list_max: int = LIST_MAX, per_company: int = PER_COMPANY):
     """rows: dicts with title, company, url, found_date (and optional location, url_verified,
     status_check). Returns ({family key: [role, ...] newest first}, skipped counts)."""
@@ -96,7 +135,7 @@ def pick(rows, list_max: int = LIST_MAX, per_company: int = PER_COMPANY):
         if not company or _norm(company) in ("", "unknown", "n a", "confidential", "company"):
             skipped["no_company"] += 1
             continue
-        if links.classify(url) not in ("direct_ats", "company"):
+        if not employer_link(url, company):
             skipped["not_employer_link"] += 1
             continue
         if r.get("url_verified") == 0 or str(r.get("status_check") or "").lower() == "closed":
@@ -215,6 +254,64 @@ def _turn(voice: str, family_index: int, week: int, shift: int = 0) -> dict:
     return versions[(week + family_index + shift) % len(versions)]
 
 
+MIXED = ("mixed", "tech", "בהייטק")      # key, English word, Hebrew words for the all-families post
+
+
+def headline(lang: str, n: int, label: str, label_he: str) -> str:
+    return ("%d משרות %s" % (n, label_he)) if lang == "he" else ("%d %s roles" % (n, label))
+
+
+def mix(listed: dict, list_max: int = LIST_MAX) -> list:
+    """The all-families post: one role from each family in turn (largest family first),
+    at most two per employer overall, until the post is full."""
+    queues = [list(v["roles"]) for _k, v in sorted(listed.items(), key=lambda kv: -kv[1]["all"])
+              if len(v["roles"]) >= MIN_ROLES]
+    if len(queues) < 2:                       # one family is that family's own post
+        return []
+    out, per, seen = [], {}, set()
+    while len(out) < list_max and any(queues):
+        for q in queues:
+            while q:
+                r = q.pop(0)
+                c = _norm(r["company"])
+                if per.get(c, 0) >= PER_COMPANY or r["url"] in seen:
+                    continue
+                per[c] = per.get(c, 0) + 1
+                seen.add(r["url"])
+                out.append(r)
+                break
+            if len(out) >= list_max:
+                break
+    return out
+
+
+def instagram_caption(version: dict, label: str, label_he: str, roles: list) -> str:
+    """Hebrew, the page's voice. Instagram does not make links in a caption clickable, so the
+    roles are named without addresses and the sign-up is "the link in the bio"."""
+    fill = {"n": len(roles), "family": label, "family_he": label_he}
+    opening = version["he_open"].format(**fill)
+    opening = opening.replace(", כל אחת בעמוד הקריירה של החברה עצמה:", ":").replace(
+        " והשארתי רק את אלה שמובילות ישר לעמוד הקריירה של החברה:", ":").replace(", ישר מאתרי החברות:", ":")
+    lines = [opening, ""] + ["\u2022 %s | %s" % (r["title"], r["company"]) for r in roles]
+    lines += ["", "את המשרות תמצאו באתרי החברות.", version["he_close"].format(**fill),
+              "הקישור להרשמה בביו.", "", "#דרושים #הייטק #חיפושעבודה #משרות"]
+    return "\n".join(lines)
+
+
+def _family_out(i: int, key: str, en: str, he: str, roles: list, found: int, base_url: str,
+                week: int, shift: int) -> dict:
+    posts = []
+    for voice in ("page", "personal"):
+        v = _turn(voice, i, week, shift)
+        for lang in ("he", "en"):
+            posts.append({"voice": voice, "lang": lang, "version": v["key"],
+                          "text": write_post(voice, lang, v, en, he, roles, base_url, key)})
+    page = _turn("page", i, week, shift)
+    return {"key": key, "label": en, "label_he": he, "found": found, "listed": len(roles), "roles": roles,
+            "headline_en": headline("en", len(roles), en, he), "headline_he": headline("he", len(roles), en, he),
+            "posts": posts, "instagram": instagram_caption(page, en, he, roles)}
+
+
 def build(rows, base_url: str, days: int = 7, week: int = 0, shift: int = 0) -> dict:
     listed, skipped = pick(rows)
     families = []
@@ -222,15 +319,14 @@ def build(rows, base_url: str, days: int = 7, week: int = 0, shift: int = 0) -> 
         got = listed.get(key)
         if not got or len(got["roles"]) < MIN_ROLES:
             continue
-        posts = []
-        for voice in ("page", "personal"):
-            v = _turn(voice, i, week, shift)
-            for lang in ("he", "en"):
-                posts.append({"voice": voice, "lang": lang, "version": v["key"],
-                              "text": write_post(voice, lang, v, en, he, got["roles"], base_url, key)})
-        families.append({"key": key, "label": en, "label_he": he, "found": got["all"],
-                         "listed": len(got["roles"]), "roles": got["roles"], "posts": posts})
+        families.append(_family_out(i, key, en, he, got["roles"], got["all"], base_url, week, shift))
     families.sort(key=lambda f: -f["found"])
+    mixed = mix(listed)
+    if mixed:
+        out = _family_out(len(FAMILIES), MIXED[0], MIXED[1], MIXED[2], mixed,
+                          sum(f["found"] for f in families), base_url, week, shift)
+        out["label"], out["headline_en"] = "All role families", headline("en", len(mixed), "tech", "")
+        families.insert(0, out)
     thin = sorted(({"key": k, "count": v["all"]} for k, v in listed.items() if len(v["roles"]) < MIN_ROLES),
                   key=lambda x: -x["count"])
     return {"days": days, "families": families, "too_few": thin, "skipped": skipped,

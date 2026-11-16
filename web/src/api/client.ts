@@ -342,7 +342,7 @@ export const api = {
   adminNoasPicks: (days = 7, shift = 0) => request<{
     days: number; considered: number; min_roles: number; list_max: number;
     families: {
-      key: string; label: string; label_he: string; found: number; listed: number;
+      key: string; label: string; label_he: string; found: number; listed: number; headline_en: string; headline_he: string; instagram: string;
       roles: { title: string; company: string; url: string }[];
       posts: { voice: "page" | "personal"; lang: "he" | "en"; version: string; text: string }[];
     }[];

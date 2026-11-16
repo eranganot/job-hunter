@@ -54,6 +54,8 @@ def test_at_most_two_roles_per_company_and_ten_per_post_newest_first():
 ROWS3 = [_row("Senior Product Manager", "Lumen Health", "https://boards.greenhouse.io/lumen/jobs/1"),
          _row("Product Manager, Growth", "Orbitly", "https://jobs.lever.co/orbitly/2"),
          _row("Product Owner", "Kesef Labs", "https://kesef.example/careers/3"),
+         _row("Group Product Manager", "Tavor", "https://tavor.example/careers/4"),
+         _row("Product Lead", "Alma", "https://alma.example/careers/5"),
          _row("Backend Developer", "Kesef Labs", "https://kesef.example/careers/9")]     # one role: not a post
 
 
@@ -64,7 +66,7 @@ def _post(f, voice, lang):
 def test_each_family_gets_four_posts_two_voices_two_languages():
     out = noaspicks.build(ROWS3, "https://job-hunter.work", week=0)
     (f,) = out["families"]
-    assert f["key"] == "product" and f["listed"] == 3 and out["too_few"] == [{"key": "software", "count": 1}]
+    assert f["key"] == "product" and f["listed"] == 5 and out["too_few"] == [{"key": "software", "count": 1}]
     assert [(p["voice"], p["lang"]) for p in f["posts"]] == [("page", "he"), ("page", "en"),
                                                            ("personal", "he"), ("personal", "en")]
     he, en = _post(f, "page", "he")["text"], _post(f, "page", "en")["text"]
@@ -121,10 +123,12 @@ def test_the_admin_gets_this_weeks_posts_and_nobody_else_does(stack, users):  # 
         for i, (title, company, age) in enumerate([("Senior Product Manager", "Lumen Health", "-1 day"),
                                                    ("Product Manager", "Orbitly", "-2 day"),
                                                    ("Product Owner", "Kesef Labs", "-3 day"),
+                                                   ("Group Product Manager", "Tavor", "-2 day"),
+                                                   ("Product Manager, Growth", "Alma", "-1 day"),
                                                    ("Product Lead", "Old Co", "-20 day")]):
             conn.execute("INSERT INTO jobs (user_id, title, company, url, status, found_date) "
                          "VALUES (?,?,?,?, 'held', datetime('now', ?))",
-                         (uid, title, company, "https://picks%d.example/careers/1" % i, age))
+                         (uid, title, company, "https://%s.example/careers/%d" % (company.split()[0].lower(), i), age))
         conn.commit()
     finally:
         conn.close()
@@ -132,7 +136,7 @@ def test_the_admin_gets_this_weeks_posts_and_nobody_else_does(stack, users):  # 
     out = json.loads(body)
     assert st == 200 and out["days"] == 7
     f = [x for x in out["families"] if x["key"] == "product"][0]
-    assert f["listed"] == 3 and len(f["posts"]) == 4
+    assert f["listed"] == 5 and len(f["posts"]) == 4
     assert all("Old Co" not in p["text"] for p in f["posts"])            # three weeks old: not "this week"
     st, _l, body = users["admin"].get("/api/admin/noas-picks?shift=1")
     assert st == 200 and json.loads(body)["families"][0]["posts"][0]["version"] != f["posts"][0]["version"]
@@ -154,3 +158,49 @@ def test_posts_stay_positive_no_not_for_the_companies():
     assert "not for the companies" not in draw and "לא בשביל החברות" not in draw
     card = src[src.index("function NoasPicksCard"):src.index("function TestAccountCard")]
     assert "readOnly" not in card and "edits[id] ?? p.text" in card          # the post can be edited before copying
+
+
+def test_a_link_must_be_the_employers_own():
+    """First production run, 2026-11-16: bayitil.com (a directory of companies) passed as
+    i-BrainTech's page, and JRG Partners (a recruitment agency) as the employer of a CPO role."""
+    yes = [("https://monday.com/careers/d3b5", "monday.com"), ("https://www.comeet.com/jobs/buildots/36", "Buildots"),
+           ("https://careers.google.com/jobs/1", "Google"), ("https://www.checkpoint.com/careers/1", "Check Point"),
+           ("https://www.amazon.jobs/en/jobs/1", "Amazon"), ("https://www.metacareers.com/jobs/1", "Meta"),
+           ("https://www.nice.com/careers/x", "NICE Ltd.")]
+    no = [("https://www.bayitil.com/companies/i-braintech", "i-BrainTech"),           # a directory
+          ("https://www.jrgpartners.com/jobs/chief-product-officer", "JRG Partners"),   # an agency
+          ("https://acme.example/jobs/1", "Talent Recruiting Ltd"),                       # an agency by name
+          ("https://www.linkedin.com/jobs/view/3", "Orbitly")]                           # a job board
+    assert all(noaspicks.employer_link(u, c) for u, c in yes)
+    assert not any(noaspicks.employer_link(u, c) for u, c in no)
+
+
+def test_a_family_needs_five_roles_for_a_post():
+    """The owner, 2026-11-16: below 4 or 5 roles a post looks thin - no post for that family."""
+    four = [_row("Product Manager %d" % i, "Co%d" % i, "https://co%d.example/careers/1" % i) for i in range(4)]
+    out = noaspicks.build(four, "https://x.test")
+    assert out["families"] == [] and out["too_few"] == [{"key": "product", "count": 4}] and out["min_roles"] == 5
+
+
+def test_the_mixed_post_takes_a_few_from_each_family():
+    rows = [_row(t, "%s%d" % (t.split()[0], i), "https://%s%d.example/careers/1" % (t.split()[0].lower(), i))
+            for t in ("Product Manager", "Data Analyst", "Backend Developer") for i in range(6)]
+    rows += [_row("QA Engineer", "Qa%d" % i, "https://qa%d.example/careers/1" % i) for i in range(2)]   # too few: not mixed in
+    out = noaspicks.build(rows, "https://job-hunter.work", week=0)
+    m = out["families"][0]
+    assert m["key"] == "mixed" and m["listed"] == 10
+    assert m["headline_en"] == "10 tech roles" and m["headline_he"] == "10 משרות בהייטק"
+    first3 = [r["title"].split()[0] for r in m["roles"][:3]]
+    assert sorted(first3) == ["Backend", "Data", "Product"]                     # one from each family in turn
+    assert not any(r["title"].startswith("QA") for r in m["roles"])
+    assert "10 משרות בהייטק" in _post(m, "page", "he")["text"] and "utm_content=mixed" in _post(m, "page", "he")["text"]
+    # one qualifying family: no mixed post (it would be the same as that family's)
+    assert noaspicks.build(rows[:6], "https://x.test")["families"][0]["key"] == "product"
+
+
+def test_the_instagram_caption_names_roles_without_links():
+    f = noaspicks.build(ROWS3, "https://x.test", week=0)["families"][0]
+    cap = f["instagram"]
+    assert "http" not in cap and "\u2022 Senior Product Manager | Lumen Health" in cap
+    assert "הקישור להרשמה בביו." in cap and "#דרושים" in cap
+    assert "לא בשביל החברות" not in cap
