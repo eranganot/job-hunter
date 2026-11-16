@@ -218,6 +218,7 @@ def _meta_event(handler, user_id, event: str) -> None:
             row = c.execute("SELECT email, meta_ids FROM users WHERE id=?", (user_id,)).fetchone()
             if not row or testaccount.is_test_address(row["email"]):
                 return
+            _email = row["email"] or ""
             if ids and event == "CompleteRegistration":
                 c.execute("UPDATE users SET meta_ids=? WHERE id=?", (json.dumps(ids, sort_keys=True), user_id))
                 c.commit()
@@ -229,7 +230,8 @@ def _meta_event(handler, user_id, event: str) -> None:
             c.close()
         if ids:
             metapixel.send(event, ids, handler.headers.get("User-Agent", ""), handler.client_ip(),
-                           MOBILE_URL.rstrip("/") + ("/register" if event == "CompleteRegistration" else "/app"))
+                           MOBILE_URL.rstrip("/") + ("/register" if event == "CompleteRegistration" else "/app"),
+                           email=_email)
     except Exception as exc:
         print("[meta] %s for user %s skipped: %s" % (event, user_id, type(exc).__name__))
 

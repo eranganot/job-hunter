@@ -219,7 +219,7 @@ _PRIVACY = f"""
   <li>A record of activity in your account (searches, applications, settings changes) and usage counts used to apply plan limits.</li>
   <li>Technical data: sign-in sessions, IP address and browser details in server logs, and error reports when something breaks.</li>
   <li>Product analytics: which steps of the app you reach (for example signing up, uploading a CV, approving a first job, coming back on later days), recorded under a random-looking account number, never your name, email or CV. On our public pages, visits are counted too; analytics cookies are set only if you accept them.</li>
-  <li>Ad measurement, only if you accepted cookies on our public pages: Meta's own cookie identifiers from your browser, kept with your account so that signing up and approving a first job can be reported to Meta as results of our ads.</li>
+  <li>Ad measurement, only if you accepted cookies on our public pages: Meta's own cookie identifiers from your browser, kept with your account so that signing up and approving a first job can be reported to Meta as results of our ads, together with a one-way scrambled code (hash) of your email address.</li>
 </ul>
 <p>We do not ask for, and ask you not to include in your CV or answers, sensitive information such as health, religion or political views unless you choose to share it with employers.</p>
 
@@ -249,7 +249,7 @@ _PRIVACY = f"""
   <tr><td>Cloudflare</td><td>The job-hunter.work domain, network delivery and forwarding mail sent to our support address</td><td>IP address and request data; support emails</td></tr>
   <tr><td>Google (Gmail)</td><td>The mailbox that receives support messages</td><td>Your support messages and email address</td></tr>
   <tr><td>PostHog (EU region)</td><td>Product analytics: counting visits and which steps of the app people reach</td><td>Pseudonymous account number and events in the app; on public pages, page visits and the campaign link you came from (with analytics cookies only if you accept them); IP addresses are not stored</td></tr>
-  <tr><td>Meta Platforms Ireland (Facebook, Instagram)</td><td>Measuring our own ads, only if you clicked Accept on the cookie banner: whether a visit led to a sign-up and to a first approved job</td><td>Meta's cookie identifiers (<code>_fbp</code>, <code>_fbc</code>), IP address, browser details, the page address, and three events: page view, sign-up, first approved job. Never your name, email, CV or anything about your jobs. Meta also uses this data for its own purposes under its own privacy policy</td></tr>
+  <tr><td>Meta Platforms Ireland (Facebook, Instagram)</td><td>Measuring our own ads, only if you clicked Accept on the cookie banner: whether a visit led to a sign-up and to a first approved job</td><td>Meta's cookie identifiers (<code>_fbp</code>, <code>_fbc</code>), IP address, browser details, the page address, three events (page view, sign-up, first approved job) and, with the last two, your email address as a one-way scrambled code (a SHA-256 hash), which Meta can match to an account that uses the same email. Never your name, your email in readable form, your CV or anything about your jobs. Meta also uses this data for its own purposes under its own privacy policy</td></tr>
   <tr><td>Sentry (EU region)</td><td>Error reports when something breaks</td><td>Technical details of the error, account identifier; stack-frame variables are not sent</td></tr>
   <tr><td>Your browser's push service (Google, Apple, Mozilla, Microsoft)</td><td>Push notifications, if you turn them on</td><td>A device push address, notification text</td></tr>
   <tr><td>Telegram; Twilio (WhatsApp)</td><td>Notifications, only if you connect them with your own bot or account</td><td>Notification text, your chat or phone number</td></tr>
@@ -290,7 +290,7 @@ _PRIVACY = f"""
 <p>For anything you cannot do in the app, email <a href="mailto:{CONTACT}">{CONTACT}</a>. We answer within 30 days. You can also complain to a data protection authority: in Israel, the Privacy Protection Authority; in the EU, the authority in your country.</p>
 
 <h2>8. Cookies and local storage</h2>
-<p>We use what the Service needs to work. Analytics cookies and Meta's ad-measurement cookies are set only if you click Accept on the banner on our public pages. To change your answer, use "Cookie choices" at the bottom of our home page: "No thanks" stops both and removes Meta's cookies from your browser.</p>
+<p>We use what the Service needs to work. Analytics cookies and Meta's ad-measurement cookies are set only if you click Accept on the banner on our public pages. To change your answer, use "Cookie choices" at the bottom of our home page: "No thanks" stops both and removes Meta's cookies from your browser. If you accepted, signing up and approving your first job are also reported to Meta from our server, with those cookie values and a one-way scrambled code (hash) of your email address.</p>
 <div class="tbl"><table>
   <tr><th>Name</th><th>What it does</th><th>Lasts</th></tr>
   <tr><td><code>session</code></td><td>Keeps you signed in</td><td>Signs you out after 14 days without use (the cookie itself expires after 30)</td></tr>
