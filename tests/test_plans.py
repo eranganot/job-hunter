@@ -47,7 +47,8 @@ def test_the_matrix_is_the_one_the_owner_approved():
     assert (f["history_days"], p["history_days"], e["history_days"]) == (30, 365, None)
     assert not f["paid_sources"] and e["paid_source_credit"] > p["paid_source_credit"] > 0
     assert not f["deferred_list"] and p["deferred_list"] and e["deferred_list"]
-    assert all(row["auto_apply"] for row in plans.PLANS.values())   # every plan, user's choice (2026-11-08)
+    assert not any(row["auto_apply"] for row in plans.PLANS.values())   # no plan: the owner only (2026-11-16)
+    assert plans.ADMIN["auto_apply"]
     assert (plans.PROMOTION_PLAN, plans.PROMOTION_DAYS, plans.NOTICE_DAYS) == ("premium", 30, (7, 1))
     assert plans.SIX_MONTH_DISCOUNT == 0.20
     assert "admin" not in plans.PLANS                                    # admin is a role

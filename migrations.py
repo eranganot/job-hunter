@@ -915,6 +915,13 @@ def m0022_auto_apply_fresh_choice(conn):
     conn.commit()
 
 
+def m0039_auto_apply_owner_only(conn):
+    """Auto-apply is the owner's only again (2026-11-16). Any user who switched
+    it on since 2026-11-08 is switched off, so the flag matches a screen that
+    no longer shows the control."""
+    m0022_auto_apply_fresh_choice(conn)
+
+
 def m0023_tailored_cvs(conn):
     """Step 14: a CV rewritten for one job, kept per (user, job) - the checked
     JSON, plus what the check removed or flagged, shown with it. edited: the
@@ -1223,6 +1230,7 @@ MIGRATIONS = [
     (36, "daily_picks",                 m0036_daily_picks),
     (37, "lifecycle_emails",            m0037_lifecycle_emails),
     (38, "signup_attr",                 m0038_signup_attr),
+    (39, "auto_apply_owner_only",       m0039_auto_apply_owner_only),
 ]
 
 

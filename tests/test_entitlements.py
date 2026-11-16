@@ -10,6 +10,7 @@ hint to an honest user; the POST behind it is three lines of curl. So the gate
 lives on the server, and these tests attack it the way a user who wanted the
 feature for free would.
 """
+import os
 import json
 
 import pytest
@@ -24,13 +25,13 @@ from tests.test_routes import (Client, _new_job, _job_row, _user_id,  # noqa: F4
 @pytest.mark.parametrize("user, expected", [
     ({"role": "admin", "plan": "free"},    True),   # admin never depends on a plan row
     ({"role": "admin", "plan": None},      True),
-    # Every plan since 2026-11-08 (The owner): the user's own switch decides.
-    ({"role": "user",  "plan": "premium"}, True),
-    ({"role": "user",  "plan": "expert"},  True),
-    ({"role": "user",  "plan": "free"},    True),
-    ({"role": "user",  "plan": ""},        True),       # no plan = Free
-    ({"role": "user",  "plan": "  Premium "}, True),
-    ({"role": "user",  "plan": "gold"},    True),       # unknown plan = Free, no more
+    # No plan since 2026-11-16 (the owner): auto-apply is his only until it works.
+    ({"role": "user",  "plan": "premium"}, False),
+    ({"role": "user",  "plan": "expert"},  False),
+    ({"role": "user",  "plan": "free"},    False),
+    ({"role": "user",  "plan": ""},        False),       # no plan = Free
+    ({"role": "user",  "plan": "  Premium "}, False),
+    ({"role": "user",  "plan": "gold"},    False),       # unknown plan = Free, no more
     (None,                                 False),
 ])
 def test_can_auto_apply(user, expected):
@@ -65,16 +66,36 @@ def _auto_apply_flag(database, email):
     return row["auto_apply_enabled"] if row else None
 
 
-def test_any_plan_can_switch_auto_apply_on_and_off(stack, users):
-    """The owner, 2026-11-08: the users decide - every plan, off until they do."""
-    for plan in ("free", "premium", "expert"):
+def test_no_plan_can_switch_auto_apply_on(stack, users):
+    """The owner, 2026-11-16: auto-apply is his only until it works - no plan
+    may turn it on, and turning it off is always allowed."""
+    for plan in ("free", "premium", "expert", "beta"):
         _set_plan(stack["db"], "alice@example.test", plan)
         status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 1})
-        assert status == 200, plan
-        assert _auto_apply_flag(stack["db"], "alice@example.test") == 1, plan
+        assert status == 403, plan
+        assert not _auto_apply_flag(stack["db"], "alice@example.test"), plan
         status, _loc, _b = users["a"].post_json("/api/save-schedule", {"auto_apply_enabled": 0})
-        assert status == 200 and not _auto_apply_flag(stack["db"], "alice@example.test"), plan
+        assert status == 200, plan
     _set_plan(stack["db"], "alice@example.test", "free")
+
+
+def test_migration_39_switches_every_non_admin_off(stack):
+    import migrations
+    conn = stack["db"].get_db()
+    conn.execute("UPDATE user_profiles SET auto_apply_enabled=1")
+    conn.commit()
+    migrations.m0039_auto_apply_owner_only(conn)
+    rows = conn.execute("SELECT u.role, p.auto_apply_enabled FROM user_profiles p "
+                        "JOIN users u ON u.id=p.user_id").fetchall()
+    conn.close()
+    assert rows and all((r["auto_apply_enabled"] == 1) == (r["role"] == "admin") for r in rows)
+
+
+def test_users_are_shown_no_auto_apply_control():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "web", "src", "App.tsx"), encoding="utf-8").read()
+    assert '{canAutoApply && <Field label="Auto-apply time"' in src
+    assert "{canAutoApply && <RouteBadge job={job} />}" in src
+    assert "{canAutoApply && <div className={`p-3.5 rounded-xl border" in src
 
 
 def test_a_plan_without_auto_apply_is_still_refused(stack, users, monkeypatch):

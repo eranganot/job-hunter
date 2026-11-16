@@ -79,12 +79,13 @@ def test_a_plan_without_auto_apply_is_not_applied_for(engine_on, monkeypatch):
     assert out["applied"] == 0
 
 
-def test_every_plan_with_the_flag_on_is_applied_for(engine_on):
-    """The owner, 2026-11-08: every plan; the user's switch decides."""
-    for plan in ("free", "premium", "expert", None):
+def test_no_plan_with_the_flag_on_is_applied_for(engine_on):
+    """The owner, 2026-11-16: auto-apply is his only - a flag left on in any
+    plan sends nothing."""
+    for plan in ("free", "premium", "expert", "beta", None):
         uid = _make_user(engine_on["db"], "%s-on@example.test" % plan, plan, True)
         out = engine_on["app"].run_job_apply(uid)
-        assert out.get("skipped") != "not_entitled", (plan, out)
+        assert out.get("skipped") == "not_entitled" and out["applied"] == 0, (plan, out)
 
 
 def test_the_entitled_case_still_gets_through(engine_on):

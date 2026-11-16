@@ -5782,6 +5782,7 @@ class Handler(BaseHTTPRequestHandler):
             diag = {
                 "playwright_importable": bool(getattr(_ae, "PLAYWRIGHT_AVAILABLE", False)),
                 "apply_engine_enabled_env": os.environ.get("APPLY_ENGINE_ENABLED", "(unset)"),
+                "apply_engine_for_all_env": os.environ.get("APPLY_ENGINE_FOR_ALL", "(unset)"),
                 "gemini_key_present": bool((os.environ.get("GEMINI_API_KEY") or "").strip()),
                 # db_file/db_exists named the SQLite file on the volume, which
                 # production stopped using at the 2026-09-21 cutover (STATUS
