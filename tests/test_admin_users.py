@@ -665,3 +665,26 @@ def test_application_instructions_are_the_owners_alone(stack, users):
     assert A._standing_answers(_user_id(stack["db"], "admin@example.test"))["standing_notes"] == mine
     _s, _l, body = users["admin"].get("/api/application-answers")
     assert json.loads(body)["standing_notes"] == mine
+
+
+def test_the_test_account_is_flagged_and_left_out_of_the_funnel(stack, users):
+    """The owner, 2026-11-16: Today said 3 new users, the funnel 2 - the third was
+    the resettable test account, which is not a person."""
+    import app as A
+    import testaccount
+    st, _l, _b = users["admin"].post_json("/api/admin/test-account/reset", {})
+    assert st == 200
+    _s, _l, body = users["admin"].get("/api/admin/users")
+    flagged = {u["email"]: u["is_test"] for u in json.loads(body)}
+    assert flagged[testaccount.TEST_EMAIL] is True and flagged["admin@example.test"] is False
+    tid = _user_id(stack["db"], testaccount.TEST_EMAIL)
+    before = A.funnel_report(30)["steps"][0]["users"]
+    assert A._funnel(tid, "signup")                     # even if it ever gets a signup event...
+    assert A.funnel_report(30)["steps"][0]["users"] == before   # ...the cohort leaves it out
+
+
+def test_running_cost_is_admin_only(stack, users):
+    st, _l, body = users["admin"].get("/api/admin/running-cost?days=30")
+    assert st == 200 and "per_active_user_usd" in json.loads(body)
+    st, _l, _b = users["b"].get("/api/admin/running-cost")
+    assert st == 403

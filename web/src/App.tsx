@@ -692,6 +692,50 @@ function defaultAdminSection(): AdminSection {
   return new Date().toISOString().slice(0, 10) < LAUNCH_DAY ? "tools" : "today";
 }
 
+const usd = (n: number | null | undefined) => n == null ? "–" : "$" + (n < 10 ? n.toFixed(2) : Math.round(n).toLocaleString());
+const PURPOSE: Record<string, string> = {
+  search_scoring: "scoring searches", search_scoring_desc: "scoring searches", score: "scoring", match_score: "match scores",
+  web_search: "web search", analyze_cv: "reading CVs", cv_optimizer: "CV advice", tailored_cv: "tailored CVs",
+  cover_letter: "cover letters", check_job_status: "link checks", resume_search: "searches",
+};
+/** What the product costs to run, per active user (costreport.py). Ad spend is
+    a separate number, read from Meta once ads run. */
+function RunningCostCard({ c }: { c: any }) {
+  if (!c) return <p className="text-sm text-gray-400">Loading the running cost…</p>;
+  const g = c.gemini || {}, h = c.hosting || {}, ps = c.paid_sources || {};
+  const from = g.first_day && g.first_day > c.since ? g.first_day : c.since;
+  return (
+    <div>
+      <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-400" />Running cost</h3>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div className="bg-gray-800 rounded-xl border border-indigo-500/40 py-3 text-center">
+          <div className="text-xl font-bold text-white">{usd(c.per_active_user_usd)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">Per active user</div>
+        </div>
+        <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center">
+          <div className="text-xl font-bold text-white">{usd(c.total_usd)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">Total, {c.days} days</div>
+        </div>
+        <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center">
+          <div className="text-xl font-bold text-white">{c.active_users ?? 0}</div>
+          <div className="text-xs text-gray-400 mt-0.5">Active users</div>
+        </div>
+        <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center">
+          <div className="text-xl font-bold text-white">{usd(g.usd)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">Gemini</div>
+        </div>
+      </div>
+      <ul className="text-xs text-gray-400 mt-2 space-y-0.5">
+        <li>From {from} to today. Active = approved or passed on at least one job in that time ({c.active_admins ? "including you" : "not counting you"}; the test account never counts).</li>
+        <li>Gemini: {(g.calls || 0).toLocaleString()} calls at Google's list price{g.test_account_usd ? `, of which ${usd(g.test_account_usd)} the test account` : ""}{g.by_purpose?.length ? ". Most of it: " + g.by_purpose.slice(0, 3).map((b: any) => `${PURPOSE[b.purpose] || b.purpose} ${usd(b.usd)}`).join(", ") : ""}.{g.unpriced?.length ? ` Priced as Flash, no rate on file: ${g.unpriced.join(", ")}.` : ""}</li>
+        <li>Hosting (Railway): {h.set ? `${usd(h.usd)} (${usd(h.month_usd)} a month)` : <span className="text-amber-300">not set yet - JH_HOSTING_USD_MONTH in Railway, so it is not in the total</span>}.</li>
+        <li>Paid job sources: {ps.usd === 0 ? "$0, every source is inside its free monthly allowance" : <span className="text-amber-300">past the free allowance: {(ps.over_allowance || []).join(", ")} - not in the total</span>}.</li>
+        <li>Ad spend is not here: it gets its own number, read from Meta, once ads run.</li>
+      </ul>
+    </div>
+  );
+}
+
 /** Noa's one line at the top of the dashboard: what she brought today. */
 function NoaGreeting({ me, toSwipe, onSwipe }: { me: any; toSwipe: number; onSwipe: () => void }) {
   const dp = me?.daily_picks;
@@ -2967,8 +3011,10 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
   const [userMsg, setUserMsg] = useState("");
   const myId = me?.id;
   const [funnel, setFunnel] = useState<{ step: string; users: number }[] | null>(null);
+  const [cost, setCost] = useState<any>(null);
   const load = () => {
     api.adminFunnel(30).then((f) => setFunnel(f.steps)).catch(() => setFunnel(null));
+    api.adminRunningCost(30).then(setCost).catch(() => setCost(null));
     api.adminQueueStats().then(setStats).catch(() => {});
     api.adminUsers().then((u) => setUsers(Array.isArray(u) ? u : [])).catch(() => {});
   };
@@ -3028,7 +3074,8 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
       </span>
     </button>
   );
-  const people = users.filter((u) => u.role !== "admin");
+  // People only: not admins, not the resettable test account (owner, 2026-11-16).
+  const people = users.filter((u) => u.role !== "admin" && !u.is_test);
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const newThisWeek = people.filter((u) => String(u.created_date || "").slice(0, 10) >= weekAgo).length;
   const title = ADMIN_SECTIONS.find(([id]) => id === section)?.[1] || "Admin";
@@ -3050,8 +3097,9 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
               <Stat n={newThisWeek} label="New in the last 7 days" color="text-white" />
               <Stat n={people.length} label="Total users" color="text-white" />
             </div>
-            <p className="text-xs text-gray-400 mt-2">Not counting admins. The launch numbers (funnel, approve and applied rates, the leading KPIs) arrive here next.</p>
+            <p className="text-xs text-gray-400 mt-2">Not counting admins or the test account. The launch numbers (funnel, approve and applied rates, the leading KPIs) arrive here next.</p>
           </div>
+          <RunningCostCard c={cost} />
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-indigo-400" />Queue overview</h3>
             <div className="grid grid-cols-3 gap-2.5">
