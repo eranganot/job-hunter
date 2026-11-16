@@ -723,7 +723,7 @@ def test_meta_events_follow_the_cookie_and_only_the_cookie(stack, users, monkeyp
     import ratelimit
     calls = []
     monkeypatch.setattr(metapixel, "PIXEL_ID", "1"); monkeypatch.setattr(metapixel, "TOKEN", "t")
-    monkeypatch.setattr(metapixel, "send", lambda ev, ids, ua, ip, url: calls.append((ev, dict(ids), url)) or True)
+    monkeypatch.setattr(metapixel, "send", lambda ev, ids, ua, ip, url, email="": calls.append((ev, dict(ids), url, email)) or True)
     fbp = "fb.1.1763280000000.1234567890"
     for email, cookie in (("yes@example.test", "_fbp=%s" % fbp), ("no@example.test", "")):
         ratelimit.reset_all()
@@ -737,7 +737,7 @@ def test_meta_events_follow_the_cookie_and_only_the_cookie(stack, users, monkeyp
     conn.close()
     assert kept["no@example.test"] is None
     assert json.loads(kept["yes@example.test"]) == {"fbp": fbp}
-    assert [(e, i) for e, i, _u in calls] == [("CompleteRegistration", {"fbp": fbp})]
+    assert [(e, i, m) for e, i, _u, m in calls] == [("CompleteRegistration", {"fbp": fbp}, "yes@example.test")]
     assert calls[0][2].endswith("/register")
     # First approve: from the ids kept at sign-up (another device, no cookie), once, then forgotten.
     uid = _user_id(stack["db"], "yes@example.test")

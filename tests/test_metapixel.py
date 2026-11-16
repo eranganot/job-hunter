@@ -51,11 +51,16 @@ def test_no_fbp_cookie_means_no_consent_and_nothing_sent(mp):
     assert mp.send("Purchase", {"fbp": FBP}, "UA", "1.2.3.4", "https://x/") is False     # only our two events
 
 
-def test_the_event_carries_no_name_email_or_job(mp):
-    assert mp.send("FirstApprove", {"fbp": FBP, "fbc": FBC}, "Mozilla/5.0", "203.0.113.9", "https://job-hunter.work/app")
+def test_the_event_carries_a_hashed_email_and_no_name_or_job(mp):
+    import hashlib
+    assert mp.send("FirstApprove", {"fbp": FBP, "fbc": FBC}, "Mozilla/5.0", "203.0.113.9",
+                   "https://job-hunter.work/app", email="  Dana@Example.Test ")
     ev = _drain(mp)[0]["data"][0]
     assert ev["event_name"] == "FirstApprove" and ev["action_source"] == "website"
-    assert set(ev["user_data"]) == {"fbp", "fbc", "client_user_agent", "client_ip_address"}
+    assert set(ev["user_data"]) == {"fbp", "fbc", "client_user_agent", "client_ip_address", "em"}
+    assert ev["user_data"]["em"] == [hashlib.sha256(b"dana@example.test").hexdigest()]
+    assert "dana" not in json.dumps(ev).lower()                       # never the readable address
+    assert "em" not in mp.payload("FirstApprove", {"fbp": FBP}, "UA", "", "u")["data"][0]["user_data"]
     assert set(ev) == {"event_name", "event_time", "event_id", "action_source", "event_source_url", "user_data"}
 
 
@@ -81,7 +86,8 @@ def test_the_privacy_policy_names_meta_and_every_store():
     import legal
     p = legal.privacy_html()
     for needle in ("Meta Platforms Ireland", "<code>_fbp</code>", "<code>_fbc</code>", "<code>jh_ads_ok</code>",
-                   "Cookie choices", "no longer than 90 days after you sign up", "Your consent, given on the cookie banner"):
+                   "Cookie choices", "no longer than 90 days after you sign up", "Your consent, given on the cookie banner",
+                   "one-way scrambled code (a SHA-256 hash)"):
         assert needle in p, needle
     assert "No advertising cookies" not in p and "use advertising trackers" not in p
     import metapixel

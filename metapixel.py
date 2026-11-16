@@ -16,13 +16,16 @@ Accept on the landing page's cookie banner:
   or the account kept one from sign-up (`users.meta_ids`).
 
 What Meta receives with a server event: the event name and time, the page
-address, Meta's own cookie values, the browser's user agent and IP address.
-Never a name, an email (hashed or not), a CV, or anything about jobs.
+address, Meta's own cookie values, the browser's user agent and IP address,
+and the account's email as a SHA-256 hash (owner's decision 2026-11-16: it lets
+Meta match the event to the person who saw the ad, across devices; the Privacy
+Policy says so). Never a name, the email itself, a CV, or anything about jobs.
 
 META_PIXEL_ID alone turns on the browser half; the server half also needs
 META_CAPI_TOKEN (Railway env, never in the repo). META_TEST_EVENT_CODE sends
 server events to Events Manager's "Test events" tab instead of live data.
 """
+import hashlib
 import json
 import os
 import queue
@@ -72,8 +75,17 @@ def clean_ids(raw) -> dict:
     return out if out.get("fbp") else {}
 
 
-def payload(event: str, ids: dict, user_agent: str, ip: str, url: str, now: float | None = None) -> dict:
+def hashed_email(email: str) -> str:
+    """Meta's normalisation: trimmed, lower-cased, SHA-256 hex. '' for no email."""
+    e = (email or "").strip().lower()
+    return hashlib.sha256(e.encode("utf-8")).hexdigest() if "@" in e else ""
+
+
+def payload(event: str, ids: dict, user_agent: str, ip: str, url: str, now: float | None = None,
+            email: str = "") -> dict:
     user = {"fbp": ids["fbp"], "client_user_agent": (user_agent or "")[:512]}
+    if hashed_email(email):
+        user["em"] = [hashed_email(email)]
     if ids.get("fbc"):
         user["fbc"] = ids["fbc"]
     if ip and ip != "?":
@@ -119,7 +131,7 @@ def _run():
                     time.sleep(2)
 
 
-def send(event: str, ids: dict, user_agent: str, ip: str, url: str) -> bool:
+def send(event: str, ids: dict, user_agent: str, ip: str, url: str, email: str = "") -> bool:
     """Queue one server event. False (and nothing sent) when the server half is
     off, the event is not one of ours, or there is no consent-bearing id."""
     if not server_enabled() or event not in EVENTS or not (ids or {}).get("fbp"):
@@ -128,7 +140,7 @@ def send(event: str, ids: dict, user_agent: str, ip: str, url: str) -> bool:
         if _worker[0] is None or not _worker[0].is_alive():
             _worker[0] = threading.Thread(target=_run, name="meta-capi", daemon=True)
             _worker[0].start()
-        _q.put_nowait(payload(event, ids, user_agent, ip, url))
+        _q.put_nowait(payload(event, ids, user_agent, ip, url, email=email))
         return True
     except queue.Full:
         _sent["dropped"] += 1
