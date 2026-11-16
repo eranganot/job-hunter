@@ -200,6 +200,12 @@ _BANNER_CSS = """
 """
 
 
+BANNER_ASK = ("Can Noa use analytics cookies to learn how people use this page? Either way, nothing is sold or used "
+              "for ads.")
+BANNER_ASK_META = ("Can Noa use cookies to learn how people use this page, and to measure our own ads on Facebook "
+                   "and Instagram (Meta)? Either way, nothing is sold.")
+
+
 def browser_snippet(page: str, extra: dict | None = None) -> str:
     """posthog-js + consent banner + attribution on sign-up links, for a public
     page. Always includes the link-attribution part (it only rewrites URLs);
@@ -221,13 +227,18 @@ posthog.init(%(key)s,{api_host:%(host)s,cookieless_mode:"on_reject",person_profi
   disable_session_recording:true,disable_surveys:true,autocapture:false,capture_pageview:false,
   loaded:function(ph){ph.register(%(props)s);ph.capture("$pageview");
     if(ph.get_explicit_consent_status()==="pending"){document.getElementById("cc").classList.add("on")}}});
-function jhConsent(yes){if(yes){posthog.opt_in_capturing()}else{posthog.opt_out_capturing()}document.getElementById("cc").classList.remove("on")}
+function jhConsent(yes){if(yes){posthog.opt_in_capturing()}else{posthog.opt_out_capturing()}
+  if(window.jhMeta){jhMeta(yes)}document.getElementById("cc").classList.remove("on")}
+function jhCookieSettings(){document.getElementById("cc").classList.add("on");return false}
 document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest('a[href^="/register"]');
   if(a){posthog.capture("cta_clicked",{label:a.textContent.trim(),place:a.getAttribute("data-place")||""})}});
 """ % {"key": json.dumps(KEY), "host": json.dumps(HOST), "props": props}
-    banner = ('<div class="cc" id="cc" role="dialog" aria-label="Analytics cookies">'
-              '<p>Can Noa use analytics cookies to learn how people use this page? Either way, nothing is sold or used '
-              'for ads. <a href="/privacy">Privacy Policy</a></p><div class="row">'
+    import metapixel
+    # One Accept covers what the banner names, so the wording changes with what runs:
+    # Meta's pixel (metapixel.py) loads only after Accept on the banner that names Meta.
+    ask = BANNER_ASK_META if metapixel.browser_enabled() else BANNER_ASK
+    banner = ('<div class="cc" id="cc" role="dialog" aria-label="Cookies">'
+              '<p>%s <a href="/privacy">Privacy Policy</a></p><div class="row">'
               '<button class="yes" type="button" onclick="jhConsent(true)">Accept</button>'
-              '<button type="button" onclick="jhConsent(false)">No thanks</button></div></div>')
-    return "<style>%s</style>%s<script>%s%s</script>" % (_BANNER_CSS, banner, link_js, ph)
+              '<button type="button" onclick="jhConsent(false)">No thanks</button></div></div>' % ask)
+    return "<style>%s</style>%s<script>%s%s%s</script>" % (_BANNER_CSS, banner, link_js, ph, metapixel.consent_js())
