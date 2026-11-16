@@ -806,7 +806,7 @@ function NoaGreeting({ me, toSwipe, onSwipe }: { me: any; toSwipe: number; onSwi
   let line: string;
   if (me?.first_search_running) line = "I'm finding your first matches. They'll be here in a few minutes.";
   else if (dp && dp.today > 0) line = `I brought you ${dp.today} pick${dp.today === 1 ? "" : "s"} today.`
-    + (toSwipe >= dp.today ? " They're waiting for you." : toSwipe > 0 ? ` ${toSwipe} still to go.` : dp.today >= dp.cap ? " Next ones come in tomorrow." : "");
+    + (toSwipe >= dp.today ? " They're waiting for you." : toSwipe > 0 ? ` ${toSwipe} still to go.` : dp.today >= dp.cap ? " Next ones come in tomorrow, or run a search for more." : "");
   else if (toSwipe > 0) line = `${toSwipe} pick${toSwipe === 1 ? " is" : "s are"} waiting for you.`;
   else line = "Nothing new yet today. I'll bring your picks with today's search.";
   return (
@@ -4168,7 +4168,9 @@ function Select({ value, onChange, options, fmt }: { value: string; onChange: (v
 
 function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty, locked, me }: any) {
   const [searchMsg, setSearchMsg] = useState("");
-  // Daily picks (2026-11-12): today's cap reached -> "your next picks come in tomorrow".
+  // Daily picks (2026-11-12): today's cap reached -> "That's today's picks". Since
+  // 2026-11-16 a search the user starts brings up to the cap more, so the screen
+  // offers one (the owner: "give the option to run the search again").
   const picksDone = !!me?.daily_picks && me.daily_picks.today >= me.daily_picks.cap;
   const [perm, setPerm] = useState(pushState());
   const [pushMsg, setPushMsg] = useState("");
@@ -4194,14 +4196,14 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
         </>) : (<>
           <h2 className="text-2xl font-bold text-white mb-2">{picksDone ? "That's today's picks" : (empty ? "No new jobs right now" : "All done!")}</h2>
           <p className="text-gray-400 mb-5">{picksDone
-            ? (empty ? `I bring you up to ${me.daily_picks.cap} hand-picked jobs a day. Your next picks come in tomorrow. See you then!`
-                     : "You've been through today's picks. I'll bring the next ones tomorrow. See you then!")
+            ? (empty ? `I bring you up to ${me.daily_picks.cap} hand-picked jobs a day. Want more now? Run a new search and I'll look for up to ${me.daily_picks.cap} more.`
+                     : `You've been through today's picks. Want more now? Run a new search and I'll look for up to ${me.daily_picks.cap} more.`)
             : (empty ? "Run a search now, or check back after your next scheduled one." : "You've reviewed all new jobs.")}</p>
         </>)}
         {locked?.count > 0 && <div className="mb-5 text-left"><LockedMatchesCard locked={locked} me={me} /></div>}
         {!empty && (<div className="bg-gray-800 rounded-2xl p-5 mb-5 border border-gray-700 grid grid-cols-3 gap-4"><div><div className="text-2xl font-bold text-green-400 mb-0.5">{approvedCount}</div><div className="text-xs text-gray-400">Approved</div></div><div><div className="text-2xl font-bold text-red-400 mb-0.5">{rejectedCount}</div><div className="text-xs text-gray-400">Passed</div></div><div><div className="text-2xl font-bold text-amber-400 mb-0.5">{deferredCount}</div><div className="text-xs text-gray-400">Deferred</div></div></div>)}
         <div className="space-y-3">
-          {!(empty && me?.first_search_running) && !picksDone && <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
+          {!(empty && me?.first_search_running) && <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
           <button onClick={onViewDashboard} className="w-full py-3.5 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium flex items-center justify-center gap-2"><LayoutGrid className="w-5 h-5" />View Dashboard</button>
           <button onClick={onStartNew} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl font-medium flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4" />Refresh</button>
         </div>

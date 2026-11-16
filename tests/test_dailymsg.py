@@ -59,10 +59,16 @@ def test_first_sentence():
     assert len(long) <= 181 and long.endswith("…")
 
 
-def test_saved_for_tomorrow_names_the_daily_number():
-    import plans
-    assert dailymsg.saved_for_tomorrow() == ("Found a few more. You've had today's %d, so I'm saving them "
-                                             "for tomorrow." % plans.MATCHES_PER_DAY)
+def test_a_search_the_user_started_says_more_not_todays():
+    m = dailymsg.more_picks("Maya", TOP, 5, "L")
+    assert m["push"] == "I found 5 more for you. Senior Product Manager at Lumen Health is very you."
+    assert m["subject"] == "5 more picks: Senior Product Manager at Lumen Health + 4 more"
+    assert m["body"].startswith("Hi Maya,\n\nYour search found 5 more. The best of them:")
+    assert "2 more are waiting." in m["body"] and "Today's" not in m["body"]
+    one = dailymsg.more_picks("", TOP[:1], 1, "L")
+    assert one["push"] == "I found 1 more for you: Senior Product Manager at Lumen Health."
+    assert one["body"].startswith("Hi,\n\nYour search found 1 more:")
+    assert dailymsg.more_picks("Maya", [], 3, "L")["push"] == "I found 3 more for you."
 
 
 @pytest.fixture
@@ -159,13 +165,23 @@ def test_the_first_search_pushes_but_does_not_email_twice(env):
     assert len(pushes) == 1 and emails == []
 
 
-def test_nothing_new_says_nothing_and_the_reserve_note_only_answers_the_user(env):
+def test_nothing_new_says_nothing(env):
     app, uid, pushes, emails = env
     assert app._notify_search_result(uid, 0, []) is None                         # nothing new
     assert app._notify_search_result(uid, 0, [], held_n=5, by_user=False) is None  # the scheduler fed the reserve
+    assert app._notify_search_result(uid, 0, [], held_n=5, by_user=True) is None   # only dead/stale jobs left
     assert pushes == [] and emails == []
-    app._notify_search_result(uid, 0, [], held_n=5, by_user=True)                # the user pressed search
-    assert pushes == [dailymsg.saved_for_tomorrow()] and emails == []
+
+
+def test_a_search_the_user_started_pushes_its_own_picks_without_an_email(env):
+    """2026-11-16: a user-started search brings up to 7 of its own, on top of today's.
+    They are in the app, so a push (and Telegram / WhatsApp), no email."""
+    app, uid, pushes, emails = env
+    info = [_job(uid, "Senior Product Manager", "Lumen Health", "Fits.", 95, "https://x.test/1"),
+            _job(uid, "Product Manager, Growth", "Orbitly", "Fits.", 88, "https://x.test/2")]
+    res = app._notify_search_result(uid, 2, info, held_n=0, by_user=True)
+    assert pushes == ["I found 2 more for you. Senior Product Manager at Lumen Health is very you."]
+    assert emails == [] and res["email"].startswith("skipped")
 
 
 def test_the_search_no_longer_sends_system_lines_to_users():
@@ -177,5 +193,5 @@ def test_the_search_no_longer_sends_system_lines_to_users():
     # a failed search tells the user nothing: no deliver_notification after the failure is logged
     tail = src[src.index("Job search failed"):]
     assert "deliver_notification" not in tail
-    # and the button the user presses says so, which is what lets the reserve note through
+    # and the button the user presses says so: that is what gives its search picks of its own
     assert 'jobqueue.enqueue(uid, "search", payload={"by_user": True})' in inspect.getsource(app)
