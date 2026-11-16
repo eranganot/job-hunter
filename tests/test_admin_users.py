@@ -712,3 +712,46 @@ def test_signup_keeps_where_it_came_from_and_the_kpis_are_admin_only(stack, user
         assert st == 403, path
     _s, _l, body = users["admin"].get("/api/admin/sources?days=30")
     assert any(r["name"] == "facebook / group" for r in json.loads(body)["sources"])
+
+
+def test_meta_events_follow_the_cookie_and_only_the_cookie(stack, users, monkeypatch):
+    """GTM row 16: sign-up and first approve are reported to Meta only for someone
+    whose browser carries Meta's _fbp cookie (they accepted the banner)."""
+    import app as A
+    import metapixel
+    from tests.test_routes import Client
+    import ratelimit
+    calls = []
+    monkeypatch.setattr(metapixel, "PIXEL_ID", "1"); monkeypatch.setattr(metapixel, "TOKEN", "t")
+    monkeypatch.setattr(metapixel, "send", lambda ev, ids, ua, ip, url: calls.append((ev, dict(ids), url)) or True)
+    fbp = "fb.1.1763280000000.1234567890"
+    for email, cookie in (("yes@example.test", "_fbp=%s" % fbp), ("no@example.test", "")):
+        ratelimit.reset_all()
+        c = Client(stack["port"])
+        c.cookie = cookie
+        st, _loc, _b = c.post_form("/register", {"name": "m", "email": email, "password": "correct-horse-1",
+                                                 "password2": "correct-horse-1"})
+        assert st == 302
+    conn = stack["db"].get_db()
+    kept = dict(conn.execute("SELECT email, meta_ids FROM users WHERE email LIKE '%@example.test'").fetchall())
+    conn.close()
+    assert kept["no@example.test"] is None
+    assert json.loads(kept["yes@example.test"]) == {"fbp": fbp}
+    assert [(e, i) for e, i, _u in calls] == [("CompleteRegistration", {"fbp": fbp})]
+    assert calls[0][2].endswith("/register")
+    # First approve: from the ids kept at sign-up (another device, no cookie), once, then forgotten.
+    uid = _user_id(stack["db"], "yes@example.test")
+
+    class _H:
+        headers = {"User-Agent": "UA"}
+        def client_ip(self):
+            return "203.0.113.9"
+    A._meta_event(_H(), uid, "FirstApprove")
+    assert calls[-1][0] == "FirstApprove" and calls[-1][1] == {"fbp": fbp}
+    conn = stack["db"].get_db()
+    left = conn.execute("SELECT meta_ids FROM users WHERE id=?", (uid,)).fetchone()[0]
+    conn.close()
+    assert left is None
+    n = len(calls)
+    A._meta_event(_H(), _user_id(stack["db"], "no@example.test"), "FirstApprove")
+    assert len(calls) == n                                  # never accepted: nothing sent

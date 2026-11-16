@@ -199,6 +199,41 @@ def _save_signup_attr(user_id, attr) -> None:
         print("[funnel] signup source for user %s not saved: %s" % (user_id, exc))
 
 
+META_IDS_DAYS = 90
+
+
+def _meta_event(handler, user_id, event: str) -> None:
+    """Report one of our two ad-measurement events to Meta (metapixel.py), only for
+    someone who accepted the landing page's cookie banner: the request carries
+    Meta's _fbp cookie, or the account kept one from sign-up. Never for the test
+    account, never raises."""
+    import metapixel
+    if not metapixel.server_enabled() or not user_id:
+        return
+    try:
+        import testaccount
+        ids = metapixel.ids_from_cookies(handler.headers.get("Cookie", ""))
+        c = database.get_db()
+        try:
+            row = c.execute("SELECT email, meta_ids FROM users WHERE id=?", (user_id,)).fetchone()
+            if not row or testaccount.is_test_address(row["email"]):
+                return
+            if ids and event == "CompleteRegistration":
+                c.execute("UPDATE users SET meta_ids=? WHERE id=?", (json.dumps(ids, sort_keys=True), user_id))
+                c.commit()
+            ids = ids or metapixel.clean_ids(row["meta_ids"])
+            if event == "FirstApprove" and row["meta_ids"]:
+                c.execute("UPDATE users SET meta_ids=NULL WHERE id=?", (user_id,))   # its one use is done
+                c.commit()
+        finally:
+            c.close()
+        if ids:
+            metapixel.send(event, ids, handler.headers.get("User-Agent", ""), handler.client_ip(),
+                           MOBILE_URL.rstrip("/") + ("/register" if event == "CompleteRegistration" else "/app"))
+    except Exception as exc:
+        print("[meta] %s for user %s skipped: %s" % (event, user_id, type(exc).__name__))
+
+
 def funnel_report(days: int = 30) -> dict:
     """Signups in the last `days` days, and how many of THOSE users reached
     each later step. A cohort, so a step can never exceed the one before it
@@ -1096,6 +1131,14 @@ def _llm_usage_today(day):
                     conn.commit()
             except Exception as _pe:
                 print(f"[llm-ledger] prune skipped: {_pe}")
+            try:
+                # Meta's cookie ids kept at sign-up (metapixel.py) are no use after Meta's own
+                # 90-day cookie life: drop them (Privacy Policy, section 6).
+                _mc = (datetime.utcnow() - timedelta(days=META_IDS_DAYS)).strftime("%Y-%m-%d")
+                conn.execute("UPDATE users SET meta_ids=NULL WHERE meta_ids IS NOT NULL AND created_date < ?", (_mc,))
+                conn.commit()
+            except Exception as _me:
+                print(f"[meta] old ids not cleared: {_me}")
         g = conn.execute(
             "SELECT COALESCE(SUM(calls),0), COALESCE(SUM(total_tokens),0) "
             "FROM llm_usage WHERE day=?", (day,)).fetchone()
@@ -4953,6 +4996,7 @@ class Handler(BaseHTTPRequestHandler):
                     except (ValueError, UnicodeDecodeError):
                         _g_attr = {}
                 _save_signup_attr(_user["id"], _g_attr)
+                _meta_event(self, _user["id"], "CompleteRegistration")
                 _track(_user["id"], "user_signed_up", dict(_g_attr, method="google"), set_once=_g_attr)
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
@@ -5229,6 +5273,9 @@ class Handler(BaseHTTPRequestHandler):
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),
                 "paid_pool": _paid_pool_health(),
+                # Meta ad measurement (metapixel.py): which half is on, and how the
+                # server events are going (keyed callers only; never the token).
+                "meta": __import__("metapixel").health(),
                 # Contact support has somewhere to go (a yes/no; never the address)
                 "support_inbox": bool(SUPPORT_EMAIL),
                 # Someone receives the new-user alert (a yes/no and how it was
@@ -6355,6 +6402,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _funnel(user_id, "signup")
             _save_signup_attr(user_id, _attr)
+            _meta_event(self, user_id, "CompleteRegistration")
             _track(user_id, "user_signed_up", dict(_attr, method="email"), set_once=_attr)
             try:
                 _send_verification(user_id, email.strip().lower(), name)
@@ -7215,7 +7263,8 @@ class Handler(BaseHTTPRequestHandler):
                 database.write_approved_jobs(BASE_DIR)
                 bump_onboarding(user_id, "first_job_reviewed")
                 if action == "approve":
-                    _funnel(user_id, "first_approve")
+                    if _funnel(user_id, "first_approve"):
+                        _meta_event(self, user_id, "FirstApprove")
                     _track(user_id, "job_approved")
                 elif action == "reject":
                     _track(user_id, "job_passed", {"reason": (reason or "")[:60]})
@@ -7696,7 +7745,8 @@ class Handler(BaseHTTPRequestHandler):
                 label = "Approved" if action == "approve" else "Passed on"
                 database.log_activity(user_id, f"bulk_{action}", f"{label} {done} job(s) at once")
                 if action == "approve" and done:
-                    _funnel(user_id, "first_approve")
+                    if _funnel(user_id, "first_approve"):
+                        _meta_event(self, user_id, "FirstApprove")
                 if done:
                     _track(user_id, "job_approved" if action == "approve" else "job_passed", {"count": done, "bulk": True})
                 database.write_approved_jobs(BASE_DIR)

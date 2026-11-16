@@ -21,7 +21,7 @@ import html
 OPERATOR = "Eran Ganot"
 OPERATOR_PLACE = "Ramat Gan, Israel"
 CONTACT = "support@job-hunter.work"
-EFFECTIVE = "13 November 2026"
+EFFECTIVE = "16 November 2026"
 
 _MARK_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" '
              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -194,7 +194,7 @@ _PRIVACY = f"""
   <p><b>The short version:</b></p>
   <ul>
     <li>We collect what you give us (account, CV, preferences, answers) and what the app produces for you (matched jobs, scores, applications).</li>
-    <li>We use it only to run Job Hunter for you. We do not sell it, show you ads or use advertising trackers.</li>
+    <li>We use it only to run Job Hunter for you. We do not sell it and we do not show you ads. If you accept cookies on our public pages, we measure how our own ads on Facebook and Instagram perform (section 4, Meta); if you do not, nothing is shared with Meta.</li>
     <li>It is stored in the EU (Amsterdam). A few service providers, listed below, process parts of it for us.</li>
     <li>You can download all of it or delete your account at any time in Settings.</li>
   </ul>
@@ -219,6 +219,7 @@ _PRIVACY = f"""
   <li>A record of activity in your account (searches, applications, settings changes) and usage counts used to apply plan limits.</li>
   <li>Technical data: sign-in sessions, IP address and browser details in server logs, and error reports when something breaks.</li>
   <li>Product analytics: which steps of the app you reach (for example signing up, uploading a CV, approving a first job, coming back on later days), recorded under a random-looking account number, never your name, email or CV. On our public pages, visits are counted too; analytics cookies are set only if you accept them.</li>
+  <li>Ad measurement, only if you accepted cookies on our public pages: Meta's own cookie identifiers from your browser, kept with your account so that signing up and approving a first job can be reported to Meta as results of our ads.</li>
 </ul>
 <p>We do not ask for, and ask you not to include in your CV or answers, sensitive information such as health, religion or political views unless you choose to share it with employers.</p>
 
@@ -229,9 +230,10 @@ _PRIVACY = f"""
   <tr><td>Sending service emails: confirming your address, password resets, changes to these policies</td><td>Contract; legitimate interest</td></tr>
   <tr><td>Security, preventing abuse, applying usage limits, fixing errors</td><td>Legitimate interest in a secure, working service</td></tr>
   <tr><td>Improving the Service using aggregated statistics and product analytics (for example, how many sign-ups reach a first search, which pages and campaigns bring people who stay, how often pass reasons recur)</td><td>Legitimate interest; for analytics cookies on our public pages, your consent</td></tr>
+  <tr><td>Measuring our own advertising on Facebook and Instagram: counting visits to our public pages, sign-ups and first approved jobs that followed an ad</td><td>Your consent, given on the cookie banner; you can withdraw it at any time (section 8)</td></tr>
   <tr><td>Meeting legal obligations and handling legal claims</td><td>Legal obligation; legitimate interest</td></tr>
 </table></div>
-<p>We do not sell your data, use it for advertising, or make decisions about you that have legal or similarly significant effects without a human: the Service ranks jobs for you, but you decide what to apply for.</p>
+<p>We do not sell your data, show you ads in the Service, or use your CV, jobs or applications for advertising. The only advertising use is the measurement of our own ads described above, with your consent. We do not make decisions about you that have legal or similarly significant effects without a human: the Service ranks jobs for you, but you decide what to apply for.</p>
 
 <h2>4. Who we share it with</h2>
 <h3>Employers, when you apply</h3>
@@ -247,6 +249,7 @@ _PRIVACY = f"""
   <tr><td>Cloudflare</td><td>The job-hunter.work domain, network delivery and forwarding mail sent to our support address</td><td>IP address and request data; support emails</td></tr>
   <tr><td>Google (Gmail)</td><td>The mailbox that receives support messages</td><td>Your support messages and email address</td></tr>
   <tr><td>PostHog (EU region)</td><td>Product analytics: counting visits and which steps of the app people reach</td><td>Pseudonymous account number and events in the app; on public pages, page visits and the campaign link you came from (with analytics cookies only if you accept them); IP addresses are not stored</td></tr>
+  <tr><td>Meta Platforms Ireland (Facebook, Instagram)</td><td>Measuring our own ads, only if you clicked Accept on the cookie banner: whether a visit led to a sign-up and to a first approved job</td><td>Meta's cookie identifiers (<code>_fbp</code>, <code>_fbc</code>), IP address, browser details, the page address, and three events: page view, sign-up, first approved job. Never your name, email, CV or anything about your jobs. Meta also uses this data for its own purposes under its own privacy policy</td></tr>
   <tr><td>Sentry (EU region)</td><td>Error reports when something breaks</td><td>Technical details of the error, account identifier; stack-frame variables are not sent</td></tr>
   <tr><td>Your browser's push service (Google, Apple, Mozilla, Microsoft)</td><td>Push notifications, if you turn them on</td><td>A device push address, notification text</td></tr>
   <tr><td>Telegram; Twilio (WhatsApp)</td><td>Notifications, only if you connect them with your own bot or account</td><td>Notification text, your chat or phone number</td></tr>
@@ -257,7 +260,7 @@ _PRIVACY = f"""
 <p>We disclose data if the law requires it, to protect the rights and safety of users or others, or as part of a transfer of the Service to a new operator, who would be bound by this policy.</p>
 
 <h2>5. International transfers</h2>
-<p>Our database is in the EU, and we are based in Israel, which the European Commission recognises as providing adequate protection for personal data. Some providers above (for example Google, Resend and Twilio) may process data in the United States or other countries. Where they do, they rely on safeguards recognised under EU law, such as the EU-US Data Privacy Framework or the European Commission's Standard Contractual Clauses.</p>
+<p>Our database is in the EU, and we are based in Israel, which the European Commission recognises as providing adequate protection for personal data. Some providers above (for example Google, Meta, Resend and Twilio) may process data in the United States or other countries. Where they do, they rely on safeguards recognised under EU law, such as the EU-US Data Privacy Framework or the European Commission's Standard Contractual Clauses.</p>
 
 <h2>6. How long we keep it</h2>
 <div class="tbl"><table>
@@ -267,6 +270,7 @@ _PRIVACY = f"""
   <tr><td>Sign-in sessions</td><td>14 days from the last use</td></tr>
   <tr><td>Email confirmation and password-reset links</td><td>48 hours and 1 hour; each works once</td></tr>
   <tr><td>Usage counts of AI features</td><td>90 days</td></tr>
+  <tr><td>Meta's cookie identifiers kept with your account (only if you accepted cookies)</td><td>Until your first approved job is reported to Meta, and no longer than 90 days after you sign up</td></tr>
   <tr><td>Server logs</td><td>Up to 12 months</td></tr>
   <tr><td>Error reports</td><td>Up to 90 days</td></tr>
   <tr><td>Database backups</td><td>Overwritten on the backup provider's rolling schedule</td></tr>
@@ -286,7 +290,7 @@ _PRIVACY = f"""
 <p>For anything you cannot do in the app, email <a href="mailto:{CONTACT}">{CONTACT}</a>. We answer within 30 days. You can also complain to a data protection authority: in Israel, the Privacy Protection Authority; in the EU, the authority in your country.</p>
 
 <h2>8. Cookies and local storage</h2>
-<p>We use what the Service needs to work, and analytics cookies only if you accept them. No advertising cookies.</p>
+<p>We use what the Service needs to work. Analytics cookies and Meta's ad-measurement cookies are set only if you click Accept on the banner on our public pages. To change your answer, use "Cookie choices" at the bottom of our home page: "No thanks" stops both and removes Meta's cookies from your browser.</p>
 <div class="tbl"><table>
   <tr><th>Name</th><th>What it does</th><th>Lasts</th></tr>
   <tr><td><code>session</code></td><td>Keeps you signed in</td><td>Signs you out after 14 days without use (the cookie itself expires after 30)</td></tr>
@@ -295,9 +299,10 @@ _PRIVACY = f"""
   <tr><td>Session storage: <code>jh.nav</code></td><td>Remembers which screen and tab you were on, so a refresh keeps your place</td><td>Until you close the app</td></tr>
   <tr><td>Session storage: <code>jh.admin</code> (admins only)</td><td>Remembers which part of the Admin page was open</td><td>Until you close the app</td></tr>
   <tr><td>PostHog: a cookie and local storage named <code>ph_&lt;project key&gt;_posthog</code></td><td>Analytics on our public pages, only after you click Accept on the banner. If you click No thanks, only that choice is stored, and visits are counted without cookies.</td><td>Up to 1 year, or until you clear them</td></tr>
+  <tr><td>Meta: cookies <code>_fbp</code> and <code>_fbc</code>; local storage <code>jh_ads_ok</code></td><td>Measuring our own ads on Facebook and Instagram, only after you click Accept on the banner. <code>_fbc</code> is set only when you arrived from one of our ads; <code>jh_ads_ok</code> remembers that you accepted.</td><td>90 days for the cookies; <code>jh_ads_ok</code> until you choose No thanks or clear it</td></tr>
   <tr><td>App cache (service worker)</td><td>Lets the app load quickly and install on your device</td><td>Until the next app version</td></tr>
 </table></div>
-<p>Apart from the PostHog analytics cookie, these are strictly necessary, so we do not ask for consent to them.</p>
+<p>Apart from the PostHog analytics cookie and Meta's cookies, these are strictly necessary, so we do not ask for consent to them.</p>
 
 <h2>9. Security</h2>
 <p>We protect your data with encrypted connections (HTTPS), hashed passwords, encrypted storage of notification tokens, limits on sign-in and other attempts, and access to production data limited to the operator. No system is perfectly secure; if a breach affects your data, we will tell you and the relevant authorities as the law requires.</p>

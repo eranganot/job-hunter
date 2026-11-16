@@ -256,6 +256,8 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
     url = html.escape((public_url or "").rstrip("/") + "/", quote=True)
     t = html.escape(TITLE, quote=True)
     d = html.escape(DESCRIPTION, quote=True)
+    # Lets a visitor change the cookie answer later (Privacy Policy, section 8). Only when there is a banner.
+    cookie_link = '<a href="#" onclick="return jhCookieSettings()">Cookie choices</a>' if analytics.enabled() else ""
     canon = f'<link rel="canonical" href="{url}"/>' if public_url else ""
     og_url = f'<meta property="og:url" content="{url}"/>' if public_url else ""
     # The link preview (Facebook, LinkedIn, WhatsApp, X) needs an absolute picture address, so it is
@@ -491,7 +493,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
   <footer>
     <span>&copy; 2026 Job Hunter &middot; Built and run by Eran Ganot, in Israel</span>
     <nav aria-label="Footer">
-      <a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="mailto:support@job-hunter.work">support@job-hunter.work</a>
+      <a href="/terms">Terms</a><a href="/privacy">Privacy</a>{cookie_link}<a href="mailto:support@job-hunter.work">support@job-hunter.work</a>
     </nav>
   </footer>
 </div>

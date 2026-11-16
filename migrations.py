@@ -1201,6 +1201,16 @@ def m0040_release_kind(conn):
     conn.commit()
 
 
+def m0041_meta_ids(conn):
+    """Meta's own cookie values (_fbp, _fbc) kept on the account at sign-up, ONLY for
+    someone who accepted the landing page's cookie banner (GTM row 16), so the
+    first-approve event can be reported to Meta even from another device. NULL for
+    everyone else. Deleted with the account. Idempotent."""
+    if not _has_column(conn, "users", "meta_ids"):
+        conn.execute("ALTER TABLE users ADD COLUMN meta_ids TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1242,6 +1252,7 @@ MIGRATIONS = [
     (38, "signup_attr",                 m0038_signup_attr),
     (39, "auto_apply_owner_only",       m0039_auto_apply_owner_only),
     (40, "release_kind",                m0040_release_kind),
+    (41, "meta_ids",                    m0041_meta_ids),
 ]
 
 
