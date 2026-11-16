@@ -7,6 +7,7 @@ import {
   Zap, Target, Loader2, Plus, RotateCcw, Ban, Link2, Search, MessageSquare, FileText, Info,
   ShieldCheck, Trash2, Users, Send, Wand2, LogOut, Eye, EyeOff, Lock,
   Download, LifeBuoy, Copy,
+  Gauge, Megaphone, Wrench,
 } from "lucide-react";
 import { api, toUiJob, linkSiteName, openLabel, type UiJob, type Me, type Stats, type Activity, type CvOptimizerResult, type LockedMatches } from "./api/client";
 import { enablePush, pushState } from "./lib/push";
@@ -673,6 +674,23 @@ const TABS: [DashboardTab, string, any][] = [
 // Admin is a page, not a window floating over Settings. Kept out of TABS so a
 // non-admin never renders it at all.
 const ADMIN_TAB: [DashboardTab, string, any] = ["admin", "Admin", ShieldCheck];
+/* Admin is five sections, listed under Admin in the side bar (the owner, 16 Nov 2026; agreed in
+   "Admin page rebuild - structure and KPIs for approval"). A fresh open lands on Tools until
+   launch day and on Today from then on; within a session it remembers the last one used. */
+type AdminSection = "today" | "growth" | "content" | "users" | "tools";
+const ADMIN_SECTIONS: [AdminSection, string, any][] = [
+  ["today", "Today", Gauge], ["growth", "Growth", TrendingUp], ["content", "Content", Megaphone],
+  ["users", "Users", Users], ["tools", "Tools", Wrench],
+];
+const LAUNCH_DAY = "2026-12-01";
+const ADMIN_KEY = "jh.admin";  // listed in the Privacy Policy (legal.py)
+function defaultAdminSection(): AdminSection {
+  try {
+    const kept = sessionStorage.getItem(ADMIN_KEY) as AdminSection | null;
+    if (kept && ADMIN_SECTIONS.some(([id]) => id === kept)) return kept;
+  } catch { /* storage blocked: fall through */ }
+  return new Date().toISOString().slice(0, 10) < LAUNCH_DAY ? "tools" : "today";
+}
 
 /** Noa's one line at the top of the dashboard: what she brought today. */
 function NoaGreeting({ me, toSwipe, onSwipe }: { me: any; toSwipe: number; onSwipe: () => void }) {
@@ -698,6 +716,12 @@ function DashboardView(p: any) {
   const [removeTarget, setRemoveTarget] = useState<UiJob | null>(null);
   const [sortBy, setSortBy] = useState<"match" | "date" | "company">("match");
   const isAdmin = me?.role === "admin" || (me as any)?.is_admin;
+  const [adminSection, setAdminSectionState] = useState<AdminSection>(defaultAdminSection);
+  const setAdminSection = (s: AdminSection) => {
+    setAdminSectionState(s);
+    try { sessionStorage.setItem(ADMIN_KEY, s); } catch { /* ignore */ }
+    setActiveTab("admin");
+  };
   /* The headline cards told the same untruth the Analytics tab did: "Applied"
      counted a status written by four different things, and "Passed" counted
      the system's own rejections as the user's decisions. Both now show what
@@ -738,10 +762,22 @@ function DashboardView(p: any) {
         </div>
         <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-1">
           {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (
-            <button key={id} onClick={() => setActiveTab(id)}
+            <div key={id}>
+            <button onClick={() => setActiveTab(id)} aria-expanded={id === "admin" ? active : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-transparent border-transparent text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"}`}>
               <Icon className="w-[18px] h-[18px] shrink-0" /><span className="truncate">{label}</span>
-            </button>); })}
+            </button>
+            {id === "admin" && active && (
+              <div className="mt-1 ml-5 pl-3 border-l border-gray-700 space-y-0.5" aria-label="Admin sections">
+                {ADMIN_SECTIONS.map(([sid, slabel, SIcon]) => (
+                  <button key={sid} onClick={() => setAdminSection(sid)} aria-current={adminSection === sid ? "page" : undefined}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${adminSection === sid ? "bg-gray-700 text-white font-medium" : "text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"}`}>
+                    <SIcon className="w-4 h-4 shrink-0" />{slabel}
+                  </button>
+                ))}
+              </div>
+            )}
+            </div>); })}
         </nav>
         <div className="px-3 py-3 border-t border-gray-700 space-y-1">
           <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
@@ -794,7 +830,7 @@ function DashboardView(p: any) {
           {activeTab === "deferred" && <DeferredTab jobs={sortJobs(deferredJobs)} onSelectJob={setSelectedJob} onUnDefer={onUnDefer} onReload={onReload} />}
           {activeTab === "passed" && <PassedTab />}
           {activeTab === "activity" && <ActivityTab />}
-          {activeTab === "admin" && isAdmin && <AdminPanel me={me} />}
+          {activeTab === "admin" && isAdmin && <AdminPanel me={me} section={adminSection} setSection={setAdminSection} />}
           {activeTab === "analytics" && <AnalyticsTab approvedCount={approvedCount} rejectedCount={rejectedCount} deferredCount={deferredCount} appliedCount={stats?.applied ?? appliedJobs.length} totalSuggested={stats?.total ?? 0} stats={stats} />}
         </div>
       </div>
@@ -2252,8 +2288,11 @@ function ApplicationInstructions() {
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
       <h3 className="font-semibold text-white mb-1">Application instructions</h3>
-      <p className="text-xs text-gray-400 mb-2">How to answer the questions forms keep asking. Followed on every application; anything marked "do not answer" that a form requires is sent to you instead.</p>
+      <p className="text-xs text-gray-400 mb-2">How Noa should answer the questions forms keep asking when she applies for you. Followed on every application; anything marked "do not answer" that a form requires is sent to you instead. Only you see these.</p>
+      {/* Stored per account (application_answers.standing_notes): each user's own, empty until
+          they write something. The placeholder is an example only - never saved, never used. */}
       <textarea value={text} onChange={(e) => setText(e.target.value)} disabled={!loaded} rows={10} maxLength={3000}
+        placeholder={"For example:\nSalary: say \"open to discuss\".\nRelocation: no.\nHow did you hear about us: \"the company's careers page\".\nGender, age, ID number: do not answer."}
         className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-100" />
       <div className="flex items-center gap-3 mt-2">
         <button onClick={save} disabled={busy || !loaded}
@@ -2735,6 +2774,27 @@ async function drawPicks(lang: "he" | "en", fam: PicksFam, format: "square" | "s
   return c;
 }
 
+/** When and where each of the week's posts goes (agreed 16 Nov 2026, until the content pack in
+ *  plan row 10 replaces it): the mixed post opens the week on Sunday, then one role family a
+ *  day Monday to Thursday, largest first; two families go to the LinkedIn page; the mixed post
+ *  goes to your own LinkedIn mid-week; a Story every posting day. Israeli work week. */
+function postingPlan(families: any[]) {
+  const mixed = families.find((f) => f.key === "mixed");
+  const fams = families.filter((f) => f.key !== "mixed");
+  const rows: { day: string; post: string; where: string; text: string }[] = [];
+  const add = (day: string, f: any, where: string, text: string) => f && rows.push({ day, post: f.label, where, text });
+  add("Sunday", mixed || fams[0], "Job Hunter page on Facebook", "Page · Facebook · Noa's voice");
+  add("Sunday", mixed || fams[0], "General job groups on Facebook", "Your profile · Facebook groups");
+  ["Monday", "Tuesday", "Wednesday", "Thursday"].forEach((day, i) =>
+    add(day, fams[i], `${fams[i]?.label} groups on Facebook`, "Your profile · Facebook groups"));
+  add("Tuesday", fams[0], "Job Hunter page on LinkedIn", "Page · LinkedIn · Noa's voice");
+  add("Wednesday", mixed || fams[1], "Your own LinkedIn", "Your profile · LinkedIn");
+  add("Thursday", fams[1], "Job Hunter page on LinkedIn", "Page · LinkedIn · Noa's voice");
+  const order = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday"];
+  rows.sort((a, b) => order.indexOf(a.day) - order.indexOf(b.day));
+  return rows;
+}
+
 /** "Noa's picks" (noaspicks.py): this week's new roles per role family as post text and a
  *  post image. Two voices (the page speaks as Noa; your own profile speaks about her), Hebrew
  *  for Facebook and English for LinkedIn. Real openings only - found this week, with a company
@@ -2788,6 +2848,22 @@ function NoasPicksCard() {
             {left.length > 0 && ` Left out: ${left.map(([k, n]) => `${n} ${why[k] || k}`).join(", ")}.`}
             {res.too_few?.length > 0 && ` Too few for a post: ${res.too_few.map((t: any) => `${t.key} (${t.count})`).join(", ")}.`}
           </p>
+          {res.families.length > 0 && (
+            <div className="border border-gray-700 rounded-lg p-3">
+              <p className="text-sm text-white font-medium mb-1">This week's plan</p>
+              <p className="text-xs text-gray-400 mb-2">When and where each post goes this week, in the morning. On each posting day, also put that post's Story (Story · Hebrew) on Instagram.</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="text-gray-400"><tr><th className="py-1 pr-3 font-medium">Day</th><th className="py-1 pr-3 font-medium">Post</th><th className="py-1 pr-3 font-medium">Where</th><th className="py-1 font-medium">Text to copy</th></tr></thead>
+                  <tbody className="text-gray-200">
+                    {postingPlan(res.families).map((r, i) => (
+                      <tr key={i} className="border-t border-gray-700/70"><td className="py-1.5 pr-3 whitespace-nowrap">{r.day}</td><td className="py-1.5 pr-3">{r.post}</td><td className="py-1.5 pr-3">{r.where}</td><td className="py-1.5 text-gray-400">{r.text}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           {res.families.map((f: any) => (
             <div key={f.key} className="border border-gray-700 rounded-lg p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -2882,7 +2958,7 @@ function TestAccountCard() {
   );
 }
 
-function AdminPanel({ me }: any) {
+function AdminPanel({ me, section, setSection }: { me: any; section: AdminSection; setSection: (s: AdminSection) => void }) {
   const [stats, setStats] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [busy, setBusy] = useState("");
@@ -2952,8 +3028,30 @@ function AdminPanel({ me }: any) {
       </span>
     </button>
   );
+  const people = users.filter((u) => u.role !== "admin");
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const newThisWeek = people.filter((u) => String(u.created_date || "").slice(0, 10) >= weekAgo).length;
+  const title = ADMIN_SECTIONS.find(([id]) => id === section)?.[1] || "Admin";
   return (
     <div className="space-y-6">
+      {/* Below lg the side bar does not exist: the sections are a menu at the top. */}
+      <div className="lg:hidden">
+        <select value={section} onChange={(e) => setSection(e.target.value as AdminSection)} aria-label="Admin section"
+          className="w-full px-3 py-2.5 bg-gray-900 border border-gray-700 rounded-xl text-sm text-gray-100">
+          {ADMIN_SECTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </div>
+      <h2 className="hidden lg:block text-lg font-semibold text-white">{title}</h2>
+
+      {section === "today" && (<>
+          <div>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users</h3>
+            <div className="grid grid-cols-2 gap-2.5 max-w-md">
+              <Stat n={newThisWeek} label="New in the last 7 days" color="text-white" />
+              <Stat n={people.length} label="Total users" color="text-white" />
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Not counting admins. The launch numbers (funnel, approve and applied rates, the leading KPIs) arrive here next.</p>
+          </div>
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-indigo-400" />Queue overview</h3>
             <div className="grid grid-cols-3 gap-2.5">
@@ -2965,50 +3063,20 @@ function AdminPanel({ me }: any) {
               <Stat n={stats?.dead_links} label="Dead links" color="text-red-400" />
             </div>
           </div>
-          {funnel && <FunnelCard steps={funnel} />}
-          <TestAccountCard />
-          <LifecycleEmailsCard />
+      </>)}
+
+      {section === "growth" && (<>
+          {funnel ? <FunnelCard steps={funnel} /> : <p className="text-sm text-gray-400">Loading the funnel…</p>}
+      </>)}
+
+      {section === "content" && (<>
+          <h3 className="font-semibold text-white -mb-3">Posts</h3>
           <NoasPicksCard />
-          <div>
-            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Zap className="w-5 h-5 text-indigo-400" />Maintenance</h3>
-            <div className="space-y-2">
-              <ActBtn kind="clear-attempted" icon={<Ban className="w-5 h-5 text-gray-300 shrink-0" />} label="Clear attempted jobs from queue" sub="Removes already-tried (manual / failed) jobs" />
-              <ActBtn kind="rescore" icon={<Target className="w-5 h-5 text-gray-300 shrink-0" />} label="Re-score new jobs" />
-              <ActBtn kind="dedup" icon={<RefreshCw className="w-5 h-5 text-gray-300 shrink-0" />} label="Remove duplicate jobs" />
-              <ActBtn kind="clear-applied" icon={<Trash2 className="w-5 h-5 text-red-300 shrink-0" />} label="Delete all applied jobs" sub="Permanent — asks for confirmation" danger />
-            </div>
-            {msg && <p className="text-sm text-indigo-300 mt-3">{msg}</p>}
-          </div>
-          <div>
-            <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-400" />Apply diagnostics</h3>
-            <p className="text-xs text-gray-400 mb-3">Read-only. Launches a browser against example.com to prove the runtime can drive it. Submits nothing.</p>
-            <button onClick={selftest} disabled={!!busy}
-              className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
-              {busy === "selftest" ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <Zap className="w-5 h-5 text-gray-300 shrink-0" />}
-              <span className="block text-sm font-medium text-gray-200">Run apply self-test</span>
-            </button>
-            {diag && (
-              <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5 space-y-1.5">
-                {Object.entries(diag).map(([k, v]) => {
-                  const bad = v === false || v === "(unset)";
-                  return (
-                    <div key={k} className="flex items-start justify-between gap-3 text-xs">
-                      <span className="text-gray-400 min-w-0 break-all">{k}</span>
-                      <span className={`shrink-0 font-medium ${bad ? "text-amber-300" : typeof v === "boolean" ? "text-green-300" : "text-gray-200"}`}>
-                        {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <SupervisedApply />
-          <ApplyRates />
-          <NotificationCheck />
-          <ApplicationInstructions />
-          <LinkReport />
-          <LearningCheck />
+          <h3 className="font-semibold text-white -mb-3">Emails</h3>
+          <LifecycleEmailsCard />
+      </>)}
+
+      {section === "users" && (<>
           <div>
             <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length})</span></h3>
             <div className="space-y-2">
@@ -3047,6 +3115,51 @@ function AdminPanel({ me }: any) {
               {users.length === 0 && <p className="text-sm text-gray-400 text-center py-3">No users.</p>}
             </div>
           </div>
+      </>)}
+
+      {section === "tools" && (<>
+          <SupervisedApply />
+          <div>
+            <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-indigo-400" />Apply diagnostics</h3>
+            <p className="text-xs text-gray-400 mb-3">Read-only. Launches a browser against example.com to prove the runtime can drive it. Submits nothing.</p>
+            <button onClick={selftest} disabled={!!busy}
+              className="w-full flex items-center gap-3 p-3.5 rounded-xl border bg-gray-800 border-gray-700 text-left disabled:opacity-60">
+              {busy === "selftest" ? <Loader2 className="w-5 h-5 animate-spin shrink-0 text-gray-300" /> : <Zap className="w-5 h-5 text-gray-300 shrink-0" />}
+              <span className="block text-sm font-medium text-gray-200">Run apply self-test</span>
+            </button>
+            {diag && (
+              <div className="mt-2 bg-gray-800 rounded-xl border border-gray-700 p-3.5 space-y-1.5">
+                {Object.entries(diag).map(([k, v]) => {
+                  const bad = v === false || v === "(unset)";
+                  return (
+                    <div key={k} className="flex items-start justify-between gap-3 text-xs">
+                      <span className="text-gray-400 min-w-0 break-all">{k}</span>
+                      <span className={`shrink-0 font-medium ${bad ? "text-amber-300" : typeof v === "boolean" ? "text-green-300" : "text-gray-200"}`}>
+                        {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <ApplyRates />
+          <LinkReport />
+          <LearningCheck />
+          <NotificationCheck />
+          <TestAccountCard />
+          <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
+            <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Zap className="w-5 h-5 text-red-300" />Maintenance</h3>
+            <p className="text-xs text-red-200/80 mb-3">Changes data for every user. Some of it cannot be undone.</p>
+            <div className="space-y-2">
+              <ActBtn kind="clear-attempted" icon={<Ban className="w-5 h-5 text-gray-300 shrink-0" />} label="Clear attempted jobs from queue" sub="Removes already-tried (manual / failed) jobs" />
+              <ActBtn kind="rescore" icon={<Target className="w-5 h-5 text-gray-300 shrink-0" />} label="Re-score new jobs" />
+              <ActBtn kind="dedup" icon={<RefreshCw className="w-5 h-5 text-gray-300 shrink-0" />} label="Remove duplicate jobs" />
+              <ActBtn kind="clear-applied" icon={<Trash2 className="w-5 h-5 text-red-300 shrink-0" />} label="Delete all applied jobs" sub="Permanent — asks for confirmation" danger />
+            </div>
+            {msg && <p className="text-sm text-indigo-300 mt-3">{msg}</p>}
+          </div>
+      </>)}
     </div>
   );
 }
@@ -3748,6 +3861,9 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
               <LabelledInput label="Notice period (days)" value={noticeDays} onChange={setNoticeDays} placeholder="30" />
             </div>
           </div>
+          {/* Moved from Admin (16 Nov 2026): they are each user's own and only matter to users
+              Noa applies for, so they show where auto-apply is on for this account. */}
+          {me?.auto_apply_live && <ApplicationInstructions />}
           <div>
             <h3 className="font-semibold text-white mb-1">Work authorization</h3>
             <p className="text-xs text-gray-400 mb-3">Used to answer visa questions on application forms.</p>
