@@ -162,6 +162,9 @@ def consent_js() -> str:
     so the banner is shown again to someone who answered the older analytics-only
     banner (PostHog consent stored, nothing about Meta) - found 2026-11-17.
     On a later visit the pixel loads only if that choice is still stored.
+    autoConfig is off: Meta's automatic events (it reported the Accept click as
+    "SubscribedButtonClick" with the page's button texts, seen in the owner's
+    test 2026-11-17) are not among the events the Privacy Policy names.
     Empty when no pixel is configured."""
     if not PIXEL_ID:
         return ""
@@ -170,7 +173,7 @@ function jhMetaLoad(){if(window.fbq)return;
 !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};
 if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;
 s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
-fbq('init',%(id)s);fbq('track','PageView')}
+fbq('set','autoConfig',false,%(id)s);fbq('init',%(id)s);fbq('track','PageView')}
 function jhMetaAsk(){try{return localStorage.getItem(%(key)s)===null}catch(e){return false}}
 function jhMeta(yes){try{if(yes){localStorage.setItem(%(key)s,"1");jhMetaLoad()}else{localStorage.setItem(%(key)s,"0");
 ["_fbp","_fbc"].forEach(function(c){document.cookie=c+"=; Max-Age=0; path=/";document.cookie=c+"=; Max-Age=0; path=/; domain=."+location.hostname.replace(/^www\\./,"")})}}catch(e){}}

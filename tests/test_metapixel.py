@@ -76,6 +76,8 @@ def test_the_pixel_loads_only_after_accept_on_a_banner_that_names_meta(mp, monke
     assert 'localStorage.getItem("jh_ads_ok")==="1")jhMetaLoad()' in tail
     assert "Max-Age=0" in tail                                              # No thanks removes Meta's cookies
     assert 'localStorage.setItem("jh_ads_ok","0")' in tail                  # a No is remembered too
+    # Only the events the Privacy Policy names: Meta's automatic button-click events are off.
+    assert js.index("fbq('set','autoConfig',false,") < js.index("fbq('init'")
     # Someone who answered the older analytics-only banner has no Meta answer: ask again (2026-11-17).
     assert 'localStorage.getItem("jh_ads_ok")===null' in js and "jhMetaAsk&&jhMetaAsk()" in html
     # Shown even when PostHog's script is blocked (2026-11-17): a timer asks too,
