@@ -4222,8 +4222,8 @@ def _send_verification(user_id: int, email: str, name: str = "") -> None:
     raw = auth.issue_token(user_id, "verify", auth.VERIFY_TTL_S)
     link = MOBILE_URL.rstrip("/") + "/verify-email?token=" + raw
     send_email(email, "Confirm your email for Job Hunter",
-               "Hi%s,\n\nConfirm this is your email address so Job Hunter can send applications and "
-               "notifications with it:\n\n%s\n\nThe link works once and expires in 2 days. If you didn't "
+               "Hi%s,\n\nConfirm this is your email address so we know Noa's picks and account "
+               "emails reach you:\n\n%s\n\nThe link works once and expires in 2 days. If you didn't "
                "create a Job Hunter account, ignore this email.\n\nJob Hunter" % ((" " + name.split()[0]) if name else "", link))
 
 

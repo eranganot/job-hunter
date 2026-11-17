@@ -53,7 +53,7 @@ export function VerifyEmailBanner() {
             <p className="font-medium text-white">Email confirmed. Thanks!</p>
           ) : (<>
             <p className="font-medium text-white">Confirm your email</p>
-            <p className="text-gray-400 mt-0.5">We sent a link to <span className="text-gray-200 break-all">{email}</span>. Applications go out under this address, so auto-apply starts once it's confirmed.</p>
+            <p className="text-gray-400 mt-0.5">We sent a link to <span className="text-gray-200 break-all">{email}</span>. Confirm it so we know Noa's picks and account emails reach you.</p>
             <button onClick={resend} disabled={busy} className="mt-2 text-indigo-300 hover:text-indigo-200 font-medium disabled:opacity-50">{busy ? "Sending…" : "Send it again"}</button>
             {msg && <p className="text-gray-400 mt-1">{msg}</p>}
           </>)}
