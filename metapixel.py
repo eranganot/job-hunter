@@ -157,7 +157,10 @@ def health() -> dict:
 # ── the browser half ────────────────────────────────────────────────────────
 def consent_js() -> str:
     """JS for the landing page: `jhMeta(true)` after Accept loads the pixel and
-    remembers the choice; `jhMeta(false)` forgets it and removes Meta's cookies.
+    remembers the choice ("1"); `jhMeta(false)` remembers the No ("0") and removes
+    Meta's cookies. `jhMetaAsk()` is true while there is no answer about Meta yet,
+    so the banner is shown again to someone who answered the older analytics-only
+    banner (PostHog consent stored, nothing about Meta) - found 2026-11-17.
     On a later visit the pixel loads only if that choice is still stored.
     Empty when no pixel is configured."""
     if not PIXEL_ID:
@@ -168,7 +171,8 @@ function jhMetaLoad(){if(window.fbq)return;
 if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;
 s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
 fbq('init',%(id)s);fbq('track','PageView')}
-function jhMeta(yes){try{if(yes){localStorage.setItem(%(key)s,"1");jhMetaLoad()}else{localStorage.removeItem(%(key)s);
+function jhMetaAsk(){try{return localStorage.getItem(%(key)s)===null}catch(e){return false}}
+function jhMeta(yes){try{if(yes){localStorage.setItem(%(key)s,"1");jhMetaLoad()}else{localStorage.setItem(%(key)s,"0");
 ["_fbp","_fbc"].forEach(function(c){document.cookie=c+"=; Max-Age=0; path=/";document.cookie=c+"=; Max-Age=0; path=/; domain=."+location.hostname.replace(/^www\\./,"")})}}catch(e){}}
 try{if(localStorage.getItem(%(key)s)==="1")jhMetaLoad()}catch(e){}
 """ % {"id": json.dumps(PIXEL_ID), "key": json.dumps(CONSENT_KEY)}
