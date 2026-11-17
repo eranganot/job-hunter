@@ -257,17 +257,38 @@ def funnel_report(days: int = 30) -> dict:
             "steps": [{"step": s, "users": int(got.get(s, 0))} for s in FUNNEL_STEPS]}
 
 
-def _register_page(error_html: str, attr: dict) -> str:
+def _save_marketing(user_id, granted: bool, source: str) -> bool:
+    """Record a yes/no to offers and news (marketing.py). Never raises at sign-up:
+    an account must not fail over this - the user can still say yes in Settings."""
+    try:
+        c = database.get_db()
+        try:
+            return _marketing.record(c, user_id, granted, source)
+        finally:
+            c.close()
+    except Exception as exc:
+        print("[marketing] consent for user %s not saved: %s" % (user_id, exc))
+        return False
+
+
+def _register_page(error_html: str, attr: dict, marketing_ticked: bool = False) -> str:
     """The sign-up form, carrying where the visitor came from (utm_*, ref, the
-    landing page's Noa variant) as hidden fields and on the Google link."""
+    landing page's Noa variant) as hidden fields and on the Google link. After
+    an error the offers box keeps the visitor's own answer (it starts unticked)."""
     page = REGISTER_HTML.replace("{error_block}", error_html)
+    if marketing_ticked:
+        page = page.replace('id="mkt" onchange', 'id="mkt" checked onchange', 1)
     if attr:
         hidden = "".join('<input type="hidden" name="%s" value="%s"/>' % (k, html_lib.escape(v, quote=True))
                          for k, v in attr.items())
-        page = page.replace('<form method="POST" action="/register">',
-                            '<form method="POST" action="/register">' + hidden, 1)
+        page = page.replace('<form method="POST" action="/register" id="regform">',
+                            '<form method="POST" action="/register" id="regform">' + hidden, 1)
         page = page.replace('href="/auth/google/start"',
                             'href="/auth/google/start?%s"' % html_lib.escape(analytics.encode_attribution(attr), quote=True), 1)
+    if marketing_ticked:
+        page = re.sub(r'href="/auth/google/start(\?[^"]*)?"',
+                      lambda m: 'href="/auth/google/start%s"' % ((m.group(1) + "&amp;mkt=1") if m.group(1) else "?mkt=1"),
+                      page, count=1)
     return page
 
 
@@ -4068,8 +4089,16 @@ _AUTH_HEAD = """
     .forgot { display:block; text-align:right; font-size:.78rem; color:#a5b4fc; text-decoration:none; margin:-.4rem 0 .6rem; }
     .forgot:hover { text-decoration:underline; }
     .muted { font-size:.85rem; color:#cbd5e1; line-height:1.5; margin:0 0 1rem; }
+    .optin { display:flex; gap:.6rem; align-items:flex-start; font-size:.82rem; color:#cbd5e1; line-height:1.45; margin:0 0 1rem; cursor:pointer; }
+    .optin input { margin-top:.15rem; width:1rem; height:1rem; flex:none; accent-color:#6366f1; }
   </style>
   <script>
+    function mktLink(box){
+      var a = document.querySelector('a.google'); if (!a) return;
+      var h = a.getAttribute('href').replace(/([?&])mkt=1(&|$)/, '$1').replace(/[?&]$/, '');
+      if (box.checked) h += (h.indexOf('?') < 0 ? '?' : '&') + 'mkt=1';
+      a.setAttribute('href', h);
+    }
     function revealPw(btn){
       var i = btn.parentNode.querySelector('input');
       var on = i.type === 'password';
@@ -4144,9 +4173,10 @@ REGISTER_HTML = """<!DOCTYPE html>
   <div class="card">
     <h2>Create your account</h2>
     {error_block}
+    <label class="optin"><input type="checkbox" name="marketing" value="1" form="regform" id="mkt" onchange="mktLink(this)"/><span>{marketing_wording}</span></label>
     <a class="google" href="/auth/google/start">""" + _GOOGLE_SVG + """Continue with Google</a>
     <div class="or"><i></i><span>or</span><i></i></div>
-    <form method="POST" action="/register">
+    <form method="POST" action="/register" id="regform">
       <div class="field">
         <label for="name">Full name</label>
         <input type="text" name="name" id="name" autocomplete="name" placeholder="Jane Cohen" required autofocus/>
@@ -4177,6 +4207,10 @@ REGISTER_HTML = """<!DOCTYPE html>
 </div>
 </body>
 </html>"""
+
+import marketing as _marketing
+REGISTER_HTML = REGISTER_HTML.replace("{marketing_wording}", html_lib.escape(_marketing.WORDING))
+
 
 def notice_block(msg: str) -> str:
     return f"""<div class="ok">{msg}</div>""" if msg else ""
@@ -4987,6 +5021,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(302)
             self.send_header("Set-Cookie", f"g_state={_state}; Path=/; HttpOnly{_sec}; Max-Age=600; SameSite=Lax")
             self.send_header("Set-Cookie", f"g_verifier={_verifier}; Path=/; HttpOnly{_sec}; Max-Age=600; SameSite=Lax")
+            if (qs.get("mkt") or [""])[0] == "1":   # the sign-up page's offers box, ticked
+                self.send_header("Set-Cookie", f"g_mkt=1; Path=/; HttpOnly{_sec}; Max-Age=600; SameSite=Lax")
             self.send_header("Location", GOOGLE_AUTH_URI + "?" + _params)
             self.end_headers()
             return
@@ -5003,6 +5039,7 @@ class Handler(BaseHTTPRequestHandler):
             _ck = _SC_g(); _ck.load(self.headers.get("Cookie", ""))
             _cookie_state    = _ck["g_state"].value    if "g_state"    in _ck else ""
             _cookie_verifier = _ck["g_verifier"].value  if "g_verifier" in _ck else ""
+            _cookie_mkt      = _ck["g_mkt"].value      if "g_mkt"      in _ck else ""
             if not _code or not _state or not _cookie_state or _state != _cookie_state:
                 _google_fail("Google sign-in failed a security check. Please try again."); return
             _redirect_uri = _base_for(self.headers.get("Host", "")) + "/auth/google/callback"
@@ -5053,11 +5090,14 @@ class Handler(BaseHTTPRequestHandler):
                 _track(_user["id"], "user_signed_up", dict(_g_attr, method="google"), set_once=_g_attr)
             if _err or not _user:
                 _google_fail(_err or "Sign-in failed. Please try again."); return
+            if _cookie_mkt == "1":   # ticked the offers box on the sign-up page
+                _save_marketing(_user["id"], True, "google")
             _token = auth.create_session(_user["id"])
             self.send_response(302)
             self.send_header("Set-Cookie", auth.make_session_cookie(_token))
             self.send_header("Set-Cookie", "g_state=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
             self.send_header("Set-Cookie", "g_verifier=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
+            self.send_header("Set-Cookie", "g_mkt=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax")
             self.send_header("Location", ONBOARDING_ENTRY if _is_new else home_url())
             self.end_headers()
             return
@@ -5106,6 +5146,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_html(_stop_page("Stop these emails?",
                 "You'll stop getting Noa's tips and check-ins. Account emails (like password resets) still come.",
                 "<form method='post' action='/email/stop?u=%s&amp;t=%s'><button type='submit'>Stop these emails"
+                "</button></form>" % (int(_u), _t)))
+            return
+
+        if path == "/email/offers-off":
+            # "Stop these emails" in a promotional email (marketing.footer): a confirm
+            # page, never a change on GET (mail scanners open links).
+            _u, _t = (qs.get("u") or [""])[0], (qs.get("t") or [""])[0]
+            if not _marketing.stop_ok(_u, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete. You can also reply "
+                                          "to any of our emails and ask us to stop."), 400)
+                return
+            self.send_html(_stop_page("Stop offers and news?",
+                "You'll stop getting offers and news from Job Hunter. Noa's picks and account emails still come.",
+                "<form method='post' action='/email/offers-off?u=%s&amp;t=%s'><button type='submit'>Stop offers"
                 "</button></form>" % (int(_u), _t)))
             return
 
@@ -5485,6 +5539,15 @@ class Handler(BaseHTTPRequestHandler):
             # is being sent yet (the engine's own server-wide switch).
             out["auto_apply_live"] = _engine_on_for(user)
             out["email_verified"] = auth.is_email_verified(user["id"])
+            try:
+                _mc = database.get_db()
+                try:
+                    out["marketing_opt_in"] = _marketing.opted_in(_mc, user["id"])
+                finally:
+                    _mc.close()
+            except Exception as _me:
+                print("[marketing] answer for user %s not read: %s" % (user["id"], _me))
+                out["marketing_opt_in"] = False
             self.send_json(out)
             return
 
@@ -6199,7 +6262,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 rows = conn.execute("""
                 SELECT u.id, u.name, u.email, u.role, u.is_active, u.created_date,
-                       u.plan, u.plan_until, u.plan_after, u.plan_source, u.search_paused_at,
+                       u.plan, u.plan_until, u.plan_after, u.plan_source, u.search_paused_at, u.marketing_opt_in_at,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='locked')   AS stats_locked,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='new')      AS stats_new,
                        (SELECT COUNT(*) FROM jobs j WHERE j.user_id=u.id AND j.status='approved') AS stats_approved,
@@ -6314,6 +6377,19 @@ class Handler(BaseHTTPRequestHandler):
                 _sc.close()
             _track(int(_u), "lifecycle_unsubscribed")
             self.send_html(_stop_page("Done", "You won't get these emails any more. Noa keeps finding your "
+                                      "picks in the app."))
+            return
+
+        # "Stop offers" (marketing.py): the confirm button and one-click
+        # unsubscribe (RFC 8058) - token-authenticated, before the cross-site check.
+        if path == "/email/offers-off":
+            _q = parse_qs(parsed.query)
+            _u, _t = (_q.get("u") or [""])[0], (_q.get("t") or [""])[0]
+            if not _marketing.stop_ok(_u, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete."), 400)
+                return
+            _save_marketing(int(_u), False, "email")
+            self.send_html(_stop_page("Done", "You won't get offers and news any more. Noa keeps finding your "
                                       "picks in the app."))
             return
 
@@ -6459,25 +6535,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             body = urllib.parse.parse_qs(self.read_body().decode())
             _attr    = analytics.clean_attribution(body)
+            _mkt     = body.get("marketing", [""])[0] == "1"
             name     = body.get("name", [""])[0].strip()
             email    = body.get("email", [""])[0]
             password = body.get("password", [""])[0]
             password2 = body.get("password2", [""])[0]
             if not name or not email or not password:
-                self.send_html(_register_page(error_block("All fields are required."), _attr))
+                self.send_html(_register_page(error_block("All fields are required."), _attr, _mkt))
                 return
             if password != password2:
-                self.send_html(_register_page(error_block("Passwords don't match."), _attr))
+                self.send_html(_register_page(error_block("Passwords don't match."), _attr, _mkt))
                 return
             if len(password) < 8:
-                self.send_html(_register_page(error_block("Password must be at least 8 characters."), _attr))
+                self.send_html(_register_page(error_block("Password must be at least 8 characters."), _attr, _mkt))
                 return
             user_id, err = auth.create_user(name, email, password)
             if err:
-                self.send_html(_register_page(error_block(err), _attr))
+                self.send_html(_register_page(error_block(err), _attr, _mkt))
                 return
             _funnel(user_id, "signup")
             _save_signup_attr(user_id, _attr)
+            if _mkt:
+                _save_marketing(user_id, True, "register")
             _meta_event(self, user_id, "CompleteRegistration")
             _track(user_id, "user_signed_up", dict(_attr, method="email"), set_once=_attr)
             try:
@@ -6970,6 +7049,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Save notifications ──
+        if path == "/api/settings/marketing":
+            # Offers and news by email (marketing.py): Settings' switch, logged with its date.
+            data = self.read_json() or {}
+            on = bool(data.get("on"))
+            _save_marketing(user_id, on, "settings")
+            self.send_json({"success": True, "marketing_opt_in": on})
+            return
+
         if path == "/api/save-notifications":
             data = self.read_json()
             kwargs = {}

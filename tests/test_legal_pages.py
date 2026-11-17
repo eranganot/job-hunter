@@ -61,7 +61,7 @@ def test_every_cookie_and_storage_key_listed_is_real_and_none_is_missing():
     p = legal.privacy_html()
     code = _read("app.py") + _read("auth.py")
     set_cookies = set(re.findall(r'(?:Set-Cookie", f?"|return f")([a-z_]+)=', code))
-    assert set_cookies == {"session", "g_state", "g_verifier"}, set_cookies
+    assert set_cookies == {"session", "g_state", "g_verifier", "g_mkt"}, set_cookies
     for name in set_cookies:
         assert "<code>%s</code>" % name in p, name
     web = ""

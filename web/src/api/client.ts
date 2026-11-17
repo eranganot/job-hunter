@@ -108,9 +108,10 @@ export type Me = {
   daily_picks?: { cap: number; today: number } | null;
   role?: string;
   is_admin?: boolean;
-  // Step 5: false until the user opens the link we mailed. Applications go out
-  // under this address, so auto-apply waits for it.
+  // Step 5: false until the user opens the link we mailed.
   email_verified?: boolean;
+  // Said yes to offers and news by email (marketing.py); false = no.
+  marketing_opt_in?: boolean;
   cv_path?: string | null;
   cv_filename?: string | null;
   cv_uploaded_date?: string | null;
@@ -328,6 +329,8 @@ export const api = {
     request("/api/save-profile", "POST", body),
   saveSchedule: (body: Record<string, unknown>) =>
     request("/api/save-schedule", "POST", body),
+  saveMarketing: (on: boolean) =>
+    request<{ success: boolean; marketing_opt_in: boolean }>("/api/settings/marketing", "POST", { on }),
   saveNotifications: (body: Record<string, unknown>) =>
     request("/api/save-notifications", "POST", body),
   adminQueueStats: () => request<{ new: number; approved: number; applied: number; rejected: number; manual_required: number; dead_links: number }>("/api/admin/queue-stats"),

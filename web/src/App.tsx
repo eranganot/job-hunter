@@ -3198,7 +3198,7 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
 
       {section === "users" && (<>
           <div>
-            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length})</span></h3>
+            <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Users className="w-5 h-5 text-indigo-400" />Users <span className="text-xs text-gray-400 font-normal">({users.length}{users.some((u) => u.marketing_opt_in_at) ? ` · ${users.filter((u) => u.marketing_opt_in_at).length} want offers` : ""})</span></h3>
             <div className="space-y-2">
               {users.map((u) => (
                 <div key={u.id} className="bg-gray-800 rounded-xl border border-gray-700 p-3.5">
@@ -3208,6 +3208,11 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
                       <p className="text-xs text-gray-400 truncate">{u.email}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {/* Said yes to offers and news (marketing.py): the only people a promotional email may go to. */}
+                      {u.marketing_opt_in_at && (
+                        <span title={`Agreed to offers and news on ${String(u.marketing_opt_in_at).slice(0, 10)}`}
+                          className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">Offers ✓</span>
+                      )}
                       {/* Paused for inactivity (inactive.py): no daily search until they come back. */}
                       {u.search_paused_at && (
                         <button onClick={async () => { await api.adminResumeSearch(u.id); load(); }}
@@ -3483,6 +3488,39 @@ async function uploadCv(file: File): Promise<{ filename?: string; uploaded_date?
   });
   if (!res.ok) throw new Error("Upload failed");
   try { return await res.json(); } catch { return {}; }
+}
+
+function MarketingOptIn({ initial }: { initial: boolean }) {
+  /* Offers and news by email (marketing.py, GTM row 20). Off unless the user
+     said yes at sign-up or here; each change is saved at once, with its date,
+     so it never depends on the page's Save button. */
+  const [on, setOn] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => { setOn(initial); }, [initial]);
+  const flip = async () => {
+    const next = !on;
+    setBusy(true); setMsg("");
+    try {
+      await api.saveMarketing(next);
+      setOn(next);
+      setMsg(next ? "Saved. You'll get offers and news by email." : "Saved. No offers or news.");
+    } catch (e: any) {
+      setMsg(e?.message || "Couldn't save");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <label className="flex items-start gap-3 bg-gray-800 border border-gray-700 rounded-xl p-3.5 cursor-pointer">
+        <input type="checkbox" checked={on} disabled={busy} onChange={flip} className="mt-0.5 w-4 h-4 accent-indigo-500 shrink-0" />
+        <span className="text-sm text-gray-200">Send me occasional offers and news from Job Hunter.
+          <span className="block text-xs text-gray-400 mt-0.5">Noa's picks and account emails come either way. You can stop at any time.</span></span>
+      </label>
+      {msg && <p className="text-xs text-gray-400 mt-1.5">{msg}</p>}
+    </div>
+  );
 }
 
 function NotificationChannels({ me }: { me: any }) {
@@ -4099,6 +4137,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
           </div>
           <div><h3 className="font-semibold text-white mb-3 flex items-center gap-2"><Bell className="w-5 h-5 text-amber-400" />Notifications</h3>{perm === "unsupported" ? (<p className="text-sm text-gray-400">This browser doesn't support push notifications.</p>) : (<div className="space-y-2"><button onClick={enableNotifs} disabled={perm === "granted"} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium disabled:opacity-60">{perm === "granted" ? "✓ Notifications enabled" : "Enable push notifications"}</button>{perm === "granted" && <button onClick={sendTest} className="w-full py-2.5 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-xl text-sm font-medium">Send test notification</button>}{pushMsg && <p className="text-xs text-gray-400">{pushMsg}</p>}</div>)}</div>
           <NotificationChannels me={me} />
+          <MarketingOptIn initial={!!me?.marketing_opt_in} />
           </>)}
           <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
           <FooterLinks onSupport={() => setShowSupport(true)} className="py-3 text-center" />
