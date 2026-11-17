@@ -102,3 +102,24 @@ def test_the_privacy_policy_names_meta_and_every_store():
     assert metapixel.CONSENT_KEY == "jh_ads_ok"
     assert "META_IDS_DAYS = 90" in open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
     assert not re.search(r"META_CAPI_TOKEN\s*=\s*[\"'][A-Za-z0-9]", open(os.path.join(ROOT, "metapixel.py")).read())
+
+
+def test_health_keeps_what_meta_answered(monkeypatch):
+    monkeypatch.setenv("META_PIXEL_ID", "1"); monkeypatch.setenv("META_CAPI_TOKEN", "secret-token")
+    monkeypatch.setenv("META_TEST_EVENT_CODE", "TEST54944")
+    import metapixel
+    m = importlib.reload(metapixel)
+
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"events_received":1,"messages":[],"fbtrace_id":"Abc"}'
+    seen = []
+    monkeypatch.setattr(m.urllib.request, "urlopen", lambda req, timeout: seen.append(req.full_url) or R())
+    m._post(m.payload("CompleteRegistration", {"fbp": FBP}, "UA", "1.2.3.4", "u"))
+    last = m.health()["last"]
+    assert last["events_received"] == 1 and last["test"] and last["test_code_tail"] == "944"
+    assert "secret-token" not in json.dumps(m.health())
+    for k in ("META_PIXEL_ID", "META_CAPI_TOKEN", "META_TEST_EVENT_CODE"):
+        monkeypatch.delenv(k)
+    importlib.reload(metapixel)
