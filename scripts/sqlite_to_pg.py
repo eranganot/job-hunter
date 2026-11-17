@@ -83,6 +83,8 @@ TABLE_ORDER = [
     "auth_tokens",
     "funnel_events",
     "lifecycle_emails",
+    # m0043 (2026-11-17): offers-and-news consent log (marketing.py). After users.
+    "marketing_consent",
     "billing_events",
 ]
 

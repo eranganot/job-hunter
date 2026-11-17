@@ -21,7 +21,7 @@ import html
 OPERATOR = "Eran Ganot"
 OPERATOR_PLACE = "Ramat Gan, Israel"
 CONTACT = "support@job-hunter.work"
-EFFECTIVE = "16 November 2026"
+EFFECTIVE = "17 November 2026"
 
 _MARK_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" '
              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -211,6 +211,7 @@ _PRIVACY = f"""
   <li><b>Profile and preferences:</b> job titles, keywords, locations, salary expectations, work setup, notice period, sponsorship needs, links (such as LinkedIn), phone number, and the answers you save for application questions.</li>
   <li><b>Your decisions:</b> the jobs you approve, pass (with the reason, if you give one) or save for later.</li>
   <li><b>Notification settings:</b> the channels you choose. If you connect Telegram or WhatsApp (through your own Twilio account), we store the tokens you enter, encrypted.</li>
+  <li><b>Offers and news:</b> whether you agreed to get them by email, with the date and the words you were shown, and any later change.</li>
   <li><b>Messages to support</b> sent from the app or by email.</li>
 </ul>
 <h3>The Service creates</h3>
@@ -228,6 +229,7 @@ _PRIVACY = f"""
   <tr><th>Purpose</th><th>Legal basis (GDPR)</th></tr>
   <tr><td>Running your account and the features you use: searching, scoring, tailoring, preparing and - when you turn it on - submitting applications; notifications you asked for</td><td>Performance of our contract with you</td></tr>
   <tr><td>Sending service emails: confirming your address, password resets, changes to these policies</td><td>Contract; legitimate interest</td></tr>
+  <tr><td>Sending offers and news about Job Hunter by email, only if you ticked the box for it at sign-up or in Settings. Every such email says "פרסומת" (advertisement) in its subject and has a link to stop them</td><td>Your consent; you can withdraw it at any time in Settings or with that link</td></tr>
   <tr><td>Security, preventing abuse, applying usage limits, fixing errors</td><td>Legitimate interest in a secure, working service</td></tr>
   <tr><td>Improving the Service using aggregated statistics and product analytics (for example, how many sign-ups reach a first search, which pages and campaigns bring people who stay, how often pass reasons recur)</td><td>Legitimate interest; for analytics cookies on our public pages, your consent</td></tr>
   <tr><td>Measuring our own advertising on Facebook and Instagram: counting visits to our public pages, sign-ups and first approved jobs that followed an ad</td><td>Your consent, given on the cookie banner; you can withdraw it at any time (section 8)</td></tr>
@@ -295,6 +297,7 @@ _PRIVACY = f"""
   <tr><th>Name</th><th>What it does</th><th>Lasts</th></tr>
   <tr><td><code>session</code></td><td>Keeps you signed in</td><td>Signs you out after 14 days without use (the cookie itself expires after 30)</td></tr>
   <tr><td><code>g_state</code>, <code>g_verifier</code></td><td>Protect the Google sign-in step</td><td>10 minutes</td></tr>
+  <tr><td><code>g_mkt</code></td><td>Remembers, during Google sign-up, that you ticked the box for offers and news</td><td>10 minutes</td></tr>
   <tr><td>Local storage: <code>jh_notify_nudge</code>, <code>jh_vapid_key</code></td><td>Remember whether we asked about notifications, and the push setup</td><td>Until you clear them</td></tr>
   <tr><td>Session storage: <code>jh.nav</code></td><td>Remembers which screen and tab you were on, so a refresh keeps your place</td><td>Until you close the app</td></tr>
   <tr><td>Session storage: <code>jh.admin</code> (admins only)</td><td>Remembers which part of the Admin page was open</td><td>Until you close the app</td></tr>

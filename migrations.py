@@ -1219,6 +1219,23 @@ def m0042_search_paused(conn):
     conn.commit()
 
 
+def m0043_marketing_consent(conn):
+    """Offers and news by email (marketing.py, GTM row 20): every change of a
+    user's answer with its date, source and the words shown; the current yes on
+    users.marketing_opt_in_at (NULL = no). Everyone starts at no. Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS marketing_consent (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id  INTEGER NOT NULL,
+        granted  INTEGER NOT NULL,
+        source   TEXT NOT NULL,
+        wording  TEXT,
+        at       TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)""", conn))
+    if not _has_column(conn, "users", "marketing_opt_in_at"):
+        conn.execute("ALTER TABLE users ADD COLUMN marketing_opt_in_at TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1262,6 +1279,7 @@ MIGRATIONS = [
     (40, "release_kind",                m0040_release_kind),
     (41, "meta_ids",                    m0041_meta_ids),
     (42, "search_paused",               m0042_search_paused),
+    (43, "marketing_consent",           m0043_marketing_consent),
 ]
 
 
