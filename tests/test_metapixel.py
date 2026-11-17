@@ -78,6 +78,9 @@ def test_the_pixel_loads_only_after_accept_on_a_banner_that_names_meta(mp, monke
     assert 'localStorage.setItem("jh_ads_ok","0")' in tail                  # a No is remembered too
     # Someone who answered the older analytics-only banner has no Meta answer: ask again (2026-11-17).
     assert 'localStorage.getItem("jh_ads_ok")===null' in js and "jhMetaAsk&&jhMetaAsk()" in html
+    # Shown even when PostHog's script is blocked (2026-11-17): a timer asks too,
+    # reading PostHog's stored answer instead of PostHog itself.
+    assert "setTimeout(jhAsk,2500)" in html and '"__ph_opt_in_out_"+"phc_test"' in html
     assert "if(window.jhMeta){jhMeta(yes)}" in html and "jhCookieSettings" in html
     # Without a pixel the old wording stands and nothing of Meta's is on the page.
     monkeypatch.setattr(mp, "PIXEL_ID", "")

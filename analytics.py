@@ -226,7 +226,15 @@ def browser_snippet(page: str, extra: dict | None = None) -> str:
 posthog.init(%(key)s,{api_host:%(host)s,cookieless_mode:"on_reject",person_profiles:"identified_only",
   disable_session_recording:true,disable_surveys:true,autocapture:false,capture_pageview:false,
   loaded:function(ph){ph.register(%(props)s);ph.capture("$pageview");
-    if(ph.get_explicit_consent_status()==="pending"||(window.jhMetaAsk&&jhMetaAsk())){document.getElementById("cc").classList.add("on")}}});
+    jhAsk()}});
+// The banner must not depend on PostHog loading: ad and tracker blockers stop its
+// script, and then nothing asked about Meta either (found 2026-11-17). Decided here
+// from PostHog's own stored answer (localStorage __ph_opt_in_out_<key>) and ours.
+function jhAsk(){try{var c=document.getElementById("cc");if(!c)return;
+  var ph=(window.posthog&&posthog.__loaded)?posthog.get_explicit_consent_status()==="pending"
+         :localStorage.getItem("__ph_opt_in_out_"+%(key)s)===null;
+  if(ph||(window.jhMetaAsk&&jhMetaAsk()))c.classList.add("on")}catch(e){}}
+setTimeout(jhAsk,2500);
 function jhConsent(yes){if(yes){posthog.opt_in_capturing()}else{posthog.opt_out_capturing()}
   if(window.jhMeta){jhMeta(yes)}document.getElementById("cc").classList.remove("on")}
 function jhCookieSettings(){document.getElementById("cc").classList.add("on");return false}
