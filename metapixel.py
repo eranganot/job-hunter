@@ -101,7 +101,7 @@ def payload(event: str, ids: dict, user_agent: str, ip: str, url: str, now: floa
 # ── sending: a background thread, like analytics.capture ────────────────────
 _q: "queue.Queue" = queue.Queue(maxsize=1000)
 _worker = [None]
-_sent = {"ok": 0, "failed": 0, "dropped": 0, "last_error": ""}
+_sent = {"ok": 0, "failed": 0, "dropped": 0, "last_error": "", "last": None}
 
 
 def _post(body: dict) -> None:
@@ -110,7 +110,17 @@ def _post(body: dict) -> None:
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=10) as r:
-        r.read()
+        raw = r.read()
+    # What Meta said, for /api/health (owner's test 2026-11-17: an accepted event did
+    # not show in Test events, and a bare 200 cannot say why). No token in here.
+    try:
+        ans = json.loads(raw or b"{}")
+    except ValueError:
+        ans = {}
+    _sent["last"] = {"event": body["data"][0]["event_name"], "test": bool(body.get("test_event_code")),
+                     "test_code_tail": str(body.get("test_event_code", ""))[-3:],
+                     "events_received": ans.get("events_received"), "messages": ans.get("messages"),
+                     "fbtrace_id": ans.get("fbtrace_id"), "at": int(time.time())}
 
 
 def _run():
