@@ -10,11 +10,11 @@ NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
 def _db():
     c = sqlite3.connect(":memory:")
     c.row_factory = sqlite3.Row
-    c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, role TEXT)")
+    c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, role TEXT, is_active INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE llm_usage (day TEXT, user_id INTEGER, purpose TEXT, model TEXT, calls INTEGER,"
               " prompt_tokens INTEGER, output_tokens INTEGER, total_tokens INTEGER)")
     c.execute("CREATE TABLE activity_log (user_id INTEGER, event_type TEXT, created_date TEXT)")
-    c.executemany("INSERT INTO users VALUES (?,?,?)", [(1, "owner@x", "admin"), (2, "a@x", "user"),
+    c.executemany("INSERT INTO users (id, email, role) VALUES (?,?,?)", [(1, "owner@x", "admin"), (2, "a@x", "user"),
                                                        (3, "test-user@job-hunter.test", "user"), (4, "idle@x", "user")])
     return c
 

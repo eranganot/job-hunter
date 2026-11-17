@@ -16,11 +16,11 @@ def t(days_ago, hours=0):
 def _db():
     c = sqlite3.connect(":memory:")
     c.row_factory = sqlite3.Row
-    c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, role TEXT, signup_attr TEXT)")
+    c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, role TEXT, signup_attr TEXT, is_active INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE activity_log (user_id INTEGER, event_type TEXT, details TEXT, created_date TEXT)")
     c.execute("CREATE TABLE jobs (user_id INTEGER, status TEXT, applied_via TEXT, applied_date TEXT)")
     c.execute("CREATE TABLE funnel_events (user_id INTEGER, step TEXT, created_at TEXT)")
-    c.executemany("INSERT INTO users VALUES (?,?,?,?)", [
+    c.executemany("INSERT INTO users (id, email, role, signup_attr) VALUES (?,?,?,?)", [
         (1, "owner@x", "admin", None), (2, "a@x", "user", json.dumps({"utm_source": "facebook", "utm_medium": "group", "noa": "b"})),
         (3, "b@x", "user", json.dumps({"noa": "a"})), (4, TEST, "user", None), (5, "old@x", "user", None)])
     return c
@@ -75,3 +75,12 @@ def test_sources_and_noa_variants():
     assert got == {"facebook / group": (1, 1, 1), "direct": (1, 0, 0), "before tracking": (1, 0, 0)}
     var = {r["name"]: r["signups"] for r in s["noa_variants"]}
     assert var == {"b": 1, "a": 1, "before tracking": 1}
+
+
+def test_disabled_accounts_are_not_people():
+    """Owner, 2026-11-17: test sign-ups he disabled must leave every count."""
+    c = _db()
+    c.execute("UPDATE users SET is_active=0 WHERE id=3")
+    assert kpis.people(c, TEST) == {2, 5}
+    c.executemany("INSERT INTO funnel_events VALUES (?,?,?)", [(2, "signup", t(3)), (3, "signup", t(4))])
+    assert [r["signups"] for r in kpis.by_source(c, TEST, 30, now=NOW)["sources"]] == [1]

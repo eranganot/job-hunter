@@ -248,7 +248,7 @@ def funnel_report(days: int = 30) -> dict:
         rows = c.execute(
             "SELECT f.step, COUNT(*) AS n FROM funnel_events f "
             "WHERE f.user_id IN (SELECT user_id FROM funnel_events WHERE step='signup' AND created_at >= ?) "
-            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email)=?) "
+            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email)=? OR COALESCE(is_active, 1)=0) "
             "GROUP BY f.step", (since, testaccount.TEST_EMAIL)).fetchall()
     finally:
         c.close()
