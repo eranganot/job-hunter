@@ -44,10 +44,11 @@ def _parse(s):
 
 
 def people(conn, test_email):
-    """ids of real users: not admin, not the test account."""
+    """ids of real users: not admin, not the test account, not disabled by the admin."""
     return {int(r["id"]) for r in conn.execute(
-        "SELECT id, role, email FROM users").fetchall()
-        if str(r["role"] or "") != "admin" and str(r["email"] or "").strip().lower() != test_email}
+        "SELECT id, role, email, COALESCE(is_active, 1) AS on_ FROM users").fetchall()
+        if str(r["role"] or "") != "admin" and str(r["email"] or "").strip().lower() != test_email
+        and int(r["on_"] or 0) == 1}
 
 
 def _decisions(conn, ids, start, end):

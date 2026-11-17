@@ -67,3 +67,7 @@ def test_the_posting_plan_says_when_and_where():
         assert where in plan
     card = _between("function NoasPicksCard", "function TestAccountCard")
     assert "This week's plan" in card and "postingPlan(" in card
+
+
+def test_today_leaves_out_disabled_accounts():
+    assert '!u.is_test && u.is_active' in SRC

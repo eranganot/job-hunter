@@ -3143,7 +3143,9 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
     </button>
   );
   // People only: not admins, not the resettable test account (owner, 2026-11-16).
-  const people = users.filter((u) => u.role !== "admin" && !u.is_test);
+  // People only: not admins, not the test account, not accounts the admin disabled
+  // (owner, 2026-11-17: disabled test sign-ups must leave the counts).
+  const people = users.filter((u) => u.role !== "admin" && !u.is_test && u.is_active);
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const newThisWeek = people.filter((u) => String(u.created_date || "").slice(0, 10) >= weekAgo).length;
   const title = ADMIN_SECTIONS.find(([id]) => id === section)?.[1] || "Admin";
@@ -3165,7 +3167,7 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
               <Stat n={newThisWeek} label="New in the last 7 days" color="text-white" />
               <Stat n={people.length} label="Total users" color="text-white" />
             </div>
-            <p className="text-xs text-gray-400 mt-2">Not counting admins or the test account.</p>
+            <p className="text-xs text-gray-400 mt-2">Not counting admins, the test account or disabled accounts.</p>
           </div>
           <KpiCard k={kpi} />
           <RunningCostCard c={cost} />

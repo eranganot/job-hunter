@@ -102,7 +102,7 @@ def report(conn, days=30, now=None, test_user_ids=(), paid_sources=None):
 
     marks = ",".join("?" for _ in DECISIONS)
     act = conn.execute(
-        "SELECT a.user_id, u.role FROM activity_log a JOIN users u ON u.id = a.user_id "
+        "SELECT a.user_id, u.role FROM activity_log a JOIN users u ON u.id = a.user_id AND COALESCE(u.is_active, 1)=1 "
         "WHERE a.event_type IN (%s) AND a.created_date >= ? GROUP BY a.user_id, u.role" % marks,
         (*DECISIONS, since_ts)).fetchall()
     people = [r for r in act if int(r["user_id"]) not in test_ids]
