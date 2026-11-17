@@ -201,3 +201,42 @@ def test_the_stuck_emails_invite_a_reply():
     # Not on the emails to someone who is doing fine.
     _v, _s, _subj, body = L.compose("day7", "Dana", dict(base, picked=9, approved=3), "https://x/app")
     assert L.REPLY_INVITE not in body
+
+
+def test_the_welcome_waits_for_the_morning():
+    """Email review 6: a welcome that falls due between 22:00 and 08:00 waits until 08:00."""
+    created = _il(2026, 11, 20, 22, 30)
+    assert lifecycle.due_step(created, _il(2026, 11, 20, 23, 31), set()) is None
+    assert lifecycle.due_step(created, _il(2026, 11, 21, 7, 59), set()) is None
+    assert lifecycle.due_step(created, _il(2026, 11, 21, 8, 0), set()) == ("welcome", "send")
+    early = _il(2026, 11, 20, 20, 30)                     # due 21:30: not held
+    assert lifecycle.due_step(early, _il(2026, 11, 20, 21, 31), set()) == ("welcome", "send")
+    st = dict(lifecycle._BASE, setup_done=False, picked=0)
+    assert "You signed up an hour ago," in lifecycle.compose("welcome", "Maya", st, "L")[3]
+    assert "You signed up last night," in lifecycle.compose("welcome", "Maya", dict(st, signed_up="last night"), "L")[3]
+
+
+def test_day1_waiting_is_skipped_for_someone_already_in_the_app_today():
+    st = dict(lifecycle._BASE, to_swipe=5, top=lifecycle._TOP)
+    assert lifecycle.compose("day1", "Maya", st, "L")[0] == "waiting"
+    assert lifecycle.compose("day1", "Maya", dict(st, opened_today=True), "L") is None
+    # other day-1 variants still go: the empty one asks them to act
+    assert lifecycle.compose("day1", "Maya", dict(st, to_swipe=0, picked=0, opened_today=True), "L")[0] == "empty"
+
+
+def test_opening_the_app_is_recorded_once_a_day_and_read_as_opened_today(users):
+    import app
+    import db as database
+    app._SEEN_DAY.clear()
+    st, _loc, _b = users["b"].get("/api/me")
+    assert st == 200
+    conn = database.get_db()
+    try:
+        uid, seen = conn.execute("SELECT id, last_seen_at FROM users WHERE last_seen_at IS NOT NULL "
+                                 "ORDER BY last_seen_at DESC LIMIT 1").fetchone()
+        assert seen
+        now = lifecycle._parse(seen)
+        assert lifecycle.user_state(conn, uid, now)["opened_today"] is True
+        assert lifecycle.user_state(conn, uid, now + timedelta(days=1))["opened_today"] is False
+    finally:
+        conn.close()
