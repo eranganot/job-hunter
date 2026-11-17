@@ -2224,18 +2224,20 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
   );
 }
 
-function TagInput({ value, onChange, noun = "role", example = "VP Product" }:
-    { value: string[]; onChange: (v: string[]) => void; noun?: string; example?: string }) {
+function TagInput({ value, onChange, noun = "role", example = "VP Product", tone = "app" }:
+    { value: string[]; onChange: (v: string[]) => void; noun?: string; example?: string; tone?: "app" | "landing" }) {
   const [draft, setDraft] = useState("");
+  /* "landing": the setup screens wear the landing page's colours (GTM row 24). */
+  const L = tone === "landing";
   const add = () => { const v = draft.trim().replace(/,$/, ""); if (v && !value.includes(v)) onChange([...value, v]); setDraft(""); };
   return (
     <div>
       <div className="flex flex-wrap gap-2 mb-2">
-        {value.map((t) => (<span key={t} className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 bg-indigo-600/20 border border-indigo-600/50 text-indigo-200 rounded-full text-sm">{t}<button onClick={() => onChange(value.filter((x) => x !== t))} className="w-4 h-4 flex items-center justify-center rounded-full bg-indigo-500/40 active:bg-indigo-500"><X className="w-3 h-3" /></button></span>))}
-        {value.length === 0 && <span className="text-xs text-gray-400">No {noun}s yet — add one below.</span>}
+        {value.map((t) => (<span key={t} className={`inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full text-sm ${L ? "bg-[#ffd766]/10 border border-[#ffd766]/40 text-[#fbf6e6]" : "bg-indigo-600/20 border border-indigo-600/50 text-indigo-200"}`}>{t}<button aria-label={`Remove ${t}`} onClick={() => onChange(value.filter((x) => x !== t))} className={`w-4 h-4 flex items-center justify-center rounded-full ${L ? "bg-[#ffd766]/30 active:bg-[#ffd766]/60" : "bg-indigo-500/40 active:bg-indigo-500"}`}><X className="w-3 h-3" /></button></span>))}
+        {value.length === 0 && <span className={`text-xs ${L ? "text-[#8ba593]" : "text-gray-400"}`}>No {noun}s yet — add one below.</span>}
       </div>
-      <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className="flex-1 px-4 py-2.5 border border-gray-700 rounded-xl bg-gray-800 text-white text-sm" /><button onClick={add} className="px-3.5 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl flex items-center justify-center"><Plus className="w-5 h-5" /></button></div>
-      <p className="text-xs text-gray-400 mt-1.5">Press Enter to add each {noun}.</p>
+      <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className={`flex-1 px-4 py-2.5 rounded-xl text-sm ${L ? "border border-[#5f7f6c] bg-[#0c1f17] text-[#fbf6e6] placeholder:text-[#8ba593] focus:outline-none focus:border-[#ffd766]" : "border border-gray-700 bg-gray-800 text-white"}`} /><button aria-label={`Add ${noun}`} onClick={add} className={`px-3.5 rounded-xl flex items-center justify-center ${L ? "bg-[#ffd766] active:bg-[#ffe28f] text-[#1f1a05]" : "bg-indigo-600 active:bg-indigo-700 text-white"}`}><Plus className="w-5 h-5" /></button></div>
+      <p className={`text-xs mt-1.5 ${L ? "text-[#8ba593]" : "text-gray-400"}`}>Press Enter to add each {noun}.</p>
     </div>
   );
 }
@@ -3390,32 +3392,34 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
     finally { setFinishing(false); onDone(); }
   };
 
-  const card = "bg-gray-800 rounded-2xl border border-gray-700 p-5 lg:p-8 lg:max-w-3xl lg:mx-auto";
+  /* The landing page's colours and display face (landing.py, GTM row 24): the steps from
+     "Get started" through sign-up to here look like one product. */
+  const card = "bg-[#12291f] rounded-2xl border border-[#2c4a3c] p-5 lg:p-8 lg:max-w-3xl lg:mx-auto";
   const noaSays = (text: React.ReactNode) => (
     <div className="flex items-start gap-3 mb-5">
-      <img src={NOA_AVATAR} alt="Noa" width={48} height={48} className="w-12 h-12 rounded-full object-cover shrink-0 bg-gray-700" />
-      <div className="bg-gray-900/60 border border-gray-700 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-200 leading-relaxed">{text}</div>
+      <img src={NOA_AVATAR} alt="Noa" width={48} height={48} className="w-12 h-12 rounded-full object-cover shrink-0 bg-[#0c1f17] border-2 border-[#ffd766]" />
+      <div className="bg-[#0c1f17] border border-[#2c4a3c] rounded-2xl rounded-tl-sm px-4 py-3 text-[15px] text-[#fbf6e6] leading-relaxed">{text}</div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 text-white">
+    <div className="min-h-screen bg-[#0c1f17] text-[#c4d4c6]">
       {/* pb-56: the fixed "Confirm your email" banner must never cover the last button. */}
       <div className={`${SHELL} px-5 lg:px-12 pt-8 pb-56 safe-top`}>
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-11 h-11 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl flex items-center justify-center shrink-0"><Briefcase className="w-6 h-6 text-white" /></div>
+          <img src="/app/icon-192.png" alt="" width={44} height={44} className="w-11 h-11 rounded-xl shrink-0" />
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold leading-tight">Meet Noa</h1>
-            <p className="text-xs text-gray-400">Your personal AI headhunter agent</p>
+            <h1 className="font-display text-2xl font-semibold leading-tight text-[#fbf6e6]">Meet Noa</h1>
+            <p className="text-xs text-[#8ba593]">Your personal AI headhunter agent</p>
           </div>
-          <button onClick={() => finish(true)} className="text-xs text-gray-400 hover:text-gray-200 shrink-0">Skip setup</button>
+          <button onClick={() => finish(true)} className="text-xs text-[#8ba593] hover:text-[#fbf6e6] shrink-0">Skip setup</button>
         </div>
 
         <div className="flex items-center gap-1.5 mb-6">
           {OB_STEPS.map((label, i) => (
             <div key={label} className="flex-1">
-              <div className={`h-1.5 rounded-full transition-colors ${i <= step ? "bg-indigo-500" : "bg-gray-700"}`} />
-              <p className={`mt-1.5 text-[10px] truncate ${i === step ? "text-indigo-300" : "text-gray-400"}`}>{label}</p>
+              <div className={`h-1.5 rounded-full transition-colors ${i <= step ? "bg-[#ffd766]" : "bg-[#2c4a3c]"}`} />
+              <p className={`mt-1.5 text-[10px] truncate ${i === step ? "text-[#ffd766]" : "text-[#8ba593]"}`}>{label}</p>
             </div>
           ))}
         </div>
@@ -3427,20 +3431,20 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
               <p>Send me your CV. I'll read it, work out what fits you, and bring you hand-picked jobs every day.</p>
             </>)}
             {cvName && (
-              <div className="flex items-center gap-3 p-3 mb-3 bg-gray-900/60 rounded-xl border border-gray-700">
-                <div className="w-9 h-9 rounded-lg bg-indigo-600/20 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-indigo-300" /></div>
-                <p className="text-sm font-medium truncate">{cvName}</p>
+              <div className="flex items-center gap-3 p-3 mb-3 bg-[#0c1f17] rounded-xl border border-[#2c4a3c]">
+                <div className="w-9 h-9 rounded-lg bg-[#ffd766]/15 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-[#ffd766]" /></div>
+                <p className="text-sm font-medium truncate text-[#fbf6e6]">{cvName}</p>
               </div>
             )}
-            <label className={`block border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer bg-gray-900/40 hover:border-indigo-500 ${busy ? "opacity-60 pointer-events-none" : ""}`}>
+            <label className={`block border-2 border-dashed border-[#5f7f6c] rounded-xl p-8 text-center cursor-pointer bg-[#0c1f17] hover:border-[#ffd766] ${busy ? "opacity-60 pointer-events-none" : ""}`}>
               <input type="file" accept=".pdf" className="hidden" onChange={onPick} />
-              {busy ? <Loader2 className="w-6 h-6 text-indigo-400 animate-spin mx-auto mb-2" /> : <FileText className="w-6 h-6 text-gray-400 mx-auto mb-2" />}
-              <p className="text-sm text-gray-300">{busy ? cvMsg : (cvName ? "Choose a different PDF" : "Upload your CV (PDF)")}</p>
-              {!busy && <p className="text-xs text-gray-400 mt-0.5">Max 5MB</p>}
+              {busy ? <Loader2 className="w-6 h-6 text-[#ffd766] animate-spin mx-auto mb-2" /> : <FileText className="w-6 h-6 text-[#ffd766] mx-auto mb-2" />}
+              <p className="text-sm text-[#fbf6e6]">{busy ? cvMsg : (cvName ? "Choose a different PDF" : "Upload your CV (PDF)")}</p>
+              {!busy && <p className="text-xs text-[#8ba593] mt-0.5">Max 5MB</p>}
             </label>
-            {cvMsg && !busy && <p className="text-xs text-gray-300 mt-3">{cvMsg}</p>}
+            {cvMsg && !busy && <p className="text-xs text-[#c4d4c6] mt-3">{cvMsg}</p>}
             <button onClick={() => setStep(1)} disabled={busy}
-              className="w-full mt-4 py-3 text-sm text-gray-400 hover:text-gray-200 disabled:opacity-60">
+              className="w-full mt-4 py-3 text-sm text-[#c4d4c6] hover:text-[#fbf6e6] disabled:opacity-60">
               {cvName ? "Next" : "I'll add my CV later"}
             </button>
           </div>
@@ -3453,19 +3457,19 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
                   {filled.length > 0 && <p className="mt-2">I also added your {(() => { const n = filled.map((f) => ({ linkedin_url: "LinkedIn", phone: "phone", email_address: "email", name: "name" } as any)[f] || f); return n.length > 1 ? n.slice(0, -1).join(", ") + " and " + n[n.length - 1] : n[0]; })()} to your profile.</p>}</>
               : <p>Tell me what to look for. Add a job title or two, and where you want to work.</p>)}
             <div className="space-y-5">
-              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Briefcase className="w-4 h-4 text-indigo-400" />Job titles</h3><TagInput value={titles} onChange={setTitles} noun="title" example="Product Manager" /></div>
-              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-400" />Skills &amp; keywords</h3><TagInput value={keywords} onChange={setKeywords} noun="skill" example="SQL" /></div>
-              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2"><MapPin className="w-4 h-4 text-indigo-400" />Locations</h3><TagInput value={locations} onChange={setLocations} noun="location" example="Tel Aviv" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2 text-[#fbf6e6]"><Briefcase className="w-4 h-4 text-[#ffd766]" />Job titles</h3><TagInput tone="landing" value={titles} onChange={setTitles} noun="title" example="Product Manager" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2 text-[#fbf6e6]"><Sparkles className="w-4 h-4 text-[#ffd766]" />Skills &amp; keywords</h3><TagInput tone="landing" value={keywords} onChange={setKeywords} noun="skill" example="SQL" /></div>
+              <div><h3 className="font-medium text-sm mb-2 flex items-center gap-2 text-[#fbf6e6]"><MapPin className="w-4 h-4 text-[#ffd766]" />Locations</h3><TagInput tone="landing" value={locations} onChange={setLocations} noun="location" example="Tel Aviv" /></div>
             </div>
-            <p className="text-xs text-gray-400 mt-5">I search every day and bring you up to 7 picks a day. You can change when in Settings.</p>
+            <p className="text-xs text-[#8ba593] mt-5">I search every day and bring you up to 7 picks a day. You can change when in Settings.</p>
             <div className="flex gap-2 mt-4">
-              <button onClick={() => setStep(0)} className="px-4 py-3 bg-gray-700 rounded-xl text-sm font-medium">Back</button>
+              <button onClick={() => setStep(0)} className="px-4 py-3 border border-[#2c4a3c] hover:border-[#fbf6e6] text-[#fbf6e6] rounded-xl text-sm font-medium">Back</button>
               <button onClick={() => finish(false)} disabled={finishing || titles.length === 0}
-                className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
+                className="flex-1 py-3 bg-[#ffd766] hover:bg-[#ffe28f] text-[#1f1a05] rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
                 {finishing ? <Loader2 className="w-5 h-5 animate-spin" /> : null}{finishing ? "Saving…" : "Start my search"}
               </button>
             </div>
-            {titles.length === 0 && <p className="text-xs text-amber-300 mt-2">Add at least one job title so I know what to look for.</p>}
+            {titles.length === 0 && <p className="text-xs text-[#ffe28f] mt-2">Add at least one job title so I know what to look for.</p>}
           </div>
         )}
       </div>
