@@ -75,6 +75,9 @@ def test_the_pixel_loads_only_after_accept_on_a_banner_that_names_meta(mp, monke
     tail = js[js.index("function jhMeta(yes)"):]
     assert 'localStorage.getItem("jh_ads_ok")==="1")jhMetaLoad()' in tail
     assert "Max-Age=0" in tail                                              # No thanks removes Meta's cookies
+    assert 'localStorage.setItem("jh_ads_ok","0")' in tail                  # a No is remembered too
+    # Someone who answered the older analytics-only banner has no Meta answer: ask again (2026-11-17).
+    assert 'localStorage.getItem("jh_ads_ok")===null' in js and "jhMetaAsk&&jhMetaAsk()" in html
     assert "if(window.jhMeta){jhMeta(yes)}" in html and "jhCookieSettings" in html
     # Without a pixel the old wording stands and nothing of Meta's is on the page.
     monkeypatch.setattr(mp, "PIXEL_ID", "")

@@ -226,7 +226,7 @@ def browser_snippet(page: str, extra: dict | None = None) -> str:
 posthog.init(%(key)s,{api_host:%(host)s,cookieless_mode:"on_reject",person_profiles:"identified_only",
   disable_session_recording:true,disable_surveys:true,autocapture:false,capture_pageview:false,
   loaded:function(ph){ph.register(%(props)s);ph.capture("$pageview");
-    if(ph.get_explicit_consent_status()==="pending"){document.getElementById("cc").classList.add("on")}}});
+    if(ph.get_explicit_consent_status()==="pending"||(window.jhMetaAsk&&jhMetaAsk())){document.getElementById("cc").classList.add("on")}}});
 function jhConsent(yes){if(yes){posthog.opt_in_capturing()}else{posthog.opt_out_capturing()}
   if(window.jhMeta){jhMeta(yes)}document.getElementById("cc").classList.remove("on")}
 function jhCookieSettings(){document.getElementById("cc").classList.add("on");return false}
