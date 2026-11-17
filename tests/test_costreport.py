@@ -48,6 +48,8 @@ def test_per_active_user_counts_deciders_not_the_test_account(monkeypatch):
     assert r["paid_sources"]["usd"] == 0.0 and r["complete"] is True
     assert r["active_users"] == 2 and r["active_admins"] == 1                   # owner + user 2
     assert r["total_usd"] == 16.40 and r["per_active_user_usd"] == 8.20
+    # per active user per day (row 12): user 1 on the 15th, user 2 on the 14th (twice) = 2 user-days
+    assert r["active_user_days"] == 2 and r["per_active_user_day_usd"] == 8.2
 
 
 def test_unset_hosting_and_a_source_past_its_allowance_are_said_not_guessed(monkeypatch):

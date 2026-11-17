@@ -19,6 +19,9 @@ What is counted, and where each number comes from:
   * Paid job sources - each runs on a free monthly allowance (paidpool.py), so
     $0 while every one stays inside it; a source past its allowance is named.
 
+Per active user per day = the window's cost / active user-days (a person with
+at least one decision on a day counts once for that day).
+
 Active user = a person (the test account excluded, the admin included - his
 searches are in the cost too) who approved or passed on at least one job in
 the window. A user whose daily search ran but who never looked is a cost, not
@@ -107,6 +110,13 @@ def report(conn, days=30, now=None, test_user_ids=(), paid_sources=None):
         (*DECISIONS, since_ts)).fetchall()
     people = [r for r in act if int(r["user_id"]) not in test_ids]
     active = len(people)
+    # Active user-days: each (person, day) with a decision. Cost per active user
+    # per day = the window's cost / these (GTM row 12): what one engaged day costs.
+    user_days = sum(1 for r in conn.execute(
+        "SELECT a.user_id, SUBSTR(a.created_date,1,10) FROM activity_log a JOIN users u ON u.id = a.user_id "
+        "AND COALESCE(u.is_active, 1)=1 WHERE a.event_type IN (%s) AND a.created_date >= ? "
+        "GROUP BY a.user_id, SUBSTR(a.created_date,1,10)" % marks, (*DECISIONS, since_ts)).fetchall()
+        if int(r[0]) not in test_ids)
     active_admins = sum(1 for r in people if str(r["role"] or "") == "admin")
 
     total = gem["usd"] + (hosting["usd"] or 0.0) + (sources["usd"] or 0.0)
@@ -117,4 +127,6 @@ def report(conn, days=30, now=None, test_user_ids=(), paid_sources=None):
         "complete": hosting["set"] and sources["usd"] is not None,
         "active_users": active, "active_admins": active_admins,
         "per_active_user_usd": round(total / active, 2) if active else None,
+        "active_user_days": user_days,
+        "per_active_user_day_usd": round(total / user_days, 3) if user_days else None,
     }

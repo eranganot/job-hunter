@@ -707,10 +707,15 @@ function RunningCostCard({ c }: { c: any }) {
   return (
     <div>
       <h3 className="font-semibold text-white mb-3 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-400" />Running cost</h3>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
         <div className="bg-gray-800 rounded-xl border border-indigo-500/40 py-3 text-center">
           <div className="text-xl font-bold text-white">{usd(c.per_active_user_usd)}</div>
           <div className="text-xs text-gray-400 mt-0.5">Per active user</div>
+        </div>
+        <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center"
+          title={`The ${c.days} days' cost divided by active user-days (${c.active_user_days ?? 0}): a person who approved or passed on a job counts once for each day they did.`}>
+          <div className="text-xl font-bold text-white">{c.per_active_user_day_usd == null ? "–" : "$" + Number(c.per_active_user_day_usd).toFixed(c.per_active_user_day_usd < 1 ? 3 : 2)}</div>
+          <div className="text-xs text-gray-400 mt-0.5">Per active user per day</div>
         </div>
         <div className="bg-gray-800 rounded-xl border border-gray-700 py-3 text-center">
           <div className="text-xl font-bold text-white">{usd(c.total_usd)}</div>
@@ -739,6 +744,8 @@ function RunningCostCard({ c }: { c: any }) {
 /** The launch numbers (kpis.py): last 7 days, with the 7 days before. */
 const KPI_ROWS: [string, string, string, string][] = [
   ["active_applicants", "Active applicants", "", "Sent at least one real application. The one to steer by."],
+  ["first_applications", "First applications", "", "People who sent their first real application; median days from sign-up below."],
+  ["new_matches_per_day", "New matches a day", "", "Average matches a search found per person per day, before the 7-a-day cap holds any back."],
   ["weekly_active_swipers", "Active swipers", "", "Approved or passed on at least one job."],
   ["approve_rate", "Approve rate", "%", "Approved of swiped, averaged over people who swiped."],
   ["applied_rate", "Applied rate", "%", "Real applications of approved; marking applied in bulk is not counted."],
@@ -762,7 +769,9 @@ function KpiCard({ k }: { k: any }) {
               <div className="text-xl font-bold text-white mt-0.5">{show(r.value, unit)}</div>
               <div className="text-xs text-gray-400 mt-0.5">
                 {up && <span className={key === "time_to_first_picks" ? (up === "▲" ? "text-red-400" : "text-green-400") : (up === "▲" ? "text-green-400" : "text-red-400")}>{up} </span>}
-                before: {show(r.prev, unit)}{r.of != null && r.n != null ? ` · ${r.n} of ${r.of}` : r.of != null ? ` · ${r.of} ${r.of === 1 ? "person" : "people"}` : ""}
+                before: {show(r.prev, unit)}{key === "first_applications" ? (r.median_days != null ? ` · median ${r.median_days} days` : "")
+                  : key === "new_matches_per_day" ? (r.under_cap_pct != null ? ` · ${r.under_cap_pct}% of days under ${r.cap}` : "")
+                  : r.of != null && r.n != null ? ` · ${r.n} of ${r.of}` : r.of != null ? ` · ${r.of} ${r.of === 1 ? "person" : "people"}` : ""}
               </div>
             </div>
           );
