@@ -8,6 +8,10 @@ item 7; the owner's decisions 2026-11-12).
 - Day-N emails go out at 11:30 Israel time on the Nth day after signup (the
   daily search runs at 11:00 by default, so "today's picks are in" is true).
   A step whose day has passed is skipped, never sent late.
+- Email timing (email review 6, GTM row 22): the welcome waits until 08:00
+  if it falls due between 22:00 and 08:00 (and then says "last night");
+  day 1's "your picks are waiting" is skipped for someone who already
+  opened the app that day (users.last_seen_at).
 - Only accounts created after this feature shipped (app_flags
   'lifecycle_since'); never the test account, the admin, an account pending
   deletion, or anyone who pressed "stop these emails".
@@ -28,6 +32,7 @@ DAY_OF = {"day1": 1, "day3": 3, "day7": 7}
 SEND_AT = (11, 30)                     # Israel time
 WELCOME_AFTER = timedelta(hours=1)     # only if setup is still unfinished by then
 WELCOME_UNTIL = timedelta(hours=24)
+QUIET = (22, 8)                        # Israel time: no welcome between 22:00 and 08:00 (email review 6)
 
 # The owner's sign-offs (2026-11-13): Noa signs like a letter; Eran as "The human behind Noa".
 NOA_SIG = "Your personal AI headhunter agent at Job Hunter,\nNoa"
@@ -56,6 +61,10 @@ def _parse(value):
         return None
 
 
+def quiet(local: datetime) -> bool:
+    return local.hour >= QUIET[0] or local.hour < QUIET[1]
+
+
 def due_step(created, now: datetime, done: set):
     """The one step due for an account created at `created` (UTC), given the
     steps already recorded. Returns (step, 'send'|'skip') or None."""
@@ -67,6 +76,8 @@ def due_step(created, now: datetime, done: set):
         if now - created >= WELCOME_UNTIL:
             return ("welcome", "skip")
         if now - created >= WELCOME_AFTER:
+            if quiet(local_now):
+                return None                  # held until 08:00 (at most 10 h, inside the 24 h)
             return ("welcome", "send")
     for step, n in DAY_OF.items():
         if step in done:
@@ -104,8 +115,10 @@ def unsubscribe_url(base: str, user_id: int) -> str:
 _RANK = "COALESCE(match_score, 0) - COALESCE(feedback_penalty, 0)"
 
 
-def user_state(conn, user_id: int) -> dict:
+def user_state(conn, user_id: int, now: datetime | None = None) -> dict:
     one = lambda sql, *a: (conn.execute(sql, (user_id,) + a).fetchone() or [0])[0] or 0
+    seen = _parse((conn.execute("SELECT last_seen_at FROM users WHERE id=?", (user_id,)).fetchone() or [None])[0])
+    now = now or datetime.now(timezone.utc)
     prof = conn.execute("SELECT onboarding_complete, cv_path FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
     top = conn.execute("SELECT title, company FROM jobs WHERE user_id=? AND status='new' "
                        "ORDER BY " + _RANK + " DESC, id DESC LIMIT 3", (user_id,)).fetchall()
@@ -121,6 +134,8 @@ def user_state(conn, user_id: int) -> dict:
                            "AND COALESCE(applied_via,'') IN ('engine','manual')")),
         "activated": bool(one("SELECT COUNT(*) FROM funnel_events WHERE user_id=? AND step='first_approve'")),
         "top": [(r[0] or "", r[1] or "") for r in top],
+        # Opened the app today (Israel day): they have seen what is waiting (email review 6).
+        "opened_today": bool(seen and seen.astimezone(_tz()).date() == now.astimezone(_tz()).date()),
     }
 
 
@@ -163,10 +178,10 @@ def compose(step: str, first: str, st: dict, link: str):
         if st["setup_done"]:
             return None                          # the first-matches email is their welcome
         return ("setup", "noa", "%s, I can't start without you" % (first or "Hey"),
-                "%s\n\nYou signed up an hour ago, and I still don't know what to look for.\n\n"
+                "%s\n\nYou signed up %s, and I still don't know what to look for.\n\n"
                 "Give me two minutes: upload your CV and I'll take it from there. I read it, work out "
                 "what fits you, and start bringing you hand-picked jobs today.\n\n%s\n\n%s"
-                % (hi, link, NOA_SIG))
+                % (hi, st.get("signed_up", "an hour ago"), link, NOA_SIG))
 
     if step == "day1":
         if not st["setup_done"]:
@@ -174,6 +189,8 @@ def compose(step: str, first: str, st: dict, link: str):
                     "%s\n\nI'm ready, but I'm still waiting on your CV. Without it I'd be guessing, and "
                     "you deserve better than guesses.\n\nIt takes two minutes:\n\n%s\n\n%s" % (hi, link, NOA_SIG))
         if st["to_swipe"] > 0:
+            if st.get("opened_today"):
+                return None                      # already in the app today: they've seen them
             return ("waiting", "noa", "%s I picked for you %s waiting"
                     % (_s(st["to_swipe"], "job"), "is" if st["to_swipe"] == 1 else "are"),
                     "%s\n\nI've lined up %s that fit you%s\n\n%s\n\nSwipe right on the ones you like, left on "
@@ -281,7 +298,11 @@ def run(get_db, send, base_url: str, track=None, now: datetime | None = None,
             variant, msg = "missed", None
             if action == "send":
                 first = (u[1] or "").strip().split()[0] if (u[1] or "").strip() else ""
-                msg = compose(step, first, user_state(conn, uid), base_url.rstrip("/") + "/app")
+                st = user_state(conn, uid, now)
+                created = _parse(u[3])
+                # A welcome held overnight (QUIET) must not say "an hour ago".
+                st["signed_up"] = "an hour ago" if created and now - created < timedelta(hours=3) else "last night"
+                msg = compose(step, first, st, base_url.rstrip("/") + "/app")
                 variant = msg[0] if msg else "not_needed"
                 if msg and not senders.get(msg[1]):
                     variant, msg = "no_sender", None

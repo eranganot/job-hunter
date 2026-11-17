@@ -257,6 +257,32 @@ def funnel_report(days: int = 30) -> dict:
             "steps": [{"step": s, "users": int(got.get(s, 0))} for s in FUNNEL_STEPS]}
 
 
+_SEEN_DAY = {}   # user id -> Israel day already written (one write per user per day)
+
+
+def _mark_seen(user_id) -> None:
+    """users.last_seen_at = now, at most once per user per Israel day (migration 44).
+    Never raises: opening the app must not fail over this."""
+    try:
+        from zoneinfo import ZoneInfo
+        day = datetime.now(ZoneInfo("Asia/Jerusalem")).strftime("%Y-%m-%d")
+    except (ImportError, KeyError):
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _SEEN_DAY.get(user_id) == day:
+        return
+    try:
+        c = database.get_db()
+        try:
+            c.execute("UPDATE users SET last_seen_at=? WHERE id=?",
+                      (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), user_id))
+            c.commit()
+        finally:
+            c.close()
+        _SEEN_DAY[user_id] = day
+    except Exception as exc:
+        print("[seen] last_seen_at for user %s not saved: %s" % (user_id, exc))
+
+
 def _save_marketing(user_id, granted: bool, source: str) -> bool:
     """Record a yes/no to offers and news (marketing.py). Never raises at sign-up:
     an account must not fail over this - the user can still say yes in Settings."""
@@ -5499,6 +5525,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not testaccount.is_test_address(user.get("email")):
                     analytics.app_opened(user["id"])
             _resume_search(user["id"], "opened the app")      # a no-op unless paused for inactivity
+            _mark_seen(user["id"])
             out = dict(user)
             # Daily picks: a new day brings the next picks from Noa's reserve.
             try:

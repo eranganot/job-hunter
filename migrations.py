@@ -1236,6 +1236,16 @@ def m0043_marketing_consent(conn):
     conn.commit()
 
 
+def m0044_last_seen(conn):
+    """When the user last opened the app (users.last_seen_at, UTC, written at most
+    once per Israel day from /api/me). Email timing (GTM row 22): day 1's "your
+    picks are waiting" is skipped for someone who already opened the app that
+    day. NULL = not since this migration. Idempotent."""
+    if not _has_column(conn, "users", "last_seen_at"):
+        conn.execute("ALTER TABLE users ADD COLUMN last_seen_at TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1280,6 +1290,7 @@ MIGRATIONS = [
     (41, "meta_ids",                    m0041_meta_ids),
     (42, "search_paused",               m0042_search_paused),
     (43, "marketing_consent",           m0043_marketing_consent),
+    (44, "last_seen",                   m0044_last_seen),
 ]
 
 
