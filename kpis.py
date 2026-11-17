@@ -13,6 +13,9 @@ Where each comes from (all already recorded; nothing here writes):
     apply engine submitted it) or 'manual' (the user marked that one job
     applied). 'bulk' (queue clean-up) and 'no_url' are not applications;
   * sign-up, first search, first approve = funnel_events;
+  * first real application = the user's earliest such job (row 12, 2026-11-17);
+  * new matches a day = jobs found per person per day (jobs.found_date), before
+    the daily cap holds any back - with the share of days under the cap;
   * where a sign-up came from = users.signup_attr (utm_* / ref / noa variant,
     saved at sign-up since migration 38; earlier accounts read "before tracking").
 """
@@ -92,11 +95,43 @@ def _steps(conn, ids):
     return out
 
 
+def _first_applications(conn, ids, steps, start, end):
+    """People whose FIRST real application (engine or manual, never bulk) fell in
+    [start, end), and the median days from their sign-up to it."""
+    firsts = {}
+    for r in conn.execute("SELECT user_id, MIN(applied_date) AS first FROM jobs WHERE status='applied' "
+                          "AND applied_via IN (?,?) AND applied_date IS NOT NULL GROUP BY user_id", REAL_VIA).fetchall():
+        uid = int(r["user_id"])
+        t = _parse(r["first"])
+        if uid in ids and t and start <= t < end:
+            firsts[uid] = t
+    days = [(t - steps[u]["signup"]).total_seconds() / 86400 for u, t in firsts.items()
+            if (steps.get(u) or {}).get("signup") and t >= steps[u]["signup"]]
+    return len(firsts), (round(statistics.median(days), 1) if days else None)
+
+
+def _new_matches(conn, ids, start, end, cap):
+    """Matches the searches found per person per day (jobs.found_date), before the
+    daily cap holds any back: the average over person-days with at least one,
+    and the share of those days that came in under the cap (supply too thin)."""
+    per = {}
+    for r in conn.execute("SELECT user_id, SUBSTR(found_date,1,10) AS d, COUNT(*) AS n FROM jobs "
+                          "WHERE found_date >= ? AND found_date < ? GROUP BY user_id, SUBSTR(found_date,1,10)",
+                          (_ts(start), _ts(end))).fetchall():
+        if int(r["user_id"]) in ids:
+            per[(int(r["user_id"]), r["d"])] = int(r["n"])
+    if not per:
+        return None, None, 0
+    vals = list(per.values())
+    under = sum(1 for n in vals if n < cap)
+    return round(statistics.mean(vals), 1), _pct(under, len(vals)), len(vals)
+
+
 def _pct(a, b):
     return round(100.0 * a / b) if b else None
 
 
-def week(conn, ids, steps, start, end, now):
+def week(conn, ids, steps, start, end, now, cap=7):
     dec = _decisions(conn, ids, start, end)
     apps = _applications(conn, ids, start + timedelta(days=1), end + timedelta(days=1))
     swipers = [d for d in dec.values() if d["approved"] + d["passed"]]
@@ -122,8 +157,12 @@ def week(conn, ids, steps, start, end, now):
             times = (later.get(u) or {}).get("times") or []
             if any(t and t0 + timedelta(days=6) <= t <= t0 + timedelta(days=8) for t in times):
                 back += 1
+    first_n, first_days = _first_applications(conn, ids, steps, start, end)
+    per_day, under_cap, person_days = _new_matches(conn, ids, start, end, cap)
     return {
         "active_applicants": {"value": sum(1 for n in apps.values() if n)},
+        "first_applications": {"value": first_n, "median_days": first_days},
+        "new_matches_per_day": {"value": per_day, "under_cap_pct": under_cap, "of": person_days, "cap": cap},
         "weekly_active_swipers": {"value": len(swipers)},
         "approve_rate": {"value": round(100 * statistics.mean(rates)) if rates else None, "of": len(rates)},
         "applied_rate": {"value": round(100 * statistics.mean(applied_rates)) if applied_rates else None,
@@ -134,12 +173,12 @@ def week(conn, ids, steps, start, end, now):
     }
 
 
-def today(conn, test_email, now=None):
+def today(conn, test_email, now=None, cap=7):
     now = now or datetime.now(timezone.utc)
     ids = people(conn, test_email)
     steps = _steps(conn, ids)
-    cur = week(conn, ids, steps, now - timedelta(days=7), now, now)
-    prev = week(conn, ids, steps, now - timedelta(days=14), now - timedelta(days=7), now)
+    cur = week(conn, ids, steps, now - timedelta(days=7), now, now, cap)
+    prev = week(conn, ids, steps, now - timedelta(days=14), now - timedelta(days=7), now, cap)
     for k, v in cur.items():
         v["prev"] = prev[k]["value"]
     return {"since": _ts(now - timedelta(days=7)), "kpis": cur}

@@ -1246,6 +1246,17 @@ def m0044_last_seen(conn):
     conn.commit()
 
 
+def m0045_application_outcome(conn):
+    """What happened after an application (followup.py, GTM row 12): the user's
+    answer to "Did they get back to you?" (jobs.outcome: interview / rejected /
+    no_reply, and when), and when that question was asked (jobs.followup_at,
+    once per job). NULL for every job before. Idempotent."""
+    for col in ("outcome", "outcome_at", "followup_at"):
+        if not _has_column(conn, "jobs", col):
+            conn.execute("ALTER TABLE jobs ADD COLUMN %s TEXT" % col)
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1291,6 +1302,7 @@ MIGRATIONS = [
     (42, "search_paused",               m0042_search_paused),
     (43, "marketing_consent",           m0043_marketing_consent),
     (44, "last_seen",                   m0044_last_seen),
+    (45, "application_outcome",         m0045_application_outcome),
 ]
 
 

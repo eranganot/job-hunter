@@ -18,7 +18,7 @@ def _db():
     c.row_factory = sqlite3.Row
     c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT, role TEXT, signup_attr TEXT, is_active INTEGER DEFAULT 1)")
     c.execute("CREATE TABLE activity_log (user_id INTEGER, event_type TEXT, details TEXT, created_date TEXT)")
-    c.execute("CREATE TABLE jobs (user_id INTEGER, status TEXT, applied_via TEXT, applied_date TEXT)")
+    c.execute("CREATE TABLE jobs (user_id INTEGER, status TEXT, applied_via TEXT, applied_date TEXT, found_date TEXT)")
     c.execute("CREATE TABLE funnel_events (user_id INTEGER, step TEXT, created_at TEXT)")
     c.executemany("INSERT INTO users (id, email, role, signup_attr) VALUES (?,?,?,?)", [
         (1, "owner@x", "admin", None), (2, "a@x", "user", json.dumps({"utm_source": "facebook", "utm_medium": "group", "noa": "b"})),
@@ -35,7 +35,7 @@ def test_rates_count_people_and_leave_out_admin_and_test_account():
         (3, "job_approved", "", t(3)), (3, "jobs_searched", "", t(3)),
         (2, "job_approved", "", t(9)),                      # the week before
     ])
-    c.executemany("INSERT INTO jobs VALUES (?,?,?,?)", [
+    c.executemany("INSERT INTO jobs (user_id, status, applied_via, applied_date) VALUES (?,?,?,?)", [
         (2, "applied", "manual", t(1)[:10]), (3, "applied", "bulk", t(1)[:10]),   # bulk is not an application
         (3, "applied", "engine", t(2).replace(" ", "T")), (1, "applied", "engine", t(1)[:10])])
     k = kpis.today(c, TEST, now=NOW)["kpis"]
@@ -69,7 +69,7 @@ def test_sources_and_noa_variants():
     c = _db()
     c.executemany("INSERT INTO funnel_events VALUES (?,?,?)", [
         (2, "signup", t(3)), (2, "first_approve", t(3)), (3, "signup", t(4)), (5, "signup", t(6)), (4, "signup", t(2))])
-    c.execute("INSERT INTO jobs VALUES (2,'applied','engine',?)", (t(1)[:10],))
+    c.execute("INSERT INTO jobs (user_id, status, applied_via, applied_date) VALUES (2,'applied','engine',?)", (t(1)[:10],))
     s = kpis.by_source(c, TEST, 30, now=NOW)
     got = {r["name"]: (r["signups"], r["activated"], r["applicants"]) for r in s["sources"]}
     assert got == {"facebook / group": (1, 1, 1), "direct": (1, 0, 0), "before tracking": (1, 0, 0)}
@@ -84,3 +84,29 @@ def test_disabled_accounts_are_not_people():
     assert kpis.people(c, TEST) == {2, 5}
     c.executemany("INSERT INTO funnel_events VALUES (?,?,?)", [(2, "signup", t(3)), (3, "signup", t(4))])
     assert [r["signups"] for r in kpis.by_source(c, TEST, 30, now=NOW)["sources"]] == [1]
+
+
+def test_first_applications_and_new_matches_a_day():
+    """Row 12: first real application (median days from sign-up), and matches found
+    per person per day before the cap, with the share of days under it."""
+    import sqlite3
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, role TEXT, email TEXT, is_active INTEGER DEFAULT 1)")
+    c.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT, applied_via TEXT,"
+              " applied_date TEXT, found_date TEXT)")
+    c.execute("CREATE TABLE funnel_events (user_id INTEGER, step TEXT, created_at TEXT)")
+    c.execute("CREATE TABLE activity_log (user_id INTEGER, event_type TEXT, details TEXT, created_date TEXT)")
+    now = datetime(2026, 12, 20, 12, 0, tzinfo=timezone.utc)
+    ts = lambda d: (now - timedelta(days=d)).strftime("%Y-%m-%d %H:%M:%S")
+    c.executemany("INSERT INTO users (id, role, email) VALUES (?,?,?)", [(1, "user", "a@x"), (2, "user", "b@x")])
+    c.executemany("INSERT INTO funnel_events VALUES (?,?,?)", [(1, "signup", ts(10)), (2, "signup", ts(3))])
+    c.executemany("INSERT INTO jobs (user_id, status, applied_via, applied_date) VALUES (?,?,?,?)", [
+        (1, "applied", "manual", ts(4)), (1, "applied", "engine", ts(2)),    # first one this week, 6 days in
+        (2, "applied", "bulk", ts(1))])                                      # bulk is not an application
+    for d, n in ((1, 9), (2, 3)):                                            # user 1: 9 then 3 matches
+        c.executemany("INSERT INTO jobs (user_id, status, found_date) VALUES (1,'new',?)", [(ts(d),)] * n)
+    out = kpis.today(c, "test@x", now=now, cap=7)["kpis"]
+    assert out["first_applications"]["value"] == 1 and out["first_applications"]["median_days"] == 6.0
+    nm = out["new_matches_per_day"]
+    assert nm["value"] == 6.0 and nm["under_cap_pct"] == 50 and nm["of"] == 2 and nm["cap"] == 7

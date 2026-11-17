@@ -1600,6 +1600,28 @@ def _run_inactive_sweep(now=None) -> dict | None:
         print("[inactive] ERROR sweep failed: %s" % exc)
 
 
+def _run_followups(now=None) -> dict | None:
+    """"Did they get back to you?" 10 days after an application (followup.py).
+    Scheduler-lock holder only; off with the lifecycle emails. Never raises."""
+    import followup
+    import lifecycle
+    import testaccount
+    if not lifecycle.enabled():
+        return None
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return None
+        out = followup.run(database.get_db, _lifecycle_send, MOBILE_URL, now=now,
+                           is_test=testaccount.is_test_address,
+                           can_email=_sender(who="noa")[0] != RESEND_FROM, track=_track)
+        if out["emailed"] or out["failed"]:
+            print("[followup] emailed %(emailed)d (%(jobs)d jobs), skipped %(skipped)d, failed %(failed)d" % out)
+        return out
+    except Exception as exc:
+        print("[followup] ERROR sweep failed: %s" % exc)
+        return None
+
+
 def _run_lifecycle_emails(now=None) -> dict | None:
     """Welcome / day 1 / day 3 / day 7 (lifecycle.py). Scheduler-lock holder
     only, so a second instance never sends twice. Never raises."""
@@ -1658,6 +1680,8 @@ def file_watcher():
             _run_lifecycle_emails()
         if _tick % 60 == 7:  # ~hourly: users who stopped coming back (inactive.py)
             _run_inactive_sweep()
+        if _tick % 30 == 12:  # every ~30 minutes: "Did they get back to you?" (followup.py)
+            _run_followups()
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -5171,6 +5195,29 @@ class Handler(BaseHTTPRequestHandler):
                 "</button></form>" % (int(_u), _t)))
             return
 
+        if path == "/email/outcome":
+            # An answer from "Did they get back to you?" (followup.py): a confirm page,
+            # never a change on GET (mail scanners open links). Signed per job + answer.
+            import followup
+            _j, _o, _t = (qs.get("j") or [""])[0], (qs.get("o") or [""])[0], (qs.get("t") or [""])[0]
+            if not followup.token_ok(_j, _o, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete. You can also just "
+                                          "reply to the email and tell us how it went."), 400)
+                return
+            _oc = database.get_db()
+            try:
+                _row = _oc.execute("SELECT title, company FROM jobs WHERE id=?", (int(_j),)).fetchone()
+            finally:
+                _oc.close()
+            if not _row:
+                self.send_html(_stop_page("That job is gone", "It may have been removed from your account."), 404)
+                return
+            _what = html_lib.escape("%s at %s" % (_row[0], _row[1]) if _row[1] else str(_row[0] or "this job"))
+            self.send_html(_stop_page("How did it go?", "%s: <b>%s</b>" % (_what, followup.OUTCOMES[_o]),
+                "<form method='post' action='/email/outcome?j=%d&amp;o=%s&amp;t=%s'><button type='submit'>"
+                "Save my answer</button></form>" % (int(_j), _o, _t)))
+            return
+
         if path == "/email/offers-off":
             # "Stop these emails" in a promotional email (marketing.footer): a confirm
             # page, never a change on GET (mail scanners open links).
@@ -5259,7 +5306,8 @@ class Handler(BaseHTTPRequestHandler):
             _c = database.get_db()
             try:
                 if path == "/api/admin/kpis":
-                    out = kpis.today(_c, testaccount.TEST_EMAIL)
+                    out = kpis.today(_c, testaccount.TEST_EMAIL,
+                                     cap=entitlements.limit({"plan": "beta", "role": "user"}, "matches_per_day") or 7)
                 else:
                     try:
                         _d = max(1, min(90, int(qs.get("days", ["30"])[0])))
@@ -6403,6 +6451,30 @@ class Handler(BaseHTTPRequestHandler):
                                       "picks in the app."))
             return
 
+        # The answer button from "Did they get back to you?" (followup.py).
+        if path == "/email/outcome":
+            import followup
+            _q = parse_qs(parsed.query)
+            _j, _o, _t = (_q.get("j") or [""])[0], (_q.get("o") or [""])[0], (_q.get("t") or [""])[0]
+            if not followup.token_ok(_j, _o, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete."), 400)
+                return
+            _oc = database.get_db()
+            try:
+                _row = _oc.execute("SELECT user_id FROM jobs WHERE id=?", (int(_j),)).fetchone()
+                _ok = bool(_row) and followup.record(_oc, int(_j), _o)
+            finally:
+                _oc.close()
+            if not _ok:
+                self.send_html(_stop_page("That job is gone", "It may have been removed from your account."), 404)
+                return
+            _track(int(_row[0]), "application_outcome", {"outcome": _o})
+            self.send_html(_stop_page("Thanks, noted", {"interview": "Good luck with the interview!",
+                                                        "rejected": "Their loss. I'll keep looking for you.",
+                                                        "no_reply": "I'll keep looking meanwhile."}[_o],
+                                      "<p><a href='/app'>Open Job Hunter</a></p>"))
+            return
+
         # "Stop offers" (marketing.py): the confirm button and one-click
         # unsubscribe (RFC 8058) - token-authenticated, before the cross-site check.
         if path == "/email/offers-off":
@@ -6528,6 +6600,17 @@ class Handler(BaseHTTPRequestHandler):
                 _sent.append("inactive14/sent")
             except Exception as _le:
                 _errs.append("inactive14/sent: %s" % _le)
+            import followup                        # "Did they get back to you?", one job and several
+            for _fv, _fj in (("one", [(0, "Senior Product Manager", "Lumen Health")]),
+                             ("several", [(0, "Senior Product Manager", "Lumen Health"),
+                                          (0, "Product Manager, Growth", "Orbitly")])):
+                try:
+                    _fs, _fb = followup.compose(_first, _fj, MOBILE_URL)
+                    send_email(user["email"], "[followup / %s] %s" % (_fv, _fs),
+                               _fb + lifecycle.footer("noa", lifecycle.unsubscribe_url(MOBILE_URL, user["id"])), sender="noa")
+                    _sent.append("followup/" + _fv)
+                except Exception as _le:
+                    _errs.append("followup/%s: %s" % (_fv, _le))
             self.send_json({"sent": _sent, "errors": _errs,
                             "noa_from_set": bool(NOA_FROM), "eran_from_set": bool(ERAN_FROM),
                             "enabled": lifecycle.enabled()})
