@@ -4053,70 +4053,69 @@ def parse_multipart(headers, body: bytes) -> dict:
 _AUTH_HEAD = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <meta name="theme-color" content="#0f172a"/>
+  <meta name="theme-color" content="#0c1f17"/>
   <style>
     /* Deliberately self-contained: this page links no external stylesheet.
-       These two pages are the first thing a stranger sees, and the legacy
-       Tailwind file they used to link is a frozen gzip+base64 blob in app.py
-       that no build step regenerates - so the sign-in screen was the one
-       surface whose look depended on an artifact nobody can rebuild. The
-       palette is /app's, matched by value. */
-    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+       The landing page's colours and type (landing.py, GTM row 24), so the step
+       from "Get started" to the form looks like one product. Fonts are the
+       landing page's own files, served from /landing-assets/. */
+    @font-face { font-family:Fraunces; font-style:normal; font-weight:100 900; font-display:swap;
+                 src:url(/landing-assets/fraunces-latin-wght.woff2) format('woff2'); }
+    @font-face { font-family:Inter; font-style:normal; font-weight:100 900; font-display:swap;
+                 src:url(/landing-assets/inter-latin-wght.woff2) format('woff2'); }
+    *, *::before, *::after { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
     body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-           padding:1.25rem; color:#e5e7eb; background:#0f172a;
-           background-image: radial-gradient(60rem 40rem at 15% -10%, rgba(99,102,241,.18), transparent 60%),
-                             radial-gradient(50rem 40rem at 110% 110%, rgba(56,89,248,.14), transparent 60%);
-           font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+           padding:1.25rem; color:#c4d4c6; background:#0c1f17;
+           background-image:radial-gradient(60rem 40rem at 15% -10%, rgba(255,215,102,.07), transparent 60%);
+           font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
     .wrap { width:100%; max-width:26rem; }
-    .brand { text-align:center; margin-bottom:1.75rem; }
-    .mark { width:3.5rem; height:3.5rem; margin:0 auto .9rem; border-radius:1rem;
-            display:flex; align-items:center; justify-content:center;
-            background:linear-gradient(135deg,#6366f1,#4338ca); box-shadow:0 10px 30px rgba(79,70,229,.35); }
-    .mark svg { width:1.65rem; height:1.65rem; stroke:#fff; }
-    .brand h1 { margin:0; font-size:1.6rem; font-weight:700; color:#fff; letter-spacing:-.01em; }
-    .brand p { margin:.35rem 0 0; font-size:.85rem; color:#94a3b8; }
-    .card { background:#1f2937; border:1px solid #374151; border-radius:1.25rem; padding:1.75rem;
-            box-shadow:0 24px 60px rgba(0,0,0,.45); }
-    .card h2 { margin:0 0 1.25rem; font-size:1.05rem; font-weight:650; color:#fff; }
-    label { display:block; font-size:.78rem; font-weight:500; color:#9ca3af; margin-bottom:.4rem; }
+    .brand { text-align:center; margin-bottom:1.6rem; }
+    .mark { display:block; width:3.25rem; height:3.25rem; margin:0 auto .85rem; border-radius:.9rem; }
+    .brand h1 { margin:0; font-family:Fraunces,Georgia,serif; font-size:1.75rem; font-weight:600;
+                color:#fbf6e6; letter-spacing:-.01em; }
+    .brand p { margin:.35rem 0 0; font-size:.9rem; color:#8ba593; }
+    .card { background:#12291f; border:1px solid #2c4a3c; border-radius:1.25rem; padding:1.75rem;
+            box-shadow:0 24px 60px rgba(0,0,0,.35); }
+    .card h2 { margin:0 0 1.25rem; font-family:Fraunces,Georgia,serif; font-size:1.3rem; font-weight:600; color:#fbf6e6; }
+    label { display:block; font-size:.8rem; font-weight:500; color:#c4d4c6; margin-bottom:.4rem; }
     .field { margin-bottom:.9rem; }
-    input { width:100%; padding:.75rem 1rem; font-size:.9rem; color:#fff;
-            /* the border IS the field boundary here - #374151 on #111827 is 1.29:1 */
-            background:#111827; border:1px solid #6b7280; border-radius:.75rem; outline:none; }
-    input::placeholder { color:#9ca3af; }   /* AA on the field fill; #6b7280 was 3.67:1 */
-    input:focus { border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.25); }
+    input { width:100%; padding:.75rem 1rem; font:inherit; font-size:.92rem; color:#fbf6e6;
+            /* the border IS the field boundary: #5f7f6c on #0c1f17 */
+            background:#0c1f17; border:1px solid #5f7f6c; border-radius:.75rem; outline:none; }
+    input::placeholder { color:#8ba593; }
+    input:focus { border-color:#ffd766; box-shadow:0 0 0 3px rgba(255,215,102,.22); }
     .pw { position:relative; }
     .pw input { padding-right:3rem; }
     .reveal { position:absolute; right:.4rem; top:50%; transform:translateY(-50%);
-              background:none; border:0; color:#9ca3af; cursor:pointer; padding:.5rem;
-              font-size:.72rem; font-weight:600; }
-    .reveal:hover { color:#e5e7eb; }
-    button.primary { width:100%; margin-top:.35rem; padding:.85rem 1rem; font-size:.92rem; font-weight:600;
-                     color:#fff; border:0; border-radius:.75rem; cursor:pointer;
-                     background:linear-gradient(90deg,#4f46e5,#4338ca); }
-    button.primary:hover { filter:brightness(1.08); }
+              background:none; border:0; color:#8ba593; cursor:pointer; padding:.5rem;
+              font:inherit; font-size:.74rem; font-weight:600; }
+    .reveal:hover { color:#fbf6e6; }
+    button.primary { width:100%; margin-top:.35rem; padding:.9rem 1rem; font:inherit; font-size:.98rem; font-weight:650;
+                     color:#1f1a05; border:0; border-radius:.85rem; cursor:pointer; background:#ffd766; }
+    button.primary:hover { background:#ffe28f; }
     button.primary:active { transform:scale(.99); }
     .google { display:flex; align-items:center; justify-content:center; gap:.65rem; width:100%;
-              padding:.75rem 1rem; font-size:.9rem; font-weight:600; color:#e5e7eb; text-decoration:none;
-              background:#111827; border:1px solid #374151; border-radius:.75rem; }
-    .google:hover { background:#374151; }
+              padding:.8rem 1rem; font-size:.92rem; font-weight:600; color:#fbf6e6; text-decoration:none;
+              background:transparent; border:1.5px solid #2c4a3c; border-radius:.85rem; }
+    .google:hover { border-color:#fbf6e6; }
     .or { display:flex; align-items:center; gap:.75rem; margin:1.15rem 0; }
-    .or span { font-size:.72rem; color:#9ca3af; font-weight:500; }  /* #6b7280 was 3.69:1 */
-    .or i { flex:1; height:1px; background:#374151; }
-    .alt { text-align:center; font-size:.85rem; color:#9ca3af; margin:1.4rem 0 0; }
-    .legal { text-align:center; font-size:.78rem; color:#9ca3af; margin:1rem 0 0; line-height:1.5; }
-    .legal a { color:#cbd5e1; }
-    .alt a { color:#a5b4fc; font-weight:600; text-decoration:none; }
+    .or span { font-size:.74rem; color:#8ba593; font-weight:500; }
+    .or i { flex:1; height:1px; background:#2c4a3c; }
+    .alt { text-align:center; font-size:.88rem; color:#8ba593; margin:1.4rem 0 0; }
+    .legal { text-align:center; font-size:.8rem; color:#8ba593; margin:1rem 0 0; line-height:1.5; }
+    .legal a { color:#c4d4c6; }
+    .alt a { color:#ffd766; font-weight:600; text-decoration:none; }
     .alt a:hover { text-decoration:underline; }
-    .err { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.35); color:#fca5a5;
-           border-radius:.75rem; padding:.75rem 1rem; font-size:.85rem; margin-bottom:1rem; }
-    .ok { background:rgba(34,197,94,.12); border:1px solid rgba(34,197,94,.35); color:#86efac;
-          border-radius:.75rem; padding:.75rem 1rem; font-size:.85rem; margin-bottom:1rem; }
-    .forgot { display:block; text-align:right; font-size:.78rem; color:#a5b4fc; text-decoration:none; margin:-.4rem 0 .6rem; }
+    a:focus-visible, button:focus-visible, input[type=checkbox]:focus-visible { outline:3px solid #ffd766; outline-offset:2px; }
+    .err { background:rgba(239,68,68,.12); border:1px solid rgba(239,68,68,.4); color:#fca5a5;
+           border-radius:.75rem; padding:.75rem 1rem; font-size:.86rem; margin-bottom:1rem; }
+    .ok { background:rgba(134,239,172,.1); border:1px solid rgba(134,239,172,.35); color:#86efac;
+          border-radius:.75rem; padding:.75rem 1rem; font-size:.86rem; margin-bottom:1rem; }
+    .forgot { display:block; text-align:right; font-size:.8rem; color:#ffd766; text-decoration:none; margin:-.4rem 0 .6rem; }
     .forgot:hover { text-decoration:underline; }
-    .muted { font-size:.85rem; color:#cbd5e1; line-height:1.5; margin:0 0 1rem; }
-    .optin { display:flex; gap:.6rem; align-items:flex-start; font-size:.82rem; color:#cbd5e1; line-height:1.45; margin:0 0 1rem; cursor:pointer; }
-    .optin input { margin-top:.15rem; width:1rem; height:1rem; flex:none; accent-color:#6366f1; }
+    .muted { font-size:.88rem; color:#c4d4c6; line-height:1.5; margin:0 0 1rem; }
+    .optin { display:flex; gap:.6rem; align-items:flex-start; font-size:.84rem; color:#c4d4c6; line-height:1.45; margin:0 0 1rem; cursor:pointer; }
+    .optin input { margin-top:.15rem; width:1rem; height:1rem; flex:none; accent-color:#ffd766; padding:0; }
   </style>
   <script>
     function mktLink(box){
@@ -4135,10 +4134,7 @@ _AUTH_HEAD = """
   </script>
 """
 
-_MARK = ('<div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" '
-         'stroke-linecap="round" stroke-linejoin="round">'
-         '<rect x="2" y="7" width="20" height="14" rx="2"/>'
-         '<path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div>')
+_MARK = '<img class="mark" src="/app/icon-192.png" alt="" width="52" height="52"/>'
 
 _GOOGLE_SVG = ('<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">'
   '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>'
