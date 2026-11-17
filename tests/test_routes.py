@@ -378,7 +378,12 @@ def test_sentry_test_route_reports_honestly_without_a_dsn(users):
     assert data["sent"] is False and data["reporting"] is False
 
 
-def test_link_report_is_admin_only_and_read_only(stack, users):
+def test_link_report_is_admin_only_and_read_only(stack, users, monkeypatch):
+    # The route always runs links.reach_check (four live requests to ATS board
+    # APIs); the suite must not depend on those hosts answering within the
+    # client's 10 s timeout (it failed whenever they were slow, 2026-11-17).
+    import links
+    monkeypatch.setattr(links, "reach_check", lambda get=None: {})
     status, _, _ = Client(stack["port"]).get("/api/admin/link-report")
     assert status != 200, "the link report answered anonymously"
     status, _, _ = users["b"].get("/api/admin/link-report")
