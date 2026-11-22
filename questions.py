@@ -188,7 +188,12 @@ Rules:
 - Demographic questions (gender, race, veteran, disability...): the "decline / prefer not
   to say" option, confidence "high"; if none exists, leave the question out.
 - Consent / acknowledgement / terms checkboxes: agree, "high".
-- "How did you hear about us": "Company website" or the closest option, "high".
+- "How did you hear about us": "Company website" or the closest option, "high". A standing
+  instruction about how the applicant found the role answers ONLY that question - never a
+  "personal note", "cover letter", "additional information" or "message" box.
+- "Personal note" / "Cover letter" / "Additional information" / "Message to the hiring team"
+  text boxes: the opening of a cover letter for this job - 3-4 sentences on why this role and
+  what the applicant brings, grounded in the CV, "high" only if the CV gives real material.
 - Salary expectations: use salary_expectation from the applicant data (state it as that
   minimum, in the form's format), confidence "high". Notice period / availability: use
   notice_period, "high". If either is absent from the applicant data, confidence "low".

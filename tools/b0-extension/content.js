@@ -121,7 +121,24 @@
     if (file && file.b64) cv = JHFill.attachFile(file.b64, file.name, file.mime);
     await wait(1500);
     JHFill.fill(task.prepared || []);                     // Comeet shows its questions once the CV is in
-    const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' answers' + (cv ? ' + CV' : ', no CV attached') +
+    // The cover letter (the owner, 2026-11-22): as a PDF where the form takes a file,
+    // and in the note box - its opening paragraph next to the PDF, the whole letter without one.
+    let letter = '';
+    const notes = JHFill.noteFields();
+    if (JHFill.coverInput() || notes.length) {
+      banner('Writing the cover letter…');
+      const cl = await ask({type: 'cover', jobId: task.jobId});
+      if (cl && cl.letter) {
+        let pdf = false;
+        if (JHFill.coverInput()) {
+          const f = await ask({type: 'coverpdf', jobId: task.jobId});
+          if (f && f.b64) pdf = JHFill.attachCover(f.b64, f.name, f.mime);
+        }
+        for (const n of notes) JHFill.setNote(n, pdf ? cl.short : cl.letter);
+        letter = pdf ? ' + cover letter PDF' + (notes.length ? ' and its opening in the note' : '') : (notes.length ? ' + cover letter in the note' : '');
+      } else letter = ' (no cover letter: ' + ((cl && cl.error) || 'not written') + ')';
+    }
+    const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' answers' + (cv ? ' + CV' : ', no CV attached') + letter +
                  (res.missing.length ? '. Not found: ' + res.missing.slice(0, 4).join('; ') : '') + '.';
 
     let pressForMeImpl = null;

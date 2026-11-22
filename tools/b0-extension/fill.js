@@ -92,18 +92,49 @@
     return {filled, missing};
   }
 
-  // The CV: a File built from bytes, set on the form's CV input.
-  function attachFile(b64, name, mime) {
-    const inputs = fields().filter(el => (el.type || '').toLowerCase() === 'file');
-    if (!inputs.length) return false;
-    const pick = inputs.find(el => /cv|resume|résumé/i.test((el.name || '') + ' ' + (el.id || '') + ' ' + labelOf(el))) || inputs[0];
+  const fileInputs = () => fields().filter(el => (el.type || '').toLowerCase() === 'file');
+  const fileText = el => (el.name || '') + ' ' + (el.id || '') + ' ' + labelOf(el) + ' ' +
+    clean((el.closest('.form-group, .application-question, li, div') || {}).innerText || '').slice(0, 80);
+  const isCover = el => /cover/i.test(fileText(el));
+
+  // The form's cover-letter file field (Comeet: input#coverLetter "Attach Cover Letter").
+  function coverInput() { return fileInputs().find(isCover) || null; }
+
+  // Text boxes meant for a letter or a note (Comeet "Personal note" = textarea#inputNote,
+  // Lever "Additional information", Greenhouse "Cover Letter" text).
+  function noteFields() {
+    return [...document.querySelectorAll('textarea')].filter(el => vis(el) &&
+      !/captcha/i.test(el.name || '') &&
+      /personal note|cover letter|additional information|anything else|message to|note|comment/i
+        .test(labelOf(el) + ' ' + (el.name || '') + ' ' + (el.id || '')));
+  }
+
+  function setNote(el, text) {
+    const max = el.maxLength > 0 ? el.maxLength : 0;
+    setValue(el, max && text.length > max ? text.slice(0, max - 1).replace(/\s+\S*$/, '') + '…' : text);
+  }
+
+  function putFile(input, b64, name, mime) {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const dt = new DataTransfer();
     dt.items.add(new File([bytes], name, {type: mime}));
-    pick.files = dt.files;
-    pick.dispatchEvent(new Event('input', {bubbles: true}));
-    pick.dispatchEvent(new Event('change', {bubbles: true}));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    input.dispatchEvent(new Event('change', {bubbles: true}));
     return true;
+  }
+
+  function attachCover(b64, name, mime) {
+    const el = coverInput();
+    return el ? putFile(el, b64, name, mime) : false;
+  }
+
+  // The CV: a File built from bytes, set on the form's CV input (never the cover-letter one).
+  function attachFile(b64, name, mime) {
+    const inputs = fileInputs().filter(el => !isCover(el));
+    if (!inputs.length) return false;
+    const pick = inputs.find(el => /cv|resume|résumé/i.test((el.name || '') + ' ' + (el.id || '') + ' ' + labelOf(el))) || inputs[0];
+    return putFile(pick, b64, name, mime);
   }
 
   function submitButton() {
@@ -129,5 +160,5 @@
   const THANKS = /thank you for (applying|your application|submitting)|application (has been |was )?(received|submitted)|we('ve| have) received your application/i;
   const confirmed = () => THANKS.test(document.body ? document.body.innerText : '');
 
-  window.JHFill = {fields, hasForm, fill, attachFile, submitButton, personCheck, confirmed};
+  window.JHFill = {fields, hasForm, fill, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
 })();
