@@ -71,7 +71,12 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared):
         try:
             for pat in ([pattern] if isinstance(pattern, str) else pattern):
                 ctx.route(pat, handler)
-            sw = ctx.service_workers[0] if ctx.service_workers else ctx.wait_for_event("serviceworker")
+            try:
+                sw = ctx.service_workers[0] if ctx.service_workers else ctx.wait_for_event("serviceworker", timeout=10000)
+            except Exception:
+                # Branded Chrome 137+ ignores --load-extension (CI's google-chrome);
+                # Chrome for Testing and Chromium still load it.
+                pytest.skip("this Chrome does not load unpacked extensions")
             ext_id = sw.url.split("/")[2]
             popup = ctx.new_page()
             popup.goto(f"chrome-extension://{ext_id}/popup.html")
