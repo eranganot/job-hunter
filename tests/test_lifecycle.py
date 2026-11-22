@@ -126,7 +126,7 @@ def test_the_admin_can_send_himself_every_variant(stack, users, monkeypatch):
     monkeypatch.setattr(app, "send_email", lambda to, subj, body, *a, **k: got.append((to, subj, k.get("sender"))))
     assert users["a"].post_json("/api/admin/lifecycle-test", {})[0] == 403
     out = json.loads(users["admin"].post_json("/api/admin/lifecycle-test", {})[2])
-    assert len(out["sent"]) == len(lifecycle.SAMPLES) + 3 and not out["errors"]  # + inactivity, 2 follow-ups
+    assert len(out["sent"]) == len(lifecycle.SAMPLES) + 4 and not out["errors"]  # + inactivity, 2 follow-ups, fit
     assert {g[0] for g in got} == {"admin@example.test"}
     assert [g[2] for g in got if g[1].startswith("[day3")] == ["eran", "eran"]
 

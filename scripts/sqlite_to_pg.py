@@ -85,6 +85,8 @@ TABLE_ORDER = [
     "lifecycle_emails",
     # m0043 (2026-11-17): offers-and-news consent log (marketing.py). After users.
     "marketing_consent",
+    # m0046 (2026-11-17): the product-fit answers (fitsurvey.py). After users.
+    "fit_survey",
     "billing_events",
 ]
 
