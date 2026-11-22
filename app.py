@@ -4853,6 +4853,10 @@ SECURITY_HEADERS = (
 
 
 
+# A client that hung up mid-reply. Not a server error - see Handler._client_gone.
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
+
 class Handler(BaseHTTPRequestHandler):
 
     # BaseHTTPRequestHandler's own access line, superseded by the one log.end()
@@ -4931,6 +4935,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", MOBILE_URL)
         self.end_headers()
         self.wfile.write(body)
+
+    def _client_gone(self):
+        """The client closed the connection before the reply was written (an app
+        switched away, a phone lost signal). Nothing failed on the server and
+        there is nobody to answer. Before 2026-11-22 the catch-all treated this
+        as a crash: it reported it, wrote a 500 to the dead socket, and the
+        access line logged "-> 500" at ERROR - three Sentry issues
+        (JOB-HUNTER-W/X/E) for one closed tab. 499 is nginx's "client closed
+        request"; log.end() grades it WARNING, which Sentry keeps as a
+        breadcrumb, not an event."""
+        _log.set_status(499)
 
     def redirect(self, location: str):
         self.send_response(302)
@@ -5074,6 +5089,8 @@ class Handler(BaseHTTPRequestHandler):
         with _log.request("GET", self.path, self.client_ip()):
             try:
                 self._do_GET_inner()
+            except _CLIENT_GONE:
+                self._client_gone()
             except Exception as exc:
                 import traceback
                 print(f"[do_GET] Unhandled exception on {self.path}: {exc}\n"
@@ -6746,6 +6763,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST_guarded(self):
         try:
             self._do_POST_inner()
+        except _CLIENT_GONE:
+            self._client_gone()
         except Exception as exc:
             import traceback
             print(f"[do_POST] ❌ Unhandled exception on {self.path}: {exc}\n{traceback.format_exc()}")
