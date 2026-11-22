@@ -22,8 +22,14 @@ TEST_EMAIL = "test-user@job-hunter.test"
 TEST_NAME = "Test User"
 
 
+TEST_DOMAIN = "@job-hunter.test"
+
+
 def is_test_address(addr) -> bool:
-    return str(addr or "").strip().lower() == TEST_EMAIL
+    """Any address on the reserved .test domain: this account and the probes (probes.py,
+    2026-11-22), which search daily for the role families no user covers yet. None of them is
+    a person: no lifecycle mail, no analytics, no inactivity pause, not in the numbers."""
+    return str(addr or "").strip().lower().endswith(TEST_DOMAIN)
 
 
 def status(conn) -> dict:
