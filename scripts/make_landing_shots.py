@@ -11,6 +11,7 @@ scripts/smoke.py --boot-local does), registers "Maya Levi", fills her account
 with invented jobs, a cover letter and a tailored CV, opens /app in headless
 Chromium and saves:
 
+    job-card.webp     the swipe card at desktop width (two columns)
     job-details.webp  a role's details: the finished cover letter and the
                       tailored CV with what the job asks for that the CV lacks
     analytics.webp    the statistics tiles (queue, applied, deferred, passed)
@@ -199,6 +200,13 @@ def main():
         with sync_playwright() as p:
             kw = {"executable_path": os.environ["CHROMIUM"]} if os.environ.get("CHROMIUM") else {}
             b = p.chromium.launch(**kw)
+            # the swipe card as a desktop shows it (job-card.webp, the landing's main picture);
+            # first, while the job is still waiting to be reviewed
+            ctx = b.new_context(viewport={"width": 1100, "height": 1100}, device_scale_factor=2,
+                                timezone_id="Asia/Jerusalem", locale="en-GB")
+            ctx.add_cookies([{"name": name, "value": value, "url": base}])
+            take_card(ctx.new_page(), base)
+            ctx.close()
             for wide in (False, True):
                 ctx = b.new_context(viewport={"width": 780 if wide else 390, "height": 1000},
                                     device_scale_factor=2 if wide else 3,
@@ -222,6 +230,15 @@ def _span(first, last, pad=10):
     """A clip from the top of one box to the bottom of another."""
     return {"x": first["x"] - pad, "y": first["y"] - pad, "width": first["width"] + 2 * pad,
             "height": last["y"] + last["height"] - first["y"] + 2 * pad}
+
+
+def take_card(pg, base):
+    """job-card.webp: the whole swipe card at desktop width (two columns), buttons included."""
+    pg.goto(base + "/app")
+    pg.wait_for_selector("text=Why Noa picked this")
+    pg.wait_for_timeout(800)
+    card = pg.locator("text=Northwind Labs").first.locator("xpath=ancestor::div[contains(@class,'rounded')][last()]")
+    save_webp(card.screenshot(), "job-card.webp")
 
 
 def take_phone(pg, base, db_path):

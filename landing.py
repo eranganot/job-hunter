@@ -115,7 +115,7 @@ p{margin:0}
 .bub{background:var(--panel);border:1px solid var(--line);border-radius:.4rem 1.3rem 1.3rem 1.3rem;padding:.95rem 1.15rem;
      color:var(--strong);font-size:1.08rem;line-height:1.45}
 .bub small{display:block;color:var(--muted);font-size:.8rem;margin-bottom:.25rem}
-.shot{border-radius:1rem;overflow:hidden;border:1px solid var(--line);background:#111827}
+.shot{border-radius:1rem;overflow:hidden;border:1px solid var(--line);background:#12291f}
 .chat .shot{margin-left:3.65rem}
 @media(max-width:30rem){.chat .shot{margin-left:0}}
 /* One column (phones, small tablets): Noa's morning message and the top of the job card sit straight
@@ -291,13 +291,13 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
   <meta name="twitter:title" content="{t}"/>
   <meta name="twitter:description" content="{d}"/>
   <link rel="manifest" href="/app/manifest.webmanifest"/>
-  <link rel="icon" type="image/png" href="/app/icon-192.png"/>
+  <link rel="icon" type="image/png" href="/app/icon-192.png?v=forest"/>
   <link rel="preload" href="/landing-assets/fraunces-latin-wght.woff2" as="font" type="font/woff2" crossorigin/>
   <style>{_CSS}</style>
 </head>
 <body data-noa="{noa}">
 <header class="wrap top">
-  <a class="brand" href="/"><img src="/app/icon-192.png" alt="" width="36" height="36"/>Job Hunter</a>
+  <a class="brand" href="/"><img src="/app/icon-192.png?v=forest" alt="" width="36" height="36"/>Job Hunter</a>
   <nav class="nav" aria-label="Account">
     <a class="btn ghost" href="/login">Sign in</a>
     <a class="btn go" href="/register" data-place="header">Meet Noa</a>
@@ -325,7 +325,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         <p class="bub"><small>Noa, every morning</small>{msg2}</p></div>
       <div class="shot"><picture>
         <source media="(max-width:39.99rem)" srcset="/landing-assets/job-card-mobile.webp" width="780" height="1277"/>
-        <img src="/landing-assets/job-card.webp" width="1400" height="986"
+        <img src="/landing-assets/job-card.webp" width="1400" height="976"
         alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with Noa's reasons it fits"/></picture></div>
     </div>
   </section>

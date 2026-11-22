@@ -37,7 +37,7 @@ export function InstallPrompt() {
           <p className="text-sm font-semibold text-white leading-tight">Install Job Hunter</p>
           <p className="text-xs text-gray-400 leading-tight">Add to your home screen</p>
         </div>
-        <button onClick={install} className="px-3 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium rounded-xl shrink-0">Install</button>
+        <button onClick={install} className="px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium rounded-xl shrink-0">Install</button>
         <button onClick={() => setHidden(true)} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
       </div>
     </div>

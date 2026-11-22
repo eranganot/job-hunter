@@ -4233,7 +4233,7 @@ _AUTH_HEAD = """
   </script>
 """
 
-_MARK = '<img class="mark" src="/app/icon-192.png" alt="" width="52" height="52"/>'
+_MARK = '<img class="mark" src="/app/icon-192.png?v=forest" alt="" width="52" height="52"/>'
 
 _GOOGLE_SVG = ('<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">'
   '<path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>'
