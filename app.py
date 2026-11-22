@@ -986,6 +986,33 @@ def _is_admin_id(user_id) -> bool:
         return False
 
 
+# What each channel needs before anything can be sent on it. One table, read by
+# the sender and by /api/save-notifications, so the two cannot disagree.
+_CHANNEL_NEEDS = {
+    "telegram": ("telegram_token", "telegram_chat_id"),
+    "whatsapp": ("twilio_account_sid", "twilio_auth_token", "whatsapp_number"),
+    "email":    ("email_address",),
+}
+_CHANNEL_MISSING_TEXT = {
+    "telegram": "Telegram is selected but the bot token or chat id is missing",
+    "whatsapp": "WhatsApp is selected but the Twilio account SID, auth token or WhatsApp number is missing",
+    "email":    "Email is selected but no address is set",
+}
+
+
+def _channel_missing(channel: str, values) -> str:
+    """'' when `channel` has what it needs in `values` (a dict or a DB row),
+    else the sentence saying what is missing."""
+    for key in _CHANNEL_NEEDS.get(channel, ()):
+        try:
+            v = values[key]
+        except (KeyError, IndexError):
+            v = None
+        if not str(v or "").strip():
+            return _CHANNEL_MISSING_TEXT[channel]
+    return ""
+
+
 def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None,
                          subject: str = "", body: str = "", email: bool = True, from_noa: bool = True) -> dict:
     """Deliver to every channel the user has; return {channel: "sent" | "FAILED: ..." | ...}.
@@ -1034,21 +1061,24 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
     msg_with_link = repair_mojibake(body) if body else message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
     for channel in channels:
         try:
+            if channel == "email" and not email:
+                results[channel] = "skipped: another email covered this"
+                continue
+            missing = _channel_missing(channel, p)
+            if missing:
+                # The user's setup, not a server fault: a WARNING the user can
+                # fix in Settings, not an ERROR that pages anyone (JOB-HUNTER-M:
+                # 14 alerts for one profile saved before the save route checked).
+                results[channel] = "not set up: " + missing
+                _log_notification(user_id, channel, "NOT SET UP", missing)
+                print(f"[notify] WARNING {channel} not set up for user {user_id}: {missing}")
+                continue
             if channel == "telegram":
-                if not (p["telegram_token"] and p["telegram_chat_id"]):
-                    raise RuntimeError("Telegram is selected but the bot token or chat id is missing")
                 send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
             elif channel == "whatsapp":
-                if not (p["twilio_account_sid"] and p["whatsapp_number"]):
-                    raise RuntimeError("WhatsApp is selected but the Twilio details are missing")
                 send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
                               p["whatsapp_number"], msg_with_link)
             elif channel == "email":
-                if not email:
-                    results[channel] = "skipped: another email covered this"
-                    continue
-                if not p["email_address"]:
-                    raise RuntimeError("Email is selected but no address is set")
                 send_email(to_addr=p["email_address"], subject=subject or "Job Hunter Notification",
                            body=msg_with_link, as_noa=True)
             else:
@@ -7604,6 +7634,24 @@ class Handler(BaseHTTPRequestHandler):
                           "email_smtp_user", "email_smtp_pass"):
                 if field in data:
                     kwargs[field] = data[field]
+            # Refuse a channel that could never send: the field values are this
+            # request's, else what is stored. Before 2026-11-22 WhatsApp could be
+            # saved with no Twilio details and every notification after it failed.
+            if "notification_channel" in kwargs:
+                _cur = {}
+                _pc = database.get_db()
+                try:
+                    _row = _pc.execute("SELECT * FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
+                finally:
+                    _pc.close()
+                if _row:
+                    _cur = dict(crypto.decrypt_row(_row))
+                _merged = dict(_cur, **kwargs)
+                for _ch in [c.strip() for c in str(kwargs["notification_channel"] or "").split(",") if c.strip()]:
+                    _miss = _channel_missing(_ch, _merged)
+                    if _miss:
+                        self.send_json({"error": _miss + " - fill it in or turn the channel off."}, 400)
+                        return
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
             database.write_users_config(BASE_DIR)

@@ -219,3 +219,35 @@ def test_the_grader_still_grades():
               ("job failed", "added apply_error to jobs", "could not connect")}
     assert levels == {_logging.ERROR, _logging.INFO, _logging.WARNING}, (
         "the grader no longer distinguishes the three tiers: %s" % levels)
+
+
+# ── an explicit tag wins; a zero counter is not a failure (2026-11-22) ───────
+
+@_pytest.mark.parametrize("msg, level", [
+    # JOB-HUNTER-V: a clean daily summary filed as an ERROR, three Sentry alerts.
+    ("[lifecycle] sent 1, skipped 0, failed 0",                         _logging.INFO),
+    ("[fit] sent 0, skipped 3, failed 0",                               _logging.INFO),
+    ("[run-apply] user 1: 1 — confirmed=1 submitted=0 manual=0 failed=0", _logging.INFO),
+    ("[ingest] 0 errors in 40 rows",                                    _logging.INFO),
+    # ... while a non-zero counter is still an error.
+    ("[lifecycle] sent 1, skipped 0, failed 2",                         _logging.ERROR),
+    ("[lifecycle] sent 1, skipped 0, failed 10",                        _logging.ERROR),
+    ("[run-apply] user 1: 1 — confirmed=0 submitted=0 manual=0 failed=1", _logging.ERROR),
+    ("[gemini] error: 0x80 from the client",                            _logging.ERROR),
+    # JOB-HUNTER-R/-7/-8/-9/-B: the author wrote WARNING; the word "failed" outranked it.
+    ("[search] WARNING Workday: 13 of 16 tenants failed: Workday outage on wd5", _logging.WARNING),
+    ("[search] WARNING indeed: 3 of 3 requests failed: HTTP 403",       _logging.WARNING),
+    ("[pool] WARNING scheduler lock check failed: timeout",             _logging.WARNING),
+    ("[notify] WARNING whatsapp not set up for user 7: WhatsApp is selected but ... is missing",
+                                                                        _logging.WARNING),
+    # An explicit ERROR stays an error, even beside the word "warning".
+    ("[pool] ERROR daily run failed: boom",                             _logging.ERROR),
+    ("[lifecycle] ERROR sweep failed: warning-free text",               _logging.ERROR),
+    # Lowercase "warning" is a word, not a tag: the word list still decides.
+    ("[db] warning: slow query",                                        _logging.WARNING),
+    ("[db] warning: write failed",                                      _logging.ERROR),
+])
+def test_an_explicit_tag_wins_and_a_zero_counter_is_not_a_failure(msg, level):
+    assert _log._level_for(msg) == level, (
+        "%r graded %s, expected %s"
+        % (msg, _logging.getLevelName(_log._level_for(msg)), _logging.getLevelName(level)))
