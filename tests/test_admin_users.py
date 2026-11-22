@@ -614,6 +614,37 @@ def test_ats_names_cover_the_systems_and_embedded_greenhouse():
     assert ae.ats_name("https://acme.com/careers/1") == "Company site"
 
 
+def test_apply_rates_do_not_count_jobs_marked_applied_by_hand_as_engine_sends(stack, users):
+    """2026-11-22, proven on production: 56 jobs the engine failed on and the owner
+    then marked applied himself (apply_status='submitted', applied_via='manual')
+    were counted as the engine's sends - Comeet 78% with no Comeet send ever."""
+    uid = _user_id(stack["db"], "admin@example.test")
+    conn = stack["db"].get_db()
+    rows = [  # url, apply_status, applied_via, failure type
+        ("https://www.comeet.com/jobs/acme/1", "submitted", "manual", "captcha"),     # 423, then by hand
+        ("https://www.comeet.com/jobs/acme/2", "manual_required", None, "captcha"),   # 423
+        ("https://www.comeet.com/jobs/acme/3", "submitted", "manual", "other"),       # engine fault, then by hand
+        ("https://www.comeet.com/jobs/acme/4", "submitted", "engine", None),          # a real send
+        ("https://www.linkedin.com/jobs/view/5", "submitted", "manual", "unconfirmed"),  # board: by design
+    ]
+    for i, (url, st, via, ft) in enumerate(rows):
+        conn.execute("INSERT INTO jobs (user_id,title,company,url,status,apply_status,applied_via,"
+                     "apply_failure_type,apply_attempts) VALUES (?,?,?,?,?,?,?,?,1)",
+                     (uid, "PM %d" % i, "ByHand", url + "?byhand", "applied", st, via, ft))
+    conn.commit()
+    conn.close()
+    st, _l, body = users["admin"].get("/api/admin/apply-rates?scope=me")
+    by = {r["system"]: r for r in json.loads(body)["systems"]}
+    c = by["Comeet"]
+    assert (c["sent"], c["blocked"], c["failed"]) == (1, 2, 1), c
+    assert c["success_rate"] == 25
+    assert by["LinkedIn"]["sent"] == 0 and by["LinkedIn"]["manual"] >= 1
+    conn = stack["db"].get_db()
+    conn.execute("DELETE FROM jobs WHERE company='ByHand'")
+    conn.commit()
+    conn.close()
+
+
 def test_apply_rates_count_engine_attempts_by_system_and_outcome(stack, users):
     """Step 8.3: held and manual are not engine failures."""
     uid = _user_id(stack["db"], "admin@example.test")

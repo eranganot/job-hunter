@@ -660,30 +660,61 @@ _APPLY_OUTCOME = {"confirmed": "sent", "submitted": "sent", "needs_answers": "he
                   "awaiting_code": "held", "manual_required": "manual", "failed": "failed"}
 
 
+def _engine_outcome(status: str, via: str, ftype: str, route: str) -> str:
+    """What the ENGINE achieved on one job it attempted: sent / held / blocked /
+    manual / failed / other.
+
+    2026-11-22, root cause of the inflated table (proven on production): marking a
+    job applied by hand writes apply_status='submitted', applied_via='manual'
+    (the "applied" action), so 56 jobs the engine had failed on were counted as
+    the engine's sends. A row the user or a bulk action marked (via manual/bulk)
+    was not sent by the engine; what the engine met is still in
+    apply_failure_type. `blocked` = the site's bot check refused the app's
+    browser (Comeet 423, DataDome, Lever's puzzle): an engine failure on that
+    system, not "manual by design". `manual` = by design only: job boards and
+    Workday accounts (apply_route board/account) or a login wall."""
+    status, via, ftype = (status or "").strip(), (via or "").strip(), (ftype or "").strip()
+    engine_sent = status in ("confirmed", "submitted") and via not in ("manual", "bulk")
+    if engine_sent:
+        return "sent"
+    if status in ("needs_answers", "needs_code", "awaiting_code") or ftype == "needs_answers":
+        return "held"
+    if ftype == "captcha":
+        return "blocked"
+    if route in ("board", "account") or ftype in ("login_wall", "prepared"):
+        return "manual"       # "prepared": filled, Submit left to the user by design (2026-11-22)
+    if via in ("manual", "bulk") or status in ("failed", "manual_required", "manual"):
+        return "failed"
+    return "other"
+
+
 def _apply_rates(conn, user_id=None) -> dict:
-    """Step 8.3: what the engine achieved per application system. Counts jobs
-    the engine attempted (apply_attempts > 0) by their latest outcome:
-    sent (confirmed/submitted), held for the user (questions / security code),
-    manual (the engine cannot submit there by design) and failed.
-    success = sent / (sent + failed): held and manual are not engine failures."""
-    sql = ("SELECT url, apply_resolved_url, apply_status FROM jobs WHERE COALESCE(apply_attempts,0) > 0"
-           + (" AND user_id=?" if user_id else ""))
+    """Step 8.3: what the engine achieved per application system, over the jobs
+    it attempted (apply_attempts > 0) - see _engine_outcome.
+    success = sent / (sent + failed + blocked): held (waiting on the user) and
+    manual (by design) are left out."""
+    sql = ("SELECT url, apply_resolved_url, apply_status, applied_via, apply_failure_type FROM jobs "
+           "WHERE COALESCE(apply_attempts,0) > 0" + (" AND user_id=?" if user_id else ""))
     import apply_engine as _ae
     by = {}
     for r in conn.execute(sql, (user_id,) if user_id else ()).fetchall():
-        sys_ = _ae.ats_name(r["apply_resolved_url"] or r["url"] or "")
+        u = r["apply_resolved_url"] or r["url"] or ""
+        sys_ = _ae.ats_name(u)
         row = by.setdefault(sys_, {"system": sys_, "attempted": 0, "sent": 0, "held": 0, "manual": 0,
-                                   "failed": 0, "other": 0})
+                                   "blocked": 0, "failed": 0, "other": 0})
         row["attempted"] += 1
-        row[_APPLY_OUTCOME.get((r["apply_status"] or "").strip(), "other")] += 1
+        row[_engine_outcome(r["apply_status"], r["applied_via"], r["apply_failure_type"],
+                            _ae.apply_route(r["url"] or ""))] += 1
     rows = sorted(by.values(), key=lambda x: -x["attempted"])
     for row in rows:
-        d = row["sent"] + row["failed"]
+        d = row["sent"] + row["failed"] + row["blocked"]
         row["success_rate"] = round(100.0 * row["sent"] / d) if d else None
         row["small_sample"] = d < 5
     return {"systems": rows, "engine_on": _engine_on(),
-            "note": "success = sent / (sent + failed); held (your answers or a security code) and "
-                    "manual (job boards, Workday accounts) are not counted as failures."}
+            "note": "success = sent / (sent + failed + blocked). Sent = the engine's own submits; a job you "
+                    "marked applied yourself is not counted as sent. Blocked = the site's bot check refused "
+                    "the app's browser. Held (your answers or a security code) and manual (job boards, "
+                    "Workday accounts) are left out."}
 
 
 def _flag(name: str) -> bool:

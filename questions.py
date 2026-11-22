@@ -44,6 +44,12 @@ COLLECT_JS = r"""() => {
     }
     if (!t && el.type !== 'radio' && el.type !== 'checkbox' && el.closest('label')) t = el.closest('label').innerText;
     if (!t) t = el.getAttribute('aria-label') || '';
+    // A label beside the control whose "for" names its text, not the control's
+    // id (AppsFlyer's careers page: <label for="First Name">, 2026-11-22).
+    if (!t && el.type !== 'radio' && el.type !== 'checkbox' && el.parentElement) {
+      const sib = el.parentElement.querySelector(':scope > label:not(:has(input, select, textarea))');
+      if (sib) t = sib.innerText;
+    }
     return clean(t);
   };
   const groupLabel = el => {
@@ -54,7 +60,11 @@ COLLECT_JS = r"""() => {
       if (lab) return clean(lab.innerText);
       return clean((q.innerText || '').split('\n')[0]);
     }
-    return '';
+    // Last resort: the question's label in a plain ".field" box (AppsFlyer's
+    // radios, 2026-11-22 - read as unlabelled before).
+    const fb = el.closest('.field');
+    const fl = fb && fb.querySelector('label:not(:has(input, select, textarea))');
+    return fl ? clean(fl.innerText) : '';
   };
   const out = [], seen = new Set();
   for (const el of document.querySelectorAll('input, select, textarea')) {
@@ -72,15 +82,21 @@ COLLECT_JS = r"""() => {
       const opts = items.map(i => labelOf(i) || clean((i.closest('label') || {}).innerText) || i.value).filter(Boolean);
       const label = groupLabel(el) || labelOf(el);
       const required = items.some(i => i.required || i.getAttribute('aria-required') === 'true') || /[*✱]/.test(label);
+      // A choice the PAGE ticked (the checked attribute in its markup) is not an
+      // answer: AppsFlyer pre-ticks "1-3" years and "Yes" on its screening
+      // questions, so they went out unread as the applicant's (2026-11-22).
       out.push({selector: 'input[name="' + el.name + '"]', label, type, options: opts.slice(0, 30), required,
-                filled: items.some(i => i.checked)});
+                filled: items.some(i => i.checked && !i.defaultChecked)});
       continue;
     }
     if (!vis(el) && type !== 'select') continue;
     if (el.getAttribute('aria-label') === 'Search') continue;
     let sel = el.id ? '#' + CSS.escape(el.id) : (el.name ? el.tagName.toLowerCase() + '[name="' + el.name + '"]' : '');
     if (!sel || seen.has(sel)) continue; seen.add(sel);
-    const label = labelOf(el) || groupLabel(el) || el.placeholder || el.name || '';
+    // A file picker's name box (AppsFlyer: a required text input beside the hidden
+    // file input, placeholder " ") is not a question: the upload fills it.
+    if (el.hasAttribute('data-file-input')) continue;
+    const label = labelOf(el) || groupLabel(el) || clean(el.placeholder) || el.name || '';
     let options = [];
     if (type === 'select') options = [...el.options].filter(o => o.value && !/^select/i.test(o.text)).map(o => clean(o.text)).slice(0, 40);
     // A React-select combobox keeps its text box EMPTY after a choice; the value
