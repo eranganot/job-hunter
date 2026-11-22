@@ -828,3 +828,29 @@ def test_a_paused_user_is_skipped_by_the_scheduler_and_resumes_on_opening_the_ap
     assert st == 403
     src = open(A.__file__, encoding="utf-8").read()
     assert "_search_runs_today(freq, s_dow, wo, row[12], cur_dow)" in src and "u.search_paused_at " in src
+
+
+def test_the_run_timeline_is_admin_only_and_carries_each_runs_timestamps(stack, users):
+    """/api/admin/runs (2026-11-22): queued / started / finished per run, so a late
+    search can be told apart as a queue wait or a slow run."""
+    import jobqueue
+    uid = _user_id(stack["db"], "alice@example.test")
+    rid = jobqueue.enqueue(uid, "search", cap=False)
+    st, _l, _b = users["a"].get("/api/admin/runs")
+    assert st == 403
+    st, _l, body = users["admin"].get("/api/admin/runs")
+    v = json.loads(body)
+    assert st == 200 and v["times"] == "UTC"
+    row = [r for r in v["runs"] if r["id"] == rid][0]
+    assert row["user_id"] == uid and row["kind"] == "search" and row["created_date"]
+    assert {"started_date", "finished_date", "status"} <= set(row)
+    st, _l, body = users["admin"].get("/api/admin/runs?day=2001-01-01")
+    assert json.loads(body)["runs"] == []
+    st, _l, body = users["admin"].get("/api/admin/runs?day=bogus")   # falls back to today
+    assert any(r["id"] == rid for r in json.loads(body)["runs"])
+    db = stack["db"].get_db()
+    try:
+        db.execute("DELETE FROM job_runs WHERE id=?", (rid,))
+        db.commit()
+    finally:
+        db.close()

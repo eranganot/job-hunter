@@ -5898,6 +5898,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(_notify_status(user["id"]))
             return
 
+        if path == "/api/admin/runs":
+            # Read-only timeline of the run queue: when each run was queued, started
+            # and finished. Added 2026-11-22 to settle why the 11:00 search lands at
+            # ~11:47 (queue wait behind other users vs a slow search); nothing else
+            # exposed these timestamps. ?day=YYYY-MM-DD (UTC), default today.
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            day = (parse_qs(urlparse(self.path).query).get("day") or [""])[0].strip()
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                day = datetime.utcnow().strftime("%Y-%m-%d")
+            nxt = (datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            conn = database.get_db()
+            try:
+                rows = conn.execute(
+                    "SELECT id, user_id, kind, status, attempts, created_date, started_date, "
+                    "finished_date, error FROM job_runs WHERE created_date >= ? AND created_date < ? "
+                    "ORDER BY id", (day, nxt)).fetchall()
+            finally:
+                conn.close()
+            self.send_json({"day": day, "times": "UTC", "runs": [dict(r) for r in rows]})
+            return
+
         if path == "/api/push/public-key":
             user = self.require_auth()
             if not user:
