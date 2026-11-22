@@ -9,6 +9,7 @@
   const ask = msg => new Promise(res => { try { chrome.runtime.sendMessage(msg, res); } catch (e) { res(null); } });
   const wait = ms => new Promise(r => setTimeout(r, ms));
   let task = null, reported = false, submittedAt = 0, pressedBy = 'user', checkSeen = '';
+  let pressForMe = () => {};
 
   async function report(outcome, siteStatus, detail, extra) {
     if (reported) return; reported = true;
@@ -29,6 +30,13 @@
     }
     bar.innerHTML = '';
     const p = document.createElement('div'); p.textContent = 'Job Hunter B0 · ' + text; bar.appendChild(p);
+    if (state === 'ready' && !submittedAt) {
+      // Run B where nothing was prepared (SmartRecruiters): Eran fills, the extension presses Submit.
+      const b = document.createElement('button'); b.textContent = 'Submit for me';
+      b.style.cssText = 'margin-top:8px;padding:6px 10px;border-radius:8px;border:0;cursor:pointer;background:#22c55e;color:#0f172a';
+      b.onclick = () => pressForMe();
+      bar.appendChild(b);
+    }
     if (state !== 'done' && submittedAt) {
       const row = document.createElement('div'); row.style.marginTop = '8px';
       for (const [label, outcome] of [['It went through', 'sent'], ['A check stopped it', 'blocked'], ['Nothing was sent', 'nothing_sent']]) {
@@ -101,6 +109,7 @@
     const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' answers' + (cv ? ' + CV' : ', no CV attached') +
                  (res.missing.length ? '. Not found: ' + res.missing.slice(0, 4).join('; ') : '') + '.';
 
+    let pressForMeImpl = null;
     const btn = JHFill.submitButton();
     const mark = async who => {
       if (submittedAt) return;
@@ -110,18 +119,23 @@
       watchAfterSubmit();
     };
     if (btn) btn.addEventListener('click', () => mark('user'), {capture: true, once: true});
-    if (task.mode === 'B') {
+    pressForMeImpl = async () => {
+      if (submittedAt) return;
+      const b = JHFill.submitButton();
+      if (!b) { banner(line + ' No Submit button found - press it yourself.', 'ready'); return; }
+      submittedAt = Date.now(); pressedBy = 'extension';
+      await ask({type: 'submitted', pressedBy: 'extension'});
+      b.click();
+      banner(line + ' Submitted by the extension, waiting for the site…');
+      watchAfterSubmit();
+    };
+    pressForMe = pressForMeImpl;
+    if (task.mode === 'B' && (task.prepared || []).length) {
       banner(line + ' The extension presses Submit in 5 seconds - check the form now.');
       await wait(5000);
-      if (!submittedAt) {
-        const b = JHFill.submitButton();
-        if (!b) { banner(line + ' No Submit button found - press it yourself.'); return; }
-        submittedAt = Date.now(); pressedBy = 'extension';
-        await ask({type: 'submitted', pressedBy: 'extension'});
-        b.click();
-        banner(line + ' Submitted by the extension, waiting for the site…');
-        watchAfterSubmit();
-      }
+      await pressForMeImpl();
+    } else if (task.mode === 'B') {
+      banner(line + ' Nothing was prepared for this job: fill the form, then press "Submit for me".', 'ready');
     } else {
       banner(line + ' Check the form and press Submit yourself.');
     }

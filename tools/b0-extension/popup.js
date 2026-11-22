@@ -19,15 +19,15 @@ async function show() {
   const d = await send({type: 'jobs'});
   if (!d || d.error) { if (d && d.error === 'unpaired') return show(); $('jobs').innerHTML = '<span class="err">Could not load your jobs.</span>'; return; }
   const list = (d.jobs || []).filter(j => $('all').checked || B0_SYSTEMS.includes(j.system));
-  $('jobs').innerHTML = list.length ? '' : '<span class="muted">No approved Comeet, Lever or SmartRecruiters jobs. Approve some in the app, then press Apply now on each so Noa prepares the answers.</span>';
+  $('jobs').innerHTML = list.length ? '' : '<span class="muted">No approved Comeet, Lever or SmartRecruiters jobs. Approve some in the app, then press Apply now on each so Noa prepares the answers (SmartRecruiters cannot be prepared: its check stops the server first).</span>';
   for (const j of list) {
     const row = document.createElement('div'); row.className = 'job';
     const info = document.createElement('div');
     const t = document.createElement('b'); t.textContent = `${j.company} · ${j.title}`;
     const m = document.createElement('span'); m.className = 'muted';
-    m.textContent = `${j.system} · ${j.prepared.length ? j.prepared.length + ' answers prepared' : 'no answers prepared yet - press Apply now in the app first'}`;
+    m.textContent = `${j.system} · ${j.prepared.length ? j.prepared.length + ' answers prepared' : 'no answers prepared: you fill the form, then "Submit for me"'}`;
     info.append(t, m);
-    const b = document.createElement('button'); b.textContent = 'Open'; b.disabled = !j.prepared.length;
+    const b = document.createElement('button'); b.textContent = 'Open';
     if (!j.prepared.length) b.className = 'quiet';
     b.onclick = async () => { await send({type: 'start', job: j}); window.close(); };
     row.append(info, b);

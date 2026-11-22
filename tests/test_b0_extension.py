@@ -28,8 +28,8 @@ pytestmark = pytest.mark.skipif(not (CHROME and sync_playwright), reason="needs 
 EXT = os.path.join(os.path.dirname(__file__), "..", "tools", "b0-extension")
 JOB = "https://jobs.lever.co/acme-b0/1111"
 
-POSTING = "<html><body><h2>Senior PM</h2><a class='postings-btn' href='/acme-b0/1111/apply'>Apply</a></body></html>"
-APPLY = """<html><body><form method="post" action="/acme-b0/1111/apply" enctype="multipart/form-data">
+POSTING = "<html><body><h2>Senior PM</h2></body></html>"
+APPLY = """<html><body><form method="post" action="" enctype="multipart/form-data">
 <ul>
 <li class="application-question"><div class="application-label">Full name</div><input name="name" type="text"></li>
 <li class="application-question"><div class="application-label">Email</div><input name="email" type="email"></li>
@@ -100,6 +100,8 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared):
                 ctx.pages[0].wait_for_timeout(250)
             assert tab, "the extension opened no tab for %s" % job_url
             tab.goto(job_url)
+            if not prepared:
+                tab.click("button:has-text('Submit for me')", timeout=30000)
             deadline = time.time() + 45
             row = None
             while time.time() < deadline and not row:
@@ -165,3 +167,18 @@ def test_b0_extension_reads_comeets_423_inside_its_form_frame(stack, users, tmp_
                     [{"label": "First name", "value": "Dana"}])
     assert (row["outcome"], row["site_status"], row["pressed_by"]) == ("blocked", "423", "extension"), row
     assert job["status"] == "approved"            # a refusal leaves the job where it was
+
+
+def test_b0_run_b_without_prepared_answers_submits_when_eran_asks(stack, users, tmp_path):
+    """SmartRecruiters' check stops the server before its form, so nothing is
+    prepared: Eran fills the form himself and the extension presses Submit
+    ("Submit for me") - still run B."""
+    def lever(route, request):
+        u = request.url
+        if request.method == "POST":
+            return route.fulfill(status=302, headers={"Location": JOB + "/thanks"})
+        body = THANKS if u.endswith("/thanks") else APPLY if u.endswith("/apply") else POSTING
+        route.fulfill(status=200, content_type="text/html", body=body)
+
+    row, job = _run(stack, users, tmp_path, JOB.replace("1111", "2222"), "https://jobs.lever.co/**", lever, [])
+    assert (row["outcome"], row["pressed_by"]) == ("sent", "extension"), row
