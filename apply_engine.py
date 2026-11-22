@@ -857,6 +857,40 @@ def _greenhouse_form(page, wait_ms: int = 10_000):
     return None
 
 
+def cv_display_name(full_name: str, ext: str = ".pdf") -> str:
+    """The file name an employer sees for the CV: "<Full name> CV <year>.pdf"
+    (the owner, 2026-11-22: "Eran Ganot CV 2026", not "cv.pdf" - the name the
+    stored copy happens to have). Falls back to "CV <year>" without a name."""
+    import datetime as _dt
+    name = re.sub(r"[^\w .'-]", "", (full_name or "").strip(), flags=re.UNICODE)
+    name = re.sub(r"\s+", " ", name).strip()
+    year = _dt.date.today().year
+    return (f"{name} CV {year}" if name else f"CV {year}") + (ext or ".pdf")
+
+
+def _named_cv(cv_path: str | None, applicant: dict) -> str | None:
+    """A copy of the CV under cv_display_name, for set_input_files (the browser
+    sends the file's own name). The original is untouched."""
+    if not cv_path or not os.path.exists(cv_path):
+        return cv_path
+    import shutil
+    import tempfile
+    ext = os.path.splitext(cv_path)[1].lower() or ".pdf"
+    want = cv_display_name((applicant or {}).get("full_name") or
+                           " ".join(x for x in ((applicant or {}).get("first_name"), (applicant or {}).get("last_name")) if x),
+                           ext)
+    if os.path.basename(cv_path) == want:
+        return cv_path
+    try:
+        d = tempfile.mkdtemp(prefix="jh-cv-")
+        out = os.path.join(d, want)
+        shutil.copyfile(cv_path, out)
+        return out
+    except OSError as exc:
+        print(f"[apply-engine] CV name copy: {type(exc).__name__}")
+        return cv_path
+
+
 def _fill_file_name_box(frame, file_sel: str, name: str) -> None:
     """Some careers pages show the chosen file in a REQUIRED text box of their
     own and expect their click handler to fill it (AppsFlyer: input
@@ -2535,6 +2569,7 @@ def submit_application(
     # Where the job is, so the required-question step can tell a home-country
     # sponsorship question from one about working abroad (2026-11-07).
     if isinstance(applicant, dict):
+        cv_path = _named_cv(cv_path, applicant)
         applicant = {**applicant, "posting_location": job_location or "",
                      "_job": {"title": job_title, "company": company, "location": job_location or ""},
                      "_prepare_only": _prepare_only, "_system": ats_name(actual_url)}
