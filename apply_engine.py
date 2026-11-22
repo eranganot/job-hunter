@@ -857,6 +857,30 @@ def _greenhouse_form(page, wait_ms: int = 10_000):
     return None
 
 
+def _fill_file_name_box(frame, file_sel: str, name: str) -> None:
+    """Some careers pages show the chosen file in a REQUIRED text box of their
+    own and expect their click handler to fill it (AppsFlyer: input
+    [data-file-input="resume"], placeholder " "). set_input_files does not, so
+    the box stayed empty: the question reader held it for the user as a question
+    with a blank label, and the browser would refuse Submit (2026-11-22,
+    reproduced). Fill it with the file name, as the page's own script would."""
+    try:
+        n = frame.evaluate("""([sel, name]) => {
+          const f = document.querySelector(sel); if (!f) return 0;
+          const id = f.getAttribute('data-file-url-input') || f.name || f.id;
+          const boxes = [...document.querySelectorAll('input[data-file-input]')]
+              .filter(b => b.getAttribute('data-file-input') === id && !b.value);
+          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          for (const b of boxes) { set.call(b, name); b.dispatchEvent(new Event('input', {bubbles: true}));
+                                   b.dispatchEvent(new Event('change', {bubbles: true})); }
+          return boxes.length;
+        }""", [file_sel, name])
+        if n:
+            print(f"[apply-engine] GH: file name box filled ({n})")
+    except Exception as exc:
+        print(f"[apply-engine] GH: file name box: {type(exc).__name__}")
+
+
 def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
     """Handle Greenhouse application forms with known structure - on the page,
     or in the embed iframe on a company's own careers site."""
@@ -941,6 +965,7 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
                     form.set_input_files(sel, cv_path, timeout=5_000)
                     print(f"[apply-engine] GH: uploaded CV via {sel}")
                     form.wait_for_timeout(1_500)
+                    _fill_file_name_box(form, sel, os.path.basename(cv_path))
                     break
                 except Exception as exc:
                     print(f"[apply-engine] GH: CV via {sel}: {type(exc).__name__}")
@@ -948,6 +973,8 @@ def _apply_greenhouse(page, applicant: dict, cv_path: str | None) -> dict:
         qa = _answer_form(form, applicant)
         if qa["unsure"]:
             return _needs_answers(qa["unsure"])
+        if applicant.get("_prepare_only"):
+            return _prepared_not_sent(form, applicant)
 
         # Submit
         _dismiss_cookie_banners(page)
@@ -1130,6 +1157,8 @@ def _apply_comeet(page, applicant: dict, cv_path: str | None) -> dict:
         page.on("response", _on_response)
         # What was filled, read before Submit (Comeet may reset the form after
         # refusing it): the user's ready-to-paste sheet when Comeet answers 423.
+        if applicant.get("_prepare_only"):
+            return _prepared_not_sent(frame, applicant)
         prepared = _form_snapshot(frame)
         frame.click('button:has-text("SUBMIT APPLICATION")', timeout=5_000)
         for _ in range(20):                           # the request answers within seconds
@@ -1312,6 +1341,8 @@ def _apply_lever(page, applicant: dict, cv_path: str | None) -> dict:
         qa = _answer_form(page, applicant)
         if qa["unsure"]:
             return _needs_answers(qa["unsure"])
+        if applicant.get("_prepare_only"):
+            return _prepared_not_sent(page, applicant)
 
         # Submit: the VISIBLE button first. Lever pages carry a hidden
         # button#hcaptchaSubmitBtn type=submit that hCaptcha presses itself
@@ -1600,7 +1631,7 @@ RETRYABLE_FAILURES = {"timeout", "network_error", "other"}
 # browser was still working (it is not stopped). Retrying could send the same
 # application again (2026-11-09: Seatpicl and Tavily were tried 3 times each in
 # one day), so a person checks instead.
-MANUAL_FAILURES = {"captcha", "login_wall", "form_validation", "unconfirmed"}
+MANUAL_FAILURES = {"captcha", "login_wall", "form_validation", "unconfirmed", "prepared"}
 
 def retry_decision(failure_type, attempts, max_attempts=MAX_APPLY_ATTEMPTS):
     """Decide what to do after a failed apply attempt.
@@ -1961,6 +1992,81 @@ def ats_name(url: str) -> str:
     return "Company site" if u else "No link"
 
 
+def auto_submit_systems() -> set:
+    """Application systems the engine may press Submit on (2026-11-22, the owner
+    chose option C). Measured on production (apply-rates, engine's own sends):
+    Greenhouse 11 sent of 23 decided; Comeet 1/23, Lever 1/6, Ashby 0/5,
+    SmartRecruiters 0/4, company sites 3/106. Everywhere else the engine fills
+    the form and stops before Submit, and the user gets the ready-to-paste
+    sheet. Widen with APPLY_AUTO_SUBMIT_SYSTEMS="Greenhouse,Lever" (names as
+    ats_name gives them) - no deploy needed."""
+    raw = os.environ.get("APPLY_AUTO_SUBMIT_SYSTEMS", "Greenhouse")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def may_auto_submit(url: str) -> bool:
+    return ats_name(url).lower() in auto_submit_systems()
+
+
+_TRACKING = re.compile(r"google-analytics|googletagmanager|/g/collect|/collect\?|doubleclick|googlesyndication|"
+                       r"facebook\.(com|net)/tr|connect\.facebook|bat\.bing|clarity\.ms|hotjar|sentry|"
+                       r"analytics|pixel|segment\.(io|com)|mixpanel|amplitude|fullstory|"
+                       r"linkedin\.com/(px|li/track)|px\.ads|adroll|reddit\.com/rp|tiktok|capterra|mktoresp|"
+                       r"fullcircleinsights|/cdn-cgi/rum|g2\.com|recaptcha|hcaptcha|gstatic", re.I)
+
+
+def _is_tracking_url(url: str) -> bool:
+    """Analytics, ads and captcha traffic - not the application."""
+    return bool(_TRACKING.search(url or ""))
+
+
+_INVALID_JS = r"""() => {
+  const vis = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const nameOf = el => {
+    let t = '';
+    if (el.id) { const l = document.querySelector('label[for="' + CSS.escape(el.id) + '"]'); if (l) t = l.innerText; }
+    if (!t) { const box = el.closest('.field, .form-group, [class*="field"], [class*="question"], fieldset');
+              const l = box && box.querySelector('label:not(:has(input)), legend'); if (l) t = l.innerText; }
+    return clean(t || el.getAttribute('aria-label') || el.placeholder || el.name || '').slice(0, 60);
+  };
+  const out = [];
+  for (const el of document.querySelectorAll('input, select, textarea')) {
+    if (['hidden', 'submit', 'button'].includes((el.type || '').toLowerCase())) continue;
+    let bad = el.getAttribute('aria-invalid') === 'true';
+    try { bad = bad || (el.willValidate && !el.checkValidity()); } catch (e) {}
+    if (!bad) continue;
+    if (!vis(el) && el.type !== 'file' && el.type !== 'checkbox' && el.type !== 'radio') continue;
+    const n = nameOf(el); if (n && !out.includes(n)) out.push(n);
+  }
+  return out.slice(0, 12);
+}"""
+
+
+def _invalid_fields(frame) -> list:
+    """Labels of the fields the page itself marks missing or invalid."""
+    try:
+        return [x for x in (frame.evaluate(_INVALID_JS) or []) if x]
+    except Exception as exc:
+        print(f"[apply-engine] invalid fields: {type(exc).__name__}")
+        return []
+
+
+def _prepared_not_sent(where, applicant: dict) -> dict:
+    """The form is filled; the engine does not press Submit on this system.
+    manual_required + the snapshot = the "finish it yourself" sheet; never retried."""
+    system = (applicant or {}).get("_system") or "this site"
+    prepared = _form_snapshot(where)
+    print(f"[apply-engine] {system}: filled, not submitted (auto-submit is on for "
+          f"{', '.join(sorted(auto_submit_systems())) or 'no system'} only); {len(prepared)} value(s) prepared")
+    return {"success": False, "status": "manual_required", "confirmation_text": "",
+            "apply_failure_type": "prepared", "prepared": prepared,
+            "apply_failure_detail": f"Filled in, not sent: auto-apply submits on "
+                                    f"{', '.join(sorted(x.title() for x in auto_submit_systems()))} only for now",
+            "error": f"Noa filled this in but doesn't press Submit on {system} yet, so nothing was sent. "
+                     f"Open the job, paste the answers below and press Submit yourself."}
+
+
 def apply_route(url: str) -> str:
     """What auto-apply can do with this link, judged from the URL alone (no
     network) - for the queue's per-job sign (The owner, 2026-11-09: "I can't say
@@ -1974,6 +2080,8 @@ def apply_route(url: str) -> str:
                 only gets through when it finds the same job on the company's
                 own system, so it is counted as manual
       site    - another company site: the engine tries, results vary
+      prepare - a system auto-submit is not on for (auto_submit_systems): the
+                engine fills the form and the user presses Submit
       none    - no link
     """
     u = (url or "").strip()
@@ -1984,8 +2092,9 @@ def apply_route(url: str) -> str:
     if _is_job_board(u):
         return "board"
     if "gh_jid=" in u.lower() or _is_direct_ats(u):
-        return "auto"
-    return "site"
+        return "auto" if may_auto_submit(u) else "prepare"
+    # A company's own site: the engine only submits there if the list names it.
+    return "site" if "company site" in auto_submit_systems() else "prepare"
 
 
 def _is_direct_ats(url: str) -> bool:
@@ -2407,6 +2516,7 @@ def submit_application(
                     "apply_failure_detail": "No direct ATS match found; job-board listing requires manual application",
                     "error": "Job-board listing — apply manually on the source site"}
     _base["resolved_url"] = actual_url
+    _prepare_only = not may_auto_submit(actual_url)
     # The caller's deadline (seconds), enforced HERE so the engine stops itself
     # instead of running on after app.py stopped waiting (seen 2026-11-11: three
     # abandoned runs still filling forms 7+ minutes past the 150 s deadline).
@@ -2420,7 +2530,8 @@ def submit_application(
     # sponsorship question from one about working abroad (2026-11-07).
     if isinstance(applicant, dict):
         applicant = {**applicant, "posting_location": job_location or "",
-                     "_job": {"title": job_title, "company": company, "location": job_location or ""}}
+                     "_job": {"title": job_title, "company": company, "location": job_location or ""},
+                     "_prepare_only": _prepare_only, "_system": ats_name(actual_url)}
 
     try:
         with sync_playwright() as pw:
@@ -2644,8 +2755,26 @@ def submit_application(
                         "apply_failure_detail": "Stopped before submitting: apply deadline reached (nothing was sent)",
                         "error": "Ran out of time before submitting - nothing was sent"}
 
+            if applicant.get("_prepare_only"):
+                res = _prepared_not_sent(form_frame, applicant)
+                browser.close()
+                return {**_base, **res}
+
             submitted = False
             sf = submit_frame or form_frame
+            # What Submit sends (2026-11-22): 5 of the 6 engine faults that day
+            # read "No submission confirmation detected", but in every rehearsal
+            # of those pages no application request left the browser - Submit
+            # was pressed and the page refused it. Watch the writes after the
+            # click, so "nothing was sent" is told apart from "sent, unconfirmed".
+            _writes = []
+            def _on_request(req):
+                try:
+                    if req.method != "GET" and not _is_tracking_url(req.url):
+                        _writes.append(req.url)
+                except Exception as exc:
+                    print(f"[apply-engine] submit watch: {type(exc).__name__}")
+            page.on("request", _on_request)
             try:
                 sf.locator('[data-jh-submit="1"]').click(timeout=5_000)
                 submitted = True
@@ -2670,6 +2799,22 @@ def submit_application(
                 page.wait_for_load_state("networkidle", timeout=5_000)
             except PWTimeout:
                 pass
+            try:
+                page.remove_listener("request", _on_request)
+            except Exception as exc:
+                print(f"[apply-engine] submit watch off: {type(exc).__name__}")
+            if not _writes:
+                blocked = _invalid_fields(sf)
+                prepared = _form_snapshot(form_frame)
+                browser.close()
+                detail = ("Submit was pressed but the page sent nothing"
+                          + (": it marks these fields as missing or invalid - " + "; ".join(blocked[:6]) if blocked else ""))
+                print(f"[apply-engine] generic form: {detail}")
+                return {**_base, "status": "manual_required", "apply_failure_type": "form_validation",
+                        "apply_failure_detail": detail[:300], "prepared": prepared,
+                        "error": ("Noa filled this in, but the form didn't accept it"
+                                  + (" (it wants: " + ", ".join(blocked[:4]) + ")" if blocked else "")
+                                  + ", so nothing was sent. Open the job and finish it there - the answers are below.")}
 
             result_text = page.evaluate("document.body.innerText") or ""
             result_url  = page.url

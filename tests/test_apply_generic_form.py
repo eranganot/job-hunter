@@ -42,6 +42,13 @@ ASHBY_PAGE = """<!doctype html><html><body><form action="/submit" method="post">
 <div><label><input type="radio" name="wa" value="y"> Yes - I consent to WhatsApp</label></div></div>
 <label for="em">Email</label><input id="em" name="a2" type="email" required>
 <button type="submit">Submit application</button></form></body></html>"""
+# A form whose required cover letter the model leaves empty: the browser refuses
+# Submit and nothing is sent (2026-11-22: JRG Partners' shape).
+COVER_PAGE = """<!doctype html><html><body><form action="/submit" method="post">
+<label for="fn">First name</label><input id="fn" name="a1" required>
+<label for="em">Email address</label><input id="em" name="a2" type="email" required>
+<label for="cl">Cover Letter *</label><textarea id="cl" name="a4" required></textarea>
+<button type="submit">Submit application</button></form></body></html>"""
 POSTS = []
 
 
@@ -52,7 +59,8 @@ class _H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         body = (NO_FORM_PAGE if self.path.startswith("/article") else SR_POSTING % self.path.split("/")[2]
                 if self.path.startswith("/sr/") else WALL_PAGE if self.path.startswith("/oneclick-ui/walled")
-                else ASHBY_PAGE if self.path.startswith("/ashby") else FORM_PAGE).encode()
+                else ASHBY_PAGE if self.path.startswith("/ashby")
+                else COVER_PAGE if self.path.startswith("/cover") else FORM_PAGE).encode()
         self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
         self.wfile.write(body)
 
@@ -66,6 +74,9 @@ class _H(http.server.BaseHTTPRequestHandler):
 @pytest.fixture
 def site(monkeypatch):
     POSTS.clear()
+    # These tests drive the engine's submit on a local "company site"; since
+    # 2026-11-22 it only submits where APPLY_AUTO_SUBMIT_SYSTEMS says.
+    monkeypatch.setenv("APPLY_AUTO_SUBMIT_SYSTEMS", "Greenhouse,Company site,Ashby,SmartRecruiters")
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     real_launch = ae.sync_playwright
@@ -225,3 +236,65 @@ def test_comeet_423_is_its_bot_check_not_the_applicant():
     assert ae._comeet_verdict(423, "")["prepared"] == []
     assert ae._comeet_verdict(200, "{}")["status"] == "confirmed"
     assert ae._comeet_verdict(400, "bad")["apply_failure_type"] == "form_validation"
+
+
+@browser_only
+def test_a_system_auto_submit_is_not_on_for_is_filled_and_not_sent(site, monkeypatch):
+    """2026-11-22 (option C): the engine presses Submit only where
+    APPLY_AUTO_SUBMIT_SYSTEMS says (default Greenhouse); elsewhere the user gets
+    the filled-in answers and presses Submit."""
+    monkeypatch.delenv("APPLY_AUTO_SUBMIT_SYSTEMS", raising=False)
+    _model(monkeypatch, [])
+    res = ae.submit_application(site + "/careers/pm", "Senior PM", "Acme", {**APPLICANT, "_deadline_s": 60},
+                                None, force=True)
+    assert POSTS == []
+    assert res["status"] == "manual_required" and res["apply_failure_type"] == "prepared", res
+    assert {"label": "First name", "value": "Dana"} in res["prepared"]
+    assert ae.retry_decision("prepared", 1)[0] == "manual"
+
+
+@browser_only
+def test_a_submit_the_page_refuses_is_reported_as_nothing_sent_with_the_missing_field(site, monkeypatch):
+    """2026-11-22: 5 of 6 engine faults read "No submission confirmation
+    detected", retried up to 4 times, though no application request had left the
+    browser. Now the engine watches what Submit sends."""
+    _model(monkeypatch, [])
+    res = ae.submit_application(site + "/cover/pm", "Senior PM", "Acme", {**APPLICANT, "_deadline_s": 60},
+                                None, force=True)
+    assert POSTS == []
+    assert res["status"] == "manual_required" and res["apply_failure_type"] == "form_validation", res
+    assert "Cover Letter" in res["apply_failure_detail"] and "nothing was sent" in res["error"]
+    assert res["prepared"]
+
+
+APPSFLYER = """<!doctype html><html><body><form>
+<div class="field"><input required placeholder=" " type="text" id="first_name" name="first_name">
+  <label class="field__label" for="First Name"> First Name*</label></div>
+<div class="field field--file"><input type="file" class="d-none" id="resume" name="resume" data-file-url-input="resume">
+  <input required data-file-input="resume" name="resume" placeholder=" " type="text" value=""></div>
+<div class="field"><label class="pl" for="Years"> How many years of experience do you have as a Product Manager</label>
+  <label class="radioLable">1-3 <input checked type="radio" id="q1" name="q1" value="1"></label>
+  <label class="radioLable">7+ <input type="radio" id="q1b" name="q1" value="3"></label></div>
+</form></body></html>"""
+
+
+@browser_only
+def test_appsflyer_shaped_form_labels_file_box_and_pre_ticked_answers():
+    """Reproduced 2026-11-22 on AppsFlyer's careers page: labels whose "for" is
+    their text, a required file-name box with placeholder " " (held for the
+    owner as a question with a blank label), and screening radios pre-ticked
+    by the page (would have gone out as his answers)."""
+    import questions
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(executable_path=CHROME, headless=True, args=["--no-sandbox"])
+        p = b.new_page(); p.set_content(APPSFLYER)
+        fields = {f["selector"]: f for f in p.evaluate(questions.COLLECT_JS)}
+        assert fields["#first_name"]["label"] == "First Name*"
+        assert not any(f["label"].strip() == "" for f in fields.values()), fields
+        assert 'input[name="resume"]' not in fields                     # the file-name box is no question
+        q1 = fields['input[name="q1"]']
+        assert q1["label"].startswith("How many years") and q1["filled"] is False
+        ae._fill_file_name_box(p, "#resume", "cv.pdf")
+        assert p.evaluate("() => document.querySelector('input[data-file-input=resume]').value") == "cv.pdf"
+        b.close()

@@ -76,7 +76,7 @@ export type UiJob = {
   sourceUrl: string;
   /** 5 when no direct link was found; part of the effective rank. */
   linkPenalty: number;
-  /** apply_engine.apply_route(url): auto | site | account | board | none. */
+  /** apply_engine.apply_route(url): auto | prepare | site | account | board | none. */
   applyRoute: string;
   verified: boolean;
   timeAgo: string;

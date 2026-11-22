@@ -23,6 +23,7 @@ Claude works in a cloud workspace with **push access to `github.com/eranganot/jo
 
 ## Domain facts
 - **No plan has auto-apply since 2026-11-16** (`plans.py`; users see no control for it; the owner: "cannot be launched to users"). Do not give it back to a plan without the owner.
+- **The engine presses Submit only on `APPLY_AUTO_SUBMIT_SYSTEMS` (default Greenhouse) since 2026-11-22**; elsewhere it fills the form and returns the prepared sheet (`manual_required` / `prepared`). Widen only with the owner.
 - Auto-apply is **on for admins only in production** since 2026-11-09 (`APPLY_ENGINE_ENABLED` set; `_engine_on_for(user)` = the switch AND (admin OR `APPLY_ENGINE_FOR_ALL`)). It still fails on most jobs (0 of 21 sent on 2026-11-12; Comeet answers 423 to the app's automated browser - settled 2026-11-15, reported as a bot check) - see `STATUS.md` and `APPLY_ENGINE_INVESTIGATION.md`. Do not set `APPLY_ENGINE_FOR_ALL` or widen it without the owner.
 - The apply engine can only auto-submit to **direct ATS URLs** (Greenhouse, Lever, Workday, Comeet, SmartRecruiters, Ashby, company `/careers`). Job-board listings (LinkedIn/Indeed/Glassdoor) are correctly flagged `manual_required` — by design, not a bug.
 - "Submitted N" in summaries must reflect real submits, not manual-flagged jobs — keep wording honest.
