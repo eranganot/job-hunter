@@ -5821,7 +5821,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"letter": _letter, "short": _cp.short_note(_letter)})
                 return
             _cvt, _nm, _contact = _tailor_inputs(_du["id"], _du)
-            _pdf = _cp.letter_pdf(_letter, _nm, _contact)
+            try:
+                _pdf = _cp.letter_pdf(_letter, _nm, _contact)
+            except Exception as exc:  # noqa: BLE001 - the extension then puts the whole letter in the note
+                _log.get("cover-letter").warning("cover letter PDF for job %s: %s", _mcl.group(1), exc)
+                self.send_json({"error": "Could not make the PDF: %s" % exc}, 503)
+                return
             from urllib.parse import quote as _q
             _name = _cp.display_name(_nm)
             _ascii = _name.encode("ascii", "ignore").decode().replace('"', "").strip() or "Cover Letter.pdf"
