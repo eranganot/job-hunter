@@ -578,8 +578,11 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
             <div className="min-w-0"><h3 className="text-xl font-bold text-white truncate">{job.company}</h3><div className="flex items-center gap-2 text-white/90 text-sm mt-0.5"><MapPin className="w-4 h-4" /><span className="truncate">{(job.location || "").split(",")[0]}</span></div></div>
           </div>
         </div>
-        <div className="p-5 lg:p-7 lg:grid lg:grid-cols-2 lg:gap-7 lg:items-start">
-          <div className="space-y-5">
+        {/* Phone: title, scores, Noa's reason, the role. Desktop: title and scores beside
+            the role, Noa's reason across both columns under them (it was half the width
+            with an empty gap beside it). */}
+        <div className="p-5 lg:p-7 flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:gap-7 lg:items-start">
+          <div className="space-y-5 order-1">
           <div>
             <h2 className="text-xl lg:text-2xl font-bold text-white mb-2">{job.title}</h2>
             <div className="flex items-center gap-4 flex-wrap">
@@ -604,9 +607,9 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
               </div>
             )}
           </div>
-          {job.whyFits && (<div className="bg-gradient-to-br from-amber-950/50 to-orange-950/50 rounded-2xl p-4 border-2 border-amber-700"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-amber-400 text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
           </div>
-          <div className="space-y-5 mt-5 lg:mt-0">
+          {job.whyFits && (<div className="order-2 lg:order-3 lg:col-span-2 bg-brand-yellow/5 rounded-2xl p-4 border-2 border-brand-yellow/55"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-brand-yellow text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
+          <div className="space-y-5 order-3 lg:order-2">
           {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${job.verified ? "bg-green-950/50 text-green-400 border border-green-800" : "bg-orange-950/50 text-orange-400 border border-orange-800"}`}>
             {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">{job.linkPenalty > 0 && linkSiteName(job.url) ? `Posting is live on ${linkSiteName(job.url)}` : "URL verified — ready to apply"}</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
@@ -616,8 +619,8 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
         </div>
         <div className="p-5 lg:px-7 pt-0 space-y-3 lg:max-w-2xl lg:mx-auto lg:w-full">
           <div className="flex gap-3">
-            <motion.button whileTap={{ scale: 0.95 }} onClick={onPass} className="flex-1 py-4 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><X className="w-5 h-5" />Pass</motion.button>
-            <motion.button whileTap={{ scale: 0.95 }} onClick={onApprove} className="flex-1 py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><Check className="w-5 h-5" />Approve</motion.button>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={onPass} className="flex-1 py-4 bg-brand-no active:bg-brand-no-press text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><X className="w-5 h-5" />Pass</motion.button>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={onApprove} className="flex-1 py-4 bg-indigo-600 active:bg-indigo-700 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><Check className="w-5 h-5" />Approve</motion.button>
           </div>
           {onDefer && <motion.button whileTap={{ scale: 0.98 }} onClick={onDefer} className="w-full py-3 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-2xl font-medium flex items-center justify-center gap-2"><Clock className="w-4 h-4" />Decide Later</motion.button>}
         </div>
@@ -1356,8 +1359,8 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
               moment a job reached the queue - which is where the decision to
               actually apply gets made. */}
           {job.whyFits && (
-            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-              <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
+            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-brand-yellow/50 pl-3">
+              <span className="text-brand-yellow font-medium">Why Noa picked this: </span>{job.whyFits}
             </p>
           )}
         </div>
@@ -1602,8 +1605,8 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
               <FeedbackBadge job={job} /><LinkBadge job={job} />
             </div>
             {job.whyFits && (
-              <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-                <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
+              <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-brand-yellow/50 pl-3">
+                <span className="text-brand-yellow font-medium">Why Noa picked this: </span>{job.whyFits}
               </p>
             )}
             {stages && (job.appliedVia === "bulk" || job.appliedVia === "no_url") ? (
@@ -1648,8 +1651,8 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer, onReload }: any) {
             <FeedbackBadge job={job} /><LinkBadge job={job} />
           </div>
           {job.whyFits && (
-            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-              <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
+            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-brand-yellow/50 pl-3">
+              <span className="text-brand-yellow font-medium">Why Noa picked this: </span>{job.whyFits}
             </p>
           )}
         </RankedRow>
@@ -2155,7 +2158,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
         <div className="p-5 space-y-5">
           <div className="flex items-start gap-4"><div className="w-16 h-16 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-2xl flex items-center justify-center shrink-0"><Building2 className="w-8 h-8 text-indigo-400" /></div><div className="flex-1 min-w-0"><h3 className="text-xl font-bold text-white mb-0.5">{job.title}</h3><p className="text-lg text-indigo-400 font-semibold mb-1">{job.company}</p><div className="flex items-center gap-4 text-gray-400 flex-wrap">{job.location && <div className="flex items-center gap-1"><MapPin className="w-4 h-4" /><span className="text-sm">{job.location}</span></div>}{job.timeAgo && <div className="flex items-center gap-1"><Clock className="w-4 h-4" /><span className="text-sm">{job.timeAgo}</span></div>}</div></div></div>
           <div className="grid grid-cols-2 gap-3"><div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-xl p-4 border border-blue-800/50"><div className="text-sm text-gray-400 mb-1">Match Score</div><div className="text-2xl font-bold text-blue-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div></div><div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-xl p-4 border border-green-800/50"><div className="text-sm text-gray-400 mb-1">Your Strength</div><div className="text-2xl font-bold text-green-400">{job.candidateScore === null ? "—" : `${job.candidateScore}%`}</div></div></div>
-          {job.whyFits && <div className="bg-gradient-to-br from-amber-900/20 to-orange-900/20 rounded-xl p-4 border border-amber-800/50"><h4 className="font-bold text-amber-500 mb-1.5 flex items-center gap-2"><NoaAvatar size={24} />Why Noa picked this</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
+          {job.whyFits && <div className="bg-brand-yellow/5 rounded-xl p-4 border border-brand-yellow/55"><h4 className="font-bold text-brand-yellow mb-1.5 flex items-center gap-2"><NoaAvatar size={24} />Why Noa picked this</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
           {job.description && <div><h4 className="font-semibold text-white mb-1.5">About the role</h4><p className="text-gray-400 text-sm leading-relaxed whitespace-pre-line">{job.description}</p></div>}
           {job.applyStatus && job.applyStatus !== "queued" && (
             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">

@@ -325,7 +325,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         <p class="bub"><small>Noa, every morning</small>{msg2}</p></div>
       <div class="shot"><picture>
         <source media="(max-width:39.99rem)" srcset="/landing-assets/job-card-mobile.webp" width="780" height="1277"/>
-        <img src="/landing-assets/job-card.webp" width="1400" height="976"
+        <img src="/landing-assets/job-card.webp" width="1400" height="980"
         alt="A job card in Job Hunter: Senior Product Manager, Growth at Northwind Labs, 92% match, with Noa's reasons it fits"/></picture></div>
     </div>
   </section>

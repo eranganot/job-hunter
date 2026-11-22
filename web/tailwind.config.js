@@ -4,7 +4,9 @@
    landing's greens; `indigo`, the app's old purple, is a forest-green scale
    whose light end is yellow (accents on dark); `blue` is a gold scale (the
    Match Score, the Applied icon). The main button on a screen is solid yellow
-   with dark `ink` text; a selected tab or chip is a yellow outline. Redefining
+   with dark `ink` text; a selected tab or chip is a yellow outline. On the
+   swipe card Pass/Approve keep red-for-no, green-for-yes (owner, 22 Nov):
+   `brand-no` and the forest green; Noa's reason is a yellow-outlined box. Redefining
    the scales here, not the ~1,000 class names, keeps the components unchanged. */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -19,7 +21,9 @@ export default {
                   500: "#3f9a68", 600: "#2f7d55", 700: "#256645", 800: "#1c4f36", 900: "#143a28", 950: "#0f2d1f" },
         blue: { 50: "#fff8e0", 100: "#fff1c2", 200: "#ffe9a6", 300: "#ffe28f", 400: "#ffd766",
                 500: "#f2c443", 600: "#c99a1f", 700: "#8a6a14", 800: "#5c4710", 900: "#3a2d0a", 950: "#261d06" },
-        brand: { yellow: "#ffd766", "yellow-hover": "#ffe28f", "yellow-press": "#f2c443" },
+        brand: { yellow: "#ffd766", "yellow-hover": "#ffe28f", "yellow-press": "#f2c443",
+                 /* Pass on the swipe card: a softer red than Tailwind's, white text 5.0:1 */
+                 no: "#b84f3c", "no-press": "#a3432f" },
         ink: "#1f1a05",
       },
     },

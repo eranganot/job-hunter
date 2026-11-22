@@ -37,6 +37,7 @@ TAILWIND = {
     "blue-300": "#ffe28f", "blue-400": "#ffd766",
     "blue-500": "#f2c443", "blue-600": "#c99a1f", "blue-700": "#8a6a14",
     "brand-yellow": "#ffd766", "brand-yellow-hover": "#ffe28f", "brand-yellow-press": "#f2c443",
+    "brand-no": "#b84f3c", "brand-no-press": "#a3432f",
     "ink": "#1f1a05",
     "white": "#ffffff",
 }
@@ -76,6 +77,9 @@ PAIRS = [
     ("ink", "brand-yellow-press", "body"),
     # Selected tab or chip: yellow text on a yellow-tinted card
     ("brand-yellow", "gray-800", "body"),
+    # Pass and Approve on the swipe card (red for no, green for yes)
+    ("white", "brand-no", "body"),
+    ("white", "brand-no-press", "body"),
     # Green buttons that stay (toggles on, the bulk "Auto-apply selected")
     ("white", "indigo-600", "body"),
     ("white", "indigo-700", "body"),
