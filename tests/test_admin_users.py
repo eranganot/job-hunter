@@ -796,4 +796,4 @@ def test_a_paused_user_is_skipped_by_the_scheduler_and_resumes_on_opening_the_ap
     st, _l, _b = users["b"].post_json("/api/admin/users/%d/resume-search" % uid, {})
     assert st == 403
     src = open(A.__file__, encoding="utf-8").read()
-    assert "run_search = not row[12]" in src and "u.search_paused_at " in src
+    assert "_search_runs_today(freq, s_dow, wo, row[12], cur_dow)" in src and "u.search_paused_at " in src

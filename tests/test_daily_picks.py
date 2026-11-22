@@ -131,7 +131,8 @@ def test_the_admin_gets_daily_picks_like_everyone(stack, users):
     assert list(_status(stack, uid).values()).count("held") == 20
 
 
-def test_held_jobs_do_not_exist_for_the_user_until_released(stack):
+def test_held_jobs_do_not_exist_for_the_user_until_released(stack, monkeypatch):
+    _at_israel(monkeypatch, stack, 2026, 11, 23, 20)        # Monday evening: no search still to come
     c, uid = _fresh_user(stack, "dp-5@example.test")
     ids = _search(stack, uid, list(range(10)))
     held = ids[0]                                            # the worst: stays in the reserve today
@@ -200,3 +201,103 @@ def test_noa_speaks_in_the_app():
     for s in ("Why Noa picked this", "I brought you", "That's today's picks", "/landing-assets/noa-"):
         assert s in js, s
     assert "Why this is a strong fit" not in js
+
+
+# ── An app open before today's scheduled search (2026-11-22) ──────────────────
+# Opening the app released the day's picks without a notification, so the
+# scheduled search found nothing left to release and - by design - said
+# nothing. The owner opens the app most mornings and got no notification for a
+# week. While the search is still to come today, an app open leaves the reserve
+# for it.
+
+def _at_israel(monkeypatch, stack, y, m, d, hour, minute=0):
+    from zoneinfo import ZoneInfo
+    fixed = datetime(y, m, d, hour, minute, tzinfo=ZoneInfo("Asia/Jerusalem"))
+    monkeypatch.setattr(stack["app"], "israel_now", lambda now_utc=None: fixed)
+    return fixed
+
+
+def _schedule(stack, uid, hour=11, freq="daily", weekdays_only=0, plan=None, paused=None):
+    db = stack["db"].get_db()
+    try:
+        db.execute("UPDATE user_profiles SET search_hour=?, schedule_frequency=?, search_day_of_week=NULL, "
+                   "weekdays_only=? WHERE user_id=?", (hour, freq, weekdays_only, uid))
+        db.execute("UPDATE users SET search_paused_at=?" + (", plan=?" if plan else "") + " WHERE id=?",
+                   ((paused, plan, uid) if plan else (paused, uid)))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _premium(stack, uid):
+    """A daily-search plan, so the day of the week does not matter."""
+    _schedule(stack, uid, plan="premium")
+
+
+def _me(c):
+    return json.loads(c.get("/api/me")[2])["daily_picks"]
+
+
+def test_an_app_open_before_the_search_leaves_the_picks_for_it_and_the_search_announces_them(stack, monkeypatch):
+    c, uid = _fresh_user(stack, "dp-8@example.test")
+    _premium(stack, uid)
+    _search(stack, uid, list(range(60, 75)))                # 15 in the reserve from earlier days
+    _at_israel(monkeypatch, stack, 2026, 11, 23, 9, 14)     # 09:14, search at 11:00
+    assert stack["app"]._scheduled_search_pending(uid)
+    assert _me(c) == {"cap": 7, "today": 0}                 # the app open released nothing
+    jobs = json.loads(c.get("/api/jobs?status=all")[2])
+    assert (jobs.get("jobs", jobs) if isinstance(jobs, dict) else jobs) == []   # nor did the job list
+    assert set(_status(stack, uid).values()) == {"held"}
+    # 11:00 - the scheduled search releases the day's picks, so it has something to say
+    sent = []
+    monkeypatch.setattr(stack["app"], "deliver_notification", lambda u, msg, **kw: sent.append((u, msg)) or {})
+    released = _release(stack, uid)
+    assert len(released) == 7
+    info = [{"title": "t", "company": "c", "url": u} for _i, u in released]
+    stack["app"]._notify_search_result(uid, len(released), info)
+    assert len(sent) == 1 and sent[0][0] == uid
+
+
+def test_once_the_search_has_run_or_its_hour_has_passed_the_app_releases(stack, monkeypatch):
+    app = stack["app"]
+    c, uid = _fresh_user(stack, "dp-9@example.test")
+    _premium(stack, uid)
+    _search(stack, uid, list(range(20)))
+    _at_israel(monkeypatch, stack, 2026, 11, 23, 11, 5)     # the search hour, search not yet logged
+    assert app._scheduled_search_pending(uid)
+    db = stack["db"].get_db()                               # the search ran (09:05 UTC = 11:05 Israel)
+    try:
+        db.execute("INSERT INTO activity_log (user_id, event_type, details, created_date) "
+                   "VALUES (?, 'jobs_searched', 'Found 0 new job(s)', '2026-11-23 09:05:00')", (uid,))
+        db.commit()
+    finally:
+        db.close()
+    assert not app._scheduled_search_pending(uid)
+    _at_israel(monkeypatch, stack, 2026, 11, 24, 12)        # next day, after the hour, no search logged
+    assert not app._scheduled_search_pending(uid)           # it failed or was skipped: do not wait forever
+    assert _me(c)["today"] == 7
+
+
+def test_no_search_today_means_the_app_releases_as_before(stack, monkeypatch):
+    app = stack["app"]
+    _c, uid = _fresh_user(stack, "dp-10@example.test")
+    _schedule(stack, uid, plan="free")                      # Free searches weekly, on Sunday
+    _at_israel(monkeypatch, stack, 2026, 11, 23, 8)         # Monday 08:00
+    assert not app._scheduled_search_pending(uid)
+    _at_israel(monkeypatch, stack, 2026, 11, 22, 8)         # Sunday 08:00: its search is today
+    assert app._scheduled_search_pending(uid)
+    _schedule(stack, uid, plan="premium", weekdays_only=1)
+    _at_israel(monkeypatch, stack, 2026, 11, 21, 8)         # Saturday, weekdays only
+    assert not app._scheduled_search_pending(uid)
+    _schedule(stack, uid, plan="premium", paused="2026-11-01 00:00:00")
+    _at_israel(monkeypatch, stack, 2026, 11, 23, 8)         # paused for inactivity: no search coming
+    assert not app._scheduled_search_pending(uid)
+
+
+def test_the_scheduler_and_the_app_agree_on_which_days_have_a_search():
+    import app
+    assert app._search_runs_today("daily", None, 0, None, 0)
+    assert not app._search_runs_today("daily", None, 1, None, 5)          # Saturday, weekdays only
+    assert not app._search_runs_today("weekly", 6, 0, None, 0)            # weekly on Sunday, Monday today
+    assert app._search_runs_today("weekly", 6, 0, None, 6)
+    assert not app._search_runs_today("daily", None, 0, "2026-11-01", 0)  # paused
