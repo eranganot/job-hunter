@@ -59,7 +59,7 @@ export function FitSurvey() {
                 placeholder="Anything to add? What Noa does best, or should do better (optional)"
                 className="w-full mt-2.5 px-3 py-2 rounded-xl bg-gray-900 border border-gray-700 text-white text-sm placeholder:text-gray-400" />
               <button onClick={() => send(picked)} disabled={busy}
-                className="w-full mt-2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium disabled:opacity-60">Send</button>
+                className="w-full mt-2 py-2.5 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl font-medium disabled:opacity-60">Send</button>
             </>
           )}
           {!picked && <button onClick={() => send("skipped")} disabled={busy} className="mt-2 text-xs text-gray-400 hover:text-gray-200">Not now</button>}

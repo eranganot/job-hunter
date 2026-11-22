@@ -420,7 +420,7 @@ export function SwipeFlow() {
       <header className="relative z-10 bg-gray-800/80 backdrop-blur-lg border-b border-gray-700 safe-top">
         <div className={`${SHELL} px-5 lg:px-8 py-4 flex items-center justify-between`}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center"><Briefcase className="w-5 h-5 text-white" /></div>
+            <img src={LOGO} alt="" width={40} height={40} className="w-10 h-10 rounded-xl ring-1 ring-brand-yellow/40" />
             <div><h1 className="text-xl font-bold text-white">Job Hunter</h1><p className="text-xs text-gray-400">Swipe to find your next role</p></div>
           </div>
           <div className="flex items-center gap-2">
@@ -438,7 +438,7 @@ export function SwipeFlow() {
             <span className="text-sm text-gray-400">{currentIndex + 1} / {reviewJobs.length}
               {locked && locked.count > 0 && <span className="ml-2 inline-flex items-center gap-1 text-indigo-300" title={`${locked.count} more match${locked.count === 1 ? "" : "es"} on a higher plan`}><Lock className="w-3.5 h-3.5" />+{locked.count}</span>}</span>
           </div>
-          <div className="h-2 bg-gray-700 rounded-full overflow-hidden"><motion.div className="h-full bg-gradient-to-r from-indigo-500 to-indigo-700" initial={{ width: 0 }} animate={{ width: `${((currentIndex + 1) / reviewJobs.length) * 100}%` }} transition={{ duration: 0.3 }} /></div>
+          <div className="h-2 bg-gray-700 rounded-full overflow-hidden"><motion.div className="h-full bg-brand-yellow" initial={{ width: 0 }} animate={{ width: `${((currentIndex + 1) / reviewJobs.length) * 100}%` }} transition={{ duration: 0.3 }} /></div>
         </div>
       </div>
 
@@ -525,7 +525,7 @@ export function FinishApplying() {
                 placeholder="Code from the email" autoComplete="one-time-code"
                 className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-100 tracking-widest" />
               <button onClick={() => send(r.run_id)} disabled={(codes[r.run_id] || "").trim().length < 4}
-                className="px-4 py-2 rounded-xl bg-indigo-600 active:bg-indigo-700 text-white text-sm font-medium disabled:opacity-50">Send</button>
+                className="px-4 py-2 rounded-xl bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium disabled:opacity-50">Send</button>
             </div>
             {msg[r.run_id] && msg[r.run_id] !== "sent" && <p className="text-xs text-red-300 mt-2">{msg[r.run_id]}</p>}
           </div>
@@ -555,7 +555,7 @@ function NotifyNudge() {
       <div className="flex items-center gap-3 lg:max-w-3xl lg:mx-auto bg-indigo-600/15 border border-indigo-600/40 rounded-2xl px-4 py-3">
         <Bell className="w-5 h-5 text-indigo-300 shrink-0" />
         <div className="flex-1 min-w-0"><p className="text-sm font-medium text-white leading-tight">Get notified about new jobs</p>{msg && <p className="text-xs text-gray-400">{msg}</p>}</div>
-        <button onClick={enable} className="px-3 py-1.5 bg-indigo-600 active:bg-indigo-700 text-white text-sm font-medium rounded-xl shrink-0">Enable</button>
+        <button onClick={enable} className="px-3 py-1.5 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium rounded-xl shrink-0">Enable</button>
         <button onClick={dismiss} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
       </div>
     </div>
@@ -578,8 +578,11 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
             <div className="min-w-0"><h3 className="text-xl font-bold text-white truncate">{job.company}</h3><div className="flex items-center gap-2 text-white/90 text-sm mt-0.5"><MapPin className="w-4 h-4" /><span className="truncate">{(job.location || "").split(",")[0]}</span></div></div>
           </div>
         </div>
-        <div className="p-5 lg:p-7 lg:grid lg:grid-cols-2 lg:gap-7 lg:items-start">
-          <div className="space-y-5">
+        {/* Phone: title, scores, Noa's reason, the role. Desktop: title and scores beside
+            the role, Noa's reason across both columns under them (it was half the width
+            with an empty gap beside it). */}
+        <div className="p-5 lg:p-7 flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:gap-7 lg:items-start">
+          <div className="space-y-5 order-1">
           <div>
             <h2 className="text-xl lg:text-2xl font-bold text-white mb-2">{job.title}</h2>
             <div className="flex items-center gap-4 flex-wrap">
@@ -604,9 +607,9 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
               </div>
             )}
           </div>
-          {job.whyFits && (<div className="bg-gradient-to-br from-amber-950/50 to-orange-950/50 rounded-2xl p-4 border-2 border-amber-700"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-amber-400 text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
           </div>
-          <div className="space-y-5 mt-5 lg:mt-0">
+          {job.whyFits && (<div className="order-2 lg:order-3 lg:col-span-2 bg-brand-yellow/5 rounded-2xl p-4 border-2 border-brand-yellow/55"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-brand-yellow text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
+          <div className="space-y-5 order-3 lg:order-2">
           {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${job.verified ? "bg-green-950/50 text-green-400 border border-green-800" : "bg-orange-950/50 text-orange-400 border border-orange-800"}`}>
             {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">{job.linkPenalty > 0 && linkSiteName(job.url) ? `Posting is live on ${linkSiteName(job.url)}` : "URL verified — ready to apply"}</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
@@ -616,8 +619,8 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
         </div>
         <div className="p-5 lg:px-7 pt-0 space-y-3 lg:max-w-2xl lg:mx-auto lg:w-full">
           <div className="flex gap-3">
-            <motion.button whileTap={{ scale: 0.95 }} onClick={onPass} className="flex-1 py-4 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><X className="w-5 h-5" />Pass</motion.button>
-            <motion.button whileTap={{ scale: 0.95 }} onClick={onApprove} className="flex-1 py-4 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><Check className="w-5 h-5" />Approve</motion.button>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={onPass} className="flex-1 py-4 bg-brand-no active:bg-brand-no-press text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><X className="w-5 h-5" />Pass</motion.button>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={onApprove} className="flex-1 py-4 bg-indigo-600 active:bg-indigo-700 text-white rounded-2xl font-semibold shadow-lg flex items-center justify-center gap-2"><Check className="w-5 h-5" />Approve</motion.button>
           </div>
           {onDefer && <motion.button whileTap={{ scale: 0.98 }} onClick={onDefer} className="w-full py-3 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-2xl font-medium flex items-center justify-center gap-2"><Clock className="w-4 h-4" />Decide Later</motion.button>}
         </div>
@@ -659,7 +662,7 @@ function ScoreBox({ label, value, icon, tone }: { label: string; value: number |
 }
 
 function CenterState({ icon, title, action }: { icon: any; title: string; action?: { label: string; onClick: () => void } }) {
-  return (<div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex flex-col items-center justify-center p-6 text-center">{icon}<p className="text-gray-300 mt-4 mb-4">{title}</p>{action && <button onClick={action.onClick} className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-medium">{action.label}</button>}</div>);
+  return (<div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900 flex flex-col items-center justify-center p-6 text-center">{icon}<p className="text-gray-300 mt-4 mb-4">{title}</p>{action && <button onClick={action.onClick} className="px-5 py-2.5 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl font-medium">{action.label}</button>}</div>);
 }
 
 // One width for the whole desktop shell. Capped rather than unbounded: at
@@ -824,7 +827,7 @@ function NoaGreeting({ me, toSwipe, onSwipe }: { me: any; toSwipe: number; onSwi
     <div className="flex items-center gap-3 mb-5 p-3 bg-gray-800 rounded-2xl border border-gray-700">
       <NoaAvatar size={40} />
       <p className="flex-1 min-w-0 text-sm text-gray-200 leading-snug">{line}</p>
-      {toSwipe > 0 && <button onClick={onSwipe} className="shrink-0 px-3 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl text-sm font-medium">Swipe</button>}
+      {toSwipe > 0 && <button onClick={onSwipe} className="shrink-0 px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium">Swipe</button>}
     </div>
   );
 }
@@ -876,14 +879,14 @@ function DashboardView(p: any) {
           than two navigations to keep in sync. */}
       <aside className="hidden lg:flex lg:flex-col lg:w-56 xl:w-64 lg:shrink-0 lg:sticky lg:top-0 lg:h-screen bg-gray-800 border-r border-gray-700">
         <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-700">
-          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center shrink-0"><Briefcase className="w-5 h-5 text-white" /></div>
+          <img src={LOGO} alt="" width={40} height={40} className="w-10 h-10 rounded-xl ring-1 ring-brand-yellow/40 shrink-0" />
           <div className="min-w-0"><h1 className="text-base font-bold text-white leading-tight">Job Hunter</h1><p className="text-xs text-gray-400 truncate">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div>
         </div>
         <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-3 space-y-1">
           {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (
             <div key={id}>
             <button onClick={() => setActiveTab(id)} aria-expanded={id === "admin" ? active : undefined}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-transparent border-transparent text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"}`}>
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-sm font-medium transition-colors ${active ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-transparent border-transparent text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"}`}>
               <Icon className="w-[18px] h-[18px] shrink-0" /><span className="truncate">{label}</span>
             </button>
             {id === "admin" && active && (
@@ -899,7 +902,7 @@ function DashboardView(p: any) {
             </div>); })}
         </nav>
         <div className="px-3 py-3 border-t border-gray-700 space-y-1">
-          <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 text-white text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
+          <button onClick={onBackToSwipe} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium"><Briefcase className="w-[18px] h-[18px] shrink-0" />Swipe</button>
           <button onClick={onOpenSettings} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-gray-400 hover:bg-gray-700/60 hover:text-gray-200 text-sm font-medium"><Settings className="w-[18px] h-[18px] shrink-0" />Settings</button>
           {/* A full-page navigation, not a fetch: /logout clears the session
               cookie in its response, which only a real navigation applies. */}
@@ -911,10 +914,10 @@ function DashboardView(p: any) {
       <div className="flex-1 min-w-0">
       <header className="bg-gray-800 border-b border-gray-700 safe-top lg:bg-gray-900">
         <div className={`${SHELL} px-5 lg:px-8 py-4 flex items-center justify-between`}>
-          <div className="flex items-center gap-3"><div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl flex items-center justify-center lg:hidden"><Briefcase className="w-5 h-5 text-white" /></div><div><h1 className="text-lg font-bold text-white lg:text-2xl">Dashboard</h1><p className="text-xs text-gray-400 lg:hidden">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div></div>
+          <div className="flex items-center gap-3"><img src={LOGO} alt="" width={40} height={40} className="w-10 h-10 rounded-xl ring-1 ring-brand-yellow/40 lg:hidden" /><div><h1 className="text-lg font-bold text-white lg:text-2xl">Dashboard</h1><p className="text-xs text-gray-400 lg:hidden">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div></div>
           {/* The rail carries these above lg; two copies on screen at once would
               be the thing a user notices before they notice the extra width. */}
-          <div className="flex items-center gap-2 lg:hidden"><button onClick={onBackToSwipe} className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl text-sm font-medium flex items-center gap-2"><Briefcase className="w-4 h-4" />Swipe</button><button onClick={onOpenSettings} className="p-2.5 bg-gray-800 rounded-xl border border-gray-700 active:bg-gray-700"><Settings className="w-5 h-5 text-gray-300" /></button></div>
+          <div className="flex items-center gap-2 lg:hidden"><button onClick={onBackToSwipe} className="px-3.5 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium flex items-center gap-2"><Briefcase className="w-4 h-4" />Swipe</button><button onClick={onOpenSettings} className="p-2.5 bg-gray-800 rounded-xl border border-gray-700 active:bg-gray-700"><Settings className="w-5 h-5 text-gray-300" /></button></div>
         </div>
       </header>
       <div className={`${SHELL} px-5 lg:px-8 py-5`}>
@@ -930,7 +933,7 @@ function DashboardView(p: any) {
                     icon={<XCircle className="w-5 h-5 text-red-500" />} />
         </div>
         <div className="grid grid-cols-3 gap-2 mb-4 lg:hidden">
-          {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
+          {(isAdmin ? [...TABS, ADMIN_TAB] : TABS).map(([id, label, Icon]) => { const active = activeTab === id; return (<button key={id} onClick={() => setActiveTab(id)} className={`flex flex-col items-center justify-center gap-1 py-3 rounded-xl border transition-colors ${active ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-800 border-gray-700 text-gray-400 active:bg-gray-700"}`}><Icon className="w-5 h-5" /><span className="text-xs font-medium">{label}</span></button>); })}
         </div>
         {["queue", "applied", "deferred"].includes(activeTab) && (
           <div className="flex items-center justify-end gap-2 mb-3">
@@ -1075,7 +1078,7 @@ function AnswerQuestions({ job, onDone }: { job: UiJob; onDone: () => void }) {
         </div>
       ))}
       <button onClick={save} disabled={busy}
-        className="px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium disabled:opacity-60">
+        className="px-4 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium disabled:opacity-60">
         {busy ? "Saving…" : "Save answers"}
       </button>
       {msg && <p className="text-sm text-gray-300">{msg}</p>}
@@ -1115,7 +1118,7 @@ function FinishYourself({ job }: { job: UiJob }) {
       <p className="text-sm text-gray-200 font-medium">Everything is prepared - finish it on {site}</p>
       <p className="text-xs text-gray-400 mt-0.5">Open the job, then copy each answer into the same field and press Submit.</p>
       <div className="flex gap-2 mt-2 flex-wrap">
-        <a href={job.url} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium inline-flex items-center gap-1.5"><ExternalLink className="w-4 h-4" />Open the application</a>
+        <a href={job.url} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-lg text-sm font-medium inline-flex items-center gap-1.5"><ExternalLink className="w-4 h-4" />Open the application</a>
         <a href="/api/cv" target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm inline-flex items-center gap-1.5"><Download className="w-4 h-4" />Your CV</a>
         <a href={`/api/jobs/${job.id}/tailored-cv.docx`} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-lg text-sm inline-flex items-center gap-1.5"><Download className="w-4 h-4" />Tailored CV (if made)</a>
       </div>
@@ -1203,7 +1206,7 @@ function LockedSwipeEnd({ locked, me, reviewed, onUpgrade, onDashboard }:
         </div>
       </div>
       <div className="w-full max-w-md mt-8 space-y-3">
-        <button onClick={onUpgrade} className="w-full py-4 bg-gradient-to-r from-indigo-500 to-indigo-700 text-white rounded-2xl font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"><Sparkles className="w-5 h-5" />Upgrade plan</button>
+        <button onClick={onUpgrade} className="w-full py-4 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-2xl font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"><Sparkles className="w-5 h-5" />Upgrade plan</button>
         <button onClick={onDashboard} className="w-full py-3.5 bg-gray-800 border border-gray-700 text-gray-200 rounded-2xl font-medium flex items-center justify-center gap-2"><LayoutGrid className="w-5 h-5" />Go to dashboard</button>
       </div>
     </div>
@@ -1303,7 +1306,7 @@ function QueueTab({ me, jobs, onSelectJob, onMarkApplied, onRemove, onReload }: 
         <button onClick={checkLinks} disabled={checking} className="px-3 py-2 bg-gray-700 active:bg-gray-600 text-gray-200 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">{checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}{checking ? "Checking…" : "Check links"}</button>
         {canAutoApply && me?.auto_apply_live && jobs.length > 0 && (
           <button onClick={runApply} disabled={applying || checking}
-                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">
+                  className="px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-60 shrink-0">
             {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
             {applying ? "Starting…" : "Apply to queue"}
           </button>
@@ -1361,8 +1364,8 @@ function QueueJobCard({ job, rank, onSelect, onMarkApplied, onRemove, selected, 
               moment a job reached the queue - which is where the decision to
               actually apply gets made. */}
           {job.whyFits && (
-            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-              <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
+            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-brand-yellow/50 pl-3">
+              <span className="text-brand-yellow font-medium">Why Noa picked this: </span>{job.whyFits}
             </p>
           )}
         </div>
@@ -1550,12 +1553,12 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
       {stages && (
         <div className="flex items-center gap-1.5 flex-wrap">
           <button onClick={() => setFilter("")}
-            className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${filter === "" ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-900/50 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${filter === "" ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-900/50 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
             All {jobs.length}
           </button>
           {STAGES.map(([id, label]) => (
             <button key={id} onClick={() => setFilter(filter === id ? "" : id)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${filter === id ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-900/50 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${filter === id ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-900/50 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
               {label} {counts[id] || 0}
             </button>
           ))}
@@ -1577,7 +1580,7 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
             .map(([id, label, c]) => (
               <button key={id || "all"} onClick={() => setOrigin(origin === id ? "" : id)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
-                  origin === id ? "bg-indigo-600 border-indigo-500 text-white"
+                  origin === id ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow"
                                 : "bg-gray-900/50 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
                 {label} {c}
               </button>
@@ -1591,7 +1594,7 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
             them applied to empty the queue. They are real jobs you never got to decide on.
           </p>
           <button onClick={restoreAllBulk} disabled={!!bulkBusy}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink disabled:opacity-60">
             {bulkBusy ? "Moving\u2026" : `Send all ${origins["bulk"]} back to review`}
           </button>
         </div>
@@ -1607,8 +1610,8 @@ function ListTab({ jobs, onSelectJob, showStatus, emptyIcon: EI, emptyTitle, emp
               <FeedbackBadge job={job} /><LinkBadge job={job} />
             </div>
             {job.whyFits && (
-              <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-                <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
+              <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-brand-yellow/50 pl-3">
+                <span className="text-brand-yellow font-medium">Why Noa picked this: </span>{job.whyFits}
               </p>
             )}
             {stages && (job.appliedVia === "bulk" || job.appliedVia === "no_url") ? (
@@ -1653,8 +1656,8 @@ function DeferredTab({ jobs, onSelectJob, onUnDefer, onReload }: any) {
             <FeedbackBadge job={job} /><LinkBadge job={job} />
           </div>
           {job.whyFits && (
-            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-amber-700/60 pl-3">
-              <span className="text-amber-400 font-medium">Why Noa picked this: </span>{job.whyFits}
+            <p className="mt-2 text-sm text-gray-300 leading-relaxed border-l-2 border-brand-yellow/50 pl-3">
+              <span className="text-brand-yellow font-medium">Why Noa picked this: </span>{job.whyFits}
             </p>
           )}
         </RankedRow>
@@ -2021,7 +2024,7 @@ function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: bool
       {!draft && (
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => act("gen", () => api.tailorCv(job.id))} disabled={!!busy || !allowed}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink disabled:opacity-60">
             {busy === "gen" ? "Tailoring… (about 30 s)" : cv ? "Tailor again" : "Tailor my CV for this job"}
           </button>
           {cv && <button onClick={startEdit} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-60">Edit</button>}
@@ -2048,7 +2051,7 @@ function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: bool
           <label className="block text-xs text-gray-400">Education (one per line)<textarea rows={2} className={inp} value={draft.education} onChange={(e) => setDraft({ ...draft, education: e.target.value })} /></label>
           <label className="block text-xs text-gray-400">Additional (one per line)<textarea rows={2} className={inp} value={draft.other} onChange={(e) => setDraft({ ...draft, other: e.target.value })} /></label>
           <div className="flex gap-2">
-            <button onClick={saveEdit} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white disabled:opacity-60">{busy === "save" ? "Saving…" : "Save changes"}</button>
+            <button onClick={saveEdit} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink disabled:opacity-60">{busy === "save" ? "Saving…" : "Save changes"}</button>
             <button onClick={() => setDraft(null)} disabled={!!busy} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-700 text-gray-200">Cancel</button>
           </div>
         </div>
@@ -2160,7 +2163,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
         <div className="p-5 space-y-5">
           <div className="flex items-start gap-4"><div className="w-16 h-16 bg-gradient-to-br from-indigo-900/40 to-slate-800 rounded-2xl flex items-center justify-center shrink-0"><Building2 className="w-8 h-8 text-indigo-400" /></div><div className="flex-1 min-w-0"><h3 className="text-xl font-bold text-white mb-0.5">{job.title}</h3><p className="text-lg text-indigo-400 font-semibold mb-1">{job.company}</p><div className="flex items-center gap-4 text-gray-400 flex-wrap">{job.location && <div className="flex items-center gap-1"><MapPin className="w-4 h-4" /><span className="text-sm">{job.location}</span></div>}{job.timeAgo && <div className="flex items-center gap-1"><Clock className="w-4 h-4" /><span className="text-sm">{job.timeAgo}</span></div>}</div></div></div>
           <div className="grid grid-cols-2 gap-3"><div className="bg-gradient-to-br from-blue-900/20 to-indigo-900/20 rounded-xl p-4 border border-blue-800/50"><div className="text-sm text-gray-400 mb-1">Match Score</div><div className="text-2xl font-bold text-blue-400">{job.matchScore === null ? "—" : `${job.matchScore}%`}</div></div><div className="bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-xl p-4 border border-green-800/50"><div className="text-sm text-gray-400 mb-1">Your Strength</div><div className="text-2xl font-bold text-green-400">{job.candidateScore === null ? "—" : `${job.candidateScore}%`}</div></div></div>
-          {job.whyFits && <div className="bg-gradient-to-br from-amber-900/20 to-orange-900/20 rounded-xl p-4 border border-amber-800/50"><h4 className="font-bold text-amber-500 mb-1.5 flex items-center gap-2"><NoaAvatar size={24} />Why Noa picked this</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
+          {job.whyFits && <div className="bg-brand-yellow/5 rounded-xl p-4 border border-brand-yellow/55"><h4 className="font-bold text-brand-yellow mb-1.5 flex items-center gap-2"><NoaAvatar size={24} />Why Noa picked this</h4><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>}
           {job.description && <div><h4 className="font-semibold text-white mb-1.5">About the role</h4><p className="text-gray-400 text-sm leading-relaxed whitespace-pre-line">{job.description}</p></div>}
           {job.applyStatus && job.applyStatus !== "queued" && (
             <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
@@ -2179,12 +2182,12 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
                 <p className="text-sm text-gray-300 mt-2">This site emails a security code during the application, and it wasn't entered in time, so nothing was sent. Tap Apply now while you can check your email: a new code will arrive within a minute, and you paste it here.</p>
               )}
               {job.applyStatus === "needs_code" && onRetry && (
-                <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><Send className="w-4 h-4" />Apply now</button>
+                <button onClick={() => { onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><Send className="w-4 h-4" />Apply now</button>
               )}
               {(job.applyStatus === "failed" || job.applyStatus === "manual_required") && onRetry && (
                 <button onClick={() => {
                   if (job.applyFailureType === "unconfirmed" && !window.confirm("This application may already have been sent. Send it again anyway?")) return;
-                  onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />{job.applyFailureType === "unconfirmed" ? "Try again anyway" : "Retry application"}</button>
+                  onRetry(job); onClose(); }} className="mt-3 px-4 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium inline-flex items-center gap-1.5"><RefreshCw className="w-4 h-4" />{job.applyFailureType === "unconfirmed" ? "Try again anyway" : "Retry application"}</button>
               )}
             </div>
           )}
@@ -2221,7 +2224,7 @@ function JobDetailModal({ job, onClose, onRetry, isAdmin, me }: { job: UiJob; on
                         className="w-full px-3 py-2 border border-gray-500 rounded-xl bg-gray-900 text-white text-sm leading-relaxed" />
               <div className="flex gap-2 mt-2">
                 <button onClick={() => clRun("generate")} disabled={!!clBusy}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink disabled:opacity-60">
                   {clBusy === "generate" ? "Writing\u2026" : letter ? "Rewrite" : "Generate"}
                 </button>
                 <button onClick={() => clRun("save")} disabled={!!clBusy || !letter.trim()}
@@ -2252,7 +2255,7 @@ function TagInput({ value, onChange, noun = "role", example = "VP Product", tone
         {value.map((t) => (<span key={t} className={`inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full text-sm ${L ? "bg-[#ffd766]/10 border border-[#ffd766]/40 text-[#fbf6e6]" : "bg-indigo-600/20 border border-indigo-600/50 text-indigo-200"}`}>{t}<button aria-label={`Remove ${t}`} onClick={() => onChange(value.filter((x) => x !== t))} className={`w-4 h-4 flex items-center justify-center rounded-full ${L ? "bg-[#ffd766]/30 active:bg-[#ffd766]/60" : "bg-indigo-500/40 active:bg-indigo-500"}`}><X className="w-3 h-3" /></button></span>))}
         {value.length === 0 && <span className={`text-xs ${L ? "text-[#8ba593]" : "text-gray-400"}`}>No {noun}s yet — add one below.</span>}
       </div>
-      <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className={`flex-1 px-4 py-2.5 rounded-xl text-sm ${L ? "border border-[#5f7f6c] bg-[#0c1f17] text-[#fbf6e6] placeholder:text-[#8ba593] focus:outline-none focus:border-[#ffd766]" : "border border-gray-700 bg-gray-800 text-white"}`} /><button aria-label={`Add ${noun}`} onClick={add} className={`px-3.5 rounded-xl flex items-center justify-center ${L ? "bg-[#ffd766] active:bg-[#ffe28f] text-[#1f1a05]" : "bg-indigo-600 active:bg-indigo-700 text-white"}`}><Plus className="w-5 h-5" /></button></div>
+      <div className="flex gap-2"><input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(); } }} placeholder={`e.g. ${example}`} className={`flex-1 px-4 py-2.5 rounded-xl text-sm ${L ? "border border-[#5f7f6c] bg-[#0c1f17] text-[#fbf6e6] placeholder:text-[#8ba593] focus:outline-none focus:border-[#ffd766]" : "border border-gray-700 bg-gray-800 text-white"}`} /><button aria-label={`Add ${noun}`} onClick={add} className={`px-3.5 rounded-xl flex items-center justify-center ${L ? "bg-[#ffd766] active:bg-[#ffe28f] text-[#1f1a05]" : "bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink"}`}><Plus className="w-5 h-5" /></button></div>
       <p className={`text-xs mt-1.5 ${L ? "text-[#8ba593]" : "text-gray-400"}`}>Press Enter to add each {noun}.</p>
     </div>
   );
@@ -2291,7 +2294,7 @@ function UserPlanControl({ u, onDone }: { u: any; onDone: () => void }) {
           <option value="perm">Permanent</option>
           {[7, 14, 30, 60, 90].map((d) => <option key={d} value={d}>{d} days, then Free</option>)}
         </select>
-        <button onClick={apply} disabled={busy} className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">{busy ? "…" : "Apply"}</button>
+        <button onClick={apply} disabled={busy} className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink disabled:opacity-60">{busy ? "…" : "Apply"}</button>
       </div>
       {msg && <p className="text-[11px] text-gray-400 mt-1.5">{msg}</p>}
     </div>
@@ -2322,7 +2325,7 @@ function ApplyRates() {
       <h3 className="font-semibold text-white mb-1">Apply results by system</h3>
       <p className="text-xs text-gray-400 mb-2">Every job the engine tried, by where it applies. Success = sent / (sent + failed + blocked). Jobs you marked applied yourself are not counted as sent.</p>
       <button onClick={load} disabled={busy}
-        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Loading..." : rep ? "Refresh" : "Show results"}</button>
+        className="px-3 py-1.5 rounded-lg bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm disabled:opacity-50">{busy ? "Loading..." : rep ? "Refresh" : "Show results"}</button>
       {rep && (
         <div className="mt-3 overflow-x-auto">
           <p className="text-xs text-gray-300 mb-2">Auto-apply engine: <span className={rep.engine_on ? "text-green-300" : "text-amber-300"}>{rep.engine_on ? "on" : "off (supervised applies only)"}</span></p>
@@ -2383,7 +2386,7 @@ function NotificationCheck() {
         </div>
       )}
       <button onClick={send} disabled={busy}
-        className="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Sending..." : "Send me a test on every channel"}</button>
+        className="mt-3 px-3 py-1.5 rounded-lg bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm disabled:opacity-50">{busy ? "Sending..." : "Send me a test on every channel"}</button>
       {res && (
         <ul className="mt-2 text-xs space-y-0.5">
           {Object.entries(res).map(([k, v]) => <li key={k} className={ok(v) ? "text-green-300" : "text-amber-300"}><span className="text-gray-300">{k}:</span> {v}</li>)}
@@ -2423,7 +2426,7 @@ function ApplicationInstructions() {
         className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm text-gray-100" />
       <div className="flex items-center gap-3 mt-2">
         <button onClick={save} disabled={busy || !loaded}
-          className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Saving..." : "Save"}</button>
+          className="px-3 py-1.5 rounded-lg bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm disabled:opacity-50">{busy ? "Saving..." : "Save"}</button>
         <span className="text-xs text-gray-400">{text.length}/3000 {msg && `· ${msg}`}</span>
       </div>
     </div>
@@ -2702,7 +2705,7 @@ function SupervisedApply() {
                 <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="8-character code" autoComplete="one-time-code"
                   className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-100 tracking-widest" />
                 <button onClick={sendCode} disabled={code.trim().length < 4}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">Enter code</button>
+                  className="px-3 py-1.5 rounded-lg bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm disabled:opacity-50">Enter code</button>
               </div>
               {codeMsg && <p className="text-xs text-gray-300">{codeMsg}</p>}
             </div>
@@ -2778,7 +2781,7 @@ function LifecycleEmailsCard() {
     <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
       <h3 className="font-semibold text-white mb-1">Lifecycle emails</h3>
       <p className="text-xs text-gray-400 mb-3">Welcome, day 1, day 3 (from you) and day 7, every variant, sent to your own inbox.</p>
-      <button onClick={send} disabled={busy} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Sending…" : "Send me every variant"}</button>
+      <button onClick={send} disabled={busy} className="px-4 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Sending…" : "Send me every variant"}</button>
       {res && (
         <div className="mt-3 text-xs space-y-1">
           <p className="text-gray-300">Sent {res.sent?.length || 0}{res.errors?.length ? `, ${res.errors.length} failed` : ""}.</p>
@@ -2828,7 +2831,7 @@ function drawPicksImage(lang: "he" | "en", fam: PicksFam) { return drawPicks(lan
 
 async function drawPicks(lang: "he" | "en", fam: PicksFam, format: "square" | "story") {
   await loadPicksFonts();
-  const [noa, logo] = await Promise.all([loadImage(NOA_AVATAR), loadImage("/app/icon-192.png")]);
+  const [noa, logo] = await Promise.all([loadImage(NOA_AVATAR), loadImage(LOGO)]);
   const story = format === "story";
   const W = 1080, H = story ? 1920 : 1080, M = 72;
   const c = document.createElement("canvas");
@@ -2964,7 +2967,7 @@ function NoasPicksCard() {
       <h3 className="font-semibold text-white mb-1">Noa's picks posts</h3>
       <p className="text-xs text-gray-400 mb-3">This week's new roles per role family, ready to post, with an image. The page speaks as Noa; your own profile speaks about her. Edit any post before you copy it. Only roles with a company name and a link to the employer's own page.</p>
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => load(shift)} disabled={busy} className="px-4 py-2 bg-indigo-600 rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Building…" : res ? "Build again" : "Build this week's posts"}</button>
+        <button onClick={() => load(shift)} disabled={busy} className="px-4 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-lg text-sm font-medium disabled:opacity-60">{busy ? "Building…" : res ? "Build again" : "Build this week's posts"}</button>
         {res && <button onClick={() => load(shift + 1)} disabled={busy} className="px-4 py-2 bg-gray-700 rounded-lg text-sm font-medium disabled:opacity-60">Next wording</button>}
       </div>
       {err && <p className="mt-2 text-xs text-red-300">{err}</p>}
@@ -3337,6 +3340,9 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
 // alerts left setup: daily at 11:00 by default (Settings), and the alert offer
 // moved to the "Noa is finding your first matches" screen, where it is wanted.
 const OB_STEPS = ["Your CV", "What to look for"] as const;
+/* The app icon (L2 swapped, 22 Nov 2026): a yellow case on dark green. The ?v= changes
+   whenever the picture does, so no browser keeps showing a cached old one. */
+const LOGO = "/app/icon-192.png?v=forest";
 const NOA_AVATAR = "/landing-assets/noa-e.webp";   // the owner picked E for the app (2026-11-12); the landing page keeps its A/B test
 /** Noa's face, wherever she speaks in the app (the owner approved the places,
  *  2026-11-12). One source, so the picture he picks changes everywhere. */
@@ -3424,7 +3430,7 @@ function OnboardingView({ me, onDone }: { me: any; onDone: () => void }) {
       {/* pb-56: the fixed "Confirm your email" banner must never cover the last button. */}
       <div className={`${SHELL} px-5 lg:px-12 pt-8 pb-56 safe-top`}>
         <div className="flex items-center gap-3 mb-6">
-          <img src="/app/icon-192.png" alt="" width={44} height={44} className="w-11 h-11 rounded-xl shrink-0" />
+          <img src={LOGO} alt="" width={44} height={44} className="w-11 h-11 rounded-xl shrink-0" />
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-2xl font-semibold leading-tight text-[#fbf6e6]">Meet Noa</h1>
             <p className="text-xs text-[#8ba593]">Your personal AI headhunter agent</p>
@@ -3619,7 +3625,7 @@ function NotificationChannels({ me }: { me: any }) {
       <div className="grid grid-cols-3 gap-2 mb-3">
         {CHANNELS.map(([id, label]) => (
           <button key={id} onClick={() => toggle(id)} aria-pressed={has(id)}
-            className={`py-2.5 rounded-xl border text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${has(id) ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+            className={`py-2.5 rounded-xl border text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${has(id) ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
             {has(id) && <Check className="w-3.5 h-3.5" />}{label}
           </button>
         ))}
@@ -3769,7 +3775,7 @@ function SupportModal({ onClose }: { onClose: () => void }) {
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={5000} rows={6} placeholder="Your message"
               className="w-full px-3.5 py-2.5 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 resize-y" />
             {err && <p className="text-sm text-amber-300">{err}</p>}
-            <button onClick={send} disabled={busy} className="w-full py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
+            <button onClick={send} disabled={busy} className="w-full py-3 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
               {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4" />}{busy ? "Sending…" : "Send"}
             </button>
           </div>
@@ -4062,7 +4068,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
                   <div className="flex shrink-0 rounded-lg border border-gray-700 overflow-hidden" role="group" aria-label={q}>
                     {["no", "yes"].map((opt) => (
                       <button key={opt} type="button" onClick={() => set(opt)} aria-pressed={v === opt}
-                        className={`px-3 py-1.5 text-sm ${v === opt ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-300"}`}>
+                        className={`px-3 py-1.5 text-sm ${v === opt ? "bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink" : "bg-gray-800 text-gray-300"}`}>
                         {opt === "yes" ? "Yes" : "No"}
                       </button>
                     ))}
@@ -4160,7 +4166,7 @@ function SettingsModal({ me, onClose, initialTab }: { me: Me & any; onClose: () 
           <NotificationChannels me={me} />
           <MarketingOptIn initial={!!me?.marketing_opt_in} />
           </>)}
-          <button onClick={save} disabled={saving} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
+          <button onClick={save} disabled={saving} className="w-full py-4 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2 lg:sticky lg:bottom-0">{saving ? <Loader2 className="w-5 h-5 animate-spin" /> : saved ? <CheckCircle className="w-5 h-5" /> : null}{saving ? "Saving…" : saved ? "Saved" : "Save Settings"}</button>
           <FooterLinks onSupport={() => setShowSupport(true)} className="py-3 text-center" />
         </div>
       </motion.div>
@@ -4224,7 +4230,7 @@ function DayPicker({ label, value, onChange }: { label: string; value: number; o
       <div className="grid grid-cols-7 gap-1.5">
         {DOW.map((d, i) => (
           <button key={d} onClick={() => onChange(i)} aria-pressed={value === i}
-            className={`py-2 rounded-lg text-xs font-medium border transition-colors ${value === i ? "bg-indigo-600 border-indigo-500 text-white" : "bg-gray-900/60 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
+            className={`py-2 rounded-lg text-xs font-medium border transition-colors ${value === i ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-900/60 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
             {d}
           </button>
         ))}
@@ -4273,7 +4279,7 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
         {locked?.count > 0 && <div className="mb-5 text-left"><LockedMatchesCard locked={locked} me={me} /></div>}
         {!empty && (<div className="bg-gray-800 rounded-2xl p-5 mb-5 border border-gray-700 grid grid-cols-3 gap-4"><div><div className="text-2xl font-bold text-green-400 mb-0.5">{approvedCount}</div><div className="text-xs text-gray-400">Approved</div></div><div><div className="text-2xl font-bold text-red-400 mb-0.5">{rejectedCount}</div><div className="text-xs text-gray-400">Passed</div></div><div><div className="text-2xl font-bold text-amber-400 mb-0.5">{deferredCount}</div><div className="text-xs text-gray-400">Deferred</div></div></div>)}
         <div className="space-y-3">
-          {!(empty && me?.first_search_running) && <button onClick={runSearch} className="w-full py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
+          {!(empty && me?.first_search_running) && <button onClick={runSearch} className="w-full py-4 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl font-semibold flex items-center justify-center gap-2"><SearchIcon className="w-5 h-5" />Run search now</button>}
           <button onClick={onViewDashboard} className="w-full py-3.5 bg-gray-800 border border-gray-700 text-gray-200 rounded-xl font-medium flex items-center justify-center gap-2"><LayoutGrid className="w-5 h-5" />View Dashboard</button>
           <button onClick={onStartNew} className="w-full py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl font-medium flex items-center justify-center gap-2"><RefreshCw className="w-4 h-4" />Refresh</button>
         </div>

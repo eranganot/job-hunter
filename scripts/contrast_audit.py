@@ -22,18 +22,23 @@ as comments rather than assertions.
 import itertools
 import sys
 
-# Tailwind 3 default palette, only the shades /app uses.
+# The brand palette in web/tailwind.config.js (option D, 22 Nov 2026): the neutral
+# scales are the landing page's greens, `indigo` is forest green with a yellow
+# light end, `blue` is gold. The other scales are still Tailwind's defaults.
 TAILWIND = {
-    "gray-200": "#e5e7eb", "gray-300": "#d1d5db", "gray-400": "#9ca3af",
-    "gray-500": "#6b7280", "gray-600": "#4b5563", "gray-700": "#374151",
-    "gray-800": "#1f2937", "gray-900": "#111827",
-    "indigo-200": "#c7d2fe", "indigo-300": "#a5b4fc", "indigo-400": "#818cf8",
-    "indigo-500": "#6366f1", "indigo-600": "#4f46e5", "indigo-700": "#4338ca",
+    "gray-200": "#d3e0d5", "gray-300": "#c4d4c6", "gray-400": "#8ba593",
+    "gray-500": "#6b8a76", "gray-600": "#3d5e4d", "gray-700": "#2c4a3c",
+    "gray-800": "#12291f", "gray-900": "#0c1f17",
+    "indigo-200": "#ffe9a6", "indigo-300": "#ffe28f", "indigo-400": "#ffd766",
+    "indigo-500": "#3f9a68", "indigo-600": "#2f7d55", "indigo-700": "#256645",
     "green-300": "#86efac", "green-400": "#4ade80",
     "amber-300": "#fcd34d", "amber-400": "#fbbf24",
     "red-300": "#fca5a5", "red-400": "#f87171",
-    "blue-300": "#93c5fd", "blue-400": "#60a5fa",
-    "blue-500": "#3b82f6", "blue-600": "#2563eb", "blue-700": "#1d4ed8",
+    "blue-300": "#ffe28f", "blue-400": "#ffd766",
+    "blue-500": "#f2c443", "blue-600": "#c99a1f", "blue-700": "#8a6a14",
+    "brand-yellow": "#ffd766", "brand-yellow-hover": "#ffe28f", "brand-yellow-press": "#f2c443",
+    "brand-no": "#b84f3c", "brand-no-press": "#a3432f",
+    "ink": "#1f1a05",
     "white": "#ffffff",
 }
 
@@ -66,7 +71,16 @@ PAIRS = [
     ("red-400",    "gray-800", "body"),
     ("blue-300",   "gray-800", "body"),
     ("blue-400",   "gray-800", "body"),
-    # Primary button
+    # Primary button: yellow with dark ink text, at rest, hover and press (2026-11-22)
+    ("ink", "brand-yellow", "body"),
+    ("ink", "brand-yellow-hover", "body"),
+    ("ink", "brand-yellow-press", "body"),
+    # Selected tab or chip: yellow text on a yellow-tinted card
+    ("brand-yellow", "gray-800", "body"),
+    # Pass and Approve on the swipe card (red for no, green for yes)
+    ("white", "brand-no", "body"),
+    ("white", "brand-no-press", "body"),
+    # Green buttons that stay (toggles on, the bulk "Auto-apply selected")
     ("white", "indigo-600", "body"),
     ("white", "indigo-700", "body"),
     # "Apply to queue" in the Queue tab (2026-09-20). Its first draft was

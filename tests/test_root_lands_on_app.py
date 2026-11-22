@@ -106,7 +106,7 @@ def test_the_page_is_dark_uses_the_app_icon_and_app_screenshots():
     import landing
     page = landing.landing_html("https://x.test")
     assert 'name="color-scheme" content="dark"' in page
-    assert '<img src="/app/icon-192.png"' in page
+    assert '<img src="/app/icon-192.png?v=forest"' in page
     for name in ("job-card.webp", "job-details.webp", "analytics.webp"):
         assert "/landing-assets/" + name in page
     assert "queue.webp" not in page

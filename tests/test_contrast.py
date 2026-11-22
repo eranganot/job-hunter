@@ -42,8 +42,10 @@ def test_the_audit_can_actually_fail():
 
 
 @pytest.mark.parametrize("known", [
-    ("white", "gray-900", 17.74),   # published WCAG values for these hexes
-    ("gray-400", "gray-800", 5.78),
+    # WCAG values for these hexes (white on #0c1f17, #8ba593 on #12291f: the brand
+    # palette since 2026-11-22), as any devtools contrast panel reports them
+    ("white", "gray-900", 17.16),
+    ("gray-400", "gray-800", 5.80),
 ])
 def test_the_maths_matches_published_values(known):
     """A contrast checker with a wrong formula passes everything. sRGB
