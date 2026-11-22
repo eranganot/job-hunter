@@ -6748,6 +6748,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json({"token": _tok})
             return
+        if path == "/api/device/jobs/add":
+            import device as _dev
+            _du = _dev.user_for(self.headers)
+            if not _du:
+                self.send_json({"error": "Not paired"}, 401)
+                return
+            _res = _dev.add_by_link(_du["id"], (self.read_json() or {}).get("url", ""))
+            self.send_json(_res, 200 if _res.get("ok") else 400)
+            return
         if path == "/api/device/attempt":
             import device as _dev
             _du = _dev.user_for(self.headers)

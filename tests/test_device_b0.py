@@ -109,3 +109,37 @@ def test_the_cv_goes_out_named_after_the_applicant_never_cv_pdf(tmp_path):
     assert src.exists()
     out2 = ae._named_cv(str(src), {"first_name": "Eran", "last_name": "Ganot"})
     assert out2.endswith("Eran Ganot CV %d.pdf" % year)
+
+
+def test_a_job_added_by_link_lands_approved_named_from_its_page(stack, users, monkeypatch):
+    """B0 (the owner, 2026-11-22): his search had no Lever or SmartRecruiters
+    jobs, so the extension adds one by its link - approved, owner-only, only
+    the three systems under test."""
+    import device
+    monkeypatch.setattr(device, "_page_meta", lambda url: {
+        "title": "Acme Robotics - Senior Product Manager" if "lever" in url else "",
+        "company": "", "description": "Build the robot."})
+    anon, auth = _pair(stack, users)
+
+    st, _l, body = anon.post_json("/api/device/jobs/add", {"url": "https://jobs.lever.co/acme-robotics/abc-123"}, auth)
+    got = json.loads(body)
+    assert st == 200 and got["ok"] and not got["existing"], got
+    assert (got["company"], got["title"], got["system"]) == ("Acme Robotics", "Senior Product Manager", "Lever")
+
+    # The page told nothing (DataDome): the link's own path names the company.
+    st, _l, body = anon.post_json("/api/device/jobs/add",
+                                  {"url": "https://jobs.smartrecruiters.com/WixCom/744000160000001"}, auth)
+    assert json.loads(body)["company"] == "Wixcom"
+
+    # The same link again: the job already there, not a second one.
+    st, _l, body = anon.post_json("/api/device/jobs/add", {"url": "https://jobs.lever.co/acme-robotics/abc-123"}, auth)
+    assert json.loads(body)["existing"] is True
+
+    st, _l, body = anon.get("/api/device/jobs", auth)
+    mine = [j for j in json.loads(body)["jobs"] if j["url"] == "https://jobs.lever.co/acme-robotics/abc-123"]
+    assert len(mine) == 1 and mine[0]["system"] == "Lever"
+
+    # Anything else is refused; so is a caller without a token.
+    st, _l, body = anon.post_json("/api/device/jobs/add", {"url": "https://www.linkedin.com/jobs/view/1"}, auth)
+    assert st == 400 and "LinkedIn" in json.loads(body)["error"]
+    assert anon.post_json("/api/device/jobs/add", {"url": "https://jobs.lever.co/x/1"})[0] == 401

@@ -29,6 +29,12 @@
   <label class="mode"><input type="radio" name="mode" value="B"> Run B: the extension does, 5 s after filling</label>
   <div style="margin-top:10px"><label><input type="checkbox" id="all"> Show every system</label></div>
   <div id="jobs" style="margin-top:6px"></div>
+  <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px">
+    <div><b>Add a job</b> <span class="muted">(Comeet, Lever, SmartRecruiters)</span></div>
+    <button id="addTab" hidden style="margin-top:6px"></button>
+    <input type="text" id="link" placeholder="or paste the job's link">
+    <button id="addLink" class="quiet">Add</button> <span id="addMsg" class="muted"></span>
+  </div>
   <div class="muted" style="margin-top:10px">Results so far: <span id="tally"></span> · <a href="#" id="unpair">disconnect</a></div>
 </section>
 <script src="popup.js"></script>

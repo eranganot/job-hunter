@@ -93,12 +93,12 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
             # (same tab = same task) so the stand-in page is served.
             host = job_url.split("/")[2]
             tab = None
-            for _ in range(40):
+            for _ in range(160):          # the first load is the real site, unrouted: it can be slow
                 tab = next((p for p in ctx.pages if host in p.url), None)
                 if tab:
                     break
                 ctx.pages[0].wait_for_timeout(250)
-            assert tab, "the extension opened no tab for %s" % job_url
+            assert tab, "the extension opened no tab for %s; tabs %s" % (job_url, sw.evaluate("chrome.tabs.query({}).then(t => t.map(x => x.url + ' | ' + x.pendingUrl + ' | ' + x.status))"))
             tab.goto(job_url)
             if not prepared:
                 tab.click("button:has-text('Submit for me')", timeout=30000)
@@ -216,3 +216,43 @@ def test_b0_run_a_comeet_submit_eran_presses_is_reported_from_comeets_answer(sta
                     [{"label": "First name", "value": "Dana"}], mode="A", as_eran=eran_presses)
     assert (row["outcome"], row["site_status"], row["pressed_by"]) == ("sent", "200", "user"), row
     assert job["applied_via"] == "device"
+
+
+def test_the_popup_adds_a_job_by_its_link(stack, users, monkeypatch):
+    """B0: Eran pastes a Lever link (or is on the page) and it lands in his
+    queue, approved - Lever's /apply page and tracking query trimmed off."""
+    import device
+    monkeypatch.setattr(device, "_page_meta", lambda url: {"title": "Linkco - Head of Product", "company": "",
+                                                           "description": ""})
+    code = json.loads(users["admin"].get("/api/admin/device-code")[2])["code"]
+    ext = tempfile.mkdtemp()
+    shutil.copytree(EXT, ext, dirs_exist_ok=True)
+    m = json.load(open(os.path.join(ext, "manifest.json")))
+    m["host_permissions"].append("http://127.0.0.1/*")
+    json.dump(m, open(os.path.join(ext, "manifest.json"), "w"))
+    with sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(
+            tempfile.mkdtemp(), executable_path=CHROME, headless=False,
+            args=["--headless=new", "--no-sandbox", f"--disable-extensions-except={ext}", f"--load-extension={ext}"])
+        try:
+            try:
+                sw = ctx.service_workers[0] if ctx.service_workers else ctx.wait_for_event("serviceworker", timeout=10000)
+            except Exception:
+                pytest.skip("this Chrome does not load unpacked extensions")
+            popup = ctx.new_page()
+            popup.goto(f"chrome-extension://{sw.url.split('/')[2]}/popup.html")
+            popup.click("summary")
+            popup.fill("#server", "http://127.0.0.1:%d" % stack["port"])
+            popup.fill("#code", code)
+            popup.click("#pairBtn")
+            popup.wait_for_selector("#main:not([hidden])")
+            popup.fill("#link", "https://jobs.lever.co/linkco/9f8e-77/apply?lever-source=LinkedIn")
+            popup.click("#addLink")
+            popup.wait_for_selector("text=Added: Linkco", timeout=15000)
+            popup.wait_for_selector("text=Head of Product")
+        finally:
+            ctx.close()
+    conn = stack["db"].get_db()
+    row = conn.execute("SELECT status, company, title FROM jobs WHERE url='https://jobs.lever.co/linkco/9f8e-77'").fetchone()
+    conn.close()
+    assert dict(row) == {"status": "approved", "company": "Linkco", "title": "Head of Product"}
