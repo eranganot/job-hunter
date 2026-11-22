@@ -1257,6 +1257,23 @@ def m0045_application_outcome(conn):
     conn.commit()
 
 
+def m0046_fit_survey(conn):
+    """The product-fit question (fitsurvey.py, GTM row 21): one answer per user per
+    round (d14 / d30) - very / somewhat / not / no_longer, or skipped - with an
+    optional comment, where it came from (app / email) and when. Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS fit_survey (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id  INTEGER NOT NULL,
+        round    TEXT NOT NULL,
+        answer   TEXT NOT NULL,
+        comment  TEXT,
+        source   TEXT NOT NULL,
+        at       TEXT NOT NULL,
+        UNIQUE (user_id, round),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)""", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1303,6 +1320,7 @@ MIGRATIONS = [
     (43, "marketing_consent",           m0043_marketing_consent),
     (44, "last_seen",                   m0044_last_seen),
     (45, "application_outcome",         m0045_application_outcome),
+    (46, "fit_survey",                  m0046_fit_survey),
 ]
 
 

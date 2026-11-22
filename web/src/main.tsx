@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { SwipeFlow, FinishApplying } from "./App";
 import { InstallPrompt } from "./InstallPrompt";
 import { VerifyEmailBanner } from "./VerifyEmailBanner";
+import { FitSurvey } from "./FitSurvey";
 import { syncPush } from "./lib/push";
 import "./index.css";
 
@@ -22,5 +23,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <FinishApplying />
     <InstallPrompt />
     <VerifyEmailBanner />
+    <FitSurvey />
   </React.StrictMode>
 );

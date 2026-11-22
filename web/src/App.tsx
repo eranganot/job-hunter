@@ -744,6 +744,7 @@ function RunningCostCard({ c }: { c: any }) {
 /** The launch numbers (kpis.py): last 7 days, with the 7 days before. */
 const KPI_ROWS: [string, string, string, string][] = [
   ["active_applicants", "Active applicants", "", "Sent at least one real application. The one to steer by."],
+  ["product_fit", "Product fit", "%", "Of activated users who answered on day 14 or 30, the share who'd be very disappointed without Job Hunter. Fit = 40% or more. All answers so far, latest per person."],
   ["first_applications", "First applications", "", "People who sent their first real application; median days from sign-up below."],
   ["new_matches_per_day", "New matches a day", "", "Average matches a search found per person per day, before the 7-a-day cap holds any back."],
   ["weekly_active_swipers", "Active swipers", "", "Approved or passed on at least one job."],
@@ -769,9 +770,10 @@ function KpiCard({ k }: { k: any }) {
               <div className="text-xl font-bold text-white mt-0.5">{show(r.value, unit)}</div>
               <div className="text-xs text-gray-400 mt-0.5">
                 {up && <span className={key === "time_to_first_picks" ? (up === "▲" ? "text-red-400" : "text-green-400") : (up === "▲" ? "text-green-400" : "text-red-400")}>{up} </span>}
+                {key === "product_fit" ? <>target {r.target ?? 40}%{r.of ? ` · ${r.n} of ${r.of}` : ""}{r.no_longer ? ` · ${r.no_longer} stopped using it` : ""}</> : <>
                 before: {show(r.prev, unit)}{key === "first_applications" ? (r.median_days != null ? ` · median ${r.median_days} days` : "")
                   : key === "new_matches_per_day" ? (r.under_cap_pct != null ? ` · ${r.under_cap_pct}% of days under ${r.cap}` : "")
-                  : r.of != null && r.n != null ? ` · ${r.n} of ${r.of}` : r.of != null ? ` · ${r.of} ${r.of === 1 ? "person" : "people"}` : ""}
+                  : r.of != null && r.n != null ? ` · ${r.n} of ${r.of}` : r.of != null ? ` · ${r.of} ${r.of === 1 ? "person" : "people"}` : ""}</>}
               </div>
             </div>
           );

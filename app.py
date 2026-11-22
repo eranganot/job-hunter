@@ -1622,6 +1622,28 @@ def _run_followups(now=None) -> dict | None:
         return None
 
 
+def _run_fit_survey(now=None) -> dict | None:
+    """The product-fit question by email on day 14 and day 30 (fitsurvey.py), from
+    Eran. Scheduler-lock holder only; off with the lifecycle emails. Never raises."""
+    import fitsurvey
+    import lifecycle
+    import testaccount
+    if not lifecycle.enabled():
+        return None
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return None
+        out = fitsurvey.run(database.get_db, _lifecycle_send, MOBILE_URL, now=now,
+                            is_test=testaccount.is_test_address,
+                            can_email=_sender(who="eran")[0] != RESEND_FROM, track=_track)
+        if out["sent"] or out["failed"]:
+            print("[fit] sent %(sent)d, skipped %(skipped)d, failed %(failed)d" % out)
+        return out
+    except Exception as exc:
+        print("[fit] ERROR sweep failed: %s" % exc)
+        return None
+
+
 def _run_lifecycle_emails(now=None) -> dict | None:
     """Welcome / day 1 / day 3 / day 7 (lifecycle.py). Scheduler-lock holder
     only, so a second instance never sends twice. Never raises."""
@@ -1682,6 +1704,8 @@ def file_watcher():
             _run_inactive_sweep()
         if _tick % 30 == 12:  # every ~30 minutes: "Did they get back to you?" (followup.py)
             _run_followups()
+        if _tick % 30 == 17:  # every ~30 minutes: the product-fit question on day 14 / 30 (fitsurvey.py)
+            _run_fit_survey()
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -5195,6 +5219,25 @@ class Handler(BaseHTTPRequestHandler):
                 "</button></form>" % (int(_u), _t)))
             return
 
+        if path == "/email/fit":
+            # An answer from the product-fit email (fitsurvey.py): a confirm page with an
+            # optional comment; never a change on GET (mail scanners open links).
+            import fitsurvey
+            _u, _r, _a, _t = ((qs.get(k) or [""])[0] for k in ("u", "r", "a", "t"))
+            if not fitsurvey.token_ok(_u, _r, _a, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete. You can also just "
+                                          "reply to the email."), 400)
+                return
+            self.send_html(_stop_page("Thanks for answering", "%s <b>%s</b>" % (
+                html_lib.escape(fitsurvey.QUESTION), fitsurvey.ANSWERS[_a]),
+                "<form method='post' action='/email/fit?u=%d&amp;r=%s&amp;a=%s&amp;t=%s'>"
+                "<p style='margin:0 0 .5rem'>Anything you'd like to add? (optional)</p>"
+                "<textarea name='comment' rows='4' style='width:100%%;box-sizing:border-box;margin:0 0 1rem;"
+                "padding:.6rem;border-radius:10px;border:1px solid #5f7f6c;background:#0c1f17;color:#fbf6e6;"
+                "font:inherit'></textarea><button type='submit'>Send my answer</button></form>"
+                % (int(_u), _r, _a, _t)))
+            return
+
         if path == "/email/outcome":
             # An answer from "Did they get back to you?" (followup.py): a confirm page,
             # never a change on GET (mail scanners open links). Signed per job + answer.
@@ -5308,6 +5351,8 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/admin/kpis":
                     out = kpis.today(_c, testaccount.TEST_EMAIL,
                                      cap=entitlements.limit({"plan": "beta", "role": "user"}, "matches_per_day") or 7)
+                    import fitsurvey
+                    out["kpis"]["product_fit"] = fitsurvey.score(_c, kpis.people(_c, testaccount.TEST_EMAIL))
                 else:
                     try:
                         _d = max(1, min(90, int(qs.get("days", ["30"])[0])))
@@ -5619,6 +5664,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as _me:
                 print("[marketing] answer for user %s not read: %s" % (user["id"], _me))
                 out["marketing_opt_in"] = False
+            try:                                   # the product-fit card (fitsurvey.py): the round due, if any
+                import fitsurvey
+                import testaccount as _ta_fit
+                _fc = database.get_db()
+                try:
+                    out["fit_survey_due"] = (None if _ta_fit.is_test_address(user.get("email"))
+                                             else fitsurvey.due_round(_fc, user))
+                finally:
+                    _fc.close()
+            except Exception as _fe:
+                print("[fit] due round for user %s not read: %s" % (user["id"], _fe))
+                out["fit_survey_due"] = None
             self.send_json(out)
             return
 
@@ -6451,6 +6508,25 @@ class Handler(BaseHTTPRequestHandler):
                                       "picks in the app."))
             return
 
+        # The answer from the product-fit email (fitsurvey.py), with its optional comment.
+        if path == "/email/fit":
+            import fitsurvey
+            _q = parse_qs(parsed.query)
+            _u, _r, _a, _t = ((_q.get(k) or [""])[0] for k in ("u", "r", "a", "t"))
+            if not fitsurvey.token_ok(_u, _r, _a, _t):
+                self.send_html(_stop_page("This link doesn't work", "It may be incomplete."), 400)
+                return
+            _body = urllib.parse.parse_qs(self.read_body().decode("utf-8", "replace"))
+            _fc = database.get_db()
+            try:
+                fitsurvey.record(_fc, int(_u), _r, _a, "email", (_body.get("comment") or [""])[0])
+            finally:
+                _fc.close()
+            _track(int(_u), "fit_survey_answered", {"round": _r, "answer": _a, "source": "email"})
+            self.send_html(_stop_page("Thank you", "It goes straight to me. Eran",
+                                      "<p><a href='/app'>Open Job Hunter</a></p>"))
+            return
+
         # The answer button from "Did they get back to you?" (followup.py).
         if path == "/email/outcome":
             import followup
@@ -6611,6 +6687,15 @@ class Handler(BaseHTTPRequestHandler):
                     _sent.append("followup/" + _fv)
                 except Exception as _le:
                     _errs.append("followup/%s: %s" % (_fv, _le))
+            try:                                   # the product-fit question, day 14 (fitsurvey.py), from Eran
+                import fitsurvey
+                _fs, _fb = fitsurvey.compose(_first, "d14", {a: fitsurvey.answer_url(MOBILE_URL, user["id"], "d14", a)
+                                                             for a in fitsurvey.ANSWERS})
+                send_email(user["email"], "[fit / d14] %s" % _fs,
+                           _fb + lifecycle.footer("eran", lifecycle.unsubscribe_url(MOBILE_URL, user["id"])), sender="eran")
+                _sent.append("fit/d14")
+            except Exception as _le:
+                _errs.append("fit/d14: %s" % _le)
             self.send_json({"sent": _sent, "errors": _errs,
                             "noa_from_set": bool(NOA_FROM), "eran_from_set": bool(ERAN_FROM),
                             "enabled": lifecycle.enabled()})
@@ -7155,6 +7240,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # ── Save notifications ──
+        if path == "/api/fit-survey":
+            # The in-app card (fitsurvey.py): an answer to the round due, or "Not now".
+            import fitsurvey
+            data = self.read_json() or {}
+            _rnd, _ans = str(data.get("round") or ""), str(data.get("answer") or "")
+            _fc = database.get_db()
+            try:
+                if _rnd != fitsurvey.due_round(_fc, user):
+                    self.send_json({"error": "No question due"}, 400)
+                    return
+                ok = fitsurvey.record(_fc, user_id, _rnd, _ans, "app", str(data.get("comment") or ""))
+            finally:
+                _fc.close()
+            if not ok:
+                self.send_json({"error": "Unknown answer"}, 400)
+                return
+            _track(user_id, "fit_survey_answered", {"round": _rnd, "answer": _ans, "source": "app"})
+            self.send_json({"success": True})
+            return
+
         if path == "/api/settings/marketing":
             # Offers and news by email (marketing.py): Settings' switch, logged with its date.
             data = self.read_json() or {}

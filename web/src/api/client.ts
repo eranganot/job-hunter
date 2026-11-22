@@ -112,6 +112,8 @@ export type Me = {
   email_verified?: boolean;
   // Said yes to offers and news by email (marketing.py); false = no.
   marketing_opt_in?: boolean;
+  // The product-fit question's round due now ("d14" | "d30"), or null (fitsurvey.py).
+  fit_survey_due?: string | null;
   cv_path?: string | null;
   cv_filename?: string | null;
   cv_uploaded_date?: string | null;
@@ -329,6 +331,8 @@ export const api = {
     request("/api/save-profile", "POST", body),
   saveSchedule: (body: Record<string, unknown>) =>
     request("/api/save-schedule", "POST", body),
+  answerFitSurvey: (round: string, answer: string, comment: string) =>
+    request<{ success: boolean }>("/api/fit-survey", "POST", { round, answer, comment }),
   saveMarketing: (on: boolean) =>
     request<{ success: boolean; marketing_opt_in: boolean }>("/api/settings/marketing", "POST", { on }),
   saveNotifications: (body: Record<string, unknown>) =>

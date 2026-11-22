@@ -211,6 +211,7 @@ _PRIVACY = f"""
   <li><b>Profile and preferences:</b> job titles, keywords, locations, salary expectations, work setup, notice period, sponsorship needs, links (such as LinkedIn), phone number, and the answers you save for application questions.</li>
   <li><b>Your decisions:</b> the jobs you approve, pass (with the reason, if you give one) or save for later.</li>
   <li><b>Notification settings:</b> the channels you choose. If you connect Telegram or WhatsApp (through your own Twilio account), we store the tokens you enter, encrypted.</li>
+  <li><b>Survey answers:</b> your answer to our occasional product question (for example, how you would feel without Job Hunter) and any comment you add.</li>
   <li><b>Offers and news:</b> whether you agreed to get them by email, with the date and the words you were shown, and any later change.</li>
   <li><b>Messages to support</b> sent from the app or by email.</li>
 </ul>
