@@ -50,6 +50,7 @@ POLICIES = {
     "support":    lambda: _policy("support", 5, 86400),    # 5 support messages / day / user
     "reset":      lambda: _policy("reset", 5, 3600),       # 5 reset requests / hour / IP and / address
     "verify":     lambda: _policy("verify", 5, 3600),      # 5 verification mails / hour / user
+    "device_pair": lambda: _policy("device_pair", 10, 3600),  # 10 pairing tries / hour / IP (B0)
 }
 
 

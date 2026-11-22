@@ -5769,6 +5769,56 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(out)
             return
 
+        # Plan B, test B0 (device.py): the owner's paired device reads its jobs and CV.
+        if path in ("/api/device/jobs", "/api/device/cv"):
+            import device as _dev
+            _du = _dev.user_for(self.headers)
+            if not _du:
+                self.send_json({"error": "Not paired"}, 401)
+                return
+            if path == "/api/device/jobs":
+                self.send_json({"jobs": _dev.jobs(_du["id"])})
+                return
+            try:
+                _jid = int(qs.get("job", [""])[0])
+            except ValueError:
+                _jid = None
+            _pc = database.get_db()
+            try:
+                _pr = _pc.execute("SELECT cv_path FROM user_profiles WHERE user_id=?", (_du["id"],)).fetchone()
+            finally:
+                _pc.close()
+            _cvp = _cv_for_apply(_du["id"], _jid, _cv_file(_du["id"], (_pr["cv_path"] or "") if _pr else ""))
+            if not _cvp or not os.path.exists(_cvp):
+                self.send_json({"error": "No CV uploaded yet."}, 404)
+                return
+            with open(_cvp, "rb") as _f:
+                _data = _f.read()
+            _name = os.path.basename(_cvp)
+            _ctype = ("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      if _name.lower().endswith(".docx") else "application/pdf")
+            self.send_response(200)
+            self.send_header("Content-Type", _ctype)
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % _name.replace('"', ""))
+            self.send_header("Content-Length", str(len(_data)))
+            self.send_header("Cache-Control", "private, no-store")
+            self.end_headers()
+            self.wfile.write(_data)
+            return
+        if path in ("/api/admin/device-code", "/api/admin/device-attempts"):
+            user = self.require_auth()
+            if not user:
+                return
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import device as _dev
+            if path == "/api/admin/device-code":
+                self.send_json({"code": _dev.new_code(user["id"]), "minutes": _dev.CODE_MINUTES})
+            else:
+                self.send_json({"attempts": _dev.attempts(user["id"])})
+            return
+
         if path == "/api/cv":
             user = self.require_auth()
             if not user:
@@ -6652,6 +6702,31 @@ class Handler(BaseHTTPRequestHandler):
             _save_marketing(int(_u), False, "email")
             self.send_html(_stop_page("Done", "You won't get offers and news any more. Noa keeps finding your "
                                       "picks in the app."))
+            return
+
+        # Plan B, test B0 (device.py): a device token in the Authorization header,
+        # never the cookie, so it sits before the cross-site lock.
+        if path == "/api/device/pair":
+            _w = ratelimit.check_and_record("device_pair", "ip:" + self.client_ip())
+            if _w:
+                self.send_json({"error": "Too many tries. Wait a few minutes."}, 429)
+                return
+            _d = self.read_json()
+            import device as _dev
+            _tok = _dev.pair(_d.get("code", ""), _d.get("label", ""))
+            if not _tok:
+                self.send_json({"error": "That code is wrong or has expired."}, 400)
+                return
+            self.send_json({"token": _tok})
+            return
+        if path == "/api/device/attempt":
+            import device as _dev
+            _du = _dev.user_for(self.headers)
+            if not _du:
+                self.send_json({"error": "Not paired"}, 401)
+                return
+            _res = _dev.record(_du["id"], self.read_json())
+            self.send_json(_res, 200 if _res.get("ok") else 400)
             return
 
         # SameSite=Lax already stops the browser sending the session cookie on a

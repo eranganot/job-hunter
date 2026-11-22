@@ -1,0 +1,94 @@
+"""
+tests/test_device_b0.py - Plan B, test B0 (device.py): the owner's own device
+sends the application; the server pairs it, hands it the prepared answers and
+the CV, and records what the site answered.
+
+Owner-only (the owner, 2026-11-22): codes come from an admin session, tokens work
+only for an admin account, and a stranger without a token gets nothing.
+"""
+import json
+
+from tests.test_routes import (Client, stack, users, _user_id, _new_job)  # noqa: F401
+
+
+def _pair(stack, users):
+    st, _l, body = users["admin"].get("/api/admin/device-code")
+    assert st == 200, body
+    code = json.loads(body)["code"]
+    anon = Client(stack["port"])
+    st, _l, body = anon.post_json("/api/device/pair", {"code": code, "label": "Chrome on the Mac"},
+                                  extra_headers={"Sec-Fetch-Site": "none"})
+    assert st == 200, body
+    return anon, {"Authorization": "Bearer " + json.loads(body)["token"]}
+
+
+def test_only_an_admin_gets_a_code_and_a_code_works_once(stack, users):
+    st, _l, _b = users["a"].get("/api/admin/device-code")
+    assert st == 403
+    anon, _auth = _pair(stack, users)
+    # The same code again: used up.
+    st, _l, body = users["admin"].get("/api/admin/device-code")
+    code = json.loads(body)["code"]
+    assert anon.post_json("/api/device/pair", {"code": code})[0] == 200
+    assert anon.post_json("/api/device/pair", {"code": code})[0] == 400
+    assert anon.post_json("/api/device/pair", {"code": "000000"})[0] == 400
+
+
+def test_without_a_token_the_device_api_answers_nothing(stack, users):
+    anon = Client(stack["port"])
+    assert anon.get("/api/device/jobs")[0] == 401
+    assert anon.get("/api/device/jobs", {"Authorization": "Bearer not-a-token"})[0] == 401
+    assert anon.post_json("/api/device/attempt", {"job_id": 1, "outcome": "sent"})[0] == 401
+
+
+def test_the_device_gets_the_prepared_answers_and_a_sent_attempt_moves_the_job(stack, users):
+    db = stack["db"]
+    uid = _user_id(db, "admin@example.test")
+    jid = _new_job(db, uid, title="Senior PM", company="Comeet Co")
+    conn = db.get_db()
+    conn.execute("UPDATE jobs SET status='approved', url=?, apply_status='manual_required', "
+                 "apply_failure_type='prepared', apply_prepared=? WHERE id=?",
+                 ("https://www.comeet.com/jobs/acme/1/b0-%d" % jid,
+                  json.dumps([{"label": "First name", "value": "Eran"}]), jid))
+    conn.commit()
+    conn.close()
+    anon, auth = _pair(stack, users)
+
+    st, _l, body = anon.get("/api/device/jobs", auth)
+    assert st == 200
+    job = next(j for j in json.loads(body)["jobs"] if j["id"] == jid)
+    assert job["system"] == "Comeet" and job["route"] == "prepare"
+    assert job["prepared"] == [{"label": "First name", "value": "Eran"}]
+
+    # A bot check: logged, the job stays where it is.
+    st, _l, _b = anon.post_json("/api/device/attempt", {"job_id": jid, "outcome": "blocked", "site_status": "423",
+                                                       "pressed_by": "extension", "device": "chrome"}, auth)
+    assert st == 200
+    # Sent: the job is applied, sent by the device, and the rates count it as sent.
+    st, _l, _b = anon.post_json("/api/device/attempt", {"job_id": jid, "outcome": "sent", "site_status": "200",
+                                                       "pressed_by": "extension", "device": "chrome"}, auth)
+    assert st == 200
+    conn = db.get_db()
+    row = conn.execute("SELECT status, applied_via, apply_status FROM jobs WHERE id=?", (jid,)).fetchone()
+    conn.close()
+    assert (row["status"], row["applied_via"], row["apply_status"]) == ("applied", "device", "submitted")
+
+    st, _l, body = users["admin"].get("/api/admin/device-attempts")
+    got = [a for a in json.loads(body)["attempts"] if a["job_id"] == jid]
+    assert [a["outcome"] for a in got] == ["sent", "blocked"]
+    assert got[1]["site_status"] == "423" and got[1]["system"] == "Comeet"
+
+
+def test_a_token_stops_working_when_the_account_is_no_longer_admin(stack, users):
+    db = stack["db"]
+    anon, auth = _pair(stack, users)
+    assert anon.get("/api/device/jobs", auth)[0] == 200
+    conn = db.get_db()
+    conn.execute("UPDATE users SET role='user' WHERE email='admin@example.test'")
+    conn.commit()
+    try:
+        assert anon.get("/api/device/jobs", auth)[0] == 401
+    finally:
+        conn.execute("UPDATE users SET role='admin' WHERE email='admin@example.test'")
+        conn.commit()
+        conn.close()

@@ -1265,6 +1265,12 @@ _SNAPSHOT_JS = r"""() => {
     value = el.tagName === 'SELECT' ? clean((el.options[el.selectedIndex] || {}).text) : clean(el.value);
     if (value && !/^select/i.test(value)) out.push({label: labelOf(el), value});
   }
+  // Comeet's answer dropdowns (no <select>: a.dropdown-toggle "Choose answer for <question>").
+  for (const a of document.querySelectorAll('a.dropdown-toggle[aria-haspopup]')) {
+    const label = clean((a.getAttribute('aria-label') || '').replace(/^Choose answer for /i, ''));
+    const value = clean(a.innerText);
+    if (label && value && !/^choose/i.test(value)) out.push({label, value});
+  }
   return out.slice(0, 40);
 }"""
 

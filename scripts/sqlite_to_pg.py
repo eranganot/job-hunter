@@ -88,6 +88,10 @@ TABLE_ORDER = [
     # m0046 (2026-11-17): the product-fit answers (fitsurvey.py). After users.
     "fit_survey",
     "billing_events",
+    # m0047 (2026-11-22): Plan B test B0 (device.py). No foreign keys; after users and jobs.
+    "device_codes",
+    "device_tokens",
+    "device_attempts",
 ]
 
 BATCH = 500

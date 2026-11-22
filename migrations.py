@@ -1274,6 +1274,39 @@ def m0046_fit_survey(conn):
     conn.commit()
 
 
+def m0047_device_spike(conn):
+    """Plan B, test B0 (2026-11-22): applications sent from the owner's own
+    Chrome (an extension) or phone (a WebView test app). device_codes = the
+    6-digit pairing codes (hashed, 10 minutes); device_tokens = one hashed token
+    per paired device; device_attempts = what each attempt met, for the go/no-go.
+    Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS device_codes (
+        code_hash  TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL,
+        expires_at TEXT NOT NULL)""", conn))
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS device_tokens (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL,
+        token_hash   TEXT NOT NULL UNIQUE,
+        label        TEXT,
+        created_at   TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked      INTEGER DEFAULT 0)""", conn))
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS device_attempts (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL,
+        job_id     INTEGER,
+        system     TEXT,
+        device     TEXT,
+        pressed_by TEXT,
+        outcome    TEXT,
+        site_status TEXT,
+        detail     TEXT,
+        url        TEXT,
+        created_at TEXT NOT NULL)""", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1321,6 +1354,7 @@ MIGRATIONS = [
     (44, "last_seen",                   m0044_last_seen),
     (45, "application_outcome",         m0045_application_outcome),
     (46, "fit_survey",                  m0046_fit_survey),
+    (47, "device_spike",                m0047_device_spike),
 ]
 
 
