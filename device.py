@@ -163,6 +163,104 @@ def record(user_id: int, data: dict) -> dict:
     return {"ok": True}
 
 
+LINK_SYSTEMS = ("Comeet", "Lever", "SmartRecruiters")
+
+
+def _page_meta(url: str) -> dict:
+    """Title / company / description from the job page itself (og: tags, then
+    <title>). Best effort: a page that refuses the server (SmartRecruiters'
+    DataDome) leaves these empty and the link's own path names the company."""
+    import html as _html
+    import re
+    import urllib.request
+    out = {"title": "", "company": "", "description": ""}
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (JobHunter link import)"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            page = r.read(600_000).decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001 - any failure leaves the fields empty
+        print(f"[device] page meta for {url[:80]}: {type(exc).__name__}")
+        return out
+
+    def meta(prop):
+        m = re.search(r'<meta[^>]+(?:property|name)=["\']%s["\'][^>]+content=["\']([^"\']*)' % re.escape(prop), page, re.I) \
+            or re.search(r'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']%s["\']' % re.escape(prop), page, re.I)
+        return _html.unescape(m.group(1)).strip() if m else ""
+    title = meta("og:title")
+    if not title:
+        m = re.search(r"<title[^>]*>(.*?)</title>", page, re.I | re.S)
+        title = _html.unescape(m.group(1)).strip() if m else ""
+    out["title"] = re.sub(r"\s+", " ", title)[:200]
+    out["company"] = meta("og:site_name")[:120]
+    out["description"] = meta("og:description")[:4000]
+    return out
+
+
+def _from_link(url: str) -> tuple:
+    """(company, title) read from the link and the page: Lever "Company - Title",
+    Comeet "Title at Company", SmartRecruiters' path."""
+    import re
+    from urllib.parse import urlparse, unquote
+    path = [unquote(p) for p in urlparse(url).path.split("/") if p]
+    slug_company = ""
+    if "lever.co" in url and path:
+        slug_company = path[0]
+    elif "smartrecruiters.com" in url and path:
+        slug_company = path[0]
+    elif "comeet." in url and len(path) >= 2 and path[0] == "jobs":
+        slug_company = path[1]
+    m = _page_meta(url)
+    title, company = m["title"], m["company"]
+    if "lever.co" in url and " - " in title:
+        company, title = title.split(" - ", 1)
+    elif " at " in title and not company:
+        title, company = title.rsplit(" at ", 1)
+    if not company or company.lower() in ("lever", "comeet", "smartrecruiters"):
+        company = re.sub(r"[-_]+", " ", slug_company).strip().title()
+    return (company or "Unknown company")[:120], (title or "Job from a link")[:200], m["description"]
+
+
+def add_by_link(user_id: int, url: str) -> dict:
+    """B0 (the owner, 2026-11-22): a Comeet / Lever / SmartRecruiters job he
+    wants to apply to, added to his queue as approved - his search had found
+    no Lever or SmartRecruiters jobs to test with. Admin-only like the rest."""
+    import apply_engine as ae
+    url = (url or "").strip()
+    if not url.lower().startswith("https://"):
+        return {"ok": False, "error": "Paste the job's https:// link."}
+    system = ae.ats_name(url)
+    if system not in LINK_SYSTEMS:
+        return {"ok": False, "error": "Only Comeet, Lever and SmartRecruiters links are part of this test (this one is %s)." % system}
+    conn = database.get_db()
+    try:
+        old = conn.execute("SELECT id, title, company, status FROM jobs WHERE user_id=? AND url=?", (user_id, url)).fetchone()
+        if old:
+            if old["status"] not in ("approved", "applied"):
+                conn.execute("UPDATE jobs SET status='approved' WHERE id=?", (old["id"],))
+                conn.commit()
+            return {"ok": True, "id": old["id"], "title": old["title"], "company": old["company"],
+                    "system": system, "existing": True}
+    finally:
+        conn.close()
+    company, title, desc = _from_link(url)
+    import textclean
+    j = textclean.clean_job({"title": title, "company": company, "description": desc})
+    title, company, desc = j.get("title") or title, j.get("company") or company, j.get("description") or ""
+    conn = database.get_db()
+    try:
+        conn.execute(
+            "INSERT INTO jobs (user_id, title, company, location, url, description, why_relevant, source, "
+            "found_date, status) VALUES (?,?,?,?,?,?,?,?,?, 'approved')",
+            (user_id, title, company, "", url, desc, "Added by link (B0 test)", "link",
+             datetime.now().isoformat()))
+        jid = conn.execute("SELECT id FROM jobs WHERE user_id=? AND url=?", (user_id, url)).fetchone()["id"]
+        conn.commit()
+    finally:
+        conn.close()
+    database.log_activity(user_id, "job_added", "Added by link: %s at %s" % (title, company))
+    return {"ok": True, "id": jid, "title": title, "company": company, "system": system, "existing": False}
+
+
 def attempts(user_id: int) -> list:
     conn = database.get_db()
     try:

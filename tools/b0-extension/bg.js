@@ -33,6 +33,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (r.ok && d.token) { await chrome.storage.local.set({token: d.token}); return reply({ok: true}); }
       return reply({ok: false, error: d.error || ('HTTP ' + r.status)});
     }
+    if (msg.type === 'add') {
+      const r = await api('/api/device/jobs/add', {method: 'POST', body: JSON.stringify({url: msg.url})});
+      if (r.status === 401) { await chrome.storage.local.remove('token'); return reply({error: 'unpaired'}); }
+      return reply(await r.json().catch(() => ({error: 'HTTP ' + r.status})));
+    }
     if (msg.type === 'jobs') {
       const r = await api('/api/device/jobs');
       if (r.status === 401) { await chrome.storage.local.remove('token'); return reply({error: 'unpaired'}); }

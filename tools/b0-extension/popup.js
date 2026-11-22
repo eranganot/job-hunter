@@ -38,6 +38,44 @@ async function show() {
   }
 }
 
+// A job page's own link: Lever's form lives at <posting>/apply, query strings are tracking.
+function jobLink(u) {
+  try {
+    const x = new URL(u);
+    if (!/comeet\.com$|lever\.co$|smartrecruiters\.com$/.test(x.hostname)) return '';
+    let p = x.pathname.replace(/\/(apply|thanks)\/?$/, '');
+    // SmartRecruiters' form page: oneclick-ui/company/<C>/publication/<id> -> the posting.
+    const sr = p.match(/oneclick-ui\/company\/([^/]+)\/publication\/([^/]+)/);
+    if (sr) p = '/' + sr[1] + '/' + sr[2];
+    return x.origin + p;
+  } catch (e) { return ''; }
+}
+
+async function add(url) {
+  $('addMsg').textContent = 'Adding…';
+  const r = await send({type: 'add', url});
+  if (r && r.ok) {
+    $('addMsg').textContent = (r.existing ? 'Already there: ' : 'Added: ') + r.company + ' · ' + r.title +
+      (r.system !== 'SmartRecruiters' ? '. Press Apply now on it in the app so Noa prepares the answers.' : '.');
+    show().then(() => chrome.storage.local.get('token').then(c => c.token && offerTab()));
+  } else $('addMsg').textContent = (r && r.error) || 'Could not add it.';
+}
+
+async function offerTab() {
+  const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+  const u = tab && tab.url ? jobLink(tab.url) : '';
+  if (!u) return;
+  $('addTab').hidden = false;
+  $('addTab').textContent = 'Add this page to Job Hunter';
+  $('addTab').onclick = () => add(u);
+}
+
+$('addLink').onclick = () => {
+  const u = jobLink($('link').value.trim());
+  if (!u) { $('addMsg').textContent = 'That is not a Comeet, Lever or SmartRecruiters job link.'; return; }
+  add(u);
+};
+
 $('pairBtn').onclick = async () => {
   $('pairMsg').textContent = '';
   const r = await send({type: 'pair', code: $('code').value.trim(), server: $('server').value.trim()});
@@ -45,4 +83,4 @@ $('pairBtn').onclick = async () => {
 };
 $('all').onchange = show;
 $('unpair').onclick = async e => { e.preventDefault(); await chrome.storage.local.remove('token'); show(); };
-show();
+show().then(() => chrome.storage.local.get('token').then(c => c.token && offerTab()));
