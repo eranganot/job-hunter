@@ -243,6 +243,9 @@ def add_by_link(user_id: int, url: str) -> dict:
     finally:
         conn.close()
     company, title, desc = _from_link(url)
+    import textclean
+    j = textclean.clean_job({"title": title, "company": company, "description": desc})
+    title, company, desc = j.get("title") or title, j.get("company") or company, j.get("description") or ""
     conn = database.get_db()
     try:
         conn.execute(
