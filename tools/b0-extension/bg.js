@@ -49,7 +49,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     }
     const t = await tasks();
     const task = tabId != null ? t[tabId] : null;
-    if (msg.type === 'task?') return reply(task && !task.reported ? task : null);
+    if (msg.type === 'task?') {
+      if (!task || task.reported) return reply(null);
+      const copy = Object.assign({}, task);
+      // A new page in the tab before Submit (a reload, Comeet opening its form,
+      // a redirect) fills again: the frame that filled the old page is gone.
+      if (sender.frameId === 0 && !task.submittedAt && task.claimed) { task.claimed = false; await saveTasks(t); }
+      return reply(copy);
+    }
     if (!task) return reply(null);
     if (msg.type === 'claim') {                       // the first frame with a form does the work
       if (task.claimed) return reply(false);
@@ -58,7 +65,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.type === 'cv') {
       const r = await api('/api/device/cv?job=' + encodeURIComponent(msg.jobId));
       if (!r.ok) return reply(null);
-      const name = ((r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'cv.pdf';
+      const cd = r.headers.get('Content-Disposition') || '';
+      const star = (cd.match(/filename\*=UTF-8''([^;]+)/i) || [])[1];
+      const name = star ? decodeURIComponent(star) : ((cd.match(/filename="([^"]+)"/) || [])[1] || 'CV.pdf');
       return reply({b64: b64(await r.arrayBuffer()), name, mime: r.headers.get('Content-Type') || 'application/pdf'});
     }
     if (msg.type === 'submitted') {

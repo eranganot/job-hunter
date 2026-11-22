@@ -5794,12 +5794,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with open(_cvp, "rb") as _f:
                 _data = _f.read()
-            _name = os.path.basename(_cvp)
+            import apply_engine as _ae
+            _name = _ae.cv_display_name(_du.get("name") or "", os.path.splitext(_cvp)[1].lower() or ".pdf")
             _ctype = ("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                       if _name.lower().endswith(".docx") else "application/pdf")
             self.send_response(200)
             self.send_header("Content-Type", _ctype)
-            self.send_header("Content-Disposition", 'attachment; filename="%s"' % _name.replace('"', ""))
+            from urllib.parse import quote as _q
+            _ascii = _name.encode("ascii", "ignore").decode().replace('"', "").strip() or "CV.pdf"
+            # A Hebrew name cannot go in a plain header (latin-1): RFC 5987 filename* carries it.
+            self.send_header("Content-Disposition", "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+                             % (_ascii, _q(_name)))
             self.send_header("Content-Length", str(len(_data)))
             self.send_header("Cache-Control", "private, no-store")
             self.end_headers()

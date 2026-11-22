@@ -52,8 +52,11 @@
   // ── The site's answer ──
   window.addEventListener('message', e => {
     const d = e.data;
-    if (!task || e.source !== window || !d || d.__jh !== 'net' || !submittedAt) return;
+    if (!task || e.source !== window || !d || d.__jh !== 'net') return;
     if (SYSTEM === 'Comeet' && /careers-api/.test(d.url) && /apply/.test(d.url)) {
+      // The click listener on Submit can miss (the page may redraw its button):
+      // Comeet's own apply call is the proof that Submit was pressed.
+      if (!submittedAt) { submittedAt = Date.now(); pressedBy = 'user'; }
       if (d.status >= 200 && d.status < 300) report('sent', d.status, 'Comeet accepted the application', {confirmed: true});
       else if (d.status === 423) report('blocked', 423, 'Comeet refused it (423)');
       else report('unknown', d.status, 'Comeet answered ' + d.status);
@@ -74,7 +77,11 @@
     // The page can load before the popup's task is stored: ask a few times.
     for (let i = 0; i < 10 && !task; i++) { task = await ask({type: 'task?'}); if (!task) await wait(500); }
     if (!task) return;
-    // A page reached after Submit (Lever's /thanks, a thank-you page).
+    // A page reached after Submit (Lever's /thanks, a thank-you page) - also when
+    // the click on Submit was not seen, as long as this tab already filled a form.
+    if (TOP && !task.submittedAt && task.claimed && (/\/thanks/.test(location.pathname) || JHFill.confirmed())) {
+      task.submittedAt = Date.now(); task.pressedBy = 'user';
+    }
     if (task.submittedAt && TOP) {
       submittedAt = task.submittedAt; pressedBy = task.pressedBy || 'user';
       await wait(1500);
@@ -89,6 +96,14 @@
     if (TOP && SYSTEM === 'SmartRecruiters' && !/oneclick-ui/.test(location.href)) {
       const a = document.querySelector('a[href*="oneclick-ui"]');
       if (a) { location.href = a.href; return; }
+    }
+    // Comeet: the form frame appears only after "APPLY FOR THIS JOB" (the owner, 2026-11-22).
+    if (TOP && SYSTEM === 'Comeet' && !document.querySelector('iframe[src*="comeet.co"][src*="apply"]')) {
+      for (let i = 0; i < 10; i++) {
+        const b = [...document.querySelectorAll('button, a')].find(e => /apply for this job|^apply now$|^apply$/i.test((e.innerText || '').trim()));
+        if (b) { b.click(); break; }
+        await wait(500);
+      }
     }
     // Wait for a form in THIS frame (Comeet's sits in a comeet.co frame).
     for (let i = 0; i < 30 && !JHFill.hasForm(); i++) {

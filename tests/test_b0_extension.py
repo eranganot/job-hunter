@@ -40,7 +40,7 @@ APPLY = """<html><body><form method="post" action="" enctype="multipart/form-dat
 THANKS = "<html><body><h3>Thank you for applying</h3></body></html>"
 
 
-def _run(stack, users, tmp_path, job_url, pattern, handler, prepared):
+def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", as_eran=None):
     """Pair the extension, open the job in run B, return (attempt row, job row)."""
     db = stack["db"]
     uid = _user_id(db, "admin@example.test")
@@ -85,7 +85,7 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared):
             popup.fill("#code", code)
             popup.click("#pairBtn")
             popup.wait_for_selector("#main:not([hidden])")
-            popup.check("input[name=mode][value=B]")
+            popup.check("input[name=mode][value=%s]" % mode)
             popup.wait_for_selector("text=Acme B0")
             popup.click(".job button")
             # A tab the extension opens is navigated by the browser itself, which
@@ -102,6 +102,8 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared):
             tab.goto(job_url)
             if not prepared:
                 tab.click("button:has-text('Submit for me')", timeout=30000)
+            if as_eran:
+                as_eran(tab)
             deadline = time.time() + 45
             row = None
             while time.time() < deadline and not row:
@@ -137,14 +139,17 @@ def test_b0_extension_fills_submits_and_reports_sent(stack, users, tmp_path):
     assert (row["outcome"], row["pressed_by"]) == ("sent", "extension"), row
     body = posts[0].decode("latin-1")
     assert "Dana Levi" in body and "dana@example.test" in body
-    assert 'filename="cv.pdf"' in body and "B0 test CV" in body
+    import datetime
+    assert ' CV %d.pdf"' % datetime.date.today().year in body and "B0 test CV" in body   # never "cv.pdf"
+    assert 'filename="cv.pdf"' not in body
     assert 'name="auth"' in body and "Yes" in body
     assert (job["status"], job["applied_via"]) == ("applied", "device")
 
 
 COMEET_JOB = "https://www.comeet.com/jobs/acme-b0/22.001/senior-pm/AB.123"
-COMEET_PAGE = """<html><body><h2>Senior PM</h2>
-<iframe src="https://www.comeet.co/jobs/acme-b0/22.001/apply?token=t" style="width:600px;height:500px"></iframe></body></html>"""
+# Like comeet.com: the application frame appears only after "APPLY FOR THIS JOB" (the owner, 2026-11-22).
+COMEET_PAGE = """<html><body><h2>Senior PM</h2><div id="slot"></div>
+<button onclick="document.getElementById('slot').innerHTML = '<iframe src=&quot;https://www.comeet.co/jobs/acme-b0/22.001/apply?token=t&quot; style=&quot;width:600px;height:500px&quot;></iframe>'">APPLY FOR THIS JOB</button></body></html>"""
 COMEET_FORM = """<html><body><form onsubmit="return false">
 <label for="fn">First name</label><input id="fn" name="firstName" type="text">
 <label for="cvf">Resume</label><input id="cvf" name="cv" type="file">
@@ -182,3 +187,32 @@ def test_b0_run_b_without_prepared_answers_submits_when_eran_asks(stack, users, 
 
     row, job = _run(stack, users, tmp_path, JOB.replace("1111", "2222"), "https://jobs.lever.co/**", lever, [])
     assert (row["outcome"], row["pressed_by"]) == ("sent", "extension"), row
+
+
+def test_b0_run_a_comeet_submit_eran_presses_is_reported_from_comeets_answer(stack, users, tmp_path):
+    """Run A: Eran presses Submit. The click listener can miss it (a page may
+    redraw its button), so Comeet's own apply call is what proves the press:
+    the 2xx is reported as sent, pressed by the user."""
+    def comeet(route, request):
+        u = request.url
+        if "careers-api" in u:
+            return route.fulfill(status=200, content_type="application/json", body='{"status":200}')
+        if "comeet.co/" in u:
+            return route.fulfill(status=200, content_type="text/html", body=COMEET_FORM)
+        route.fulfill(status=200, content_type="text/html", body=COMEET_PAGE)
+
+    def eran_presses(tab):
+        for _ in range(60):
+            f = next((f for f in tab.frames if "://www.comeet.co/" in f.url), None)
+            v = f.evaluate("document.querySelector('#fn') && document.querySelector('#fn').value") if f else None
+            if v == "Dana":
+                f.evaluate("fetch('/careers-api/2.0/company/x/positions/y/apply', {method: 'POST', body: '{}'})")
+                return
+            tab.wait_for_timeout(500)
+        raise AssertionError("the form was never filled: %s" % [(f.url[:80], f.evaluate("document.body ? document.body.innerText.slice(0,200) : ''")) for f in tab.frames])
+
+    row, job = _run(stack, users, tmp_path, COMEET_JOB.replace("AB.123", "AB.456"),
+                    ["https://www.comeet.com/**", "https://www.comeet.co/**"], comeet,
+                    [{"label": "First name", "value": "Dana"}], mode="A", as_eran=eran_presses)
+    assert (row["outcome"], row["site_status"], row["pressed_by"]) == ("sent", "200", "user"), row
+    assert job["applied_via"] == "device"

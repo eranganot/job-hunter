@@ -92,3 +92,20 @@ def test_a_token_stops_working_when_the_account_is_no_longer_admin(stack, users)
         conn.execute("UPDATE users SET role='admin' WHERE email='admin@example.test'")
         conn.commit()
         conn.close()
+
+
+def test_the_cv_goes_out_named_after_the_applicant_never_cv_pdf(tmp_path):
+    """The owner, 2026-11-22: the CV arrived at DriveNets as "cv.pdf"; it is
+    "Eran Ganot CV 2026" - for the server engine and the device alike."""
+    import datetime
+    import apply_engine as ae
+    year = datetime.date.today().year
+    assert ae.cv_display_name("Eran Ganot") == "Eran Ganot CV %d.pdf" % year
+    assert ae.cv_display_name("", ".docx") == "CV %d.docx" % year
+    src = tmp_path / "cv.pdf"
+    src.write_bytes(b"%PDF-1.4 x")
+    out = ae._named_cv(str(src), {"full_name": "Eran Ganot"})
+    assert out.endswith("/Eran Ganot CV %d.pdf" % year) and open(out, "rb").read() == b"%PDF-1.4 x"
+    assert src.exists()
+    out2 = ae._named_cv(str(src), {"first_name": "Eran", "last_name": "Ganot"})
+    assert out2.endswith("Eran Ganot CV %d.pdf" % year)
