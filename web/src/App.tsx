@@ -2925,6 +2925,59 @@ function postingPlan(families: any[]) {
   return rows;
 }
 
+/** New roles a day per role family (probes.py, GTM row 17g): how many Noa found, and how many
+ *  could go in a Noa's picks post (a company name and the employer's own page). Three probe
+ *  accounts search daily for QA, design and sales / customer success until Day 1. */
+function SupplyCard() {
+  const [res, setRes] = useState<any>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.adminSupply(14).then(setRes).catch((e: any) => setErr(e?.message || "Failed")); }, []);
+  if (err) return <p className="text-xs text-red-300">{err}</p>;
+  if (!res) return <p className="text-sm text-gray-400">Loading new roles per family…</p>;
+  const week = res.days.slice(0, 7);
+  const shown = week;
+  const total = (k: string, f: "found" | "postable") => week.reduce((n: number, d: any) => n + (d.families[k]?.[f] || 0), 0);
+  const short = (d: string) => new Date(d + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
+  const label: Record<string, string> = { qa: "QA", design: "design", customer: "sales and customer success" };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:col-span-2">
+      <h3 className="font-semibold text-white mb-1">New roles per family</h3>
+      <p className="text-xs text-gray-400 mb-3">Roles Noa found each day, every account. The big number can go in a Noa's picks post (company name, employer's own page); the small one is all she found. A family needs {res.min_roles} in a week for a post.</p>
+      <div className="overflow-x-auto">
+        <table className="text-xs w-full">
+          <thead><tr className="text-gray-400">
+            <th className="text-left font-medium py-1 pr-3">Family</th>
+            {shown.map((d: any) => <th key={d.day} className="text-right font-medium py-1 px-1.5 whitespace-nowrap">{short(d.day)}</th>)}
+            <th className="text-right font-medium py-1 pl-3">7 days</th>
+          </tr></thead>
+          <tbody>
+            {res.families.map((f: any) => {
+              const t = total(f.key, "postable");
+              return (
+                <tr key={f.key} className="border-t border-gray-700/60">
+                  <td className="py-1.5 pr-3 text-gray-200 whitespace-nowrap">{f.label}</td>
+                  {shown.map((d: any) => {
+                    const c = d.families[f.key] || { found: 0, postable: 0 };
+                    return <td key={d.day} className="py-1.5 px-1.5 text-right tabular-nums"><span className="text-white">{c.postable}</span><span className="text-gray-400"> /{c.found}</span></td>;
+                  })}
+                  <td className={`py-1.5 pl-3 text-right tabular-nums font-semibold ${t >= res.min_roles ? "text-green-400" : "text-amber-300"}`}>{t}<span className="text-gray-400 font-normal"> /{total(f.key, "found")}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 text-xs text-gray-400 space-y-1">
+        {res.probes.map((p: any) => (
+          <p key={p.key}>Probe for {label[p.key] || p.key}: {!p.exists ? "not created yet (it is created within the hour)" : p.active
+            ? `searches daily at ${String(res.search_hour).padStart(2, "0")}:00 until ${res.until}; last search ${p.last_search ? String(p.last_search).replace("T", " ").slice(0, 16) : "not yet"}; ${p.jobs} roles kept`
+            : `off since ${res.until}; ${p.jobs} roles kept`}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** "Noa's picks" (noaspicks.py): this week's new roles per role family as post text and a
  *  post image. Two voices (the page speaks as Noa; your own profile speaks about her), Hebrew
  *  for Facebook and English for LinkedIn. Real openings only - found this week, with a company
@@ -3213,6 +3266,7 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
 
       {section === "content" && (<>
           <h3 className="font-semibold text-white -mb-3">Posts</h3>
+          <SupplyCard />
           <NoasPicksCard />
           <h3 className="font-semibold text-white -mb-3">Emails</h3>
           <LifecycleEmailsCard />

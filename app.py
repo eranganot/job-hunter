@@ -248,8 +248,8 @@ def funnel_report(days: int = 30) -> dict:
         rows = c.execute(
             "SELECT f.step, COUNT(*) AS n FROM funnel_events f "
             "WHERE f.user_id IN (SELECT user_id FROM funnel_events WHERE step='signup' AND created_at >= ?) "
-            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email)=? OR COALESCE(is_active, 1)=0) "
-            "GROUP BY f.step", (since, testaccount.TEST_EMAIL)).fetchall()
+            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email) LIKE ? OR COALESCE(is_active, 1)=0) "
+            "GROUP BY f.step", (since, "%" + testaccount.TEST_DOMAIN)).fetchall()
     finally:
         c.close()
     got = {r["step"]: r["n"] for r in rows}
@@ -1731,6 +1731,22 @@ def _run_followups(now=None) -> dict | None:
         return None
 
 
+def _run_probes(now=None) -> dict | None:
+    """Keep the three daily-search probe accounts (probes.py, GTM row 17g): created and on
+    until JH_PROBES_UNTIL, switched off from it. Scheduler-lock holder only. Never raises."""
+    import probes
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return None
+        out = probes.ensure(database.get_db, auth.create_user, auth.mark_email_verified,
+                            israel_now(now).date())
+        if out["created"]:
+            print("[probes] created %s; searching daily: %s" % (", ".join(out["created"]), out["active"]))
+        return out
+    except Exception as exc:
+        print("[probes] ERROR %s" % exc)
+
+
 def _run_fit_survey(now=None) -> dict | None:
     """The product-fit question by email on day 14 and day 30 (fitsurvey.py), from
     Eran. Scheduler-lock holder only; off with the lifecycle emails. Never raises."""
@@ -1815,6 +1831,8 @@ def file_watcher():
             _run_followups()
         if _tick % 30 == 17:  # every ~30 minutes: the product-fit question on day 14 / 30 (fitsurvey.py)
             _run_fit_survey()
+        if _tick % 60 == 3:  # ~hourly: the daily-search probe accounts (probes.py)
+            _run_probes()
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -5519,7 +5537,7 @@ class Handler(BaseHTTPRequestHandler):
                 days = 30
             _c = database.get_db()
             try:
-                _t = _c.execute("SELECT id FROM users WHERE LOWER(email)=?", (testaccount.TEST_EMAIL,)).fetchall()
+                _t = _c.execute("SELECT id FROM users WHERE LOWER(email) LIKE ?", ("%" + testaccount.TEST_DOMAIN,)).fetchall()
                 out = costreport.report(_c, days, test_user_ids=[r["id"] for r in _t],
                                         paid_sources=paidpool.status(_c))
             finally:
@@ -5965,6 +5983,24 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     _shift = 0
                 self.send_json(noaspicks.report(conn, MOBILE_URL, days, shift=_shift))
+            finally:
+                conn.close()
+            return
+
+        # New roles a day per role family, and the probe accounts (probes.py, GTM row 17g).
+        if path == "/api/admin/supply":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                days = max(1, min(30, int(qs.get("days", ["14"])[0])))
+            except ValueError:
+                days = 14
+            import probes
+            conn = database.get_db()
+            try:
+                self.send_json(probes.supply(conn, days))
             finally:
                 conn.close()
             return

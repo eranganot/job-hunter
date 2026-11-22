@@ -356,6 +356,12 @@ export const api = {
     too_few: { key: string; count: number }[];
     skipped: Record<string, number>;
   }>(`/api/admin/noas-picks?days=${days}&shift=${shift}`),
+  adminSupply: (days = 14) => request<{
+    days: { day: string; families: Record<string, { found: number; postable: number }> }[];
+    families: { key: string; label: string }[];
+    probes: { key: string; family: string; email: string; titles: string[]; exists: boolean; active?: boolean; last_search?: string | null; jobs?: number }[];
+    until: string; search_hour: number; min_roles: number;
+  }>(`/api/admin/supply?days=${days}`),
   adminKpis: () => request<any>(`/api/admin/kpis`),
   adminSources: (days = 30) => request<any>(`/api/admin/sources?days=${days}`),
   adminRunningCost: (days = 30) => request<any>(`/api/admin/running-cost?days=${days}`),
