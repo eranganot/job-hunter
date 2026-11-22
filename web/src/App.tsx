@@ -997,6 +997,10 @@ export const AUTO_ROUTES = new Set(["auto", "site"]);
 function RouteBadge({ job }: { job: UiJob }) {
   const r = job.applyRoute;
   const pill = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border";
+  // 2026-11-22 (option C): the engine presses Submit only on the systems that
+  // have earned it (Greenhouse); everywhere else it fills the form and you send it.
+  if (r === "prepare") return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
+    title="Noa fills in the form and prepares every answer; you open the job and press Submit."><Zap className="w-3 h-3" />Prepared · you press Submit</span>;
   // Lever shows the app's browser a human-check puzzle (Houzz, Cloudinary - 2026-11-09):
   // the app fills everything and you press Submit from the ready-to-paste sheet.
   if (r === "auto" && /jobs\.lever\.co/i.test(job.url || "")) return <span className={`${pill} bg-sky-900/30 border-sky-800 text-sky-300`}
@@ -1090,6 +1094,7 @@ export function manualReason(job: UiJob): string {
     case "form_validation": return "The form refused something the app filled in, so nothing was sent. Open the link and apply there.";
     case "unconfirmed": return "It may have been sent: the app pressed Submit but couldn't confirm it. Check before applying again.";
     case "timeout": return "The site was too slow to load. Retry later, or apply yourself.";
+    case "prepared": return "Noa filled this in but doesn't press Submit on this site yet, so nothing was sent. Open the job, paste the answers and press Submit.";
   }
   return "The app couldn't find an application form it can fill at this link (for example, the posting tells you to apply somewhere else). Open the job and apply there.";
 }
@@ -2315,7 +2320,7 @@ function ApplyRates() {
   return (
     <div className="bg-gray-800 rounded-xl border border-gray-700 p-4">
       <h3 className="font-semibold text-white mb-1">Apply results by system</h3>
-      <p className="text-xs text-gray-400 mb-2">Every job the engine tried, by where it applies. Success = sent / (sent + failed).</p>
+      <p className="text-xs text-gray-400 mb-2">Every job the engine tried, by where it applies. Success = sent / (sent + failed + blocked). Jobs you marked applied yourself are not counted as sent.</p>
       <button onClick={load} disabled={busy}
         className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50">{busy ? "Loading..." : rep ? "Refresh" : "Show results"}</button>
       {rep && (
@@ -2326,7 +2331,7 @@ function ApplyRates() {
               <thead><tr className="text-gray-400 text-left">
                 <th className="font-medium py-1 pr-2">System</th><th className="font-medium py-1 px-1 text-right">Tried</th>
                 <th className="font-medium py-1 px-1 text-right">Sent</th><th className="font-medium py-1 px-1 text-right">Held</th>
-                <th className="font-medium py-1 px-1 text-right">Manual</th><th className="font-medium py-1 px-1 text-right">Failed</th>
+                <th className="font-medium py-1 px-1 text-right">Manual</th><th className="font-medium py-1 px-1 text-right">Blocked</th><th className="font-medium py-1 px-1 text-right">Failed</th>
                 <th className="font-medium py-1 pl-1 text-right">Success</th>
               </tr></thead>
               <tbody>
@@ -2337,6 +2342,7 @@ function ApplyRates() {
                     <td className="py-1 px-1 text-right text-green-300">{r.sent}</td>
                     <td className="py-1 px-1 text-right text-amber-300">{r.held}</td>
                     <td className="py-1 px-1 text-right text-gray-300">{r.manual}</td>
+                    <td className="py-1 px-1 text-right text-orange-300">{r.blocked ?? 0}</td>
                     <td className="py-1 px-1 text-right text-red-300">{r.failed}</td>
                     <td className="py-1 pl-1 text-right text-gray-100">{r.success_rate == null ? "-" : `${r.success_rate}%`}{r.small_sample ? <span className="text-gray-400"> *</span> : null}</td>
                   </tr>
@@ -2344,7 +2350,7 @@ function ApplyRates() {
               </tbody>
             </table>
           ) : <p className="text-xs text-gray-400">No engine attempts yet.</p>}
-          <p className="text-[11px] text-gray-400 mt-2">* fewer than 5 sent or failed: too few to judge. Held = waiting on your answers or a security code; manual = job boards and Workday, by design.</p>
+          <p className="text-[11px] text-gray-400 mt-2">* fewer than 5 sent, failed or blocked: too few to judge. Held = waiting on your answers or a security code; manual = job boards and Workday, by design; blocked = the site's bot check refused the app's browser.</p>
         </div>
       )}
       {err && <p className="text-xs text-red-300 mt-2">{err}</p>}

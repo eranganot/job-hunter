@@ -50,15 +50,23 @@ def test_for_all_opens_it_and_the_master_switch_still_rules(app_mod, monkeypatch
     assert app_mod._engine_on_for(admin) is False
 
 
-def test_apply_route_tells_auto_from_manual():
+def test_apply_route_tells_auto_from_manual(monkeypatch):
     import apply_engine as ae
+    monkeypatch.delenv("APPLY_AUTO_SUBMIT_SYSTEMS", raising=False)
     assert ae.apply_route("https://boards.greenhouse.io/acme/jobs/1") == "auto"
     assert ae.apply_route("https://acme.com/careers/?gh_jid=12") == "auto"
-    assert ae.apply_route("https://jobs.lever.co/acme/abc") == "auto"
+    # 2026-11-22: the engine submits on Greenhouse only; elsewhere it prepares.
+    assert ae.apply_route("https://jobs.lever.co/acme/abc") == "prepare"
+    assert ae.apply_route("https://jobs.ashbyhq.com/acme/abc") == "prepare"
+    assert ae.apply_route("https://www.comeet.com/jobs/acme/1") == "prepare"
     assert ae.apply_route("https://www.linkedin.com/jobs/view/123") == "board"
     assert ae.apply_route("https://acme.wd3.myworkdayjobs.com/en-US/x/job/1") == "account"
-    assert ae.apply_route("https://careers.acme.com/jobs/1") == "site"
+    assert ae.apply_route("https://careers.acme.com/jobs/1") == "prepare"
     assert ae.apply_route("") == "none"
+    # Widened without a deploy.
+    monkeypatch.setenv("APPLY_AUTO_SUBMIT_SYSTEMS", "Greenhouse, Lever, Company site")
+    assert ae.apply_route("https://jobs.lever.co/acme/abc") == "auto"
+    assert ae.apply_route("https://careers.acme.com/jobs/1") == "site"
 
 
 def test_apply_selected_is_admins_only_and_runs_only_the_users_approved_jobs(stack, users, monkeypatch):
