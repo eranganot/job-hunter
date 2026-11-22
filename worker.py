@@ -9,7 +9,7 @@ what keeps it free of a circular import with `app.py`, where the handlers live.
 
 What changes for a user: pressing "Run search" no longer starts a thread inside
 the request. It writes a row. The work happens on the worker, one run per user
-at a time, and it survives a redeploy because an unfinished row is still there
+at a time (several users at once since 2026-11-22, JH_WORKER_THREADS), and it survives a redeploy because an unfinished row is still there
 to be claimed afterwards.
 
 The heartbeat runs on its own timer thread while a handler executes, because a
@@ -35,12 +35,35 @@ print = _log.make_print(__name__)  # noqa: A001 - see log.py
 HANDLERS = {}
 
 POLL_SECONDS = 3.0
+
+# How many runs this process works on at once (2026-11-22). One thread ran every
+# user's 11:00 search back to back: measured on production, the fifth of five
+# started at 11:38 and finished at 11:50, and each extra user adds ~10 minutes
+# for everyone behind them. JH_WORKER_THREADS=1 restores the old single lane.
+def _threads_wanted():
+    try:
+        return max(1, min(8, int(os.environ.get("JH_WORKER_THREADS", "3"))))
+    except ValueError:
+        return 3
+
+# Kinds that may only run one at a time in this process, whatever the thread
+# count: an apply run drives a real Chromium, and three of them at once is a
+# memory risk on one Railway box.
+SINGLE_LANE_KINDS = {"apply"}
 HEARTBEAT_SECONDS = 30.0
 SWEEP_EVERY_SECONDS = 120.0
 
-_thread = None
+_thread = None          # the first worker thread (kept for callers that read it)
+_threads = []
 _stop = threading.Event()
 _last_sweep = 0.0
+# claim() checks "this user has nothing RUNNING" and then takes the row; two
+# threads of this process doing that at once could both pass the check for the
+# same user. Claims are therefore serialised here (they are one short SELECT +
+# UPDATE); the runs themselves are not.
+_CLAIM_LOCK = threading.Lock()
+_RUNNING_KINDS = {}     # kind -> runs of it in flight in this process
+_SWEEP_LOCK = threading.Lock()
 
 
 def register(kind, handler):
@@ -68,9 +91,23 @@ def run_once():
     A handler raising is a failed run, never a dead worker: the traceback is
     printed, the failure recorded, and the loop continues.
     """
-    run = jobqueue.claim(kinds=list(HANDLERS) or None)
-    if not run:
-        return False
+    with _CLAIM_LOCK:
+        kinds = [k for k in HANDLERS
+                 if not (k in SINGLE_LANE_KINDS and _RUNNING_KINDS.get(k, 0) >= 1)]
+        if HANDLERS and not kinds:
+            return False
+        run = jobqueue.claim(kinds=kinds or None)
+        if not run:
+            return False
+        _RUNNING_KINDS[run["kind"]] = _RUNNING_KINDS.get(run["kind"], 0) + 1
+    try:
+        return _run_claimed(run)
+    finally:
+        with _CLAIM_LOCK:
+            _RUNNING_KINDS[run["kind"]] = max(0, _RUNNING_KINDS.get(run["kind"], 1) - 1)
+
+
+def _run_claimed(run):
 
     handler = HANDLERS.get(run["kind"])
     if handler is None:
@@ -100,10 +137,11 @@ def run_once():
 def _maybe_sweep():
     """Return work abandoned by a dead worker. Cheap, so run it on a timer."""
     global _last_sweep
-    now = time.time()
-    if now - _last_sweep < SWEEP_EVERY_SECONDS:
-        return
-    _last_sweep = now
+    with _SWEEP_LOCK:                      # several worker threads share one timer
+        now = time.time()
+        if now - _last_sweep < SWEEP_EVERY_SECONDS:
+            return
+        _last_sweep = now
     try:
         out = jobqueue.requeue_stuck()
         if out["requeued"] or out["abandoned"]:
@@ -174,14 +212,20 @@ def adopt_orphans():
 
 
 def start_background():
-    """Start the worker thread. Idempotent."""
-    global _thread
+    """Start the worker threads (JH_WORKER_THREADS, default 3). Idempotent."""
+    global _thread, _threads
     if _thread and _thread.is_alive():
         return _thread
     adopt_orphans()
     _stop.clear()
-    _thread = threading.Thread(target=loop, name="jobworker", daemon=True)
-    _thread.start()
+    n = _threads_wanted()
+    _threads = [threading.Thread(target=loop, name="jobworker-%d" % i, daemon=True)
+                for i in range(n)]
+    for t in _threads:
+        t.start()
+    _thread = _threads[0]
+    print("[worker] %d worker thread(s); single-lane kinds: %s"
+          % (n, ", ".join(sorted(SINGLE_LANE_KINDS))))
     return _thread
 
 
@@ -196,7 +240,8 @@ def health():
     the app is already acting on rather than a second opinion about it.
     """
     alive = bool(_thread and _thread.is_alive())
-    out = {"running": alive, "handlers": sorted(HANDLERS)}
+    out = {"running": alive, "handlers": sorted(HANDLERS),
+           "threads": sum(1 for t in _threads if t.is_alive()) if _threads else int(alive)}
     try:
         d = jobqueue.depth()
     except Exception as exc:
@@ -235,5 +280,6 @@ def health():
 def stop_background(timeout=5.0):
     """For tests and a clean shutdown."""
     _stop.set()
-    if _thread and _thread.is_alive():
-        _thread.join(timeout)
+    for t in (_threads or ([_thread] if _thread else [])):
+        if t and t.is_alive():
+            t.join(timeout)
