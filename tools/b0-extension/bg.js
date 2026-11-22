@@ -67,6 +67,18 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (task.claimed) return reply(false);
       task.claimed = true; await saveTasks(t); return reply(true);
     }
+    if (msg.type === 'cover') {
+      const r = await api('/api/device/jobs/' + encodeURIComponent(msg.jobId) + '/cover-letter');
+      return reply(await r.json().catch(() => ({error: 'HTTP ' + r.status})));
+    }
+    if (msg.type === 'coverpdf') {
+      const r = await api('/api/device/jobs/' + encodeURIComponent(msg.jobId) + '/cover-letter?format=pdf');
+      if (!r.ok) return reply(null);
+      const cd = r.headers.get('Content-Disposition') || '';
+      const star = (cd.match(/filename\*=UTF-8''([^;]+)/i) || [])[1];
+      const name = star ? decodeURIComponent(star) : ((cd.match(/filename="([^"]+)"/) || [])[1] || 'Cover Letter.pdf');
+      return reply({b64: b64(await r.arrayBuffer()), name, mime: 'application/pdf'});
+    }
     if (msg.type === 'cv') {
       const r = await api('/api/device/cv?job=' + encodeURIComponent(msg.jobId));
       if (!r.ok) return reply(null);

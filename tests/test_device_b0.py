@@ -143,3 +143,55 @@ def test_a_job_added_by_link_lands_approved_named_from_its_page(stack, users, mo
     st, _l, body = anon.post_json("/api/device/jobs/add", {"url": "https://www.linkedin.com/jobs/view/1"}, auth)
     assert st == 400 and "LinkedIn" in json.loads(body)["error"]
     assert anon.post_json("/api/device/jobs/add", {"url": "https://jobs.lever.co/x/1"})[0] == 401
+
+
+def test_the_device_gets_the_cover_letter_as_text_and_as_a_named_pdf(stack, users, monkeypatch):
+    """The owner, 2026-11-22: the letter is written if the job has none (the
+    existing writer), saved on the job, and served as a PDF named after him."""
+    import ai_analysis
+    calls = []
+
+    def writer(job, profile, key="", user_id=None, cv_text="", name="", llm=None):
+        calls.append(job["id"])
+        return {"letter": "Dear Team,\n\nI want this role because it is mine.\n\nBest,\nAdmin", "notes": []}
+    monkeypatch.setattr(ai_analysis, "write_cover_letter", writer)
+    db = stack["db"]
+    uid = _user_id(db, "admin@example.test")
+    jid = _new_job(db, uid, title="Senior PM", company="Letter Co")
+    conn = db.get_db()
+    if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (uid,)).fetchone():
+        conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (uid,))
+    conn.execute("UPDATE user_profiles SET cv_summary='Ten years of product.' WHERE user_id=?", (uid,))
+    conn.execute("UPDATE jobs SET status='approved' WHERE id=?", (jid,))
+    conn.commit()
+    conn.close()
+    anon, auth = _pair(stack, users)
+
+    st, _l, body = anon.get("/api/device/jobs/%d/cover-letter" % jid, auth)
+    assert st == 200, body
+    got = json.loads(body)
+    assert got["short"] == "I want this role because it is mine." and got["letter"].startswith("Dear Team")
+    anon.get("/api/device/jobs/%d/cover-letter" % jid, auth)
+    assert calls == [jid]                                   # written once, then reused from the job
+    conn = db.get_db()
+    assert "mine" in conn.execute("SELECT cover_letter FROM jobs WHERE id=?", (jid,)).fetchone()[0]
+    conn.close()
+
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", stack["port"], timeout=60)
+    c.request("GET", "/api/device/jobs/%d/cover-letter?format=pdf" % jid, headers=auth)
+    r = c.getresponse()
+    pdf = r.read()
+    assert r.status == 200 and pdf[:4] == b"%PDF", (r.status, pdf[:200])
+    assert "Cover%20Letter" in r.getheader("Content-Disposition")
+    # Someone else's job: nothing.
+    other = _new_job(db, _user_id(db, "alice@example.test"), title="X", company="Y")
+    assert anon.get("/api/device/jobs/%d/cover-letter" % other, auth)[0] == 404
+
+
+def test_short_note_is_the_letters_first_body_paragraph():
+    import coverpdf
+    letter = "Dear Hiring Manager,\n\nFirst paragraph here. Second sentence.\n\nMore.\n\nBest regards,\nEran"
+    assert coverpdf.short_note(letter) == "First paragraph here. Second sentence."
+    assert coverpdf.display_name("Eran Ganot").startswith("Eran Ganot Cover Letter ")
+    assert coverpdf.short_note("x" * 50 + ". " + "y" * 900, limit=100).endswith(".")

@@ -768,6 +768,41 @@ def _tailor_inputs(user_id, user):
     return cv_text or "", (user.get("name") or "").strip(), contact
 
 
+def _ensure_cover_letter(user, job_id):
+    """The job's cover letter, written now (the app's own writer) if it has
+    none. (letter, error)."""
+    uid = user["id"]
+    conn = database.get_db()
+    try:
+        job = conn.execute("SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, uid)).fetchone()
+        if not job:
+            return "", "Job not found"
+        if (job["cover_letter"] or "").strip():
+            return job["cover_letter"].strip(), ""
+        _ok, _used, _cap = entitlements.allowed(conn, user, "cover_letter")
+        if not _ok:
+            return "", "No cover letters left on this plan"
+        profile = conn.execute("SELECT * FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        from ai_analysis import write_cover_letter
+        _cvt, _nm, _c = _tailor_inputs(uid, user)
+        letter = write_cover_letter(dict(job), dict(profile) if profile else {}, GEMINI_KEY,
+                                    user_id=uid, cv_text=_cvt, name=_nm)["letter"]
+    except Exception as exc:  # noqa: BLE001 - reported to the device, which then fills no letter
+        _log.get("cover-letter").warning("cover letter for job %s: %s", job_id, exc)
+        return "", "Could not write the cover letter: %s" % exc
+    conn = database.get_db()
+    try:
+        entitlements.try_consume(conn, user, "cover_letter")
+        conn.execute("UPDATE jobs SET cover_letter=? WHERE id=? AND user_id=?", (letter, job_id, uid))
+        conn.commit()
+    finally:
+        conn.close()
+    return letter, ""
+
+
 def _tailored_cv_row(user_id, job_id):
     conn = database.get_db()
     try:
@@ -5770,6 +5805,35 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # Plan B, test B0 (device.py): the owner's paired device reads its jobs and CV.
+        _mcl = re.match(r"^/api/device/jobs/(\d+)/cover-letter$", path)
+        if _mcl:
+            import device as _dev
+            import coverpdf as _cp
+            _du = _dev.user_for(self.headers)
+            if not _du:
+                self.send_json({"error": "Not paired"}, 401)
+                return
+            _letter, _err = _ensure_cover_letter(_du, int(_mcl.group(1)))
+            if not _letter:
+                self.send_json({"error": _err or "No cover letter"}, 404)
+                return
+            if qs.get("format", [""])[0] != "pdf":
+                self.send_json({"letter": _letter, "short": _cp.short_note(_letter)})
+                return
+            _cvt, _nm, _contact = _tailor_inputs(_du["id"], _du)
+            _pdf = _cp.letter_pdf(_letter, _nm, _contact)
+            from urllib.parse import quote as _q
+            _name = _cp.display_name(_nm)
+            _ascii = _name.encode("ascii", "ignore").decode().replace('"', "").strip() or "Cover Letter.pdf"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+                             % (_ascii, _q(_name)))
+            self.send_header("Content-Length", str(len(_pdf)))
+            self.send_header("Cache-Control", "private, no-store")
+            self.end_headers()
+            self.wfile.write(_pdf)
+            return
         if path in ("/api/device/jobs", "/api/device/cv"):
             import device as _dev
             _du = _dev.user_for(self.headers)

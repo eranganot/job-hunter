@@ -40,7 +40,7 @@ APPLY = """<html><body><form method="post" action="" enctype="multipart/form-dat
 THANKS = "<html><body><h3>Thank you for applying</h3></body></html>"
 
 
-def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", as_eran=None):
+def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", as_eran=None, cover_letter=None):
     """Pair the extension, open the job in run B, return (attempt row, job row)."""
     db = stack["db"]
     uid = _user_id(db, "admin@example.test")
@@ -50,6 +50,8 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
     conn = db.get_db()
     conn.execute("UPDATE jobs SET status='approved', url=?, apply_prepared=? WHERE id=?",
                  (job_url, json.dumps(prepared), jid))
+    if cover_letter is not None:
+        conn.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (cover_letter, jid))
     if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (uid,)).fetchone():
         conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (uid,))
     conn.execute("UPDATE user_profiles SET cv_path=? WHERE user_id=?", (str(cv), uid))
@@ -256,3 +258,44 @@ def test_the_popup_adds_a_job_by_its_link(stack, users, monkeypatch):
     row = conn.execute("SELECT status, company, title FROM jobs WHERE url='https://jobs.lever.co/linkco/9f8e-77'").fetchone()
     conn.close()
     assert dict(row) == {"status": "approved", "company": "Linkco", "title": "Head of Product"}
+
+
+LETTER = ("Dear Hiring Team,\n\nI am applying for the Senior PM role at Acme because it sits where I have "
+          "spent ten years: personalization products used by millions.\n\nAt DAZN I lead the team.\n\n"
+          "Best regards,\nDana Levi")
+COMEET_FORM_CL = """<html><body><form onsubmit="return false">
+<label for="fn">First name</label><input id="fn" name="firstName" type="text">
+<label for="cvf">Resume</label><input id="cvf" name="cv" type="file">
+<label for="coverLetter">Attach Cover Letter</label><input id="coverLetter" name="coverLetter" type="file">
+<label for="inputNote">Personal note</label><textarea id="inputNote" name="comment"></textarea>
+<button type="button" onclick="fetch('/careers-api/2.0/company/x/positions/y/apply', {method: 'POST', body: JSON.stringify({
+  cv: (document.getElementById('cvf').files[0] || {}).name, cl: (document.getElementById('coverLetter').files[0] || {}).name,
+  cltype: (document.getElementById('coverLetter').files[0] || {}).type, note: document.getElementById('inputNote').value})})">SUBMIT APPLICATION</button>
+</form></body></html>"""
+
+
+def test_b0_comeet_gets_the_cover_letter_as_a_pdf_and_its_opening_as_the_note(stack, users, tmp_path):
+    """The owner, 2026-11-22: the letter goes up as "<Name> Cover Letter <year>.pdf"
+    in Comeet's cover-letter field, and the Personal note gets its opening -
+    never the "how did you hear about us" sentence it used to get."""
+    sent = []
+
+    def comeet(route, request):
+        u = request.url
+        if "careers-api" in u:
+            sent.append(json.loads(request.post_data or "{}"))
+            return route.fulfill(status=200, content_type="application/json", body='{"status":200}')
+        if "comeet.co/" in u:
+            return route.fulfill(status=200, content_type="text/html", body=COMEET_FORM_CL)
+        route.fulfill(status=200, content_type="text/html", body=COMEET_PAGE)
+
+    row, job = _run(stack, users, tmp_path, COMEET_JOB.replace("AB.123", "AB.789"),
+                    ["https://www.comeet.com/**", "https://www.comeet.co/**"], comeet,
+                    [{"label": "First name", "value": "Dana"}], cover_letter=LETTER)
+    assert (row["outcome"], row["pressed_by"]) == ("sent", "extension"), row
+    import datetime
+    got = sent[0]
+    assert got["cl"].endswith(" Cover Letter %d.pdf" % datetime.date.today().year) and got["cltype"] == "application/pdf", got
+    assert got["cv"].endswith(" CV %d.pdf" % datetime.date.today().year), got   # the CV stays in the CV field
+    assert got["note"].startswith("I am applying for the Senior PM role at Acme"), got
+    assert "Dear" not in got["note"] and "Job Hunter" not in got["note"], got
