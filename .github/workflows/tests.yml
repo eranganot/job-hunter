@@ -32,6 +32,13 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
+      # The browser the Dockerfile installs for production. Without it the
+      # cover-letter PDF test skips (2ea41a3) and coverpdf.letter_pdf - the
+      # only thing that renders the PDF - never runs in CI. The older browser
+      # tests use the runner's own /usr/bin/google-chrome and do not need it.
+      - name: Install Playwright's Chromium (same as the Dockerfile)
+        run: python -m playwright install --with-deps chromium
+
       - name: Run tests
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
