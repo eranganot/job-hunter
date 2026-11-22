@@ -282,3 +282,121 @@ def test_start_background_actually_runs_the_boot_sweep(wq, monkeypatch):
         worker.stop_background(timeout=1)
         worker._thread = None
     assert called, "start_background did not sweep orphaned claims at boot"
+
+
+# ── Several runs at once (2026-11-22) ────────────────────────────────────────
+# One thread ran every user's 11:00 search back to back; on production the
+# fifth of five started at 11:38. Now JH_WORKER_THREADS (default 3) runs
+# different users' searches side by side - but never two runs of one user, and
+# never two applies (each drives a Chromium).
+
+def _add_users(n):
+    conn = database.get_db()
+    for i in range(3, 3 + n):
+        conn.execute("INSERT INTO users (id,name,email,password_hash,salt) VALUES (?,?,?,'h','s')",
+                     (i, "U%d" % i, "u%d@e.test" % i))
+    conn.commit()
+    conn.close()
+
+
+def _run_threads(wq, monkeypatch, n, settle):
+    monkeypatch.setenv("JH_WORKER_THREADS", str(n))
+    monkeypatch.setattr(worker, "POLL_SECONDS", 0.05)
+    monkeypatch.setattr(worker, "_thread", None)
+    monkeypatch.setattr(worker, "_threads", [])
+    monkeypatch.setattr(worker, "_RUNNING_KINDS", {})
+    worker.start_background()
+    try:
+        assert worker.health()["threads"] == n
+        settle()
+    finally:
+        worker.stop_background(timeout=3)
+
+
+def _gauge(kind_of=None):
+    """A handler that records how many runs overlap, overall and per user."""
+    lock = threading.Lock()
+    state = {"now": 0, "peak": 0, "per_user": {}, "user_peak": 0, "done": 0}
+
+    def handler(uid, _payload):
+        with lock:
+            state["now"] += 1
+            state["peak"] = max(state["peak"], state["now"])
+            state["per_user"][uid] = state["per_user"].get(uid, 0) + 1
+            state["user_peak"] = max(state["user_peak"], state["per_user"][uid])
+        time.sleep(0.3)
+        with lock:
+            state["now"] -= 1
+            state["per_user"][uid] -= 1
+            state["done"] += 1
+        return "ok"
+    return state, handler
+
+
+def _wait_done(state, n, limit=10):
+    end = time.time() + limit
+    while state["done"] < n and time.time() < end:
+        time.sleep(0.05)
+    assert state["done"] == n
+
+
+def test_different_users_searches_run_side_by_side(wq, monkeypatch):
+    _add_users(4)
+    state, handler = _gauge()
+    wq.register("search", handler)
+    for uid in range(1, 7):
+        jobqueue.enqueue(uid, "search", cap=False)
+    started = time.time()
+    _run_threads(wq, monkeypatch, 3, lambda: _wait_done(state, 6))
+    assert state["peak"] == 3                      # three at once, not one
+    assert time.time() - started < 6 * 0.3         # faster than back to back
+
+
+def test_one_user_never_has_two_runs_at_once(wq, monkeypatch):
+    state, handler = _gauge()
+    wq.register("search", handler)
+    wq.register("links", handler)
+    for _ in range(3):
+        jobqueue.enqueue(1, "search", cap=False, dedupe=False)
+    jobqueue.enqueue(1, "links", cap=False)
+    _run_threads(wq, monkeypatch, 3, lambda: _wait_done(state, 4))
+    assert state["user_peak"] == 1
+
+
+def test_applies_stay_single_lane(wq, monkeypatch):
+    _add_users(3)
+    applies, apply_handler = _gauge()
+    searches, search_handler = _gauge()
+    wq.register("apply", apply_handler)
+    wq.register("search", search_handler)
+    for uid in range(1, 6):
+        jobqueue.enqueue(uid, "apply", cap=False)
+    jobqueue.enqueue(1, "search", cap=False)
+    jobqueue.enqueue(2, "search", cap=False)
+
+    def settle():
+        _wait_done(applies, 5)
+        _wait_done(searches, 2)
+    _run_threads(wq, monkeypatch, 3, settle)
+    assert applies["peak"] == 1                    # one Chromium at a time
+    assert searches["done"] == 2                   # searches were not starved behind them
+
+
+def test_one_thread_restores_the_single_lane(wq, monkeypatch):
+    _add_users(2)
+    state, handler = _gauge()
+    wq.register("search", handler)
+    for uid in range(1, 5):
+        jobqueue.enqueue(uid, "search", cap=False)
+    _run_threads(wq, monkeypatch, 1, lambda: _wait_done(state, 4))
+    assert state["peak"] == 1
+
+
+def test_the_thread_count_is_bounded():
+    import os
+    for raw, want in (("0", 1), ("-2", 1), ("99", 8), ("junk", 3), ("2", 2)):
+        os.environ["JH_WORKER_THREADS"] = raw
+        try:
+            assert worker._threads_wanted() == want
+        finally:
+            del os.environ["JH_WORKER_THREADS"]
