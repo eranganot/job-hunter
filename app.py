@@ -1443,6 +1443,51 @@ def israel_now(now_utc=None):
         return now_utc.astimezone(_dt.timezone(_dt.timedelta(hours=3)))
 
 
+def _search_runs_today(freq, s_dow, weekdays_only, paused, cur_dow) -> bool:
+    """Whether a user's scheduled search runs on this Israel weekday (0=Mon).
+    Shared by the scheduler and _scheduled_search_pending, so the two cannot
+    disagree about which days have a search."""
+    if paused:                                   # paused for inactivity (inactive.py)
+        return False
+    if weekdays_only and cur_dow >= 5:
+        return False
+    if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
+        return False
+    return True
+
+
+def _scheduled_search_pending(user_id, now_utc=None) -> bool:
+    """True while this user's scheduled search is still to come today (Israel
+    time): it runs today, its hour has not passed, and no search has been
+    logged yet today.
+
+    Why it exists (2026-11-22): opening the app released the day's picks from
+    Noa's reserve without a notification, so the scheduled search a few hours
+    later found the day's picks already out, released 0 and - by design - sent
+    nothing. The owner opens the app most mornings and so got no notification
+    for a week. While the search is pending, the app open leaves the reserve
+    alone and the search releases the picks and announces them."""
+    now = israel_now(now_utc)
+    conn = database.get_db()
+    try:
+        r = conn.execute(
+            "SELECT p.search_hour, p.schedule_frequency, p.search_day_of_week, p.weekdays_only, "
+            "u.role, u.plan, u.plan_until, u.plan_after, u.search_paused_at, u.is_active "
+            "FROM users u JOIN user_profiles p ON p.user_id = u.id WHERE u.id=?", (user_id,)).fetchone()
+    finally:
+        conn.close()
+    if not r or r["search_hour"] is None or not r["is_active"]:
+        return False
+    freq, s_dow = _plan_search_schedule(r["schedule_frequency"] or 'daily', r["search_day_of_week"],
+                                        {"role": r["role"], "plan": r["plan"], "plan_until": r["plan_until"],
+                                         "plan_after": r["plan_after"]})
+    if not _search_runs_today(freq, s_dow, r["weekdays_only"], r["search_paused_at"], now.weekday()):
+        return False
+    if now.hour > int(r["search_hour"]):
+        return False                             # its hour has passed: it ran, failed or was skipped
+    return not _scheduler_already_ran(user_id, 'jobs_searched', now.strftime('%Y-%m-%d'))
+
+
 def scheduler_enabled() -> bool:
     """JH-7 (2026-11-05): JH_SCHEDULER_ENABLED=0 turns the clock off on this box.
     Staging runs on a seeded copy of production's users, so its scheduler ran
@@ -1492,9 +1537,7 @@ def _check_scheduled_jobs() -> None:
                 if current_hour == sh and not _scheduler_already_ran(uid, 'jobs_searched', today):
                     # Paused for inactivity (inactive.py): no scheduled search, no Gemini
                     # spend, until the user comes back.
-                    run_search = not row[12]
-                    if freq == 'weekly' and s_dow is not None and cur_dow != s_dow:
-                        run_search = False
+                    run_search = _search_runs_today(freq, s_dow, wo, row[12], cur_dow)
                     if run_search:
                         # Enqueued, not spawned: the queue's one-run-per-user rule
                         # is what stops a second instance double-firing the same
@@ -3245,6 +3288,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         # this run shows the user is what was released now. A failure
                         # here releases everything.
                         held_n = 0
+                        _picks_already_out = False
                         try:
                             _dp_user = dict(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
                             if entitlements.daily_cap(_dp_user) is not None:
@@ -3262,6 +3306,11 @@ def run_job_search(user_id: int, by_user: bool = False):
                                     [i for i, _u in _released]).fetchall()
                                     if _released else [])]
                                 inserted = len(_released)
+                                # "Found 0" used to read like a dry day when the day's picks had
+                                # simply gone out earlier, unannounced (2026-11-22).
+                                _picks_already_out = (not inserted and not by_user and
+                                                      entitlements.released_today(conn, user_id)
+                                                      >= entitlements.daily_cap(_dp_user))
                                 print(f"[run-search] user {user_id}: daily picks - {inserted} released, "
                                       f"{held_n} new job(s) kept in the reserve")
                         except Exception as _dp:
@@ -3362,7 +3411,9 @@ def run_job_search(user_id: int, by_user: bool = False):
                                     _first_matches_email(user_id, inserted)
                                 database.log_activity(user_id, "jobs_searched", f"Found {inserted} new job(s) across {len(titles)} title search(es) ({skipped_rej} rejected-pattern matches skipped)"
                                                       + (f"; {locked_n} more need a higher plan" if locked_n else "")
-                                                      + (f"; {held_n} kept for the coming days" if held_n else ""))
+                                                      + (f"; {held_n} kept for the coming days" if held_n else "")
+                                                      + ("; today's picks were already released before this search, so nothing was announced"
+                                                         if _picks_already_out else ""))
 
                                 # ── What the user hears about this search (rewritten 2026-11-15) ──
                                 # Noa says what she found and why (dailymsg.py). A day with nothing new
@@ -4365,7 +4416,15 @@ def _send_verification(user_id: int, email: str, name: str = "") -> None:
 def _release_daily_picks(conn, user) -> int:
     """Move today's picks out of Noa's reserve (entitlements.release). Runs on
     app open and on the job list, so a day without a search still brings the
-    next picks. Never raises: a failure leaves the reserve for the next call."""
+    next picks - but not while today's scheduled search is still to come, which
+    releases them itself and notifies (_scheduled_search_pending). Never
+    raises: a failure leaves the reserve for the next call."""
+    try:
+        if _scheduled_search_pending(user["id"]):
+            return 0       # today's search releases them, and tells the user (2026-11-22)
+    except Exception as exc:
+        print("[daily-picks] ERROR could not read the search schedule of user %s, releasing now: %s"
+              % (user.get("id"), exc))
     try:
         return len(entitlements.release(conn, user))
     except Exception as exc:
