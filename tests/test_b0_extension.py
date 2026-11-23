@@ -413,13 +413,21 @@ customElements.define('spl-dropdown', class extends HTMLElement {
   }
 });
 customElements.define('spl-radio-group', class extends HTMLElement {
+  // As SmartRecruiters builds it (its own component, inspected 2026-11-23): no
+  // <input>; options are <spl-radio role="radio" label="Yes">, the question is the
+  // group's label attribute, a choice is taken only on a page-world click.
   connectedCallback() {
-    // As on the real form (2026-11-23): no legend - the question is printed above,
-    // and the real radio inputs are hidden under drawn circles.
-    const hid = 'display:none';
-    this.attachShadow({mode: 'open'}).innerHTML = '<div>' + this.getAttribute('label') + ' *</div>' +
-      '<div><input type="radio" name="e" id="y" required style="' + hid + '"><label for="y">Yes</label></div>' +
-      '<div><input type="radio" name="e" id="n" style="' + hid + '"><label for="n">No</label></div>';
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<label>' + this.getAttribute('label') + '<span>*</span></label><fieldset role="radiogroup"><slot></slot></fieldset>';
+    this.setAttribute('required', '');
+    for (const v of ['Yes', 'No']) {
+      const o = document.createElement('spl-radio');
+      o.setAttribute('role', 'radio'); o.setAttribute('label', v); o.setAttribute('aria-checked', 'false');
+      o.textContent = v; o.style.display = 'block';
+      o.addEventListener('click', () => { if (!window.__inPageClick) return;
+        for (const x of this.querySelectorAll('spl-radio')) x.setAttribute('aria-checked', String(x === o)); this.value = v.toLowerCase(); });
+      this.appendChild(o);
+    }
   }
 });
 customElements.define('spl-checkbox', class extends HTMLElement {
@@ -445,8 +453,8 @@ function next() {
   document.getElementById('go').onclick = () => {
     const sr = id => document.getElementById(id).shadowRoot;
     fetch('/sr-submit', {method: 'POST', body: JSON.stringify(Object.assign({}, window.step1, {
-      years: sr('years').getElementById('d').value, eligible: sr('elig').getElementById('y').checked,
-      own: !!document.getElementById('own') && sr('own').getElementById('y').checked,
+      years: sr('years').getElementById('d').value, eligible: document.getElementById('elig').value === 'yes',
+      own: !!document.getElementById('own') && document.getElementById('own').value === 'yes',
       privacy: sr('priv').getElementById('c').checked}))})
     .then(() => { document.body.innerHTML = '<h1>Thank you for applying</h1>'; });
   };
@@ -498,11 +506,11 @@ def test_b0_smartrecruiters_second_step_is_answered_and_city_picked(stack, users
 
     def eran(tab):                                     # run A: Eran presses Next, then Submit
         tab.wait_for_function("document.querySelector('#city') && document.querySelector('#city').value === 'Tel Aviv, Israel'", timeout=30000)
-        tab.click("button:has-text('Next')")
+        # The extension presses "Next" itself (0.7.0).
         tab.wait_for_function("""(() => { const p = document.querySelector('#priv'); return p && p.shadowRoot.getElementById('c').checked
                                   && document.querySelector('#years').shadowRoot.getElementById('d').value === '10+'; })()""", timeout=40000)
-        tab.wait_for_function("document.querySelector('#elig').shadowRoot.getElementById('y').checked", timeout=20000)
-        tab.wait_for_function("document.querySelector('#own') && document.querySelector('#own').shadowRoot.getElementById('y').checked", timeout=20000)
+        tab.wait_for_function("document.querySelector('#elig') && document.querySelector('#elig').value === 'yes'", timeout=30000)
+        tab.wait_for_function("document.querySelector('#own') && document.querySelector('#own').value === 'yes'", timeout=20000)
         tab.click("#go")
 
     row, job = _run(stack, users, tmp_path, "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/step-2",

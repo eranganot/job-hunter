@@ -183,6 +183,18 @@
                            .concat(((r && r.drafts) || []).map(l => 'check: ' + l))};
     }
     const q1 = await answerRound();
+    // Press the step's "Next" once it is filled; the next step is filled by the watcher.
+    let nextPressed = null;
+    async function pressNext() {
+      const nb = JHFill.nextButton();
+      if (!nb || nb === nextPressed || submittedAt) return;
+      await wait(1500);
+      if (JHFill.nextButton() !== nb) return;
+      nextPressed = nb;
+      const how = await JHFill.clickInPage(nb);
+      trace('next', {how});
+    }
+    await pressNext();
     const answered = n => n.n ? ', ' + n.n + ' questions answered' : '';
     const leftOver = n => n.unsure.length ? ' Yours to answer: ' + n.unsure.slice(0, 3).join('; ') + '.' : '';
     const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' prepared answers' + answered(q1) +
@@ -208,8 +220,9 @@
         // fields() already keeps only what is on screen, hidden-input radios included
         // (a follow-up question that appears after an answer: ServiceNow's "relocating
         // at your own expense?" once "Yes" is chosen, 2026-11-23).
-        const fresh = JHFill.fields().some(el => !el.dataset.jhAsked && !el.dataset.jhq && el.type !== 'file' &&
+        const fresh = JHFill.openRadioGroups() > 0 || JHFill.fields().some(el => !el.dataset.jhAsked && !el.dataset.jhq && el.type !== 'file' &&
           !((el.type === 'checkbox' || el.type === 'radio') ? el.checked : (el.value || '').trim()));
+        await pressNext();
         if (!fresh) continue;
         trace('new-step', {fields: JHFill.fields().length});
         const b = JHFill.fillBasics(task.applicant, basicsOpts);
