@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-23 by Claude (embedded Greenhouse forms go to the Greenhouse handler, JOB-HUNTER-Y)._
+_Last updated: 2026-11-23 by Claude (the generic apply path answers JavaScript dropdowns)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,7 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-23 — **The generic apply path now answers JavaScript dropdowns** (closes the "known remaining" item of the JOB-HUNTER-Y fix, owner: "fix it"). Company forms built with React-select or `role="combobox"` widgets were given to the model as `kind: text` with no options. It could only type into them (which leaves them empty) or, for a consent, answer "check" (which raises "Not a checkbox or radio button"). A required one then blocked Submit. **Change (`apply_engine.py`):** `_FIELDS_JS` reports `role="combobox"`, and a text input with `aria-haspopup` + `aria-autocomplete="list"` (React-select), as `kind: combobox`. `_read_combobox_options()` opens up to 10 of them and gives the model their options. The prompt says a combobox is answered with `select`. The executor picks through `_choose_combobox()` (types to filter, clicks the option, confirms it stuck), and `_combobox_choice()` turns a "check" on a consent dropdown into its "Yes"/only option, never guessing among several. **Proven live on Payoneer's real form, nothing submitted:** field 10 now reads `combobox ['Yes']`, the model's production answer `check` picks "Yes", the form shows "Yes"; the country picker reads as a dropdown with its options. Tests: `test_apply_generic_form.py` (+2: a local form with a required consent dropdown and a country dropdown, which now POSTs `privacy=Yes` and `country=Israel…`; the answer-to-option mapping). Both failed on `main` (the consent read as `text`).
 - 2026-11-23 — **B0 extension 0.5.0: SmartRecruiters forms get filled; jobs added by link get the contact details.** _Symptom (owner):_ ServiceNow, Check Point, Wix (SmartRecruiters) - "doesn't do anything (not filling and not uploading anything)"; Tonkean (Lever), Fullpath (Comeet) - "does not fill everything" (CV in, name/email/phone/LinkedIn empty).
   - _Evidence:_ (1) the live SR form (Wix Base44, oneclick-ui) has **0 inputs in the document and 14 inside shadow roots** (`spl-input`, `spl-dropzone`, `spl-textarea`); `fill.js fields()` used `document.querySelectorAll`, so `hasForm()` was false and `content.js` returned. (2) Every job added by link (7553, 7935-7939, 7992) has `apply_prepared` empty, and the extension filled only prepared answers - nothing else knew the applicant's name/email/phone.
   - _Ruled out:_ the content script not loading on SR (`jobs.smartrecruiters.com/*` is in the manifest, and the oneclick-ui form is on that host); the task not reaching the tab (on Lever/Comeet the same task attached the CV, so `task?` answered).

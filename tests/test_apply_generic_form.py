@@ -49,6 +49,31 @@ COVER_PAGE = """<!doctype html><html><body><form action="/submit" method="post">
 <label for="em">Email address</label><input id="em" name="a2" type="email" required>
 <label for="cl">Cover Letter *</label><textarea id="cl" name="a4" required></textarea>
 <button type="submit">Submit application</button></form></body></html>"""
+# A company form with JavaScript dropdowns (2026-11-23, JOB-HUNTER-Y): the
+# required privacy consent is a one-option dropdown, as on Payoneer's
+# Greenhouse form, and the country is a long one. Each is an <input> that
+# opens a list on click; typing alone leaves it empty, and an empty required
+# one blocks Submit.
+COMBO_PAGE = """<!doctype html><html><body><form action="/submit" method="post">
+<label for="fn">First name</label><input id="fn" name="a1" required>
+<label for="ct">Country*</label>
+<input id="ct" name="country" role="combobox" aria-controls="ct-list" autocomplete="off" required>
+<div id="ct-list" role="listbox" hidden><div role="option">United States +1</div><div role="option">Israel +972</div></div>
+<label for="pp">I read and understood the privacy policy*</label>
+<input id="pp" name="privacy" type="text" aria-haspopup="true" aria-autocomplete="list" aria-controls="pp-list" autocomplete="off" required>
+<div id="pp-list" role="listbox" hidden><div role="option">Yes</div></div>
+<button type="submit">Submit application</button>
+<script>
+for (const inp of document.querySelectorAll('[aria-controls]')) {
+  const box = document.getElementById(inp.getAttribute('aria-controls'));
+  inp.addEventListener('click', () => { box.hidden = false; });
+  inp.addEventListener('input', () => { inp.dataset.chosen = ''; box.hidden = false; });
+  inp.addEventListener('keydown', e => { if (e.key === 'Escape') box.hidden = true; });
+  inp.addEventListener('blur', () => setTimeout(() => { if (!inp.dataset.chosen) inp.value = ''; }, 200));
+  for (const o of box.querySelectorAll('[role=option]'))
+    o.addEventListener('mousedown', ev => { ev.preventDefault(); inp.value = o.innerText; inp.dataset.chosen = o.innerText; box.hidden = true; });
+}
+</script></form></body></html>"""
 POSTS = []
 
 
@@ -60,7 +85,8 @@ class _H(http.server.BaseHTTPRequestHandler):
         body = (NO_FORM_PAGE if self.path.startswith("/article") else SR_POSTING % self.path.split("/")[2]
                 if self.path.startswith("/sr/") else WALL_PAGE if self.path.startswith("/oneclick-ui/walled")
                 else ASHBY_PAGE if self.path.startswith("/ashby")
-                else COVER_PAGE if self.path.startswith("/cover") else FORM_PAGE).encode()
+                else COVER_PAGE if self.path.startswith("/cover")
+                else COMBO_PAGE if self.path.startswith("/combo") else FORM_PAGE).encode()
         self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
         self.wfile.write(body)
 
@@ -330,3 +356,47 @@ def test_a_gh_jid_careers_page_goes_to_the_greenhouse_handler_not_the_generic_mo
     assert called and "gh_jid=7" in called[0], res
     assert seen == []            # the generic model never saw this form
     assert POSTS == []
+
+
+
+@browser_only
+def test_dropdowns_reach_the_model_with_their_options_and_a_consent_check_picks_yes(site, monkeypatch):
+    """JOB-HUNTER-Y on the generic path: the model now sees kind "combobox" with
+    the options, and its production answer ("check" on the consent) picks Yes."""
+    seen = []
+
+    def fake(prompt, **kw):
+        if "The form's fields, numbered:" in prompt:
+            fields = json.loads(prompt.split("The form's fields, numbered:\n", 1)[1].split("\n\nReturn a JSON ARRAY", 1)[0])
+            seen.extend(f for _, f in fields)
+            out = []
+            for n, f in fields:
+                lab = f["label"].lower()
+                if "first" in lab:
+                    out.append({"field": n, "action": "fill", "value": "Dana"})
+                elif "country" in lab:
+                    out.append({"field": n, "action": "select", "value": "Israel +972"})
+                elif "privacy" in lab:
+                    out.append({"field": n, "action": "check"})        # what production's model answered
+            return out
+        if "successfully received" in prompt:
+            return {"confirmed": "thank you" in prompt.lower(), "message": "ok"}
+        return {}
+    monkeypatch.setattr(ae, "_claude_json", fake)
+    res = ae.submit_application(site + "/combo/1", "Senior PM", "Acme", {**APPLICANT, "_deadline_s": 90},
+                                None, force=True)
+    by_label = {f["label"].rstrip("*"): f for f in seen}
+    assert by_label["Country"]["kind"] == "combobox" and "Israel +972" in by_label["Country"]["options"]
+    pp = by_label["I read and understood the privacy policy"]
+    assert pp["kind"] == "combobox" and pp["options"] == ["Yes"]
+    assert res["status"] == "confirmed", res
+    assert len(POSTS) == 1 and "privacy=Yes" in POSTS[0] and "country=Israel" in POSTS[0], POSTS
+
+
+def test_what_a_dropdown_answer_picks():
+    f = {"kind": "combobox", "options": ["Yes"]}
+    assert ae._combobox_choice(f, "check", None) == "Yes"
+    assert ae._combobox_choice({"options": ["No", "Yes"]}, "check", None) == "Yes"
+    assert ae._combobox_choice({"options": ["Red", "Blue"]}, "check", None) == ""      # never guessed
+    assert ae._combobox_choice(f, "select", " Yes ") == "Yes"
+    assert ae._combobox_choice(f, "upload", None) == ""
