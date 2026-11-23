@@ -343,6 +343,6 @@ def decide(qs: list, applicant: dict, job: dict, llm, fill) -> dict:
             except Exception as exc:
                 print(f"[questions] could not fill {q['label'][:60]!r}: {exc}")
         if q.get("required"):
-            unsure.append({"key": q["key"], "label": q["label"], "type": q["type"],
+            unsure.append({"key": q["key"], "label": q["label"], "type": q["type"], "selector": q.get("selector"),
                            "options": q.get("options") or [], "draft": (a or {}).get("value", "")})
     return {"filled": filled, "unsure": unsure, "questions": len(qs)}

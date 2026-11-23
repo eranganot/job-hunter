@@ -319,3 +319,25 @@ def attempts(user_id: int) -> list:
     finally:
         conn.close()
     return [dict(r) for r in rows]
+
+
+# ── B0 trace: what the extension did on a page, step by step (2026-11-23) ──
+# Kept in memory (the last 300 events per user): it is for reading a failing
+# run right after it happens, not a record. Admin-only both ways.
+import collections as _collections
+import time as _time
+_TRACES = {}
+
+
+def add_trace(user_id: int, data: dict) -> None:
+    buf = _TRACES.setdefault(user_id, _collections.deque(maxlen=300))
+    head = {"job_id": data.get("job_id"), "url": str(data.get("url") or "")[:200],
+            "top": bool(data.get("top")), "version": str(data.get("version") or "")[:12]}
+    for ev in (data.get("events") or [])[:100]:
+        if isinstance(ev, dict):
+            buf.append(dict(head, at=_time.strftime("%H:%M:%S"), step=str(ev.get("step") or "")[:40],
+                            data=json.loads(json.dumps(ev.get("data"), default=str)[:4000]) if ev.get("data") is not None else None))
+
+
+def traces(user_id: int) -> list:
+    return list(_TRACES.get(user_id, []))[::-1]

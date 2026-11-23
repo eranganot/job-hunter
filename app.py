@@ -6019,7 +6019,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(_data)
             return
-        if path in ("/api/admin/device-code", "/api/admin/device-attempts"):
+        if path in ("/api/admin/device-code", "/api/admin/device-attempts", "/api/admin/device-trace"):
             user = self.require_auth()
             if not user:
                 return
@@ -6029,6 +6029,8 @@ class Handler(BaseHTTPRequestHandler):
             import device as _dev
             if path == "/api/admin/device-code":
                 self.send_json({"code": _dev.new_code(user["id"]), "minutes": _dev.CODE_MINUTES})
+            elif path == "/api/admin/device-trace":
+                self.send_json({"events": _dev.traces(user["id"])})
             else:
                 self.send_json({"attempts": _dev.attempts(user["id"])})
             return
@@ -7050,7 +7052,26 @@ class Handler(BaseHTTPRequestHandler):
                 _log.get("device").warning("answers for job %s: %s", _mans.group(1), exc)
                 self.send_json({"error": "Could not answer: %s" % exc}, 502)
                 return
-            self.send_json({"answers": _res["answers"], "unsure": [u["label"] for u in _res["unsure"]]})
+            # The owner, 2026-11-23: "there is no question that you don't have the
+            # answer" - he checks every form before it goes, so a draft answer is
+            # filled too and named in the bar, never left empty.
+            _drafts = [{"selector": u["selector"], "value": u["draft"]} for u in _res["unsure"]
+                       if u.get("selector") and u.get("draft") not in (None, "", [])]
+            self.send_json({"answers": _res["answers"] + _drafts,
+                            "unsure": [u["label"] for u in _res["unsure"] if not u.get("draft")],
+                            "drafts": [u["label"] for u in _res["unsure"] if u.get("draft")]})
+            return
+        if path == "/api/device/trace":
+            import device as _dev
+            _du = _dev.user_for(self.headers)
+            if not _du:
+                self.send_json({"error": "Not paired"}, 401)
+                return
+            try:
+                _dev.add_trace(_du["id"], self.read_json() or {})
+            except Exception as exc:  # noqa: BLE001 - a trace never breaks a run
+                print("[device] trace: %s" % exc)
+            self.send_json({"ok": True})
             return
         if path == "/api/device/attempt":
             import device as _dev

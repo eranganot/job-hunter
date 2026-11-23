@@ -149,16 +149,27 @@
   const isCombo = el => el.getAttribute('role') === 'combobox' || !!el.getAttribute('aria-autocomplete') ||
     upward(el).slice(1, 5).some(n => /dropdown|autocomplete|combobox|select/i.test(n.tagName || ''));
   const optionEls = () => deepAll('[role="option"], spl-select-option, li[role="option"]').filter(vis);
+  window.JHTrace = window.JHTrace || [];
+  const jt = (step, data) => window.JHTrace.push({t: Date.now(), step, data});
   async function pickOption(el, value) {
     const want = norm(String(value));
     setValue(el, String(value).split(',')[0]);
-    for (let i = 0; i < 12; i++) {
+    const seen = [];
+    for (let i = 0; i < 24; i++) {
       await new Promise(r => setTimeout(r, 250));
       const opts = optionEls();
+      seen.push(opts.length);
       const o = opts.find(x => norm(x.textContent) === want) || opts.find(x => norm(x.textContent).startsWith(want)) ||
                 opts.find(x => norm(x.textContent).includes(want)) || opts.find(x => want.includes(norm(x.textContent)) && norm(x.textContent));
-      if (o) { o.click(); return true; }
+      if (o) {
+        o.click();
+        await new Promise(r => setTimeout(r, 300));
+        jt('pick', {label: labelOf(el).slice(0, 60), want, clicked: clean(o.textContent).slice(0, 60), after: el.value, rounds: i, seen: seen.slice(-3)});
+        return true;
+      }
     }
+    jt('pick-miss', {label: labelOf(el).slice(0, 60), want, value: el.value, seen: seen.slice(-5),
+                     sample: optionEls().slice(0, 5).map(x => clean(x.textContent).slice(0, 40))});
     return false;
   }
   async function comboOptions(el) {
