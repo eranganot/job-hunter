@@ -93,3 +93,11 @@ If the package errors, app.py falls back to its legacy exact-fingerprint dedup.
 ## Tests
 `tests/test_ingestion_dedup.py` (cross-source duplicate fixtures) +
 `tests/test_ingestion_models.py` (schema/normalization + tier gating).
+
+## Source names (2026-11-15)
+
+A job keeps the source name its adapter gave it (`board-comeet`, `board-ashby`, `secrettlv`, ...)
+through dedup: `NormalizedJob` / `CanonicalJob` carry it in `source_label`, and `to_legacy_dict`
+writes it back, falling back to the `JobSource` enum only when there was none. Before this, every
+name outside the enum came back as `unknown` (562 of 947 jobs between 2026-11-08 and 2026-11-15).
+Merged duplicates keep the winner's name.
