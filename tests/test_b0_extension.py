@@ -440,6 +440,17 @@ customElements.define('spl-radio-group', class extends HTMLElement {
     }
   }
 });
+customElements.define('spl-button', class extends HTMLElement {
+  // As on ServiceNow (2026-11-23): the text is slotted, so the inner button's innerText is empty.
+  connectedCallback() {
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<button type="button" style="padding:10px 20px"><slot></slot></button>';
+    r.querySelector('button').addEventListener('click', ev => {
+      if (!ev.isTrusted && !window.__inPageClick) return;
+      if (this.onSubmit) this.onSubmit();
+    });
+  }
+});
 customElements.define('spl-checkbox', class extends HTMLElement {
   connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<input type="checkbox" id="c" required><label for="c">' + this.getAttribute('label') + '*</label>'; }
 });
@@ -456,15 +467,14 @@ function next() {
     '<spl-radio-group id="elig"></spl-radio-group>' +
     '<div id="follow"></div>' +
     '<spl-checkbox id="priv" label="You declare that you have read and understand the privacy notice of Wix."></spl-checkbox>' +
-    '<button type="button" id="go" style="position:fixed;bottom:24px;right:40px;padding:10px 20px">Submit</button>';
+    '<spl-button id="go" style="position:fixed;bottom:24px;right:40px">Submit</spl-button>';
   // A follow-up question shown only after an answer (ServiceNow: "If you selected Yes...").
   document.getElementById('years').addEventListener('picked', () => {
     document.getElementById('follow').innerHTML = '<div class="q">If you selected 10+, would you consider relocating at your own expense? <span>*</span></div><spl-radio-group id="own"></spl-radio-group>';
   });
   // Like ServiceNow's Submit (2026-11-23): a person's click or a page-world click
   // submits; the extension's own (isolated-world) click does nothing.
-  document.getElementById('go').onclick = (ev) => {
-    if (!ev.isTrusted && !window.__inPageClick) return;
+  document.getElementById('go').onSubmit = () => {
     const sr = id => document.getElementById(id).shadowRoot;
     fetch('/sr-submit', {method: 'POST', body: JSON.stringify(Object.assign({}, window.step1, {
       years: sr('years').getElementById('d').value, eligible: document.getElementById('elig').value === 'yes',
