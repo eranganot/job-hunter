@@ -44,6 +44,9 @@ print = _log.make_print(__name__)  # noqa: A001 - see log.py
 
 QUEUED, RUNNING, DONE, FAILED = "queued", "running", "done", "failed"
 
+# claim() order (2026-11-24): higher first, then oldest.
+PRIORITY_SCHEDULED, PRIORITY_USER, PRIORITY_FIRST = 0, 1, 2
+
 # A run whose worker has not touched it in this long is presumed dead. Longer
 # than the slowest legitimate run: a search is minutes, not an hour.
 STUCK_AFTER_SECONDS = int(os.environ.get("JH_QUEUE_STUCK_AFTER", 1800))
@@ -121,7 +124,7 @@ def _now_sql():
     return "datetime('now')"
 
 
-def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True, cap=True):
+def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True, cap=True, priority=0):
     """
     Add work. Returns the new run id, or None when `dedupe` suppressed it.
 
@@ -132,6 +135,10 @@ def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True, cap=True):
     Raises DailyCapReached when the user has used the day's allowance for this
     kind. `cap=False` is for internal re-enqueues (a retry of work already
     counted), never for a new user-initiated run.
+
+    `priority` (2026-11-24): claim() takes higher first, then oldest. A new
+    user's first search is PRIORITY_FIRST and a search the user pressed is
+    PRIORITY_USER, so neither waits behind the scheduled batch.
     """
     conn = database.get_db()
     try:
@@ -149,15 +156,16 @@ def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True, cap=True):
                 return None
 
         blob = json.dumps(payload) if payload is not None else None
+        prio = int(priority or 0)
         if run_after:
             conn.execute(
-                "INSERT INTO job_runs (user_id, kind, payload, run_after) VALUES (?,?,?,?)",
-                (user_id, kind, blob, run_after))
+                "INSERT INTO job_runs (user_id, kind, payload, run_after, priority) VALUES (?,?,?,?,?)",
+                (user_id, kind, blob, run_after, prio))
         else:
             conn.execute(
-                "INSERT INTO job_runs (user_id, kind, payload, run_after) "
-                "VALUES (?,?,?," + _now_sql() + ")",
-                (user_id, kind, blob))
+                "INSERT INTO job_runs (user_id, kind, payload, run_after, priority) "
+                "VALUES (?,?,?," + _now_sql() + ",?)",
+                (user_id, kind, blob, prio))
         conn.commit()
         return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     finally:
@@ -166,7 +174,7 @@ def enqueue(user_id, kind, payload=None, run_after=None, dedupe=True, cap=True):
 
 def claim(kinds=None, by=None):
     """
-    Take the oldest eligible run, or None.
+    Take the eligible run with the highest priority, oldest first, or None.
 
     Eligible means: queued, its `run_after` has passed, and **this user has no
     other run in flight** - one concurrent run per user, so one heavy account
@@ -181,7 +189,7 @@ def claim(kinds=None, by=None):
         if kinds:
             sql += " AND kind IN (%s)" % ",".join("?" for _ in kinds)
             params.extend(kinds)
-        sql += " ORDER BY id LIMIT %d" % _CLAIM_SCAN
+        sql += " ORDER BY COALESCE(priority, 0) DESC, id LIMIT %d" % _CLAIM_SCAN
 
         for row in conn.execute(sql, tuple(params)).fetchall():
             busy = conn.execute(

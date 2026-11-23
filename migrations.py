@@ -1342,6 +1342,23 @@ def m0050_device_traces(conn):
     conn.commit()
 
 
+def m0051_search_speed(conn):
+    """Search pile-up fix (2026-11-24, searchcache.py): jobs a user's profile
+    scored below the bar are remembered for a while instead of being scored
+    again every day; and a run can jump the queue (a new user's first search,
+    a search the user pressed) ahead of the scheduled batch. Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS score_skips (
+        user_id    INTEGER NOT NULL,
+        url        TEXT NOT NULL,
+        sig        TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, url, sig))""", conn))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_score_skips_user ON score_skips (user_id, sig, created_at)")
+    if not _has_column(conn, "job_runs", "priority"):
+        conn.execute("ALTER TABLE job_runs ADD COLUMN priority INTEGER DEFAULT 0")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1393,6 +1410,7 @@ MIGRATIONS = [
     (48, "telegram_connect_codes",      m0048_telegram_connect_codes),
     (49, "cover_note",                  m0049_cover_note),
     (50, "device_traces",               m0050_device_traces),
+    (51, "search_speed",                m0051_search_speed),
 ]
 
 
