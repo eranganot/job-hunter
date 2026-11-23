@@ -344,3 +344,21 @@ def test_a_note_never_opens_with_the_role_even_when_the_model_insists():
                                   llm=lambda p: calls.append(p) or bad)
     assert len(calls) == 3 and note.startswith("At DAZN") and "role" not in note.lower(), note
     assert "the hook uses" in calls[1] and "Write both sentences again" in calls[1]
+
+
+def test_note_hook_may_not_copy_the_posting_and_the_note_is_never_cut_mid_word():
+    """Production, 2026-11-23 (after the hook/proof change): the hook repeated the
+    posting word for word, and a 3-sentence note was cut at 450 chars mid-word."""
+    import ai_analysis, json
+    job = {"title": "Head of Product - CRM", "company": "Fullpath",
+           "description": "We are building a technically complex, data-intensive product that manages customer "
+                          "relationships and sales pipelines, with a rapidly growing AI and agentic layer."}
+    prod = {"hook": "I'm particularly interested in shaping a technically complex, data-intensive product that manages "
+                    "customer relationships and sales pipelines, especially with its rapidly growing AI and agentic layer.",
+            "proof": "At DAZN TLV, I led a transition to a hyper-personalized user experience, engagement increased 22% and retention 36%."}
+    assert any("copies the posting" in p for p in ai_analysis._hook_problems(prod["hook"], job))
+    long = {"hook": "Getting a dealer's sales team to act on what the data tells them is the part I'd want to work on. " + "More. " * 60,
+            "proof": "At DAZN TLV retention went up 36%. " + "Again. " * 60}
+    note = ai_analysis.write_note(job, {"cv_summary": ""}, "k", cv_text="DAZN TLV retention 36%", name="Eran",
+                                  llm=lambda p: json.dumps(long))
+    assert note == "Getting a dealer's sales team to act on what the data tells them is the part I'd want to work on. At DAZN TLV retention went up 36%.", note
