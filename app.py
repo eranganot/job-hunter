@@ -32,6 +32,7 @@ import functools
 
 import auth
 import crypto
+import telegrambot
 import db as database
 import textclean
 import voice
@@ -998,12 +999,12 @@ WHATSAPP_AVAILABLE = False
 _WHATSAPP_OFF_TEXT = "WhatsApp is not available yet - use Telegram, email or push"
 
 _CHANNEL_NEEDS = {
-    "telegram": ("telegram_token", "telegram_chat_id"),
+    "telegram": ("telegram_chat_id",),
     "whatsapp": ("twilio_account_sid", "twilio_auth_token", "whatsapp_number"),
     "email":    ("email_address",),
 }
 _CHANNEL_MISSING_TEXT = {
-    "telegram": "Telegram is selected but the bot token or chat id is missing",
+    "telegram": "Telegram is selected but not connected - use Connect Telegram in Settings",
     "whatsapp": "WhatsApp is selected but the Twilio account SID, auth token or WhatsApp number is missing",
     "email":    "Email is selected but no address is set",
 }
@@ -1012,14 +1013,29 @@ _CHANNEL_MISSING_TEXT = {
 def _channel_missing(channel: str, values) -> str:
     """'' when `channel` has what it needs in `values` (a dict or a DB row),
     else the sentence saying what is missing."""
-    for key in _CHANNEL_NEEDS.get(channel, ()):
+    def _v(key):
         try:
-            v = values[key]
+            return str(values[key] or "").strip()
         except (KeyError, IndexError):
-            v = None
-        if not str(v or "").strip():
+            return ""
+    for key in _CHANNEL_NEEDS.get(channel, ()):
+        if not _v(key):
             return _CHANNEL_MISSING_TEXT[channel]
+    # A Telegram chat id is only reachable through the bot it belongs to: the
+    # user's own (legacy) bot, else Job Hunter's (telegrambot.py).
+    if channel == "telegram" and not (_v("telegram_token") or telegrambot.configured()):
+        return _CHANNEL_MISSING_TEXT[channel]
     return ""
+
+
+def _telegram_token_for(p) -> str:
+    """The bot that owns this profile's chat: a legacy own-bot token, else ours."""
+    own = ""
+    try:
+        own = str(p["telegram_token"] or "").strip()
+    except (KeyError, IndexError):
+        pass
+    return own or telegrambot.token()
 
 
 def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None,
@@ -1086,7 +1102,7 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
                 print(f"[notify] WARNING {channel} not set up for user {user_id}: {missing}")
                 continue
             if channel == "telegram":
-                send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
+                send_telegram(_telegram_token_for(p), p["telegram_chat_id"], msg_with_link)
             elif channel == "whatsapp":
                 send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
                               p["whatsapp_number"], msg_with_link)
@@ -5738,6 +5754,9 @@ class Handler(BaseHTTPRequestHandler):
                 "db_pool": _pool_stats,
                 # Whether web push can send at all (keys + library), 2026-11-08.
                 "push": push_configured(),
+                # Job Hunter's Telegram bot (telegrambot.py): both variables set.
+                # No Bot API call here - health must not depend on Telegram.
+                "telegram": {"configured": telegrambot.configured()},
                 # Connections a code path borrowed and never closed, handed
                 # back at the end of the request/tick. Should stay 0; a rising
                 # count names a route that needs a try/finally.
@@ -5807,6 +5826,23 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
 
+        # Settings polls this after opening the t.me link, until the user has
+        # tapped Start (light: /api/me also releases picks and marks activity).
+        if path == "/api/telegram/status":
+            user = self.require_auth()
+            if not user:
+                return
+            _tc = database.get_db()
+            try:
+                _row = _tc.execute("SELECT telegram_chat_id, telegram_token FROM user_profiles WHERE user_id=?",
+                                   (user["id"],)).fetchone()
+            finally:
+                _tc.close()
+            self.send_json({"connected": bool(_row and str(_row[0] or "").strip()),
+                            "own_bot": bool(_row and str(_row[1] or "").strip()),
+                            "available": telegrambot.configured()})
+            return
+
         if path == "/api/me":
             user = self.require_auth()
             if not user:
@@ -5856,6 +5892,11 @@ class Handler(BaseHTTPRequestHandler):
             # Settings tells a user who switched auto-apply on whether anything
             # is being sent yet (the engine's own server-wide switch).
             out["auto_apply_live"] = _engine_on_for(user)
+            # Telegram (telegrambot.py): is Job Hunter's bot offered, and is this
+            # account connected - through it, or through a legacy own bot.
+            out["telegram_bot_available"] = telegrambot.configured()
+            out["telegram_connected"] = bool(str(user.get("telegram_chat_id") or "").strip())
+            out["telegram_own_bot"] = bool(str(user.get("telegram_token") or "").strip())
             out["email_verified"] = auth.is_email_verified(user["id"])
             try:
                 _mc = database.get_db()
@@ -6821,6 +6862,31 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path   = parsed.path
 
+        # Job Hunter's Telegram bot (telegrambot.py). Telegram calls this with
+        # the secret we registered in setWebhook; anything without it is refused.
+        # Always 200 to a genuine call, even when we ignore it: a non-200 makes
+        # Telegram retry the same update for hours.
+        if path == "/telegram/webhook":
+            if not telegrambot.configured() or not telegrambot.secret_ok(
+                    self.headers.get("X-Telegram-Bot-Api-Secret-Token")):
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                _update = json.loads(self.read_body().decode("utf-8", "replace") or "{}")
+            except ValueError:
+                self.send_json({"ok": True})
+                return
+            _tc = database.get_db()
+            try:
+                _done = telegrambot.handle_update(_tc, _update, auth.update_profile)
+                print(f"[telegram] webhook: {_done}")
+            except Exception as _te:
+                print(f"[telegram] ERROR webhook update not handled: {_te}")
+            finally:
+                _tc.close()
+            self.send_json({"ok": True})
+            return
+
         # "Stop these emails" (lifecycle.py): the confirm button, and mail
         # providers' one-click unsubscribe (RFC 8058), which POSTs from their
         # servers. Authenticated by the link's token, not a cookie, so it sits
@@ -7146,6 +7212,48 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Unauthorized"}, 401)
             return
         user_id = user["id"] if user else None
+
+        # Connect Telegram: a one-time code and the t.me link that carries it.
+        if path == "/api/telegram/connect":
+            if not telegrambot.configured():
+                self.send_json({"error": "Telegram isn't available yet"}, 503)
+                return
+            _tc = database.get_db()
+            try:
+                _code = telegrambot.new_connect_code(_tc, user_id)
+            finally:
+                _tc.close()
+            try:
+                self.send_json({"url": telegrambot.connect_url(_code),
+                                "expires_minutes": telegrambot.CODE_MINUTES})
+            except Exception as _te:
+                print(f"[telegram] ERROR connect link for user {user_id}: {_te}")
+                self.send_json({"error": "Telegram didn't answer - try again in a minute"}, 502)
+            return
+
+        if path == "/api/telegram/disconnect":
+            _tc = database.get_db()
+            try:
+                telegrambot.unlink(_tc, auth.update_profile, user_id)
+            finally:
+                _tc.close()
+            self.send_json({"ok": True})
+            return
+
+        # Point Telegram at /telegram/webhook and set the bot's menu (/stop only).
+        # Run once after TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET are set.
+        if path == "/api/admin/telegram/setup":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            if not telegrambot.configured():
+                self.send_json({"error": "Set TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET in Railway first"}, 400)
+                return
+            try:
+                self.send_json({"ok": True, **telegrambot.setup(MOBILE_URL)})
+            except Exception as _te:
+                self.send_json({"ok": False, "error": str(_te)[:300]}, 502)
+            return
 
         # A locked match (beyond the plan's per-search limit) cannot be acted on
         # by any per-job route - approve, restore, apply, cover letter, check -
@@ -7665,7 +7773,8 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     _miss = _channel_missing(_ch, _merged)
                     if _miss:
-                        self.send_json({"error": _miss + " - fill it in or turn the channel off."}, 400)
+                        self.send_json({"error": _miss + ("" if "Settings" in _miss
+                                                          else " - fill it in or turn the channel off.")}, 400)
                         return
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
@@ -7704,7 +7813,7 @@ class Handler(BaseHTTPRequestHandler):
                     data[_k] = _v or ""
             try:
                 if channel == "telegram":
-                    send_telegram(data.get("telegram_token",""), data.get("telegram_chat_id",""), msg)
+                    send_telegram(_telegram_token_for(data), data.get("telegram_chat_id",""), msg)
                     _log_notification(user_id, "telegram", "Test OK")
                 elif channel == "whatsapp":
                     if not WHATSAPP_AVAILABLE:

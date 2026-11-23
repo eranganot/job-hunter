@@ -3625,14 +3625,56 @@ function NotificationChannels({ me }: { me: any }) {
   const [mailTo, setMailTo] = useState(me.email_address || "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  /* Job Hunter's own Telegram bot (2026-11-23): when it is available, Telegram
+     is not a toggle with a token and a chat id but Connect / Disconnect - the
+     connection itself turns the channel on or off on the server. */
+  const botOn = !!me.telegram_bot_available;
+  const [tgConnected, setTgConnected] = useState<boolean>(!!me.telegram_connected && !me.telegram_own_bot);
+  const [tgWaiting, setTgWaiting] = useState(false);
+  const connectTelegram = async () => {
+    setMsg("");
+    // Opened before the request resolves would be blocked as a pop-up on iOS;
+    // open a blank tab now and point it at the link once we have it.
+    const tab = window.open("", "_blank");
+    try {
+      const r = await api.telegramConnect();
+      if (tab) tab.location.href = r.url; else window.location.href = r.url;
+      setTgWaiting(true);
+      const until = Date.now() + r.expires_minutes * 60000;
+      const poll = async () => {
+        if (Date.now() > until) { setTgWaiting(false); setMsg("The link expired - press Connect Telegram again."); return; }
+        try {
+          const st = await api.telegramStatus();
+          if (st.connected && !st.own_bot) {
+            setTgWaiting(false); setTgConnected(true);
+            setChannels((cur) => (cur.includes("telegram") ? cur : [...cur, "telegram"]));
+            setMsg("\u2713 Telegram connected - Noa sent you a message there.");
+            return;
+          }
+        } catch { /* keep polling */ }
+        setTimeout(poll, 3000);
+      };
+      setTimeout(poll, 3000);
+    } catch (e: any) { if (tab) tab.close(); setMsg(e?.message || "Could not connect Telegram"); }
+  };
+  const disconnectTelegram = async () => {
+    setBusy(true); setMsg("");
+    try {
+      await api.telegramDisconnect();
+      setTgConnected(false);
+      setChannels((cur) => cur.filter((c) => c !== "telegram"));
+      setMsg("Telegram disconnected.");
+    } catch (e: any) { setMsg(e?.message || "Could not disconnect"); }
+    finally { setBusy(false); }
+  };
 
   /* WhatsApp is hidden (owner, 2026-11-23): the per-user Twilio design could
      not serve public users. A Job Hunter-owned number is in BACKLOG.md. A
      profile that already holds "whatsapp" drops it on the next save, since
      the server now refuses it. */
-  const CHANNELS: [string, string][] = [
-    ["telegram", "Telegram"], ["email", "Email"],
-  ];
+  const CHANNELS: [string, string][] = botOn
+    ? [["email", "Email"]]
+    : [["telegram", "Telegram"], ["email", "Email"]];
 
   const save = async () => {
     setBusy(true); setMsg("");
@@ -3642,7 +3684,7 @@ function NotificationChannels({ me }: { me: any }) {
         // empty is already "none", and a blank would read as one nameless
         // channel after the split.
         notification_channel: channels.length ? channels.join(",") : "none",
-        telegram_token: tgToken, telegram_chat_id: tgChat,
+        ...(botOn ? {} : { telegram_token: tgToken, telegram_chat_id: tgChat }),
         email_address: mailTo,
       });
       setMsg("\u2713 Saved");
@@ -3676,7 +3718,24 @@ function NotificationChannels({ me }: { me: any }) {
     <div>
       <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channels</h3>
       <p className="text-xs text-gray-400 mb-3">Pick any combination — alerts go to all of them.</p>
-      <div className="grid grid-cols-2 gap-2 mb-3">
+      {botOn && (
+        <div className="mb-3 p-3 rounded-xl border border-gray-700 bg-gray-800/60">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm text-white font-medium">Telegram</p>
+              <p className="text-xs text-gray-400">
+                {tgConnected ? "Connected \u00b7 Noa sends your alerts there"
+                  : tgWaiting ? "Waiting for you to tap Start in Telegram\u2026"
+                  : "Get your alerts from Noa in Telegram. Notifications only."}
+              </p>
+            </div>
+            {tgConnected
+              ? <button onClick={disconnectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl border border-gray-600 text-gray-300 text-xs font-medium disabled:opacity-60">Disconnect</button>
+              : <button onClick={connectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium disabled:opacity-60">{tgWaiting ? "Open again" : "Connect Telegram"}</button>}
+          </div>
+        </div>
+      )}
+      <div className={`grid ${CHANNELS.length > 1 ? "grid-cols-2" : "grid-cols-1"} gap-2 mb-3`}>
         {CHANNELS.map(([id, label]) => (
           <button key={id} onClick={() => toggle(id)} aria-pressed={has(id)}
             className={`py-2.5 rounded-xl border text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${has(id) ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
@@ -3685,7 +3744,7 @@ function NotificationChannels({ me }: { me: any }) {
         ))}
       </div>
       {!channels.length && <p className="text-xs text-gray-400 mb-3">No channels selected — only in-app and push alerts.</p>}
-      {has("telegram") && (
+      {!botOn && has("telegram") && (
         <div className="space-y-2">
           <input value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder="Bot token" className={input} />
           <input value={tgChat} onChange={(e) => setTgChat(e.target.value)} placeholder="Chat ID" className={input} />
