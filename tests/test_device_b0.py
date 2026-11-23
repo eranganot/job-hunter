@@ -328,3 +328,19 @@ def test_fullpaths_note_of_2026_11_23_is_caught_and_rewritten():
                                   llm=lambda p: seen.append(p) or (real if len(seen) == 1 else good))
     assert note == good and len(seen) == 2
     assert ai_analysis._problems(good, job) == []
+
+
+def test_a_note_never_opens_with_the_role_even_when_the_model_insists():
+    """Production, 2026-11-23, after 0.7.2: every Gemini rewrite still opened "The CRM
+    Head of Product role ...". The note is now a checked hook + a proof sentence; a
+    hook that names the job/role/company is never sent."""
+    import ai_analysis, json
+    job = {"title": "Head of Product - CRM", "company": "Fullpath",
+           "description": "Fullpath is building a category-defining product with a rapidly growing AI layer."}
+    bad = json.dumps({"hook": "The CRM Head of Product role, building a category-defining product, is exactly what I enjoy.",
+                      "proof": "At DAZN, I moved us to a hyper-personalized experience, which increased retention 36%."})
+    calls = []
+    note = ai_analysis.write_note(job, {"cv_summary": ""}, "k", cv_text="DAZN retention 36%", name="Eran",
+                                  llm=lambda p: calls.append(p) or bad)
+    assert len(calls) == 3 and note.startswith("At DAZN") and "role" not in note.lower(), note
+    assert "the hook uses" in calls[1] and "Write both sentences again" in calls[1]
