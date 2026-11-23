@@ -302,7 +302,7 @@ COMEET_FORM_CL = """<html><body><form onsubmit="return false">
 </form></body></html>"""
 
 
-def test_b0_comeet_gets_the_cover_letter_as_a_pdf_and_its_opening_as_the_note(stack, users, tmp_path):
+def test_b0_comeet_gets_the_cover_letter_as_a_pdf_and_no_weak_note(stack, users, tmp_path):
     """The owner, 2026-11-22: the letter goes up as "<Name> Cover Letter <year>.pdf"
     in Comeet's cover-letter field, and the Personal note gets its opening -
     never the "how did you hear about us" sentence it used to get."""
@@ -325,8 +325,9 @@ def test_b0_comeet_gets_the_cover_letter_as_a_pdf_and_its_opening_as_the_note(st
     got = sent[0]
     assert got["cl"].endswith(" Cover Letter %d.pdf" % datetime.date.today().year) and got["cltype"] == "application/pdf", got
     assert got["cv"].endswith(" CV %d.pdf" % datetime.date.today().year), got   # the CV stays in the CV field
-    assert got["note"].startswith("I am applying for the Senior PM role at Acme"), got
-    assert "Dear" not in got["note"] and "Job Hunter" not in got["note"], got
+    # No note could be written here (no model in tests): next to the PDF the note box
+    # stays empty - never the letter's opening (the owner, 2026-11-23).
+    assert got["note"] == "", got
 
 
 # SmartRecruiters' real form (inspected 2026-11-23 on Wix's Base44 posting): every
@@ -460,7 +461,10 @@ function next() {
   document.getElementById('years').addEventListener('picked', () => {
     document.getElementById('follow').innerHTML = '<div class="q">If you selected 10+, would you consider relocating at your own expense? <span>*</span></div><spl-radio-group id="own"></spl-radio-group>';
   });
-  document.getElementById('go').onclick = () => {
+  // Like ServiceNow's Submit (2026-11-23): a person's click or a page-world click
+  // submits; the extension's own (isolated-world) click does nothing.
+  document.getElementById('go').onclick = (ev) => {
+    if (!ev.isTrusted && !window.__inPageClick) return;
     const sr = id => document.getElementById(id).shadowRoot;
     fetch('/sr-submit', {method: 'POST', body: JSON.stringify(Object.assign({}, window.step1, {
       years: sr('years').getElementById('d').value, eligible: document.getElementById('elig').value === 'yes',
@@ -533,3 +537,44 @@ def test_b0_smartrecruiters_second_step_is_answered_and_city_picked(stack, users
     assert row["outcome"] == "sent", row
     got = sent[0]
     assert got["city"] == "Tel Aviv, Israel" and got["years"] == "10+" and got["eligible"] is True and got["privacy"] is True and got["own"] is True, got
+
+
+
+def test_b0_run_b_extension_press_goes_through_on_a_page_world_only_submit(stack, users, tmp_path, monkeypatch):
+    """The owner, 2026-11-23, ServiceNow run B: questions all answered, the extension
+    "pressed" Submit and nothing happened; he had to press it himself."""
+    import app as _app
+    import apply_engine as _ae
+    monkeypatch.setattr(_app, "GEMINI_KEY", "test")
+
+    def fake(prompt, **kw):
+        if "ON BEHALF of the applicant" not in prompt:
+            return {}
+        qs = json.loads(prompt.split("Questions (JSON array): ", 1)[1].split("\n\nReturn ONLY", 1)[0])
+        return [{"selector": q["selector"], "value": "10+" if "years" in q["label"] else "Yes", "confidence": "high"}
+                for q in qs if q["options"]]
+    monkeypatch.setattr(_ae, "_claude_json", fake)
+    monkeypatch.setattr(_ae, "extract_applicant_data", lambda text, email, fallback_name="": {"email": email})
+    conn = stack["db"].get_db()
+    _uid = conn.execute("SELECT id FROM users WHERE email='admin@example.test'").fetchone()[0]
+    if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (_uid,)).fetchone():
+        conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (_uid,))
+    conn.execute("UPDATE user_profiles SET locations=? WHERE user_id=?", ('["Tel Aviv, Israel"]', _uid))
+    conn.commit()
+    conn.close()
+    sent = []
+
+    def sr(route, request):
+        if request.method == "POST" and "sr-submit" in request.url:
+            sent.append(json.loads(request.post_data or "{}"))
+            return route.fulfill(status=200, body="{}")
+        route.fulfill(status=200, content_type="text/html", body=SR_STEPS)
+
+    def press_for_me(tab):                     # run B: once page 2 is filled, Eran clicks "Submit for me"
+        tab.wait_for_function("document.querySelector('#own') && document.querySelector('#own').value === 'yes'", timeout=40000)
+        tab.click("button:has-text('Submit for me')", timeout=20000)
+
+    row, job = _run(stack, users, tmp_path, "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/run-b",
+                    "https://jobs.smartrecruiters.com/**", sr, [], mode="B", as_eran=press_for_me)
+    assert sent, "the extension's press sent nothing"
+    assert (row["outcome"], row["pressed_by"]) == ("sent", "extension"), row

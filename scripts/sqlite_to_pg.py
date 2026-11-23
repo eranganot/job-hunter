@@ -92,6 +92,7 @@ TABLE_ORDER = [
     "device_codes",
     "device_tokens",
     "device_attempts",
+    "device_traces",
     # m0048 (2026-11-23): Telegram connect codes (telegrambot.py). No foreign keys.
     "telegram_connect_codes",
 ]

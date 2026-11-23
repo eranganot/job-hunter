@@ -414,6 +414,15 @@
     return deepAll('button, spl-button, [role="button"]').filter(vis)
       .find(b => /^(next|continue|next step)$/i.test(clean(b.innerText || b.textContent)));
   }
+  // Errors the site shows next to fields after a press ("This field is required").
+  function siteErrors() {
+    const out = [];
+    for (const e of deepAll('[role="alert"], [class*="error"], [class*="invalid"]')) {
+      const t = clean(e.textContent);
+      if (t && t.length < 160 && vis(e) && !out.includes(t)) out.push(t);
+    }
+    return out.slice(0, 6);
+  }
   const markAsked = () => deepAll('[data-jhq]').forEach(e => { e.dataset.jhAsked = '1'; });
 
   const fileInputs = () => fields().filter(el => (el.type || '').toLowerCase() === 'file');
@@ -491,5 +500,5 @@
   const THANKS = /thank you for (applying|your application|submitting)|application (has been |was )?(received|submitted)|we('ve| have) received your application/i;
   const confirmed = () => THANKS.test(document.body ? document.body.innerText : '');
 
-  window.JHFill = {unlabeled: () => unlabeledGroups, fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, openRadioGroups, nextButton, clickInPage, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
+  window.JHFill = {siteErrors, unlabeled: () => unlabeledGroups, fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, openRadioGroups, nextButton, clickInPage, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
 })();

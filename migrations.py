@@ -1326,6 +1326,22 @@ def m0049_cover_note(conn):
     conn.commit()
 
 
+def m0050_device_traces(conn):
+    """What the B0 extension did on each page, kept across deploys (2026-11-23)."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS device_traces (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    INTEGER NOT NULL,
+        job_id     INTEGER,
+        url        TEXT,
+        top        INTEGER,
+        version    TEXT,
+        step       TEXT,
+        data       TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP)""", conn))
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_device_traces_user ON device_traces (user_id, id)")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1376,6 +1392,7 @@ MIGRATIONS = [
     (47, "device_spike",                m0047_device_spike),
     (48, "telegram_connect_codes",      m0048_telegram_connect_codes),
     (49, "cover_note",                  m0049_cover_note),
+    (50, "device_traces",               m0050_device_traces),
 ]
 
 
