@@ -305,3 +305,26 @@ def test_the_answerer_gets_years_of_experience_and_today(stack, users, monkeypat
     a = _app._applicant_for(uid, "admin@example.test", "Admin Person", "", "")
     assert a["years_of_experience"] == 10 and a["today"] == _dt.date.today().isoformat(), a
     assert "years_of_experience" in questions._PROMPT and "today from the applicant data" in questions._PROMPT
+
+
+def test_fullpaths_note_of_2026_11_23_is_caught_and_rewritten():
+    """The owner: "the personal note is not personal (again)". This exact note
+    passed every 0.7.1 check: it opens by restating the role, quotes the posting,
+    and says "drove", "boosting", "is what I'm looking for"."""
+    import ai_analysis
+    real = ('The CRM Head of Product role, with its "category-defining product" mission in a data-intensive, '
+            "AI-driven space, is what I'm looking for. At DAZN, I drove a hyper-personalized user experience, "
+            "boosting engagement 22% and retention 36% by defining LLM evaluation and commercial success metrics.")
+    good = ("Getting a dealer's sales team to actually use the data in front of them is the part I'd want to dig into. "
+            "At DAZN we rebuilt the experience around personalization and retention went up 36%.")
+    job = {"title": "Head of Product - CRM", "company": "Fullpath",
+           "description": "Fullpath is building a category-defining product: an AI-powered CDP for car dealers."}
+    probs = ai_analysis._problems(real, job)
+    for x in ("drove", "boosting", "is what I'm looking for"):
+        assert x in probs, (x, probs)
+    assert any("opens by restating" in p for p in probs) and any("quotes the posting" in p for p in probs), probs
+    seen = []
+    note = ai_analysis.write_note(job, {"cv_summary": ""}, "k", cv_text="DAZN engagement 22% retention 36%", name="Eran",
+                                  llm=lambda p: seen.append(p) or (real if len(seen) == 1 else good))
+    assert note == good and len(seen) == 2
+    assert ai_analysis._problems(good, job) == []

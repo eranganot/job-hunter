@@ -427,7 +427,7 @@ customElements.define('spl-radio-group', class extends HTMLElement {
     // The question is drawn in the shadow root only (no "label" attribute), as on
     // ServiceNow, where the text above the first option was the pinned header.
     const r = this.attachShadow({mode: 'open'});
-    r.innerHTML = '<label>' + this.dataset.q + '<span>*</span></label><fieldset role="radiogroup"><slot></slot></fieldset>';
+    r.innerHTML = '<fieldset role="radiogroup"><slot></slot></fieldset>';
     this.setAttribute('required', '');
     for (const v of ['Yes', 'No']) {
       const o = document.createElement('spl-radio');
@@ -451,13 +451,14 @@ function next() {
   document.getElementById('s1').remove();
   document.getElementById('s2').innerHTML = '<h2>Preliminary questions</h2>' +
     '<spl-dropdown id="years" label="How many years of experience do you have as a Product Manager in tech product companies?" options="0-2|3-5|6-9|10+"></spl-dropdown>' +
-    '<spl-radio-group id="elig" data-q="Are you eligible to work in Israel? ' + 'This question is long, like ServiceNow\\'s question B about U.S. Federal Government employment and the STOCK Act, which runs to some six hundred characters and so was skipped by the text-above fallback. '.repeat(3) + '"></spl-radio-group>' +
+    '<div class="q">B. Are you eligible to work in Israel? ' + 'This question is long, like ServiceNow\\'s question B about U.S. Federal Government employment and the STOCK Act. '.repeat(5) + 'Answer YES if you are eligible to work in Israel <span>*</span></div>' +
+    '<spl-radio-group id="elig"></spl-radio-group>' +
     '<div id="follow"></div>' +
     '<spl-checkbox id="priv" label="You declare that you have read and understand the privacy notice of Wix."></spl-checkbox>' +
-    '<button type="button" id="go">Submit</button>';
+    '<button type="button" id="go" style="position:fixed;bottom:24px;right:40px;padding:10px 20px">Submit</button>';
   // A follow-up question shown only after an answer (ServiceNow: "If you selected Yes...").
   document.getElementById('years').addEventListener('picked', () => {
-    document.getElementById('follow').innerHTML = '<spl-radio-group id="own" data-q="If you selected 10+, would you consider relocating at your own expense?"></spl-radio-group>';
+    document.getElementById('follow').innerHTML = '<div class="q">If you selected 10+, would you consider relocating at your own expense? <span>*</span></div><spl-radio-group id="own"></spl-radio-group>';
   });
   document.getElementById('go').onclick = () => {
     const sr = id => document.getElementById(id).shadowRoot;
@@ -521,6 +522,10 @@ def test_b0_smartrecruiters_second_step_is_answered_and_city_picked(stack, users
                                   && document.querySelector('#years').shadowRoot.getElementById('d').value === '10+'; })()""", timeout=40000)
         tab.wait_for_function("document.querySelector('#elig') && document.querySelector('#elig').value === 'yes'", timeout=30000)
         tab.wait_for_function("document.querySelector('#own') && document.querySelector('#own').value === 'yes'", timeout=20000)
+        covered = tab.evaluate("""(() => { const b = document.getElementById('go').getBoundingClientRect();
+            const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+            return top && top.id === 'go' ? '' : (top ? top.outerHTML.slice(0, 120) : 'nothing'); })()""")
+        assert covered == "", "Submit is covered by: " + covered
         tab.click("#go")
 
     row, job = _run(stack, users, tmp_path, "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/step-2",

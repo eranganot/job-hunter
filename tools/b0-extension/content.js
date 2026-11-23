@@ -41,12 +41,20 @@
   function banner(text, state) {
     if (!bar) {
       bar = document.createElement('div');
-      bar.style.cssText = 'position:fixed;z-index:2147483647;left:12px;right:12px;bottom:12px;padding:12px 14px;border-radius:10px;' +
-        'font:14px/1.4 -apple-system,Segoe UI,Arial,sans-serif;background:#0f172a;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.35)';
+      // Top-right and narrow: at the bottom, full width, it covered Fullpath's Submit
+      // button (the owner, 2026-11-23). It can be folded to a small tab.
+      bar.style.cssText = 'position:fixed;z-index:2147483647;right:12px;top:12px;max-width:380px;padding:10px 12px;border-radius:10px;' +
+        'font:13px/1.4 -apple-system,Segoe UI,Arial,sans-serif;background:#0f172a;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.35)';
       document.documentElement.appendChild(bar);
     }
     bar.innerHTML = '';
-    const p = document.createElement('div'); p.textContent = 'Job Hunter B0 · ' + text; bar.appendChild(p);
+    const fold = document.createElement('button');
+    fold.textContent = '–'; fold.title = 'Fold';
+    fold.style.cssText = 'float:right;margin:-4px -4px 0 8px;border:0;background:transparent;color:#94a3b8;cursor:pointer;font-size:16px';
+    const p = document.createElement('div'); p.textContent = 'Job Hunter B0 · ' + text;
+    fold.onclick = () => { const f = p.style.display !== 'none'; p.style.display = f ? 'none' : ''; fold.textContent = f ? 'Job Hunter ▸' : '–';
+                           [...bar.querySelectorAll('button')].forEach(b => { if (b !== fold) b.style.display = f ? 'none' : ''; }); };
+    bar.appendChild(fold); bar.appendChild(p);
     if (state === 'ready' && !submittedAt) {
       // Run B where nothing was prepared (SmartRecruiters): Eran fills, the extension presses Submit.
       const b = document.createElement('button'); b.textContent = 'Submit for me';
