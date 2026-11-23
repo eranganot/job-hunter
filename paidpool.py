@@ -470,6 +470,45 @@ def run_source(conn, name, now=None, fetchers=None) -> dict:
                       % (limit, len(jobs), added, len(titles), plan["total"], plan["after_collapse"], plan["senior"])}
 
 
+def check_key(name: str) -> dict:
+    """Is this source's key accepted, at no cost? Apify: GET /v2/users/me, which
+    bills nothing (2026-11-23: added after a rotated token, so the owner need not
+    wait for the next daily run to know). Other sources have no free probe."""
+    if name not in SOURCES:
+        return {"ok": False, "detail": "unknown source"}
+    if not api_key(name):
+        return {"ok": False, "detail": "no API key set"}
+    if name != "apify":
+        return {"ok": None, "detail": "no free key check for this source; use run"}
+    try:
+        me = _http("GET", "https://api.apify.com/v2/users/me",
+                   headers={"Authorization": "Bearer " + api_key("apify")}) or {}
+    except SourceError as e:
+        return {"ok": False, "detail": str(e)[:300]}
+    d = me.get("data") or {}
+    return {"ok": True, "detail": "token accepted for Apify user %s (plan %s)"
+            % (d.get("username") or "?", (d.get("plan") or {}).get("id") or "?")}
+
+
+def rerun_today(get_db, name: str, now=None, fetchers=None) -> dict:
+    """Run one switched-on source again now and record it as today's run,
+    replacing a failed one. Used after fixing a key; spends from the same
+    monthly cap as the daily run."""
+    if name not in enabled_sources():
+        return {"status": "off", "fetched": 0, "added": 0,
+                "detail": "not in JH_PAID_POOL_SOURCES, so it never runs"}
+    now = now or _now()
+    conn = get_db()
+    try:
+        res = run_source(conn, name, now, fetchers)
+        if res["status"] != "no_key":
+            _record_run(conn, name, _day(now), res["status"], res["fetched"], res["detail"])
+        print("[pool] %s re-run by admin: %s - %s" % (name, res["status"], res["detail"]))
+        return res
+    finally:
+        conn.close()
+
+
 def run_daily(get_db, now=None, fetchers=None) -> dict:
     """Run every provider that has not run today (Israel date), after
     RUN_AFTER_HOUR. Safe to call every minute. Returns {provider: result}
