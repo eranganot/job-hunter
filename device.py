@@ -19,6 +19,7 @@ guards cookie requests does not apply to them.
 import hashlib
 import json
 import random
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -118,6 +119,46 @@ def jobs(user_id: int) -> list:
                     "system": ae.ats_name(url), "route": ae.apply_route(url),
                     "apply_status": r["apply_status"] or "", "apply_error": r["apply_error"] or "",
                     "prepared": prepared if isinstance(prepared, list) else []})
+    return out
+
+
+def applicant(user) -> dict:
+    """The contact details every form asks for, from the Profile page (the
+    source of truth for who is applying, 2026-11-07) - for the extension to fill
+    where no prepared answer covers a field. No model call: the job list is
+    asked for every time the popup opens."""
+    import apply_engine as ae
+    uid = user["id"]
+    conn = database.get_db()
+    try:
+        p = conn.execute("SELECT phone, linkedin_url FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
+        u = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    finally:
+        conn.close()
+    u = dict(u) if u else {}
+    name = (u.get("name") or user.get("name") or "").strip()
+    parts = name.split()
+    phone = ((p["phone"] if p else "") or u.get("phone") or "").strip()
+    intl = ae.intl_phone(phone, "Israel") if phone else ""
+    local = re.sub(r"^\+972[\s-]*", "0", intl) if intl.startswith("+972") else phone
+    city = ""
+    for c in re.split(r"[,;/|]", u.get("locations") or ""):
+        c = c.strip()
+        if c and not re.search(r"remote|hybrid|anywhere|israel$", c, re.I):
+            city = c
+            break
+    out = {"full_name": name, "first_name": parts[0] if parts else "",
+           "last_name": " ".join(parts[1:]), "email": (u.get("email") or user.get("email") or "").strip(),
+           "phone": intl, "phone_local": local, "linkedin_url": ((p["linkedin_url"] if p else "") or "").strip(),
+           "city": city}
+    try:
+        import app as _app
+        notes = _app._standing_answers(uid).get("standing_notes") or ""
+        gh = re.search(r"https?://(?:www\.)?github\.com/[A-Za-z0-9_.-]+", notes)
+        if gh:
+            out["github_url"] = gh.group(0)
+    except Exception as exc:  # noqa: BLE001 - GitHub is optional
+        print("[device] standing notes for user %s: %s" % (uid, exc))
     return out
 
 

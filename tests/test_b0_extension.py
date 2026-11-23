@@ -58,7 +58,8 @@ APPLY = """<html><body><form method="post" action="" enctype="multipart/form-dat
 THANKS = "<html><body><h3>Thank you for applying</h3></body></html>"
 
 
-def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", as_eran=None, cover_letter=None):
+def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", as_eran=None, cover_letter=None,
+         profile=None):
     """Pair the extension, open the job in run B, return (attempt row, job row)."""
     db = stack["db"]
     uid = _user_id(db, "admin@example.test")
@@ -73,6 +74,8 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
     if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (uid,)).fetchone():
         conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (uid,))
     conn.execute("UPDATE user_profiles SET cv_path=? WHERE user_id=?", (str(cv), uid))
+    for k, v in (profile or {}).items():
+        conn.execute("UPDATE user_profiles SET %s=? WHERE user_id=?" % k, (v, uid))
     conn.commit()
     conn.close()
     code = json.loads(users["admin"].get("/api/admin/device-code")[2])["code"]
@@ -317,3 +320,67 @@ def test_b0_comeet_gets_the_cover_letter_as_a_pdf_and_its_opening_as_the_note(st
     assert got["cv"].endswith(" CV %d.pdf" % datetime.date.today().year), got   # the CV stays in the CV field
     assert got["note"].startswith("I am applying for the Senior PM role at Acme"), got
     assert "Dear" not in got["note"] and "Job Hunter" not in got["note"], got
+
+
+# SmartRecruiters' real form (inspected 2026-11-23 on Wix's Base44 posting): every
+# input inside a web component's shadow root, an "Easy Apply" dropzone at the top
+# and the "Resume *" one below, a phone number next to a separate +972 picker.
+SR_FORM = """<html><body>
+<script>
+customElements.define('spl-input', class extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({mode: 'open'}), id = this.getAttribute('fid'), lab = this.getAttribute('label');
+    r.innerHTML = (lab ? '<label for="' + id + '">' + lab + '*</label>' : '') +
+      '<input id="' + id + '" type="' + (this.getAttribute('type') || 'text') + '"' +
+      (lab ? '' : ' aria-label="Phone number"') + '>';
+  }
+});
+customElements.define('spl-dropzone', class extends HTMLElement {
+  connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<label for="f' + this.id + '">Choose a file or drop it here</label><input type="file" id="f' + this.id + '">'; }
+});
+customElements.define('spl-textarea', class extends HTMLElement {
+  connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<label for="m">Let the company know about your interest</label><textarea id="m"></textarea>'; }
+});
+</script>
+<section><h2>Easy Apply</h2><p>Choose an option to autocomplete your application.</p><spl-dropzone id="2"></spl-dropzone></section>
+<section><h2>Personal information</h2>
+<spl-input fid="first-name-input" label="First name"></spl-input>
+<spl-input fid="last-name-input" label="Last name"></spl-input>
+<spl-input fid="email-input" label="Email" type="email"></spl-input>
+<spl-input fid="confirm-email-input" label="Confirm your email" type="email"></spl-input>
+<span>+972</span><spl-input fid="phone" type="tel"></spl-input></section>
+<section><h3>Resume *</h3><spl-dropzone id="1"></spl-dropzone></section>
+<section><h3>Message to the Hiring Team</h3><spl-textarea></spl-textarea></section>
+<button type="button" onclick="
+  const v = id => document.querySelector('[fid=' + id + ']').shadowRoot.querySelector('input').value;
+  const f = id => (document.getElementById(id).shadowRoot.querySelector('input').files[0] || {}).name || '';
+  fetch('/sr-submit', {method: 'POST', body: JSON.stringify({first: v('first-name-input'), last: v('last-name-input'),
+    email: v('email-input'), confirm: v('confirm-email-input'), phone: v('phone'), resume: f('1'), easy: f('2'),
+    note: document.querySelector('spl-textarea').shadowRoot.querySelector('textarea').value})})
+  .then(() => { document.body.innerHTML = '<h1>Thank you for applying</h1>'; });">Submit</button>
+</body></html>"""
+
+
+def test_b0_smartrecruiters_shadow_form_gets_contact_details_cv_and_note(stack, users, tmp_path):
+    """The owner, 2026-11-23: on ServiceNow, Check Point and Wix the extension
+    "doesn't do anything" - SmartRecruiters' inputs are all in shadow roots, so
+    the extension saw no form and stopped without a word. And jobs added by link
+    have no prepared answers, so even where it saw the form only the CV went in."""
+    sent = []
+
+    def sr(route, request):
+        if request.method == "POST" and "sr-submit" in request.url:
+            sent.append(json.loads(request.post_data or "{}"))
+            return route.fulfill(status=200, body="{}")
+        route.fulfill(status=200, content_type="text/html", body=SR_FORM)
+
+    row, job = _run(stack, users, tmp_path, "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/abc-123",
+                    "https://jobs.smartrecruiters.com/**", sr, [], cover_letter=LETTER,
+                    profile={"phone": "054-123-4567", "linkedin_url": "https://www.linkedin.com/in/dana"})
+    assert row["outcome"] == "sent", row
+    got = sent[0]
+    import datetime
+    assert got["first"] == "admin" and got["email"] == "admin@example.test" == got["confirm"], got   # one-word account name: no last name
+    assert got["phone"] == "0541234567" or got["phone"].replace("-", "").replace(" ", "") == "0541234567", got
+    assert got["resume"].endswith(" CV %d.pdf" % datetime.date.today().year) and got["easy"] == "", got
+    assert got["note"].startswith("Dear Hiring Team"), got        # no cover-letter file field: the whole letter
