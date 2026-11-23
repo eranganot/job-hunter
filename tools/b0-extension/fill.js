@@ -305,8 +305,11 @@
         const own = host.shadowRoot && host.shadowRoot.querySelector('label, legend, [class*="label"]');
         const ownText = own ? clean(own.textContent).replace(/\s*[*✱]\s*$/, '') : '';
         const above = textAbove(r);
-        const lab = clean((host.getAttribute && host.getAttribute('label')) || '') || ownText ||
-                    (/[?*:]\s*$/.test(above) ? above : '');
+        // On ServiceNow every question came from the text above (2026-11-23 trace):
+        // the group carries neither a label attribute nor its own label. 0.7.1 also
+        // asked that text to end like a question - B ends "...is YES" (its "*" is a
+        // separate element) and was dropped. Pinned headers are already excluded.
+        const lab = clean((host.getAttribute && host.getAttribute('label')) || '') || ownText || above;
         jt('radio-group', {label: lab.slice(0, 80), from: host.getAttribute && host.getAttribute('label') ? 'attr' : ownText ? 'shadow' : lab ? 'above' : 'none',
                            options: r.parentElement ? [...r.parentElement.children].length : 0});
         groups.set(host, {host, items: [], label: lab,

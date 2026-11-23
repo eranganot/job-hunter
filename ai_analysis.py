@@ -651,7 +651,8 @@ _ROBOT_PHRASES = [
     r"which prepared me", r"\bthis involved\b", r"has consistently", r"have consistently",
     r"^\s*i(?:'| a)m an? [a-z ]{0,30}(leader|executive|manager|director|expert|professional)\b",
     r"\bi lead ai product\b", r"\bi(?:'| a)m drawn to\b", r"caught my eye", r"really grabs me",
-    r"\bstands out\b", r"could be valuable here", r"seems like a good match", r"\bboosted\b", r"\+\d+%",
+    r"\bstands out\b", r"could be valuable here", r"seems like a good match", r"\bboost(ed|ing)?\b", r"\+\d+%",
+    r"\bdrove\b", r"\bdriving\b", r"is what i(?:'| a)m looking for", r"\bi(?:'| a)m looking for\b",
     r"—",
 ]
 
@@ -667,13 +668,24 @@ def robot_phrases(text: str) -> list:
 
 
 def _opens_with_the_job(text: str, job: dict) -> bool:
-    """Does the body start by restating the job title or the company ("The X role at Y...")?"""
+    """Does the first sentence restate the job ("The X role at Y...", "The CRM Head of
+    Product role, with its ... mission")? 0.7.1 compared the exact title text and
+    missed a reworded title (Fullpath, 2026-11-23)."""
     body = re.sub(r"^\s*(dear|hi|hello)[^\n]*\n+", "", text or "", flags=re.I).strip().lower()
-    first = body[:120]
-    title = (job.get("title") or "").strip().lower()
-    company = (job.get("company") or "").strip().lower()
-    return bool(first.startswith("the ") and ((title and title[:20] in first) or (company and company in first)))
+    first = re.split(r"(?<=[.!?])\s", body, 1)[0][:220]
+    if re.match(r"^(the|this|your)\b[^.]{0,80}\b(role|position|opening|opportunity|job)\b", first):
+        return True
+    words = {w for w in re.findall(r"[a-z]+", (job.get("title") or "").lower()) if len(w) > 2 and w not in ("and", "the", "for")}
+    hits = sum(1 for w in words if re.search(r"\b%s\b" % re.escape(w), first[:90]))
+    return bool(words) and hits >= min(2, len(words))
 
+
+def _quotes_the_posting(text: str, jd: str) -> str:
+    """A phrase in quotes copied from the job description ("category-defining product")."""
+    for q in re.findall(r'["\u201c]([^"\u201d]{6,80})["\u201d]', text or ""):
+        if q.lower() in (jd or "").lower():
+            return q
+    return ""
 
 _STOP = {"the", "a", "an", "and", "of", "to", "in", "for", "with", "on", "at", "by", "i", "my", "is", "it", "that", "as"}
 
@@ -692,20 +704,34 @@ def _copied_from(text: str, source: str, n: int = 4) -> str:
     return ""
 
 
-def _humanize(llm, prompt: str, text: str, job: dict, summary: str = "") -> str:
-    """One rewrite when the draft sounds machine-written; the problems named."""
+def _problems(text: str, job: dict, summary: str = "") -> list:
     problems = robot_phrases(text)
     copied = _copied_from(text, summary)
     if copied:
         problems.append('it repeats the CV summary ("%s ...") - say it your own way' % copied)
     if _opens_with_the_job(text, job):
-        problems.append("it opens by restating the job title / company")
-    if not problems:
-        return text
-    return llm(prompt + "\n\nYour previous draft sounded machine-written: " + "; ".join(
-        '"%s"' % p if not p.startswith("it ") else p for p in problems) +
-        ". Write it again as a person would, without those; keep the facts.")
+        problems.append("it opens by restating the job title / role - start with what you think about the work")
+    quoted = _quotes_the_posting(text, job.get("full_description") or job.get("description") or "")
+    if quoted:
+        problems.append('it quotes the posting ("%s") - use your own words' % quoted)
+    return problems
 
+
+def _humanize(llm, prompt: str, text: str, job: dict, summary: str = "") -> str:
+    """Up to two rewrites while the draft sounds machine-written, the problems named
+    each time; the draft with the fewest problems is kept. (0.7.1 rewrote once, and
+    only for problems its checks caught - Fullpath's note passed them all, 2026-11-23.)"""
+    best, best_p = text, _problems(text, job, summary)
+    for _ in range(2):
+        if not best_p:
+            break
+        again = llm(prompt + "\n\nYour previous draft:\n" + best + "\n\nIt sounded machine-written: " + "; ".join(
+            '"%s"' % p if not p.startswith("it ") else p for p in best_p) +
+            ". Write it again as a person would, without those; keep the facts.")
+        again_p = _problems(again, job, summary)
+        if len(again_p) <= len(best_p):
+            best, best_p = again, again_p
+    return best
 
 def _letter_text(prompt: str, gemini_key: str, user_id) -> str:
     body = json.dumps({
