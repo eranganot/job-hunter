@@ -793,11 +793,71 @@ def write_cover_letter(job: dict, profile: dict, api_key: str = "", user_id=None
     return {"letter": letter.strip(), "notes": notes}
 
 
+_NOTE_PARTS_PROMPT = """You are {name}, applying for the job below. Write two sentences for the
+application form's "personal note" box, in your own first-person voice, as JSON only:
+
+{{"hook": "...", "proof": "..."}}
+
+hook - ONE sentence about a specific problem or piece of work in this job description that you
+  would genuinely want to work on, and why it interests you. Talk about the work itself.
+  It must NOT contain: the job title or any part of it ({title}), the company name ({company}),
+  the words role / position / job / opportunity / mission, a quote from the posting, or any
+  label for yourself ("I'm a product leader..."). Not "I'm drawn to", "exactly what I enjoy",
+  "is what I'm looking for", "excited", "passionate".
+proof - ONE sentence: the closest thing you actually did, from the CV - the company, what you
+  built or changed, and the CV's own number copied exactly ("22%", not "+22%"). No "drove",
+  "boosted", "spearheaded", "leveraged".
+
+Plain, specific, a little informal. No em dashes.
+
+JOB: {title} at {company}
+JOB DESCRIPTION:
+{jd}
+
+CV:
+{cv}"""
+
+_ROLE_WORDS = re.compile(r"\b(role|position|job|opportunity|opening|mission)\b", re.I)
+
+
+def _note_parts(raw: str) -> dict:
+    """{'hook', 'proof'} from the model's reply (JSON, possibly fenced)."""
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if m:
+        try:
+            d = json.loads(m.group(0))
+            if isinstance(d, dict):
+                return {"hook": str(d.get("hook") or "").strip(), "proof": str(d.get("proof") or "").strip()}
+        except (TypeError, ValueError):
+            pass
+    parts = re.split(r"(?<=[.!?])\s+", (raw or "").strip(), 1)
+    return {"hook": parts[0].strip(), "proof": parts[1].strip() if len(parts) > 1 else ""}
+
+
+def _hook_problems(hook: str, job: dict) -> list:
+    """What disqualifies the hook sentence: naming the job, the company, a role word."""
+    probs = []
+    low = (hook or "").lower()
+    company = (job.get("company") or "").strip().lower()
+    if not hook:
+        probs.append("the hook is empty")
+    if _ROLE_WORDS.search(hook or ""):
+        probs.append('the hook uses "%s"' % _ROLE_WORDS.search(hook).group(0))
+    if company and len(company) > 2 and company in low:
+        probs.append("the hook names the company")
+    words = {w for w in re.findall(r"[a-z]+", (job.get("title") or "").lower()) if len(w) > 2 and w not in ("and", "the", "for")}
+    if words and sum(1 for w in words if re.search(r"\b%s\b" % re.escape(w), low)) >= min(2, len(words)):
+        probs.append("the hook repeats the job title")
+    return probs
+
+
 def write_note(job: dict, profile: dict, api_key: str = "", user_id=None,
                cv_text: str = "", name: str = "", llm=None) -> str:
     """The short "personal note" for a form's note box (Comeet "Personal note",
-    Lever "Additional information"): 2-3 sentences from the applicant - not the
-    letter's first paragraph (the owner, 2026-11-23: "not personal")."""
+    Lever "Additional information"): a sentence about the work + a sentence of proof.
+    Built from two separately checked parts: asked for as one paragraph, Gemini opened
+    with "The CRM Head of Product role..." on every rewrite (production, 2026-11-23),
+    whatever the prompt said."""
     import tailor
     gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
     cv = (cv_text or profile.get("cv_summary") or "").strip()[:9000]
@@ -805,17 +865,30 @@ def write_note(job: dict, profile: dict, api_key: str = "", user_id=None,
         raise RuntimeError("No CV to write from - upload your CV first.")
     jd = (job.get("full_description") or job.get("description") or job.get("title", ""))[:5000]
     name = (name or "").strip() or "the candidate"
-    prompt = _NOTE_PROMPT.format(name=name, title=job.get("title", "the role"),
-                                 company=job.get("company", "the company"), jd=jd, cv=cv)
+    prompt = _NOTE_PARTS_PROMPT.format(name=name, title=job.get("title", "the role"),
+                                       company=job.get("company", "the company"), jd=jd, cv=cv)
     if llm is None:
         if not gemini_key:
             raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
         llm = lambda p: _letter_text(p, gemini_key, user_id)
-    note = _humanize(llm, prompt, llm(prompt), job, profile.get("cv_summary") or "").strip().strip('"')
+    summary = profile.get("cv_summary") or ""
+    best, best_n = None, 99
+    ask = prompt
+    for _ in range(3):
+        parts = _note_parts(llm(ask))
+        probs = _hook_problems(parts["hook"], job) + _problems(parts["hook"] + " " + parts["proof"], job, summary)
+        probs = [x for x in probs if not x.startswith("it opens by restating")]   # the hook check covers this
+        if len(probs) < best_n:
+            best, best_n = parts, len(probs)
+        if not probs:
+            break
+        ask = prompt + "\n\nYour previous answer: " + json.dumps(parts) + "\nProblems: " + "; ".join(probs) + \
+            ". Write both sentences again without those problems."
+    note = (best["hook"] + " " + best["proof"]).strip() if best_n == 0 or not _hook_problems(best["hook"], job) else best["proof"]
     allowed = tailor._numbers(cv) | tailor._numbers(jd)
     if tailor._numbers(note) - allowed:      # a number not in the CV or the job: drop that sentence
         note = " ".join(x for x in re.split(r"(?<=[.!?])\s+", note) if not (tailor._numbers(x) - allowed))
-    return note[:450].strip()
+    return note.strip().strip('"')[:450].strip()
 
 
 def generate_cover_letter(job: dict, profile: dict, api_key: str = "",
