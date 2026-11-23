@@ -68,6 +68,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (task.claimed) return reply(false);
       task.claimed = true; await saveTasks(t); return reply(true);
     }
+    if (msg.type === 'answers') {
+      const r = await api('/api/device/jobs/' + encodeURIComponent(msg.jobId) + '/answers',
+                          {method: 'POST', body: JSON.stringify({questions: msg.questions, page_text: msg.page_text})});
+      return reply(await r.json().catch(() => ({error: 'HTTP ' + r.status})));
+    }
     if (msg.type === 'cover') {
       const r = await api('/api/device/jobs/' + encodeURIComponent(msg.jobId) + '/cover-letter');
       return reply(await r.json().catch(() => ({error: 'HTTP ' + r.status})));

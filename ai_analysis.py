@@ -619,16 +619,19 @@ _NOTE_PROMPT = """You are {name}. The application form for the job below has a s
 box. Write what you would type there yourself: 2-3 sentences, at most 450 characters, to the
 person who will read the application.
 
-- Start from you: what you do, and the one thing in this job that makes you want to talk to
-  them. Then one concrete thing you have done (from the CV, numbers copied exactly) that is
-  the closest match. End naturally - no "I look forward to hearing from you".
-- Plain, warm, a bit informal, like a message to a person. Contractions are fine.
-- Never open with the job title or the company name. Never: "aligns", "relevant",
-  "this experience", "my background", "excited", "passionate", "leverage", "I believe",
-  "I am confident", "great fit". No em dashes. No greeting line, no sign-off, no name.
+- Open with the job, not with yourself: the one specific thing in this job description that
+  made you stop and want to talk to them, in your own words (not the posting's).
+- Then one concrete thing you did that is closest to it - the company, what you built or
+  changed, the CV's own number copied exactly.
+- Never describe yourself with a title or label ("I'm an Executive Product Leader",
+  "I'm an AI product executive", "I lead AI product transformation", "a seasoned..."):
+  the reader has your CV. Never "I'm drawn to", "caught my eye", "really grabs me",
+  "stands out", "could be valuable here", "seems like a good match".
+- Plain and a bit informal, like a message to a person. Contractions are fine. No em
+  dashes, no "+22%" style - write "22%". No greeting line, no sign-off, no name.
+- Never: "aligns", "relevant", "this experience", "my background", "excited",
+  "passionate", "leverage", "boosted", "I believe", "I am confident", "great fit".
 - Every fact about you comes from the CV; facts about the company only from the job.
-
-Your positioning: {about}
 
 JOB: {title} at {company}
 JOB DESCRIPTION:
@@ -646,6 +649,9 @@ _ROBOT_PHRASES = [
     r"\bleverag", r"\bspearhead", r"\bempower", r"\bdemocratiz", r"\boperationaliz",
     r"proven track record", r"results-driven", r"\bsynerg", r"(great|perfect) fit",
     r"which prepared me", r"\bthis involved\b", r"has consistently", r"have consistently",
+    r"^\s*i(?:'| a)m an? [a-z ]{0,30}(leader|executive|manager|director|expert|professional)\b",
+    r"\bi lead ai product\b", r"\bi(?:'| a)m drawn to\b", r"caught my eye", r"really grabs me",
+    r"\bstands out\b", r"could be valuable here", r"seems like a good match", r"\bboosted\b", r"\+\d+%",
     r"—",
 ]
 
@@ -669,9 +675,29 @@ def _opens_with_the_job(text: str, job: dict) -> bool:
     return bool(first.startswith("the ") and ((title and title[:20] in first) or (company and company in first)))
 
 
-def _humanize(llm, prompt: str, text: str, job: dict) -> str:
+_STOP = {"the", "a", "an", "and", "of", "to", "in", "for", "with", "on", "at", "by", "i", "my", "is", "it", "that", "as"}
+
+
+def _copied_from(text: str, source: str, n: int = 4) -> str:
+    """The first run of n+ words text shares with source (the CV summary), or ''.
+    The owner, 2026-11-23: a note opening "I'm an Executive Product Leader,
+    transforming platforms with AI" was his summary restated."""
+    words = re.findall(r"[a-z0-9']+", (source or "").lower())
+    grams = {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+    tw = re.findall(r"[a-z0-9']+", (text or "").lower())
+    for i in range(len(tw) - n + 1):
+        g = " ".join(tw[i:i + n])
+        if g in grams and sum(w not in _STOP for w in g.split()) >= 2:
+            return g
+    return ""
+
+
+def _humanize(llm, prompt: str, text: str, job: dict, summary: str = "") -> str:
     """One rewrite when the draft sounds machine-written; the problems named."""
     problems = robot_phrases(text)
+    copied = _copied_from(text, summary)
+    if copied:
+        problems.append('it repeats the CV summary ("%s ...") - say it your own way' % copied)
     if _opens_with_the_job(text, job):
         problems.append("it opens by restating the job title / company")
     if not problems:
@@ -722,7 +748,7 @@ def write_cover_letter(job: dict, profile: dict, api_key: str = "", user_id=None
             raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
         llm = lambda p: _letter_text(p, gemini_key, user_id)
     allowed = tailor._numbers(cv) | tailor._numbers(jd)
-    letter = _humanize(llm, prompt, llm(prompt), job)
+    letter = _humanize(llm, prompt, llm(prompt), job, profile.get("cv_summary") or "")
     bad = sorted(tailor._numbers(letter) - allowed)
     if bad:
         letter = llm(prompt + "\n\nYour previous draft used numbers that are in neither the CV nor the job "
@@ -753,14 +779,13 @@ def write_note(job: dict, profile: dict, api_key: str = "", user_id=None,
         raise RuntimeError("No CV to write from - upload your CV first.")
     jd = (job.get("full_description") or job.get("description") or job.get("title", ""))[:5000]
     name = (name or "").strip() or "the candidate"
-    about = (profile.get("about_me") or profile.get("cv_summary") or "").strip()[:1200] or "(see the CV)"
-    prompt = _NOTE_PROMPT.format(name=name, title=job.get("title", "the role"), about=about,
+    prompt = _NOTE_PROMPT.format(name=name, title=job.get("title", "the role"),
                                  company=job.get("company", "the company"), jd=jd, cv=cv)
     if llm is None:
         if not gemini_key:
             raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
         llm = lambda p: _letter_text(p, gemini_key, user_id)
-    note = _humanize(llm, prompt, llm(prompt), job).strip().strip('"')
+    note = _humanize(llm, prompt, llm(prompt), job, profile.get("cv_summary") or "").strip().strip('"')
     allowed = tailor._numbers(cv) | tailor._numbers(jd)
     if tailor._numbers(note) - allowed:      # a number not in the CV or the job: drop that sentence
         note = " ".join(x for x in re.split(r"(?<=[.!?])\s+", note) if not (tailor._numbers(x) - allowed))

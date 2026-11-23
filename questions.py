@@ -249,13 +249,37 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
     """Fill what can be answered; return {'filled': n, 'unsure': [...], 'questions': [...]}.
     `unsure` = required questions without a confident answer, each with a 'draft'.
     llm(prompt) -> parsed JSON; None means no model available (bank answers only)."""
-    qs = collect(frame)
+    return decide(collect(frame), applicant, job, llm, lambda q, v: _fill(frame, q, v))
+
+
+def answer_list(qs: list, applicant: dict, job: dict, llm=None) -> dict:
+    """The same decisions for questions read by someone else (the B0 extension,
+    from the applicant's own browser): [{selector, label, type, options,
+    required}] in, {'answers': [{selector, value}], 'unsure': [...]} out."""
+    out = []
+    for q in qs or []:
+        q = dict(q)
+        q["key"] = key(q.get("label") or "")
+        out.append(q)
+    picked = []
+
+    def keep(q, v):
+        picked.append({"selector": q["selector"], "value": v})
+        return True
+    res = decide(out, applicant, job, llm, keep)
+    res["answers"] = picked
+    return res
+
+
+def decide(qs: list, applicant: dict, job: dict, llm, fill) -> dict:
+    """The answering rules, with fill(q, value) -> bool doing the filling."""
+    _fill = fill
     bank = (applicant or {}).get("answer_bank") or {}
     filled, unsure, ask = 0, [], []
     for q in qs:
         if q["key"] in bank:
             try:
-                if _fill(frame, q, bank[q["key"]]):
+                if _fill(q, bank[q["key"]]):
                     filled += 1
                     continue
             except Exception as exc:
@@ -275,7 +299,7 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
                 _profile_link = (applicant or {}).get("github_url")
         if _profile_link:
             try:
-                if _fill(frame, q, _profile_link):
+                if _fill(q, _profile_link):
                     filled += 1
                     continue
             except Exception as exc:
@@ -285,7 +309,7 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
         # apply at all - filled without asking anyone.
         if q.get("required") and [o.strip().lower() for o in (q.get("options") or [])] == ["yes"]:
             try:
-                if _fill(frame, q, q["options"][0]):
+                if _fill(q, q["options"][0]):
                     filled += 1
                     continue
             except Exception as exc:
@@ -313,7 +337,7 @@ def answer(frame, applicant: dict, job: dict, llm=None) -> dict:
         confident = a is not None and (a.get("confidence") == "high" or demographic) and a.get("value") not in (None, "", [])
         if confident:
             try:
-                if _fill(frame, q, a["value"]):
+                if _fill(q, a["value"]):
                     filled += 1
                     continue
             except Exception as exc:

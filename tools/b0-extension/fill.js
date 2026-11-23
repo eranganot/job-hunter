@@ -137,12 +137,120 @@
         if (key === 'phone' && v && (opts || {}).localPhone) v = a.phone_local || v;
         if (!v) break;
         if (key === 'full_name' && done.has('first_name')) break;
+        if (isCombo(el)) { pickOption(el, v); n++; done.add(key); break; }   // City on SmartRecruiters: a suggestion list
         setValue(el, v); n++; done.add(key);
         break;
       }
     }
     return n;
   }
+
+  // ── Searchable dropdowns (SmartRecruiters' City and its "Preliminary questions") ──
+  const isCombo = el => el.getAttribute('role') === 'combobox' || !!el.getAttribute('aria-autocomplete') ||
+    upward(el).slice(1, 5).some(n => /dropdown|autocomplete|combobox|select/i.test(n.tagName || ''));
+  const optionEls = () => deepAll('[role="option"], spl-select-option, li[role="option"]').filter(vis);
+  async function pickOption(el, value) {
+    const want = norm(String(value));
+    setValue(el, String(value).split(',')[0]);
+    for (let i = 0; i < 12; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      const opts = optionEls();
+      const o = opts.find(x => norm(x.textContent) === want) || opts.find(x => norm(x.textContent).startsWith(want)) ||
+                opts.find(x => norm(x.textContent).includes(want)) || opts.find(x => want.includes(norm(x.textContent)) && norm(x.textContent));
+      if (o) { o.click(); return true; }
+    }
+    return false;
+  }
+  async function comboOptions(el) {
+    el.focus(); el.click();
+    setValue(el, '');
+    await new Promise(r => setTimeout(r, 700));
+    const t = [...new Set(optionEls().map(o => clean(o.textContent)).filter(Boolean))].slice(0, 40);
+    el.blur();
+    return t;
+  }
+
+  // ── The questions nothing else answered: read them for the server to answer ──
+  const BASIC_LABEL = /first name|last name|surname|full name|^name$|e-?mail|phone|mobile|linkedin|github|^city$|facebook|twitter|website|portfolio/i;
+  const questionLabel = el => {
+    let t = labelOf(el);
+    if (!t || /^choose a file|^search by/i.test(t)) {
+      for (const n of upward(el).slice(1, 6)) {
+        const l = n.getAttribute && n.getAttribute('label');
+        if (l) { t = l; break; }
+        const lg = n.querySelector && n.querySelector(':scope > legend, :scope > label, :scope > .label, :scope > [class*="label"]');
+        if (lg && clean(lg.textContent)) { t = lg.textContent; break; }
+      }
+    }
+    return clean(t);
+  };
+  // A radio group's question, not its first option's label: the fieldset's
+  // legend, else a "label" attribute on the way up (SmartRecruiters' components),
+  // else the question block's heading.
+  const radioQuestion = el => {
+    const fs = el.closest('fieldset');
+    const lg = fs && fs.querySelector('legend');
+    if (lg && clean(lg.textContent)) return clean(lg.textContent);
+    for (const n of upward(el).slice(1, 7)) { const l = n.getAttribute && n.getAttribute('label'); if (l) return clean(l); }
+    return groupLabel(el);
+  };
+  let qSeq = 0;
+  async function questions() {
+    const out = [], radios = new Map();
+    for (const el of fields()) {
+      if (el.dataset.jhAsked) continue;
+      const t = (el.type || '').toLowerCase();
+      if (t === 'file' || !vis(el) && el.tagName !== 'SELECT') continue;
+      const label = questionLabel(el);
+      if (!label || BASIC_LABEL.test(norm(label))) { el.dataset.jhAsked = '1'; continue; }
+      if (t === 'radio') {
+        const g = el.name || label;
+        const lab = clean(((el.getRootNode() || document).querySelector('label[for="' + CSS.escape(el.id || '-') + '"]') || {}).textContent || el.value);
+        if (!radios.has(g)) radios.set(g, {els: [], options: [], label: radioQuestion(el) || label});
+        radios.get(g).els.push(el); radios.get(g).options.push(lab);
+        continue;
+      }
+      if (t === 'checkbox' ? el.checked : clean(el.value)) continue;
+      const id = 'jhq' + (++qSeq);
+      el.dataset.jhq = id;
+      const required = /\*\s*$/.test(clean(labelOf(el))) || el.required || el.getAttribute('aria-required') === 'true' ||
+        upward(el).slice(1, 4).some(n => n.hasAttribute && n.hasAttribute('required'));
+      let type = el.tagName === 'SELECT' ? 'select' : el.tagName === 'TEXTAREA' ? 'textarea' : t === 'checkbox' ? 'checkbox' : isCombo(el) ? 'combobox' : 'text';
+      let options = type === 'select' ? [...el.options].map(optionText).filter(o => o && !/^select|^choose|^--/i.test(o))
+                  : type === 'checkbox' ? ['Yes'] : type === 'combobox' ? await comboOptions(el) : [];
+      out.push({selector: id, label: label.replace(/\s*[*✱]\s*$/, ''), type, options, required});
+    }
+    for (const [g, r] of radios) {
+      if (r.els.some(e => e.checked)) continue;
+      const id = 'jhq' + (++qSeq);
+      r.els.forEach(e => { e.dataset.jhq = id; });
+      out.push({selector: id, label: r.label.replace(/\s*[*✱]\s*$/, ''), type: 'radio', options: r.options,
+                required: /\*/.test(r.label) || r.els.some(e => e.required)});
+    }
+    return out;
+  }
+  async function applyAnswers(answers) {
+    let n = 0;
+    for (const a of answers || []) {
+      const els = deepAll('[data-jhq="' + a.selector + '"]');
+      if (!els.length || a.value == null || a.value === '') continue;
+      const el = els[0], t = (el.type || '').toLowerCase(), v = Array.isArray(a.value) ? a.value.join(', ') : String(a.value);
+      if (t === 'radio') {
+        const hit = els.find(e => norm(((e.getRootNode() || document).querySelector('label[for="' + CSS.escape(e.id || '-') + '"]') || {}).textContent || e.value) === norm(v));
+        if (hit) { hit.click(); n++; }
+      } else if (t === 'checkbox') {
+        if (/^(yes|true|agree|i agree|1)$/i.test(v) && !el.checked) { el.click(); n++; }
+      } else if (el.tagName === 'SELECT') {
+        const o = [...el.options].find(o => norm(optionText(o)) === norm(v));
+        if (o) { el.value = o.value; el.dispatchEvent(new Event('change', {bubbles: true, composed: true})); n++; }
+      } else if (isCombo(el)) {
+        if (await pickOption(el, v)) n++;
+      } else { setValue(el, v); n++; }
+      els.forEach(e => { e.dataset.jhAsked = '1'; });
+    }
+    return n;
+  }
+  const markAsked = () => deepAll('[data-jhq]').forEach(e => { e.dataset.jhAsked = '1'; });
 
   const fileInputs = () => fields().filter(el => (el.type || '').toLowerCase() === 'file');
   const fileText = el => (el.name || '') + ' ' + (el.id || '') + ' ' + labelOf(el) + ' ' +
@@ -200,7 +308,8 @@
     const by = re => btns.find(b => re.test(clean(b.innerText || b.value)));
     return document.querySelector('#btn-submit') && vis(document.querySelector('#btn-submit')) ? document.querySelector('#btn-submit')
       : by(/^submit application$/i) || by(/^submit$/i) || by(/submit|send application|apply now/i)
-      || btns.find(b => (b.type || '').toLowerCase() === 'submit');
+      // Not a step button: SmartRecruiters' first page ends in "Next" (2026-11-23).
+      || btns.find(b => (b.type || '').toLowerCase() === 'submit' && !/^(next|back|continue|previous|save)/i.test(clean(b.innerText || b.value)));
   }
 
   // Checks meant for a person, visible on this page right now.
@@ -218,5 +327,5 @@
   const THANKS = /thank you for (applying|your application|submitting)|application (has been |was )?(received|submitted)|we('ve| have) received your application/i;
   const confirmed = () => THANKS.test(document.body ? document.body.innerText : '');
 
-  window.JHFill = {fields, hasForm, fill, fillBasics, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
+  window.JHFill = {fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
 })();

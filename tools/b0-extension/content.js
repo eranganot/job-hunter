@@ -145,9 +145,24 @@
         letter = pdf ? ' + cover letter PDF' + (notes.length ? ' and its opening in the note' : '') : (notes.length ? ' + cover letter in the note' : '');
       } else letter = ' (no cover letter: ' + ((cl && cl.error) || 'not written') + ')';
     }
-    const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' prepared answers' +
+    // The questions nothing covered yet, answered by Job Hunter (saved answers,
+    // standing instructions, the model) - the same rules as the apply engine.
+    async function answerRound() {
+      const qs = await JHFill.questions();
+      if (!qs.length) return {n: 0, unsure: []};
+      banner('Answering ' + qs.length + ' question' + (qs.length > 1 ? 's' : '') + '…');
+      const r = await ask({type: 'answers', jobId: task.jobId, questions: qs,
+                           page_text: (document.body.innerText || '').slice(0, 3000)});
+      const n = r && r.answers ? await JHFill.applyAnswers(r.answers) : 0;
+      JHFill.markAsked();
+      return {n, unsure: (r && r.unsure) || (r && r.error ? ['(' + r.error + ')'] : [])};
+    }
+    const q1 = await answerRound();
+    const answered = n => n.n ? ', ' + n.n + ' questions answered' : '';
+    const leftOver = n => n.unsure.length ? ' Yours to answer: ' + n.unsure.slice(0, 3).join('; ') + '.' : '';
+    const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' prepared answers' + answered(q1) +
                  (basics ? ', ' + basics + ' contact fields' : '') + (cv ? ' + CV' : ', no CV attached') + letter +
-                 (res.missing.length ? '. Not found: ' + res.missing.slice(0, 4).join('; ') : '') + '.';
+                 (res.missing.length ? '. Not found: ' + res.missing.slice(0, 4).join('; ') : '') + '.' + leftOver(q1);
 
     let pressForMeImpl = null;
     const btn = JHFill.submitButton();
@@ -159,6 +174,25 @@
       watchAfterSubmit();
     };
     if (btn) btn.addEventListener('click', () => mark('user'), {capture: true, once: true});
+    // A form in steps (SmartRecruiters: "Next" -> "Preliminary questions") shows
+    // new fields without loading a page: fill each step as it appears.
+    (async () => {
+      let seenBtn = btn;
+      for (let i = 0; i < 600 && !submittedAt && !reported; i++) {
+        await wait(2000);
+        const fresh = JHFill.fields().some(el => !el.dataset.jhAsked && !el.dataset.jhq && el.type !== 'file' &&
+          (el.offsetWidth || el.offsetHeight) && !(el.type === 'checkbox' ? el.checked : (el.value || '').trim()));
+        if (!fresh) continue;
+        const b = JHFill.fillBasics(task.applicant, basicsOpts);
+        const q = await answerRound();
+        JHFill.markAsked();
+        const nb = JHFill.submitButton();
+        if (nb && nb !== seenBtn) { seenBtn = nb; nb.addEventListener('click', () => mark('user'), {capture: true, once: true}); }
+        if (b || q.n || q.unsure.length)
+          banner('Next step: ' + (b ? b + ' contact fields, ' : '') + q.n + ' questions answered.' + leftOver(q) +
+                 (task.mode === 'B' ? ' Check it, then "Submit for me".' : ' Check it and press Submit yourself.'), task.mode === 'B' ? 'ready' : '');
+      }
+    })();
     pressForMeImpl = async () => {
       if (submittedAt) return;
       const b = JHFill.submitButton();
