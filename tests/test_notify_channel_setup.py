@@ -26,11 +26,10 @@ def _channel_of(db, email):
 
 
 @pytest.mark.parametrize("channel, fields", [
-    ("whatsapp", {"twilio_account_sid": "", "twilio_auth_token": "", "whatsapp_number": ""}),
-    ("whatsapp", {"twilio_account_sid": "AC1", "twilio_auth_token": "", "whatsapp_number": "+972500000000"}),
     ("telegram", {"telegram_token": "t", "telegram_chat_id": ""}),
+    ("telegram", {"telegram_token": "", "telegram_chat_id": "c"}),
     ("email",    {"email_address": "  "}),
-    ("telegram,whatsapp", {"telegram_token": "t", "telegram_chat_id": "c"}),   # one good, one empty
+    ("telegram,email", {"telegram_token": "t", "telegram_chat_id": "c", "email_address": ""}),  # one good, one empty
 ])
 def test_a_channel_that_could_never_send_is_refused_with_the_reason(stack, users, channel, fields):
     before = _channel_of(stack["db"], "alice@example.test")
@@ -42,12 +41,11 @@ def test_a_channel_that_could_never_send_is_refused_with_the_reason(stack, users
 
 
 def test_a_complete_channel_saves_and_a_later_partial_save_reads_what_is_stored(stack, users):
-    ok = {"notification_channel": "whatsapp", "twilio_account_sid": "AC1",
-          "twilio_auth_token": "tok", "whatsapp_number": "+972500000000"}
+    ok = {"notification_channel": "telegram", "telegram_token": "t", "telegram_chat_id": "c"}
     assert users["a"].post_json("/api/save-notifications", ok)[0] == 200
-    assert _channel_of(stack["db"], "alice@example.test") == "whatsapp"
+    assert _channel_of(stack["db"], "alice@example.test") == "telegram"
     # Re-selecting the same channel without resending the secrets uses the stored ones.
-    assert users["a"].post_json("/api/save-notifications", {"notification_channel": "whatsapp"})[0] == 200
+    assert users["a"].post_json("/api/save-notifications", {"notification_channel": "telegram"})[0] == 200
     # Turning everything off is always allowed.
     assert users["a"].post_json("/api/save-notifications", {"notification_channel": "none"})[0] == 200
     assert _channel_of(stack["db"], "alice@example.test") == "none"
@@ -57,3 +55,25 @@ def test_saving_credentials_without_a_channel_is_not_validated(stack, users):
     """The UI sends notification_channel every time, but an API caller updating a
     token alone has selected nothing new, so there is nothing to refuse."""
     assert users["a"].post_json("/api/save-notifications", {"telegram_token": "new"})[0] == 200
+
+
+# ── WhatsApp is hidden (owner, 2026-11-23) ───────────────────────────────────
+
+@pytest.mark.parametrize("channel", ["whatsapp", "telegram,whatsapp", "whatsapp,email"])
+def test_whatsapp_cannot_be_selected_even_with_full_details(stack, users, channel):
+    before = _channel_of(stack["db"], "alice@example.test")
+    status, _loc, body = users["a"].post_json("/api/save-notifications", {
+        "notification_channel": channel, "telegram_token": "t", "telegram_chat_id": "c",
+        "email_address": "a@e.com", "twilio_account_sid": "AC1", "twilio_auth_token": "tok",
+        "whatsapp_number": "+972500000000"})
+    assert status == 400 and "not available" in json.loads(body)["error"]
+    assert _channel_of(stack["db"], "alice@example.test") == before
+
+
+def test_the_whatsapp_test_button_says_unavailable_and_sends_nothing(stack, users, monkeypatch):
+    sent = []
+    monkeypatch.setattr(stack["app"], "send_whatsapp", lambda *a: sent.append(a))
+    status, _loc, body = users["a"].post_json("/api/test-notification", {"channel": "whatsapp"})
+    out = json.loads(body)
+    assert status == 200 and out["success"] is False and "not available" in out["error"]
+    assert sent == []

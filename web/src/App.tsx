@@ -3616,21 +3616,22 @@ function NotificationChannels({ me }: { me: any }) {
      making it look like one channel at a time. */
   const parseChannels = (v: any): string[] =>
     String(v || "none").split(",").map((c: string) => c.trim()).filter((c: string) => c && c !== "none");
-  const [channels, setChannels] = useState<string[]>(parseChannels(me.notification_channel));
+  const [channels, setChannels] = useState<string[]>(parseChannels(me.notification_channel).filter((c) => c !== "whatsapp"));
   const has = (id: string) => channels.includes(id);
   const toggle = (id: string) =>
     setChannels((cur) => (cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id]));
   const [tgToken, setTgToken] = useState(me.telegram_token || "");
   const [tgChat, setTgChat] = useState(me.telegram_chat_id || "");
-  const [waSid, setWaSid] = useState(me.twilio_account_sid || "");
-  const [waToken, setWaToken] = useState(me.twilio_auth_token || "");
-  const [waNumber, setWaNumber] = useState(me.whatsapp_number || "");
   const [mailTo, setMailTo] = useState(me.email_address || "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
+  /* WhatsApp is hidden (owner, 2026-11-23): the per-user Twilio design could
+     not serve public users. A Job Hunter-owned number is in BACKLOG.md. A
+     profile that already holds "whatsapp" drops it on the next save, since
+     the server now refuses it. */
   const CHANNELS: [string, string][] = [
-    ["telegram", "Telegram"], ["whatsapp", "WhatsApp"], ["email", "Email"],
+    ["telegram", "Telegram"], ["email", "Email"],
   ];
 
   const save = async () => {
@@ -3642,8 +3643,7 @@ function NotificationChannels({ me }: { me: any }) {
         // channel after the split.
         notification_channel: channels.length ? channels.join(",") : "none",
         telegram_token: tgToken, telegram_chat_id: tgChat,
-        twilio_account_sid: waSid, twilio_auth_token: waToken,
-        whatsapp_number: waNumber, email_address: mailTo,
+        email_address: mailTo,
       });
       setMsg("\u2713 Saved");
     } catch (e: any) { setMsg(e?.message || "Could not save"); }
@@ -3676,7 +3676,7 @@ function NotificationChannels({ me }: { me: any }) {
     <div>
       <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channels</h3>
       <p className="text-xs text-gray-400 mb-3">Pick any combination — alerts go to all of them.</p>
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-2 gap-2 mb-3">
         {CHANNELS.map(([id, label]) => (
           <button key={id} onClick={() => toggle(id)} aria-pressed={has(id)}
             className={`py-2.5 rounded-xl border text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${has(id) ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
@@ -3689,13 +3689,6 @@ function NotificationChannels({ me }: { me: any }) {
         <div className="space-y-2">
           <input value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder="Bot token" className={input} />
           <input value={tgChat} onChange={(e) => setTgChat(e.target.value)} placeholder="Chat ID" className={input} />
-        </div>
-      )}
-      {has("whatsapp") && (
-        <div className="space-y-2">
-          <input value={waSid} onChange={(e) => setWaSid(e.target.value)} placeholder="Twilio account SID" className={input} />
-          <input value={waToken} onChange={(e) => setWaToken(e.target.value)} placeholder="Twilio auth token" className={input} />
-          <input value={waNumber} onChange={(e) => setWaNumber(e.target.value)} placeholder="WhatsApp number" className={input} />
         </div>
       )}
       {has("email") && (
