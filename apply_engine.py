@@ -40,6 +40,25 @@ def _is_greenhouse(url: str) -> bool:
     # deadline three times each (2026-11-09).
     return bool(re.search(r'(?:job-)?boards(?:\.eu)?\.greenhouse\.io|grnh\.se', url or ""))
 
+def _routes_to_greenhouse(url: str, frame_urls=()) -> bool:
+    """Does this page go to the Greenhouse handler? Greenhouse's own addresses,
+    AND a company careers page that embeds Greenhouse: `?gh_jid=` in its
+    address, or the embed frame already on the page.
+
+    Routing used to ask _is_greenhouse(url) alone, while ats_name() - which
+    decides that Greenhouse may be submitted - already counted ?gh_jid= as
+    Greenhouse. So an employer's own careers page with an embedded form went down the generic AI path,
+    which sees Greenhouse's dropdowns as plain text boxes. 2026-11-23,
+    JOB-HUNTER-Y: on Payoneer the model was told field 10 "I read and
+    understood the privacy policy*" was `kind: text`, answered "check", the
+    required consent stayed empty and Submit sent nothing. The Greenhouse
+    handler opens the embed's own page and picks that dropdown (proven live on
+    the same form: options ['Yes'], chosen, shown "Yes")."""
+    if _is_greenhouse(url) or "gh_jid=" in (url or "").lower():
+        return True
+    return any("greenhouse.io/embed/job_app" in (u or "") for u in frame_urls)
+
+
 def _is_lever(url: str) -> bool:
     """Check if URL is a Lever job board."""
     return bool(re.search(r'jobs\.lever\.co|lever\.co/.*?/[a-f0-9-]+', url))
@@ -2613,7 +2632,7 @@ def submit_application(
                         "error": "Login or account creation required to apply"}
 
             # 2b. ATS-specific fast path ──────────────────────────────────────
-            if _is_greenhouse(actual_url):
+            if _routes_to_greenhouse(actual_url, [f.url for f in page.frames[1:]]):
                 print(f"[apply-engine] Detected Greenhouse ATS")
                 res = _apply_greenhouse(page, applicant, cv_path)
                 browser.close()
