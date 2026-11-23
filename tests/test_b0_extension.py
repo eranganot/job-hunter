@@ -417,8 +417,10 @@ customElements.define('spl-radio-group', class extends HTMLElement {
   // <input>; options are <spl-radio role="radio" label="Yes">, the question is the
   // group's label attribute, a choice is taken only on a page-world click.
   connectedCallback() {
+    // The question is drawn in the shadow root only (no "label" attribute), as on
+    // ServiceNow, where the text above the first option was the pinned header.
     const r = this.attachShadow({mode: 'open'});
-    r.innerHTML = '<label>' + this.getAttribute('label') + '<span>*</span></label><fieldset role="radiogroup"><slot></slot></fieldset>';
+    r.innerHTML = '<label>' + this.dataset.q + '<span>*</span></label><fieldset role="radiogroup"><slot></slot></fieldset>';
     this.setAttribute('required', '');
     for (const v of ['Yes', 'No']) {
       const o = document.createElement('spl-radio');
@@ -442,13 +444,13 @@ function next() {
   document.getElementById('s1').remove();
   document.getElementById('s2').innerHTML = '<h2>Preliminary questions</h2>' +
     '<spl-dropdown id="years" label="How many years of experience do you have as a Product Manager in tech product companies?" options="0-2|3-5|6-9|10+"></spl-dropdown>' +
-    '<spl-radio-group id="elig" label="Are you eligible to work in Israel?"></spl-radio-group>' +
+    '<spl-radio-group id="elig" data-q="Are you eligible to work in Israel? ' + 'This question is long, like ServiceNow\\'s question B about U.S. Federal Government employment and the STOCK Act, which runs to some six hundred characters and so was skipped by the text-above fallback. '.repeat(3) + '"></spl-radio-group>' +
     '<div id="follow"></div>' +
     '<spl-checkbox id="priv" label="You declare that you have read and understand the privacy notice of Wix."></spl-checkbox>' +
     '<button type="button" id="go">Submit</button>';
   // A follow-up question shown only after an answer (ServiceNow: "If you selected Yes...").
   document.getElementById('years').addEventListener('picked', () => {
-    document.getElementById('follow').innerHTML = '<spl-radio-group id="own" label="If you selected 10+, would you consider relocating at your own expense?"></spl-radio-group>';
+    document.getElementById('follow').innerHTML = '<spl-radio-group id="own" data-q="If you selected 10+, would you consider relocating at your own expense?"></spl-radio-group>';
   });
   document.getElementById('go').onclick = () => {
     const sr = id => document.getElementById(id).shadowRoot;
@@ -460,6 +462,7 @@ function next() {
   };
 }
 </script>
+<div style="position:sticky;top:0;background:#fff">Hamerton House 18-20 Aharon Bart St., Petah Tikva, Israel</div>
 <div id="s1"><h2>Personal information</h2>
 <spl-input fid="first-name-input" label="First name"></spl-input>
 <spl-dropdown id="city" label="City" options="Tel Aviv, Israel|Tel Mond, Israel|Haifa, Israel"></spl-dropdown>

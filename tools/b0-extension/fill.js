@@ -209,6 +209,8 @@
   // in the same column. SmartRecruiters' "Preliminary questions" components give
   // the extension no label it can read (2026-11-23 trace: 3 questions, every
   // label ""), whatever element holds the text.
+  // Inside a header pinned to the top of the page (position fixed/sticky)?
+  const pinned = el => upward(el).some(n => n.nodeType === 1 && /^(fixed|sticky)$/.test(getComputedStyle(n).position));
   const textAbove = el => {
     const r = el.getBoundingClientRect();
     if (!r.width) return '';
@@ -217,9 +219,9 @@
       const it = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       for (let n = it.nextNode(); n; n = it.nextNode()) {
         const t = clean(n.textContent);
-        if (t.length < 3 || t.length > 400 || /^this field is required/i.test(t)) continue;
+        if (t.length < 3 || t.length > 2000 || /^this field is required/i.test(t)) continue;
         const p = n.parentElement;
-        if (!p || /^(SCRIPT|STYLE|OPTION)$/.test(p.tagName)) continue;
+        if (!p || /^(SCRIPT|STYLE|OPTION)$/.test(p.tagName) || pinned(p)) continue;
         const rng = document.createRange(); rng.selectNodeContents(n);
         const b = rng.getBoundingClientRect();
         if (!b.width || b.bottom > r.top + 2 || b.right < r.left - 40 || b.left > r.right) continue;
@@ -296,14 +298,27 @@
       if (r.tagName === 'INPUT' || !vis(r)) continue;
       const host = upward(r).slice(1, 6).find(n => /radio-?group/i.test(n.tagName || '') || (n.getAttribute && n.getAttribute('role') === 'radiogroup')) || r.parentElement;
       if (!groups.has(host)) {
-        const lab = clean((host.getAttribute && host.getAttribute('label')) || '') || textAbove(r);
+        // The group's own question first: SmartRecruiters' spl-radio-group draws it in
+        // its shadow root (<label ...>Question<span>*</span></label>). The text above
+        // is only a fallback, and only when it reads as a question - on ServiceNow it
+        // picked the pinned header's address and answered it "Yes" (2026-11-23).
+        const own = host.shadowRoot && host.shadowRoot.querySelector('label, legend, [class*="label"]');
+        const ownText = own ? clean(own.textContent).replace(/\s*[*✱]\s*$/, '') : '';
+        const above = textAbove(r);
+        const lab = clean((host.getAttribute && host.getAttribute('label')) || '') || ownText ||
+                    (/[?*:]\s*$/.test(above) ? above : '');
+        jt('radio-group', {label: lab.slice(0, 80), from: host.getAttribute && host.getAttribute('label') ? 'attr' : ownText ? 'shadow' : lab ? 'above' : 'none',
+                           options: r.parentElement ? [...r.parentElement.children].length : 0});
         groups.set(host, {host, items: [], label: lab,
           required: !!(host.hasAttribute && (host.hasAttribute('required') || host.getAttribute('aria-required') === 'true')) || /\*\s*$/.test(lab)});
       }
       groups.get(host).items.push(r);
     }
-    return [...groups.values()].filter(g => g.label);
+    const out = [...groups.values()];
+    unlabeledGroups = out.filter(g => !g.label).length;
+    return out.filter(g => g.label);
   }
+  let unlabeledGroups = 0;
   const openRadioGroups = () => ariaRadioGroups().filter(g => !g.items.some(i => i.getAttribute('aria-checked') === 'true') && !g.items[0].dataset.jhAsked).length;
   let qSeq = 0;
   async function questions() {
@@ -473,5 +488,5 @@
   const THANKS = /thank you for (applying|your application|submitting)|application (has been |was )?(received|submitted)|we('ve| have) received your application/i;
   const confirmed = () => THANKS.test(document.body ? document.body.innerText : '');
 
-  window.JHFill = {fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, openRadioGroups, nextButton, clickInPage, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
+  window.JHFill = {unlabeled: () => unlabeledGroups, fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, openRadioGroups, nextButton, clickInPage, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
 })();
