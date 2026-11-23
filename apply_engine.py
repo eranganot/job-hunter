@@ -522,7 +522,12 @@ _FIELDS_JS = r"""() => {
     if (t !== 'file' && !vis(e)) continue;
     if ((e.name || '').startsWith('g-recaptcha') || (e.name || '').startsWith('h-captcha')) continue;
     const i = out.length; e.setAttribute('data-jh-f', String(i));
-    const f = {kind: t, label: labelOf(e), required: !!(e.required || e.getAttribute('aria-required') === 'true')};
+    // A JavaScript dropdown (role="combobox", or React-select's text input with a
+    // popup list) is not a text box: typing leaves it empty (2026-11-23,
+    // JOB-HUNTER-Y - Payoneer's required privacy consent read as kind "text").
+    const combo = e.getAttribute('role') === 'combobox'
+      || (t === 'text' && !!e.getAttribute('aria-haspopup') && e.getAttribute('aria-autocomplete') === 'list');
+    const f = {kind: combo ? 'combobox' : t, label: labelOf(e), required: !!(e.required || e.getAttribute('aria-required') === 'true')};
     if (t === 'select-one' || t === 'select-multiple' || e.tagName === 'SELECT')
       f.options = [...e.options].map(o => o.text.trim()).filter(Boolean).slice(0, 25);
     if (t === 'radio' || t === 'checkbox') f.option = labelOf(e);
@@ -534,6 +539,33 @@ _FIELDS_JS = r"""() => {
   if (btn) btn.setAttribute('data-jh-submit', '1');
   return {fields: out, submit: btn ? (btn.innerText || btn.value || 'submit').trim().slice(0, 40) : null};
 }"""
+
+
+def _read_combobox_options(fields, frame, limit: int = 10) -> None:
+    """Give each dropdown field its options, so the model can answer it (the
+    reader cannot see them: React-select renders the list only while open).
+    At most `limit` dropdowns, about half a second each."""
+    if frame is None:
+        return
+    done = 0
+    for n, f in enumerate(fields):
+        if f.get("kind") != "combobox" or done >= limit:
+            continue
+        done += 1
+        f["options"] = _combobox_options(frame, f'[data-jh-f="{n}"]')
+
+
+def _combobox_choice(field: dict, action: str, value) -> str:
+    """What to pick in a dropdown for the model's answer. "select"/"fill" pick
+    the value. "check" - the model ticking a consent that is really a dropdown -
+    picks "Yes" (or its only option); anything else is not guessed."""
+    opts = [str(o) for o in (field.get("options") or [])]
+    if action in ("select", "fill"):
+        return str(value or "").strip()
+    if action == "check":
+        yes = next((o for o in opts if o.strip().lower() in ("yes", "i agree", "agree", "i accept", "accept")), None)
+        return yes or (opts[0] if len(opts) == 1 else "")
+    return ""
 
 
 def _read_form(page) -> tuple[list, object, object]:
@@ -2723,6 +2755,7 @@ def submit_application(
                 pass
             fields, form_frame, submit_frame = _read_form(page)
             print(f"[apply-engine] generic form: {len(fields)} field(s), submit button: {'yes' if submit_frame else 'no'}")
+            _read_combobox_options(fields, form_frame)
             if not fields or form_frame is None:
                 browser.close()
                 return {**_base, "status": "manual_required",
@@ -2736,7 +2769,7 @@ def submit_application(
                     f'The form\'s fields, numbered:\n{json.dumps(list(enumerate(fields)), ensure_ascii=False)[:12000]}\n\n'
                     f'Return a JSON ARRAY, one entry per field you can answer from the applicant data:\n'
                     f' {{"field": <number>, "action": "fill", "value": "text"}}\n'
-                    f' {{"field": <number>, "action": "select", "value": "one of its options"}}\n'
+                    f' {{"field": <number>, "action": "select", "value": "one of its options"}}  (a select, or a field of kind "combobox": a dropdown - always select, never fill or check)\n'
                     f' {{"field": <number>, "action": "check"}}   (a checkbox/radio to tick)\n'
                     f' {{"field": <number>, "action": "upload"}}  (the CV, for a file field)\n'
                     f'Use only the numbers above. Never invent facts the applicant data does not give.\n'
@@ -2780,6 +2813,19 @@ def submit_application(
                     # Sentry (JOB-HUNTER-Q, 2026-11-15).
                     _log.get("apply-engine").info(
                         "[apply-engine] field %s is a file input; ignoring %r", n, action)
+                    continue
+                if fields[n].get("kind") == "combobox":
+                    _v = _combobox_choice(fields[n], action, instr.get("value"))
+                    if not _v:
+                        _log.get("apply-engine").info(
+                            "[apply-engine] field %s is a dropdown; no option for %r", n, action)
+                        continue
+                    try:
+                        if not _choose_combobox(form_frame, f'[data-jh-f="{n}"]', _v):
+                            raise RuntimeError(f"option {_v!r} did not stick")
+                        filled += 1
+                    except Exception as e:
+                        print(f"[apply-engine] field {n} ({fields[n].get('label','')[:40]!r}) dropdown: {str(e).splitlines()[0][:120]}")
                     continue
                 try:
                     if action == "fill":
