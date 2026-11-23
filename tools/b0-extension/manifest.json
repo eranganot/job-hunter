@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Job Hunter - B0 test",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Plan B test B0: fills the answers Job Hunter prepared and sends the application from your own Chrome. Owner-only test build.",
   "permissions": [
     "storage",

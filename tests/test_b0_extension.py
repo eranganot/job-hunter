@@ -413,8 +413,12 @@ customElements.define('spl-dropdown', class extends HTMLElement {
 });
 customElements.define('spl-radio-group', class extends HTMLElement {
   connectedCallback() {
-    this.attachShadow({mode: 'open'}).innerHTML = '<fieldset><legend>' + this.getAttribute('label') + ' *</legend>' +
-      '<input type="radio" name="e" id="y" required><label for="y">Yes</label><input type="radio" name="e" id="n"><label for="n">No</label></fieldset>';
+    // As on the real form (2026-11-23): no legend - the question is printed above,
+    // and the real radio inputs are hidden under drawn circles.
+    const hid = 'display:none';
+    this.attachShadow({mode: 'open'}).innerHTML = '<div>' + this.getAttribute('label') + ' *</div>' +
+      '<div><input type="radio" name="e" id="y" required style="' + hid + '"><label for="y">Yes</label></div>' +
+      '<div><input type="radio" name="e" id="n" style="' + hid + '"><label for="n">No</label></div>';
   }
 });
 customElements.define('spl-checkbox', class extends HTMLElement {

@@ -43,11 +43,21 @@
   };
   const optionText = o => clean(o.text || o.innerText);
 
+  // A radio or checkbox drawn by the site with the real input hidden underneath
+  // (SmartRecruiters' "Are you eligible to work in Israel?", 2026-11-23: the
+  // page-2 trace saw 3 fields - two dropdowns and the privacy box - and never
+  // the Yes/No question) counts when its label is on screen.
+  const shownChoice = el => {
+    const t = (el.type || '').toLowerCase();
+    if (t !== 'radio' && t !== 'checkbox') return false;
+    const l = (el.id && (el.getRootNode() || document).querySelector('label[for="' + CSS.escape(el.id) + '"]')) || el.closest('label');
+    return !!(l && vis(l)) || vis(((el.getRootNode() || {}).host) || el.parentElement || el);
+  };
   function fields() {
     return deepAll('input, select, textarea').filter(el => {
       const t = (el.type || '').toLowerCase();
       return !['hidden', 'submit', 'button', 'image', 'reset', 'password'].includes(t) &&
-             !(el.name || '').match(/captcha/i) && (vis(el) || el.tagName === 'SELECT' || t === 'file');
+             !(el.name || '').match(/captcha/i) && (vis(el) || el.tagName === 'SELECT' || t === 'file' || shownChoice(el));
     });
   }
 
@@ -221,11 +231,34 @@
     walk(document);
     return best;
   };
+  const textBeside = el => {
+    const host = ((el.getRootNode() || {}).host) || el;
+    const r = (vis(el) ? el : host).getBoundingClientRect();
+    let best = '', bestGap = 1e9;
+    const walk = root => {
+      const it = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = it.nextNode(); n; n = it.nextNode()) {
+        const t = clean(n.textContent);
+        if (t.length < 3 || t.length > 400) continue;
+        const rng = document.createRange(); rng.selectNodeContents(n);
+        const b = rng.getBoundingClientRect();
+        if (!b.width || b.left < r.right - 2 || b.top > r.bottom + 6 || b.bottom < r.top - 6) continue;
+        const gap = b.left - r.right;
+        if (gap < bestGap && gap < 60) { bestGap = gap; best = t; }
+      }
+      for (const h of root.querySelectorAll('*')) if (h.shadowRoot) walk(h.shadowRoot);
+    };
+    walk(document);
+    return best;
+  };
   const questionLabel = el => {
     let t = labelOf(el);
     // A label that is only the required star (SmartRecruiters prints "*" in its
     // own label - the 2026-11-23 trace's "" labels) is no label.
-    if (!t || !t.replace(/[\s*✱:]/g, '') || /^choose a file|^search by|^search$/i.test(t)) { const a = textAbove(el); if (a) t = a; }
+    if (!t || !t.replace(/[\s*✱:]/g, '') || /^choose a file|^search by|^search$/i.test(t)) {
+      const a = (el.type || '').toLowerCase() === 'checkbox' ? (textBeside(el) || textAbove(el)) : textAbove(el);
+      if (a) t = a;
+    }
     if (!t || /^choose a file|^search by/i.test(t)) {
       for (const n of upward(el).slice(1, 6)) {
         const l = n.getAttribute && n.getAttribute('label');
@@ -244,7 +277,17 @@
     const lg = fs && fs.querySelector('legend');
     if (lg && clean(lg.textContent)) return clean(lg.textContent);
     for (const n of upward(el).slice(1, 7)) { const l = n.getAttribute && n.getAttribute('label'); if (l) return clean(l); }
-    return groupLabel(el) || textAbove(el);
+    return textAbove(firstOfGroup(el)) || groupLabel(el);
+  };
+  // The first radio of its group: the question sits above it, not above "No".
+  const firstOfGroup = el => {
+    const root = el.getRootNode() || document;
+    const g = el.name ? [...root.querySelectorAll('input[type="radio"]')].filter(x => x.name === el.name) : [el];
+    const top = g.map(x => [x, (vis(x) ? x : (((x.getRootNode() || {}).host) || x.parentElement || x)).getBoundingClientRect().top])
+                 .sort((a, b) => a[1] - b[1]);
+    const lab = top[0] && top[0][0];
+    const l = lab && lab.id && root.querySelector('label[for="' + CSS.escape(lab.id) + '"]');
+    return (l && vis(l)) ? l : lab || el;
   };
   let qSeq = 0;
   async function questions() {
@@ -252,7 +295,7 @@
     for (const el of fields()) {
       if (el.dataset.jhAsked) continue;
       const t = (el.type || '').toLowerCase();
-      if (t === 'file' || !vis(el) && el.tagName !== 'SELECT') continue;
+      if (t === 'file' || !vis(el) && el.tagName !== 'SELECT' && !shownChoice(el)) continue;
       const label = questionLabel(el);
       if (!label || BASIC_LABEL.test(norm(label))) { el.dataset.jhAsked = '1'; continue; }
       if (t === 'radio') {
@@ -290,8 +333,15 @@
       if (!els.length || a.value == null || a.value === '') continue;
       const el = els[0], t = (el.type || '').toLowerCase(), v = Array.isArray(a.value) ? a.value.join(', ') : String(a.value);
       if (t === 'radio') {
-        const hit = els.find(e => norm(((e.getRootNode() || document).querySelector('label[for="' + CSS.escape(e.id || '-') + '"]') || {}).textContent || e.value) === norm(v));
-        if (hit) { hit.click(); n++; }
+        const labFor = e => (e.getRootNode() || document).querySelector('label[for="' + CSS.escape(e.id || '-') + '"]');
+        const hit = els.find(e => norm((labFor(e) || {}).textContent || e.value) === norm(v));
+        if (hit) {
+          const target = vis(hit) ? hit : (labFor(hit) || hit);
+          await clickInPage(target);
+          if (!hit.checked) hit.click();
+          jt('radio', {q: a.selector, want: v, checked: hit.checked});
+          if (hit.checked) n++;
+        }
       } else if (t === 'checkbox') {
         if (/^(yes|true|agree|i agree|1)$/i.test(v) && !el.checked) { el.click(); n++; }
       } else if (el.tagName === 'SELECT') {
