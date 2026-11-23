@@ -155,6 +155,7 @@ def test_the_device_gets_the_cover_letter_as_text_and_as_a_named_pdf(stack, user
         calls.append(job["id"])
         return {"letter": "Dear Team,\n\nI want this role because it is mine.\n\nBest,\nAdmin", "notes": []}
     monkeypatch.setattr(ai_analysis, "write_cover_letter", writer)
+    monkeypatch.setattr(ai_analysis, "write_note", lambda job, profile, key="", **kw: "I build personalization at scale and this team's problem is one I know.")
     db = stack["db"]
     uid = _user_id(db, "admin@example.test")
     jid = _new_job(db, uid, title="Senior PM", company="Letter Co")
@@ -170,7 +171,8 @@ def test_the_device_gets_the_cover_letter_as_text_and_as_a_named_pdf(stack, user
     st, _l, body = anon.get("/api/device/jobs/%d/cover-letter" % jid, auth)
     assert st == 200, body
     got = json.loads(body)
-    assert got["short"] == "I want this role because it is mine." and got["letter"].startswith("Dear Team")
+    assert got["short"] == "I build personalization at scale and this team's problem is one I know."   # the note, not the letter's opening
+    assert got["letter"].startswith("Dear Team")
     anon.get("/api/device/jobs/%d/cover-letter" % jid, auth)
     assert calls == [jid]                                   # written once, then reused from the job
     conn = db.get_db()
@@ -198,3 +200,33 @@ def test_short_note_is_the_letters_first_body_paragraph():
     assert coverpdf.short_note(letter) == "First paragraph here. Second sentence."
     assert coverpdf.display_name("Eran Ganot").startswith("Eran Ganot Cover Letter ")
     assert coverpdf.short_note("x" * 50 + ". " + "y" * 900, limit=100).endswith(".")
+
+
+def test_a_machine_sounding_draft_gets_one_rewrite_with_its_phrases_named():
+    """The owner, 2026-11-23, on the Commit letter: "this is not written by human".
+    That draft opened "The AI R&D Forward Deployment Engineer role at Commit ...
+    aligns well with my experience" - both are caught and named in the rewrite."""
+    import ai_analysis
+    job = {"id": 1, "title": "AI R&D Forward Deployment Engineer", "company": "Commit",
+           "description": "Guide AI adoption."}
+    bad = ("Dear Hiring Team,\n\nThe AI R&D Forward Deployment Engineer role at Commit aligns well with my "
+           "experience. This direct experience is directly relevant.\n\nBest regards,\nEran")
+    good = "Dear Hiring Team,\n\nFor the last few years I've been getting non-technical teams to use ML.\n\nBest regards,\nEran"
+    prompts = []
+
+    def llm(p):
+        prompts.append(p)
+        return bad if len(prompts) == 1 else good
+    out = ai_analysis.write_cover_letter(job, {"cv_summary": "Product leader."}, "k", cv_text="CV text", name="Eran", llm=llm)
+    assert out["letter"] == good and len(prompts) == 2
+    assert "aligns" in prompts[1] and "directly relevant" in prompts[1] and "restating the job title" in prompts[1]
+    assert ai_analysis.robot_phrases(good) == []
+
+
+def test_the_note_is_written_by_its_own_prompt_and_capped():
+    import ai_analysis
+    job = {"title": "Head of Product", "company": "Fullpath", "description": "CRM for dealers."}
+    seen = []
+    note = ai_analysis.write_note(job, {"cv_summary": "Product leader."}, "k", cv_text="CV", name="Eran",
+                                  llm=lambda p: seen.append(p) or ("I've spent ten years on personalization. " * 20))
+    assert len(seen) == 1 and "personal note" in seen[0] and len(note) <= 450

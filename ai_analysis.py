@@ -569,32 +569,43 @@ def check_job_status(job_url: str, job_title: str, job_company: str, api_key: st
 
 
 
-_LETTER_PROMPT = """Write a cover letter from {name} for the job below. It should read as if {name}
-wrote it: plain, warm, confident and specific - a senior professional writing to a hiring
-manager they respect.
+_LETTER_PROMPT = """You are {name}, writing a short cover letter for the job below, yourself, the way
+a senior person writes to someone they would like to work with. Not a summary of the CV
+mapped onto the job description: a letter from a person.
 
-How it goes:
-- Open with why this role makes sense: connect one concrete thing the job description asks for
-  to one concrete thing {name} has done. No grand opening line, no boast.
-- Then one or two short paragraphs: the two or three experiences from the CV that best match
-  what the job needs most. For each, what {name} did and what changed, with the CV's own
-  numbers, and in plain words why it matters for this job.
-- Close briefly: what {name} would like to talk about. Sign off simply.
+What you know about yourself (your own positioning, then your CV):
+{about}
+
+How it goes (three short paragraphs, 150-200 words in all):
+1. Start from you, not from the job. What you have been working on and what pulls you toward
+   this particular job - something specific in the job description that you actually find
+   interesting, said the way you would say it to a person. Never open with the job title or
+   the company name, never restate what the job is.
+2. One real story from the CV that is the closest thing to what they need: what the situation
+   was, what you did, what changed (the CV's own numbers, copied exactly). One story told
+   well beats three listed.
+3. One or two sentences: what you would like to talk about with them. Then "Best regards,"
+   and {name} on its own line.
+
+Sound like a person:
+- First person, plain words, contractions, sentences of different lengths. Something a
+  colleague could hear you say out loud.
+- Never these, or anything like them: "aligns with", "aligns well", "directly relevant",
+  "this experience", "my experience in", "my background", "I am confident", "I believe",
+  "I am writing to", "I'm interested in discussing", "excited", "thrilled", "passionate",
+  "leverage", "spearheaded", "drove", "empowering", "democratizing", "operationalized",
+  "proven track record", "results-driven", "dynamic", "synergy", "great fit", "perfect fit",
+  "which prepared me", "this involved", "has consistently". No em dashes.
+- Never describe yourself in the third person or with adjectives about yourself ("seasoned",
+  "strategic leader"). Show it with what you did.
 
 Accuracy (this matters most):
-- Every fact about {name} - employers, titles, numbers, products, degrees - comes from the CV.
-  Copy numbers exactly as the CV writes them. If the CV doesn't say it, don't say it.
-- Facts about the company come only from the job description. No general praise of the company.
-
-Voice:
-- First person. Natural sentences of different lengths; contractions are fine.
-- Never use: "I am writing to", "I am excited", "thrilled", "passionate", "dynamic",
-  "results-driven", "proven track record", "synergy", "leverage", "spearheaded",
-  "great fit", "perfect fit", "I believe I would". No em dashes.
-- No headers, bullet points, subject line or placeholders like [Company].
-
-Length: 180-250 words in 3-4 paragraphs. Begin with "Dear Hiring Team," unless the job
-description names a person. End with "Best regards," and then {name} on its own line.
+- Every fact about you - employers, titles, numbers, products - comes from the CV. If the CV
+  doesn't say it, don't say it. Don't invent feelings about your past either; the "why" comes
+  from what you have done and what the job describes.
+- Facts about the company come only from the job description. No praise of the company.
+- No headers, bullets, subject line or placeholders like [Company]. Begin with "Dear Hiring
+  Team," unless the job description names a person.
 
 JOB: {title} at {company}
 JOB DESCRIPTION:
@@ -602,6 +613,72 @@ JOB DESCRIPTION:
 
 CV:
 {cv}"""
+
+
+_NOTE_PROMPT = """You are {name}. The application form for the job below has a short "personal note"
+box. Write what you would type there yourself: 2-3 sentences, at most 450 characters, to the
+person who will read the application.
+
+- Start from you: what you do, and the one thing in this job that makes you want to talk to
+  them. Then one concrete thing you have done (from the CV, numbers copied exactly) that is
+  the closest match. End naturally - no "I look forward to hearing from you".
+- Plain, warm, a bit informal, like a message to a person. Contractions are fine.
+- Never open with the job title or the company name. Never: "aligns", "relevant",
+  "this experience", "my background", "excited", "passionate", "leverage", "I believe",
+  "I am confident", "great fit". No em dashes. No greeting line, no sign-off, no name.
+- Every fact about you comes from the CV; facts about the company only from the job.
+
+Your positioning: {about}
+
+JOB: {title} at {company}
+JOB DESCRIPTION:
+{jd}
+
+CV:
+{cv}"""
+
+# Phrases that make a letter read as machine-written (the owner, 2026-11-23, on the Commit
+# letter: "this is not written by human"). A draft using one gets one rewrite with them named.
+_ROBOT_PHRASES = [
+    r"\baligns?\b", r"\baligned\b", r"directly relevant", r"\bthis (direct )?experience\b",
+    r"\bmy background\b", r"\bmy experience (in|with)\b", r"i(?:'| a)m interested in discussing",
+    r"\bi am confident\b", r"\bi believe\b", r"\bpassionate\b", r"\bexcited\b", r"\bthrilled\b",
+    r"\bleverag", r"\bspearhead", r"\bempower", r"\bdemocratiz", r"\boperationaliz",
+    r"proven track record", r"results-driven", r"\bsynerg", r"(great|perfect) fit",
+    r"which prepared me", r"\bthis involved\b", r"has consistently", r"have consistently",
+    r"—",
+]
+
+
+def robot_phrases(text: str) -> list:
+    """The machine-sounding phrases in text (see _ROBOT_PHRASES), as written."""
+    found = []
+    for pat in _ROBOT_PHRASES:
+        m = re.search(pat, text or "", re.I)
+        if m:
+            found.append(m.group(0))
+    return found
+
+
+def _opens_with_the_job(text: str, job: dict) -> bool:
+    """Does the body start by restating the job title or the company ("The X role at Y...")?"""
+    body = re.sub(r"^\s*(dear|hi|hello)[^\n]*\n+", "", text or "", flags=re.I).strip().lower()
+    first = body[:120]
+    title = (job.get("title") or "").strip().lower()
+    company = (job.get("company") or "").strip().lower()
+    return bool(first.startswith("the ") and ((title and title[:20] in first) or (company and company in first)))
+
+
+def _humanize(llm, prompt: str, text: str, job: dict) -> str:
+    """One rewrite when the draft sounds machine-written; the problems named."""
+    problems = robot_phrases(text)
+    if _opens_with_the_job(text, job):
+        problems.append("it opens by restating the job title / company")
+    if not problems:
+        return text
+    return llm(prompt + "\n\nYour previous draft sounded machine-written: " + "; ".join(
+        '"%s"' % p if not p.startswith("it ") else p for p in problems) +
+        ". Write it again as a person would, without those; keep the facts.")
 
 
 def _letter_text(prompt: str, gemini_key: str, user_id) -> str:
@@ -637,14 +714,15 @@ def write_cover_letter(job: dict, profile: dict, api_key: str = "", user_id=None
         raise RuntimeError("No CV to write from - upload your CV first.")
     jd = (job.get("full_description") or job.get("description") or job.get("title", ""))[:5000]
     name = (name or "").strip() or "the candidate"
-    prompt = _LETTER_PROMPT.format(name=name, title=job.get("title", "the role"),
+    about = (profile.get("about_me") or profile.get("cv_summary") or "").strip()[:1200] or "(see the CV)"
+    prompt = _LETTER_PROMPT.format(name=name, title=job.get("title", "the role"), about=about,
                                    company=job.get("company", "the company"), jd=jd, cv=cv)
     if llm is None:
         if not gemini_key:
             raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
         llm = lambda p: _letter_text(p, gemini_key, user_id)
     allowed = tailor._numbers(cv) | tailor._numbers(jd)
-    letter = llm(prompt)
+    letter = _humanize(llm, prompt, llm(prompt), job)
     bad = sorted(tailor._numbers(letter) - allowed)
     if bad:
         letter = llm(prompt + "\n\nYour previous draft used numbers that are in neither the CV nor the job "
@@ -661,6 +739,32 @@ def write_cover_letter(job: dict, profile: dict, api_key: str = "", user_id=None
         letter = "\n".join(kept)
     print("[cover-letter] written (" + str(len(letter)) + " chars, " + str(len(notes)) + " removed)")
     return {"letter": letter.strip(), "notes": notes}
+
+
+def write_note(job: dict, profile: dict, api_key: str = "", user_id=None,
+               cv_text: str = "", name: str = "", llm=None) -> str:
+    """The short "personal note" for a form's note box (Comeet "Personal note",
+    Lever "Additional information"): 2-3 sentences from the applicant - not the
+    letter's first paragraph (the owner, 2026-11-23: "not personal")."""
+    import tailor
+    gemini_key = api_key or os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_KEY", "")
+    cv = (cv_text or profile.get("cv_summary") or "").strip()[:9000]
+    if not cv:
+        raise RuntimeError("No CV to write from - upload your CV first.")
+    jd = (job.get("full_description") or job.get("description") or job.get("title", ""))[:5000]
+    name = (name or "").strip() or "the candidate"
+    about = (profile.get("about_me") or profile.get("cv_summary") or "").strip()[:1200] or "(see the CV)"
+    prompt = _NOTE_PROMPT.format(name=name, title=job.get("title", "the role"), about=about,
+                                 company=job.get("company", "the company"), jd=jd, cv=cv)
+    if llm is None:
+        if not gemini_key:
+            raise RuntimeError("GEMINI_API_KEY is not set in Railway environment variables.")
+        llm = lambda p: _letter_text(p, gemini_key, user_id)
+    note = _humanize(llm, prompt, llm(prompt), job).strip().strip('"')
+    allowed = tailor._numbers(cv) | tailor._numbers(jd)
+    if tailor._numbers(note) - allowed:      # a number not in the CV or the job: drop that sentence
+        note = " ".join(x for x in re.split(r"(?<=[.!?])\s+", note) if not (tailor._numbers(x) - allowed))
+    return note[:450].strip()
 
 
 def generate_cover_letter(job: dict, profile: dict, api_key: str = "",

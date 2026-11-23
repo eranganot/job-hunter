@@ -1318,6 +1318,14 @@ def m0048_telegram_connect_codes(conn):
     conn.commit()
 
 
+def m0049_cover_note(conn):
+    """The short personal note for an application form's note box, written next
+    to the cover letter (jobs.cover_note; the owner, 2026-11-23). Idempotent."""
+    if not _has_column(conn, "jobs", "cover_note"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN cover_note TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1367,6 +1375,7 @@ MIGRATIONS = [
     (46, "fit_survey",                  m0046_fit_survey),
     (47, "device_spike",                m0047_device_spike),
     (48, "telegram_connect_codes",      m0048_telegram_connect_codes),
+    (49, "cover_note",                  m0049_cover_note),
 ]
 
 
