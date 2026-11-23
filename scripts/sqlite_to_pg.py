@@ -92,6 +92,8 @@ TABLE_ORDER = [
     "device_codes",
     "device_tokens",
     "device_attempts",
+    # m0048 (2026-11-23): Telegram connect codes (telegrambot.py). No foreign keys.
+    "telegram_connect_codes",
 ]
 
 BATCH = 500

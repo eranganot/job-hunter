@@ -337,6 +337,11 @@ export const api = {
     request<{ success: boolean; marketing_opt_in: boolean }>("/api/settings/marketing", "POST", { on }),
   saveNotifications: (body: Record<string, unknown>) =>
     request("/api/save-notifications", "POST", body),
+  // Job Hunter's own Telegram bot (telegrambot.py): a one-time t.me link, then
+  // poll until the user has tapped Start.
+  telegramConnect: () => request<{ url: string; expires_minutes: number }>("/api/telegram/connect", "POST", {}),
+  telegramStatus: () => request<{ connected: boolean; own_bot: boolean; available: boolean }>("/api/telegram/status"),
+  telegramDisconnect: () => request<{ ok: boolean }>("/api/telegram/disconnect", "POST", {}),
   adminQueueStats: () => request<{ new: number; approved: number; applied: number; rejected: number; manual_required: number; dead_links: number }>("/api/admin/queue-stats"),
   adminClearAttempted: () => request<{ cleared: number }>("/api/admin/clear-attempted", "POST", {}),
   adminClearApplied: () => request<{ deleted: number }>("/api/admin/clear-applied", "POST", {}),

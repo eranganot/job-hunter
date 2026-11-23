@@ -36,7 +36,8 @@ def test_a_channel_that_could_never_send_is_refused_with_the_reason(stack, users
     status, _loc, body = users["a"].post_json(
         "/api/save-notifications", dict(fields, notification_channel=channel))
     assert status == 400, (status, body)
-    assert "is missing" in json.loads(body)["error"] or "no address is set" in json.loads(body)["error"]
+    err = json.loads(body)["error"]
+    assert "not connected" in err or "no address is set" in err
     assert _channel_of(stack["db"], "alice@example.test") == before      # nothing stored
 
 
