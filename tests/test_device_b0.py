@@ -284,3 +284,24 @@ def test_the_extension_trace_is_kept_for_the_admin_to_read(stack, users):
     ev = json.loads(body)["events"]
     assert st == 200 and ev[0]["step"] == "pick-miss" and ev[0]["data"]["want"] == "tel aviv" and ev[0]["version"] == "0.6.1"
     assert users["a"].get("/api/admin/device-trace")[0] == 403
+
+
+def test_the_answerer_gets_years_of_experience_and_today(stack, users, monkeypatch):
+    """The owner, 2026-11-23: Wix got "4-6 years" for his 10; ServiceNow's "Today's
+    date" got 2024-05-24 from the model."""
+    import app as _app
+    import apply_engine as _ae
+    import datetime as _dt
+    import questions
+    monkeypatch.setattr(_ae, "extract_applicant_data", lambda text, email, fallback_name="": {"email": email})
+    db = stack["db"]
+    uid = _user_id(db, "admin@example.test")
+    conn = db.get_db()
+    if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (uid,)).fetchone():
+        conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (uid,))
+    conn.execute("UPDATE user_profiles SET experience_years=10 WHERE user_id=?", (uid,))
+    conn.commit()
+    conn.close()
+    a = _app._applicant_for(uid, "admin@example.test", "Admin Person", "", "")
+    assert a["years_of_experience"] == 10 and a["today"] == _dt.date.today().isoformat(), a
+    assert "years_of_experience" in questions._PROMPT and "today from the applicant data" in questions._PROMPT

@@ -289,6 +289,22 @@
     const l = lab && lab.id && root.querySelector('label[for="' + CSS.escape(lab.id) + '"]');
     return (l && vis(l)) ? l : lab || el;
   };
+  const radioText = e => clean(e.getAttribute('label') || e.getAttribute('aria-label') || e.textContent);
+  function ariaRadioGroups() {
+    const groups = new Map();
+    for (const r of deepAll('[role="radio"]')) {
+      if (r.tagName === 'INPUT' || !vis(r)) continue;
+      const host = upward(r).slice(1, 6).find(n => /radio-?group/i.test(n.tagName || '') || (n.getAttribute && n.getAttribute('role') === 'radiogroup')) || r.parentElement;
+      if (!groups.has(host)) {
+        const lab = clean((host.getAttribute && host.getAttribute('label')) || '') || textAbove(r);
+        groups.set(host, {host, items: [], label: lab,
+          required: !!(host.hasAttribute && (host.hasAttribute('required') || host.getAttribute('aria-required') === 'true')) || /\*\s*$/.test(lab)});
+      }
+      groups.get(host).items.push(r);
+    }
+    return [...groups.values()].filter(g => g.label);
+  }
+  const openRadioGroups = () => ariaRadioGroups().filter(g => !g.items.some(i => i.getAttribute('aria-checked') === 'true') && !g.items[0].dataset.jhAsked).length;
   let qSeq = 0;
   async function questions() {
     const out = [], radios = new Map();
@@ -317,6 +333,16 @@
       if (!label) jt('no-label', upward(el).slice(0, 8).map(n => (n.tagName || '').toLowerCase() + '[' +
         [...(n.attributes || [])].map(a => a.name + '=' + String(a.value).slice(0, 30)).join(',') + ']'));
     }
+    // Choices that are not inputs at all: SmartRecruiters' <spl-radio role="radio"
+    // label="Yes"> inside <spl-radio-group label="Are you eligible to work in Israel?">
+    // (seen on its own component, 2026-11-23). Wix's and ServiceNow's Yes/No questions.
+    for (const grp of ariaRadioGroups()) {
+      if (grp.items.some(i => i.getAttribute('aria-checked') === 'true') || grp.items[0].dataset.jhAsked) continue;
+      const id = 'jhq' + (++qSeq);
+      grp.items.forEach(e => { e.dataset.jhq = id; });
+      out.push({selector: id, label: grp.label.replace(/\s*[*✱]\s*$/, ''), type: 'radio',
+                options: grp.items.map(radioText), required: grp.required});
+    }
     for (const [g, r] of radios) {
       if (r.els.some(e => e.checked)) continue;
       const id = 'jhq' + (++qSeq);
@@ -332,7 +358,17 @@
       const els = deepAll('[data-jhq="' + a.selector + '"]');
       if (!els.length || a.value == null || a.value === '') continue;
       const el = els[0], t = (el.type || '').toLowerCase(), v = Array.isArray(a.value) ? a.value.join(', ') : String(a.value);
-      if (t === 'radio') {
+      if (el.tagName !== 'INPUT' && el.getAttribute('role') === 'radio') {
+        const hit = els.find(e => norm(radioText(e)) === norm(v)) || els.find(e => norm(radioText(e)).startsWith(norm(v)) || norm(v).startsWith(norm(radioText(e))));
+        if (hit) {
+          const how = await clickInPage(hit);
+          await new Promise(r => setTimeout(r, 200));
+          if (hit.getAttribute('aria-checked') !== 'true') { hit.click(); await new Promise(r => setTimeout(r, 200)); }
+          const ok = hit.getAttribute('aria-checked') === 'true';
+          jt('radio', {q: a.selector, want: v, how, checked: ok});
+          if (ok) n++;
+        } else jt('radio-miss', {q: a.selector, want: v, options: els.map(radioText)});
+      } else if (t === 'radio') {
         const labFor = e => (e.getRootNode() || document).querySelector('label[for="' + CSS.escape(e.id || '-') + '"]');
         const hit = els.find(e => norm((labFor(e) || {}).textContent || e.value) === norm(v));
         if (hit) {
@@ -353,6 +389,12 @@
       els.forEach(e => { e.dataset.jhAsked = '1'; });
     }
     return n;
+  }
+  // The step button (SmartRecruiters "Next"): pressed by the extension once a step
+  // is filled (the owner, 2026-11-23: "I was needed to click on next"). Never Submit.
+  function nextButton() {
+    return deepAll('button, spl-button, [role="button"]').filter(vis)
+      .find(b => /^(next|continue|next step)$/i.test(clean(b.innerText || b.textContent)));
   }
   const markAsked = () => deepAll('[data-jhq]').forEach(e => { e.dataset.jhAsked = '1'; });
 
@@ -431,5 +473,5 @@
   const THANKS = /thank you for (applying|your application|submitting)|application (has been |was )?(received|submitted)|we('ve| have) received your application/i;
   const confirmed = () => THANKS.test(document.body ? document.body.innerText : '');
 
-  window.JHFill = {fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
+  window.JHFill = {fields, hasForm, fill, fillBasics, questions, applyAnswers, markAsked, openRadioGroups, nextButton, clickInPage, attachFile, attachCover, coverInput, noteFields, setNote, submitButton, personCheck, confirmed};
 })();

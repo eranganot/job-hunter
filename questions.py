@@ -194,6 +194,12 @@ Rules:
 - "Personal note" / "Cover letter" / "Additional information" / "Message to the hiring team"
   text boxes: the opening of a cover letter for this job - 3-4 sentences on why this role and
   what the applicant brings, grounded in the CV, "high" only if the CV gives real material.
+- Years of experience (in product, as a PM, in management, overall): use years_of_experience
+  from the applicant data; for a list, the option whose range contains that number (10 -> "8+",
+  "10+", "8-10"), "high". Never estimate years from the CV when years_of_experience is given.
+- Today's date / date of signature: today from the applicant data, in the form's format
+  (ISO yyyy-mm-dd if none is shown), "high". Never any other date.
+- Signature / full name fields: the applicant's full name, "high".
 - Salary expectations: use salary_expectation from the applicant data (state it as that
   minimum, in the form's format), confidence "high". Notice period / availability: use
   notice_period, "high". If either is absent from the applicant data, confidence "low".

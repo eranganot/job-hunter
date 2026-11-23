@@ -4698,7 +4698,7 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
     try:
         _c = database.get_db()
         try:
-            _r = _c.execute("SELECT phone, linkedin_url, sponsorship_local, sponsorship_abroad "
+            _r = _c.execute("SELECT phone, linkedin_url, sponsorship_local, sponsorship_abroad, experience_years "
                             "FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
         finally:
             _c.close()
@@ -4708,6 +4708,11 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
             out["home_country"] = "Israel"
             out["needs_sponsorship_in_home_country"] = (_r["sponsorship_local"] or "").lower() == "yes"
             out["needs_sponsorship_abroad"] = (_r["sponsorship_abroad"] or "").lower() == "yes"
+            # Years of experience from the Profile page: Wix asked "How many years of
+            # experience do you have as a Product Manager..." and the model, with only
+            # a CV excerpt, picked "4-6 years" for the owner's 10 (2026-11-23).
+            if _r["experience_years"]:
+                out["years_of_experience"] = int(_r["experience_years"])
     except Exception as _pe:
         print(f"[apply] WARNING could not read the profile for user {user_id}: {_pe}")
     nm = (name or "").strip()
@@ -4723,6 +4728,9 @@ def _applicant_for(user_id, email, name, cv_path_raw, cv_summary):
         out["phone"] = _ae_ap.intl_phone(out["phone"], out.get("home_country") or "Israel")
     if linkedin:
         out["linkedin_url"] = linkedin
+    # Today's date for "Today's date" / signature-date fields: ServiceNow's got
+    # "2024-05-24" from the model (2026-11-23).
+    out["today"] = datetime.now().date().isoformat()
     return out
 
 
