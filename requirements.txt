@@ -2,10 +2,10 @@
 # Core modules (http.server, sqlite3, json, urllib) are stdlib - no install needed.
 
 # Browser automation for job application submission
-playwright==1.49.1
+playwright==1.65.2
 
 # Email sending via Resend
-resend==2.52.0
+resend==2.55.0
 
 # Anti-bot stealth patches for Playwright
 playwright-stealth==1.0.6
@@ -29,11 +29,11 @@ rapidfuzz>=3.6
 
 # Postgres driver (Phase 2b). Only used when DB_BACKEND=postgres;
 # SQLite deployments never import it.
-psycopg[binary,pool]==3.3.8
+psycopg[binary,pool]==3.3.9
 # Error reporting. Optional at runtime - errors.py imports it lazily and
 # no-ops when JH_SENTRY_DSN is unset, so a failed install loses reporting,
 # not serving.
-sentry-sdk==2.74.0
+sentry-sdk==2.75.0
 
 # Reading the CV's text (app._extract_cv_text): the applicant's name and phone
 # for application forms, and the CV optimizer. Missing until 2026-11-07, so
@@ -47,4 +47,4 @@ python-docx==1.2.0
 
 # Scheduler clock (app.israel_now): zoneinfo needs an IANA database and a slim
 # image is not guaranteed to ship one; this is the fallback zoneinfo uses.
-tzdata==2025.2
+tzdata==2025.3
