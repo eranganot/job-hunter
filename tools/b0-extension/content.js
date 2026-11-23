@@ -42,6 +42,7 @@
   function banner(text, state) {
     if (!bar) {
       bar = document.createElement('div');
+      bar.setAttribute('data-jh-bar', '');               // never taken for the site's own buttons
       // Top-right and narrow: at the bottom, full width, it covered Fullpath's Submit
       // button (the owner, 2026-11-23). It can be folded to a small tab.
       bar.style.cssText = 'position:fixed;z-index:2147483647;right:12px;top:12px;max-width:380px;padding:10px 12px;border-radius:10px;' +

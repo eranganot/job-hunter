@@ -411,7 +411,7 @@
   // The step button (SmartRecruiters "Next"): pressed by the extension once a step
   // is filled (the owner, 2026-11-23: "I was needed to click on next"). Never Submit.
   function nextButton() {
-    return deepAll('button, spl-button, [role="button"]').filter(vis)
+    return deepAll('button, spl-button, [role="button"]').filter(b => vis(b) && !b.closest('[data-jh-bar]'))
       .find(b => /^(next|continue|next step)$/i.test(clean(b.innerText || b.textContent)));
   }
   // Errors the site shows next to fields after a press ("This field is required").
@@ -476,13 +476,20 @@
     return putFile(pick, b64, name, mime);
   }
 
+  // A button's text: its own, else the text slotted into it from its component host
+  // (SmartRecruiters' <spl-button>Submit</spl-button> renders a shadow <button><slot>,
+  // whose innerText is empty).
+  const buttonText = b => clean(b.innerText || b.value || ((b.getRootNode() || {}).host || {}).textContent || '');
   function submitButton() {
-    const btns = deepAll('button, input[type="submit"], a.postings-btn').filter(vis);
-    const by = re => btns.find(b => re.test(clean(b.innerText || b.value)));
+    // Never the extension's own bar: on ServiceNow (0.7.3 trace, 2026-11-23) the site's
+    // Submit had no readable text, so /submit/ matched the bar's "Submit for me" and the
+    // extension pressed its own button.
+    const btns = deepAll('button, input[type="submit"], a.postings-btn').filter(b => vis(b) && !b.closest('[data-jh-bar]'));
+    const by = re => btns.find(b => re.test(buttonText(b)));
     return document.querySelector('#btn-submit') && vis(document.querySelector('#btn-submit')) ? document.querySelector('#btn-submit')
       : by(/^submit application$/i) || by(/^submit$/i) || by(/submit|send application|apply now/i)
       // Not a step button: SmartRecruiters' first page ends in "Next" (2026-11-23).
-      || btns.find(b => (b.type || '').toLowerCase() === 'submit' && !/^(next|back|continue|previous|save)/i.test(clean(b.innerText || b.value)));
+      || btns.find(b => (b.type || '').toLowerCase() === 'submit' && !/^(next|back|continue|previous|save)/i.test(buttonText(b)));
   }
 
   // Checks meant for a person, visible on this page right now.
