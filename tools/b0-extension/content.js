@@ -10,6 +10,23 @@
   const wait = ms => new Promise(r => setTimeout(r, ms));
   let task = null, reported = false, submittedAt = 0, pressedBy = 'user', checkSeen = '';
   let pressForMe = () => {};
+  // What the extension did on this page, step by step, sent to Job Hunter so a
+  // failure can be read instead of guessed (2026-11-23: City and SmartRecruiters'
+  // second step failed on Eran's runs but passed on every stand-in).
+  const traceBuf = [];
+  let traceTimer = null;
+  const trace = (step, data) => {
+    traceBuf.push({t: Date.now(), step, data: data === undefined ? null : data});
+    if (window.JHTrace && window.JHTrace.length) traceBuf.push(...window.JHTrace.splice(0));
+    clearTimeout(traceTimer);
+    traceTimer = setTimeout(flushTrace, 800);
+  };
+  const flushTrace = () => {
+    if (!task || !traceBuf.length) return;
+    if (window.JHTrace && window.JHTrace.length) traceBuf.push(...window.JHTrace.splice(0));
+    ask({type: 'trace', jobId: task.jobId, url: location.href, top: TOP, version: chrome.runtime.getManifest().version,
+         events: traceBuf.splice(0)});
+  };
 
   async function report(outcome, siteStatus, detail, extra) {
     if (reported) return; reported = true;
@@ -119,9 +136,12 @@
     if (await ask({type: 'claim'}) !== true) return;     // one frame per tab does the work
 
     banner('Filling ' + (task.prepared || []).length + ' prepared answers…');
+    trace('form', {system: SYSTEM, fields: JHFill.fields().length, prepared: (task.prepared || []).length,
+                   applicant: Object.keys(task.applicant || {}).filter(k => (task.applicant || {})[k])});
     const res = JHFill.fill(task.prepared || []);
     const basicsOpts = {localPhone: SYSTEM === 'SmartRecruiters'};
     let basics = JHFill.fillBasics(task.applicant, basicsOpts);
+    trace('basics', {filled: basics});
     let cv = false;
     const file = await ask({type: 'cv', jobId: task.jobId});
     if (file && file.b64) cv = JHFill.attachFile(file.b64, file.name, file.mime);
@@ -149,13 +169,18 @@
     // standing instructions, the model) - the same rules as the apply engine.
     async function answerRound() {
       const qs = await JHFill.questions();
+      trace('questions', qs.map(q => ({label: q.label.slice(0, 80), type: q.type, options: q.options.length, required: q.required})));
       if (!qs.length) return {n: 0, unsure: []};
       banner('Answering ' + qs.length + ' question' + (qs.length > 1 ? 's' : '') + '…');
       const r = await ask({type: 'answers', jobId: task.jobId, questions: qs,
                            page_text: (document.body.innerText || '').slice(0, 3000)});
+      trace('server-answers', r ? {answers: (r.answers || []).map(a => ({q: a.selector, v: String(a.value).slice(0, 60)})),
+                                   unsure: r.unsure, error: r.error} : 'no reply');
       const n = r && r.answers ? await JHFill.applyAnswers(r.answers) : 0;
+      trace('applied', {n});
       JHFill.markAsked();
-      return {n, unsure: (r && r.unsure) || (r && r.error ? ['(' + r.error + ')'] : [])};
+      return {n, unsure: ((r && r.unsure) || (r && r.error ? ['(' + r.error + ')'] : []))
+                           .concat(((r && r.drafts) || []).map(l => 'check: ' + l))};
     }
     const q1 = await answerRound();
     const answered = n => n.n ? ', ' + n.n + ' questions answered' : '';
@@ -183,6 +208,7 @@
         const fresh = JHFill.fields().some(el => !el.dataset.jhAsked && !el.dataset.jhq && el.type !== 'file' &&
           (el.offsetWidth || el.offsetHeight) && !(el.type === 'checkbox' ? el.checked : (el.value || '').trim()));
         if (!fresh) continue;
+        trace('new-step', {fields: JHFill.fields().length});
         const b = JHFill.fillBasics(task.applicant, basicsOpts);
         const q = await answerRound();
         JHFill.markAsked();
@@ -215,5 +241,5 @@
     }
   }
 
-  if (window.JHFill) run().catch(e => console.warn('Job Hunter B0:', e));
+  if (window.JHFill) run().catch(e => { console.warn('Job Hunter B0:', e); trace('error', String(e && e.stack || e)); flushTrace(); });
 })();

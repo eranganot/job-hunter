@@ -68,6 +68,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (task.claimed) return reply(false);
       task.claimed = true; await saveTasks(t); return reply(true);
     }
+    if (msg.type === 'trace') {
+      await api('/api/device/trace', {method: 'POST', body: JSON.stringify({job_id: msg.jobId, url: msg.url, top: msg.top,
+                                       version: msg.version, events: msg.events})}).catch(() => null);
+      return reply({ok: true});
+    }
     if (msg.type === 'answers') {
       const r = await api('/api/device/jobs/' + encodeURIComponent(msg.jobId) + '/answers',
                           {method: 'POST', body: JSON.stringify({questions: msg.questions, page_text: msg.page_text})});

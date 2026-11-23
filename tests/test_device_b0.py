@@ -270,3 +270,17 @@ def test_the_note_never_restates_the_cv_summary_or_labels_the_applicant():
     for x in ("I'm an Executive Product Leader", "I'm drawn to", "boosted", "+22%"):
         assert x in seen[1], x
     assert ai_analysis._copied_from(bad, summ) == "an executive product leader"
+
+
+def test_the_extension_trace_is_kept_for_the_admin_to_read(stack, users):
+    anon, auth = _pair(stack, users)
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", stack["port"], timeout=30)
+    c.request("POST", "/api/device/trace", body=json.dumps({"job_id": 5, "url": "https://x/form", "top": True, "version": "0.6.1",
+              "events": [{"step": "pick-miss", "data": {"want": "tel aviv", "seen": [0, 0]}}]}),
+              headers=dict(auth, **{"Content-Type": "application/json"}))
+    assert c.getresponse().status == 200
+    st, _h, body = users["admin"].get("/api/admin/device-trace")
+    ev = json.loads(body)["events"]
+    assert st == 200 and ev[0]["step"] == "pick-miss" and ev[0]["data"]["want"] == "tel aviv" and ev[0]["version"] == "0.6.1"
+    assert users["a"].get("/api/admin/device-trace")[0] == 403
