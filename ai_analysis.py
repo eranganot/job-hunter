@@ -848,6 +848,11 @@ def _hook_problems(hook: str, job: dict) -> list:
     words = {w for w in re.findall(r"[a-z]+", (job.get("title") or "").lower()) if len(w) > 2 and w not in ("and", "the", "for")}
     if words and sum(1 for w in words if re.search(r"\b%s\b" % re.escape(w), low)) >= min(2, len(words)):
         probs.append("the hook repeats the job title")
+    # Copying the posting is not personal: Fullpath's hooks on production repeated
+    # "technically complex, data-intensive product ..." word for word (2026-11-23).
+    copied = _copied_from(hook, job.get("full_description") or job.get("description") or "", n=4)
+    if copied:
+        probs.append('the hook copies the posting ("%s ...") - say it in your own words' % copied)
     return probs
 
 
@@ -884,11 +889,17 @@ def write_note(job: dict, profile: dict, api_key: str = "", user_id=None,
             break
         ask = prompt + "\n\nYour previous answer: " + json.dumps(parts) + "\nProblems: " + "; ".join(probs) + \
             ". Write both sentences again without those problems."
-    note = (best["hook"] + " " + best["proof"]).strip() if best_n == 0 or not _hook_problems(best["hook"], job) else best["proof"]
+    first = lambda t: re.split(r"(?<=[.!?])\s+", (t or "").strip(), 1)[0]   # one sentence each
+    hook, proof = first(best["hook"]), first(best["proof"])
+    note = (hook + " " + proof).strip() if not _hook_problems(hook, job) else proof
     allowed = tailor._numbers(cv) | tailor._numbers(jd)
     if tailor._numbers(note) - allowed:      # a number not in the CV or the job: drop that sentence
         note = " ".join(x for x in re.split(r"(?<=[.!?])\s+", note) if not (tailor._numbers(x) - allowed))
-    return note.strip().strip('"')[:450].strip()
+    note = note.strip().strip('"')
+    # Never cut mid-word (production: "...engagem"): drop whole sentences past 450.
+    while len(note) > 450 and re.search(r"[.!?]\s+\S", note):
+        note = re.split(r"(?<=[.!?])\s+(?=\S[^.!?]*[.!?]?\s*$)", note)[0]
+    return note if len(note) <= 450 else note[:450].rsplit(" ", 1)[0].rstrip(",;:") + "."
 
 
 def generate_cover_letter(job: dict, profile: dict, api_key: str = "",
