@@ -122,7 +122,14 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
                     break
                 ctx.pages[0].wait_for_timeout(250)
             assert tab, "the extension opened no tab for %s; tabs %s" % (job_url, sw.evaluate("chrome.tabs.query({}).then(t => t.map(x => x.url + ' | ' + x.pendingUrl + ' | ' + x.status))"))
-            tab.goto(job_url)
+            try:
+                tab.goto(job_url)
+            except Exception as exc:
+                # The extension can move the tab on before this load finishes (Lever's
+                # job page -> its /apply form): that is the extension working, not a
+                # failure. CI, 2026-11-23: "interrupted by another navigation to .../apply".
+                if "interrupted by another navigation" not in str(exc):
+                    raise
             if not prepared and mode == "B" and not as_eran:
                 tab.click("button:has-text('Submit for me')", timeout=30000)
             if as_eran:
