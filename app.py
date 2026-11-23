@@ -769,38 +769,50 @@ def _tailor_inputs(user_id, user):
 
 
 def _ensure_cover_letter(user, job_id):
-    """The job's cover letter, written now (the app's own writer) if it has
-    none. (letter, error)."""
+    """The job's cover letter and personal note, written now (the app's own
+    writers) when missing. (letter, note, error). The letter costs one
+    cover-letter credit; the note rides on it."""
     uid = user["id"]
     conn = database.get_db()
     try:
         job = conn.execute("SELECT * FROM jobs WHERE id=? AND user_id=?", (job_id, uid)).fetchone()
         if not job:
-            return "", "Job not found"
-        if (job["cover_letter"] or "").strip():
-            return job["cover_letter"].strip(), ""
-        _ok, _used, _cap = entitlements.allowed(conn, user, "cover_letter")
-        if not _ok:
-            return "", "No cover letters left on this plan"
+            return "", "", "Job not found"
+        letter = (job["cover_letter"] or "").strip()
+        note = (job["cover_note"] or "").strip()
+        if letter and note:
+            return letter, note, ""
+        if not letter:
+            _ok, _used, _cap = entitlements.allowed(conn, user, "cover_letter")
+            if not _ok:
+                return "", "", "No cover letters left on this plan"
         profile = conn.execute("SELECT * FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
     finally:
         conn.close()
+    _prof = dict(profile) if profile else {}
     try:
-        from ai_analysis import write_cover_letter
+        import ai_analysis as _ai
         _cvt, _nm, _c = _tailor_inputs(uid, user)
-        letter = write_cover_letter(dict(job), dict(profile) if profile else {}, GEMINI_KEY,
-                                    user_id=uid, cv_text=_cvt, name=_nm)["letter"]
+        new_letter = not letter
+        if new_letter:
+            letter = _ai.write_cover_letter(dict(job), _prof, GEMINI_KEY, user_id=uid, cv_text=_cvt, name=_nm)["letter"]
+        if not note:
+            note = _ai.write_note(dict(job), _prof, GEMINI_KEY, user_id=uid, cv_text=_cvt, name=_nm)
     except Exception as exc:  # noqa: BLE001 - reported to the device, which then fills no letter
         _log.get("cover-letter").warning("cover letter for job %s: %s", job_id, exc)
-        return "", "Could not write the cover letter: %s" % exc
+        if not letter:
+            return "", "", "Could not write the cover letter: %s" % exc
+        new_letter = False
     conn = database.get_db()
     try:
-        entitlements.try_consume(conn, user, "cover_letter")
-        conn.execute("UPDATE jobs SET cover_letter=? WHERE id=? AND user_id=?", (letter, job_id, uid))
+        if new_letter:
+            entitlements.try_consume(conn, user, "cover_letter")
+        conn.execute("UPDATE jobs SET cover_letter=?, cover_note=? WHERE id=? AND user_id=?",
+                     (letter, note or None, job_id, uid))
         conn.commit()
     finally:
         conn.close()
-    return letter, ""
+    return letter, note, ""
 
 
 def _tailored_cv_row(user_id, job_id):
@@ -5813,12 +5825,12 @@ class Handler(BaseHTTPRequestHandler):
             if not _du:
                 self.send_json({"error": "Not paired"}, 401)
                 return
-            _letter, _err = _ensure_cover_letter(_du, int(_mcl.group(1)))
+            _letter, _note, _err = _ensure_cover_letter(_du, int(_mcl.group(1)))
             if not _letter:
                 self.send_json({"error": _err or "No cover letter"}, 404)
                 return
             if qs.get("format", [""])[0] != "pdf":
-                self.send_json({"letter": _letter, "short": _cp.short_note(_letter)})
+                self.send_json({"letter": _letter, "short": _note or _cp.short_note(_letter), "note": _note})
                 return
             _cvt, _nm, _contact = _tailor_inputs(_du["id"], _du)
             try:
@@ -8255,6 +8267,13 @@ class Handler(BaseHTTPRequestHandler):
                     _wl = write_cover_letter(dict(job), dict(profile) if profile else {},
                                              GEMINI_KEY, user_id=user_id, cv_text=_cvt, name=_nm)
                     letter, _notes = _wl["letter"], _wl["notes"]
+                    try:      # its personal note, for a form's note box (best effort)
+                        from ai_analysis import write_note
+                        _cnote = write_note(dict(job), dict(profile) if profile else {}, GEMINI_KEY,
+                                            user_id=user_id, cv_text=_cvt, name=_nm)
+                    except Exception as _ne:  # noqa: BLE001 - the letter still stands
+                        _log.get("cover-letter").warning("note for job %s: %s", job_id, _ne)
+                        _cnote = None
                 except Exception as gen_err:
                     self.send_json({"error": str(gen_err)}, 500)
                     return
@@ -8262,10 +8281,11 @@ class Handler(BaseHTTPRequestHandler):
                 c2 = database.get_db()
                 try:
                     entitlements.try_consume(c2, user, "cover_letter")
-                    c2.execute("UPDATE jobs SET cover_letter=? WHERE id=?", (letter, job_id))
+                    # A new letter: its personal note is written again with it (cover_note).
+                    c2.execute("UPDATE jobs SET cover_letter=?, cover_note=? WHERE id=?", (letter, _cnote, job_id))
                     c2.commit()
                     c2.close()
-                    self.send_json({"success": True, "letter": letter, "notes": _notes})
+                    self.send_json({"success": True, "letter": letter, "notes": _notes, "note": _cnote})
                     return
                 finally:
                     c2.close()

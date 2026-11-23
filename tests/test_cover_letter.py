@@ -13,8 +13,9 @@ def test_the_letter_is_written_from_the_full_cv_and_the_users_name():
     seen = []
     out = write_cover_letter(JOB, {"cv_summary": "short summary"}, cv_text=CV, name="Alex Tester",
                              llm=lambda p: seen.append(p) or "Dear Hiring Team,\nRetention rose 36% at Northwind Media.\nBest regards,\nAlex Tester")
-    assert "Northwind Media TLV, Israel" in seen[0] and "short summary" not in seen[0]
-    assert "from Alex Tester" in seen[0] and "No em dashes" in seen[0]
+    # The full CV, with the summary only as the applicant's positioning (the owner, 2026-11-23).
+    assert "Northwind Media TLV, Israel" in seen[0] and "yourself (your own positioning, then your CV):\nshort summary" in seen[0]
+    assert "You are Alex Tester" in seen[0] and "No em dashes" in seen[0]
     assert len(seen) == 1 and out["notes"] == []                     # 36 is in the CV: no rewrite
 
 

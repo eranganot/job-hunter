@@ -1307,6 +1307,14 @@ def m0047_device_spike(conn):
     conn.commit()
 
 
+def m0048_cover_note(conn):
+    """The short personal note for an application form's note box, written next
+    to the cover letter (jobs.cover_note; the owner, 2026-11-23). Idempotent."""
+    if not _has_column(conn, "jobs", "cover_note"):
+        conn.execute("ALTER TABLE jobs ADD COLUMN cover_note TEXT")
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1355,6 +1363,7 @@ MIGRATIONS = [
     (45, "application_outcome",         m0045_application_outcome),
     (46, "fit_survey",                  m0046_fit_survey),
     (47, "device_spike",                m0047_device_spike),
+    (48, "cover_note",                  m0048_cover_note),
 ]
 
 
