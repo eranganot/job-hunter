@@ -205,8 +205,11 @@
       let seenBtn = btn;
       for (let i = 0; i < 600 && !submittedAt && !reported; i++) {
         await wait(2000);
+        // fields() already keeps only what is on screen, hidden-input radios included
+        // (a follow-up question that appears after an answer: ServiceNow's "relocating
+        // at your own expense?" once "Yes" is chosen, 2026-11-23).
         const fresh = JHFill.fields().some(el => !el.dataset.jhAsked && !el.dataset.jhq && el.type !== 'file' &&
-          (el.offsetWidth || el.offsetHeight) && !(el.type === 'checkbox' ? el.checked : (el.value || '').trim()));
+          !((el.type === 'checkbox' || el.type === 'radio') ? el.checked : (el.value || '').trim()));
         if (!fresh) continue;
         trace('new-step', {fields: JHFill.fields().length});
         const b = JHFill.fillBasics(task.applicant, basicsOpts);

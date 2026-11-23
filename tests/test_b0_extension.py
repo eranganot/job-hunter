@@ -407,7 +407,8 @@ customElements.define('spl-dropdown', class extends HTMLElement {
     const i = r.getElementById('d'), l = r.getElementById('l');
     const show = () => { l.innerHTML = ''; for (const o of opts) if (o.toLowerCase().includes(i.value.toLowerCase())) {
       const e = document.createElement('spl-select-option'); e.textContent = o; e.setAttribute('role', 'option');
-      e.onclick = () => { if (!window.__inPageClick) return; i.value = o; this.value = o; l.innerHTML = ''; }; l.appendChild(e); } };
+      e.onclick = () => { if (!window.__inPageClick) return; i.value = o; this.value = o; l.innerHTML = '';
+        this.dispatchEvent(new CustomEvent('picked', {bubbles: true, detail: o})); }; l.appendChild(e); } };
     i.addEventListener('input', show); i.addEventListener('focus', show);
   }
 });
@@ -434,12 +435,18 @@ function next() {
   document.getElementById('s2').innerHTML = '<h2>Preliminary questions</h2>' +
     '<spl-dropdown id="years" label="How many years of experience do you have as a Product Manager in tech product companies?" options="0-2|3-5|6-9|10+"></spl-dropdown>' +
     '<spl-radio-group id="elig" label="Are you eligible to work in Israel?"></spl-radio-group>' +
+    '<div id="follow"></div>' +
     '<spl-checkbox id="priv" label="You declare that you have read and understand the privacy notice of Wix."></spl-checkbox>' +
     '<button type="button" id="go">Submit</button>';
+  // A follow-up question shown only after an answer (ServiceNow: "If you selected Yes...").
+  document.getElementById('years').addEventListener('picked', () => {
+    document.getElementById('follow').innerHTML = '<spl-radio-group id="own" label="If you selected 10+, would you consider relocating at your own expense?"></spl-radio-group>';
+  });
   document.getElementById('go').onclick = () => {
     const sr = id => document.getElementById(id).shadowRoot;
     fetch('/sr-submit', {method: 'POST', body: JSON.stringify(Object.assign({}, window.step1, {
       years: sr('years').getElementById('d').value, eligible: sr('elig').getElementById('y').checked,
+      own: !!document.getElementById('own') && sr('own').getElementById('y').checked,
       privacy: sr('priv').getElementById('c').checked}))})
     .then(() => { document.body.innerHTML = '<h1>Thank you for applying</h1>'; });
   };
@@ -469,7 +476,7 @@ def test_b0_smartrecruiters_second_step_is_answered_and_city_picked(stack, users
         for q in qs:
             if "years" in q["label"]:
                 out.append({"selector": q["selector"], "value": "10+", "confidence": "high"})
-            elif "eligible" in q["label"]:
+            elif "eligible" in q["label"] or "own expense" in q["label"]:
                 out.append({"selector": q["selector"], "value": "Yes", "confidence": "high"})
         return out
     monkeypatch.setattr(_ae, "_claude_json", fake)
@@ -495,10 +502,11 @@ def test_b0_smartrecruiters_second_step_is_answered_and_city_picked(stack, users
         tab.wait_for_function("""(() => { const p = document.querySelector('#priv'); return p && p.shadowRoot.getElementById('c').checked
                                   && document.querySelector('#years').shadowRoot.getElementById('d').value === '10+'; })()""", timeout=40000)
         tab.wait_for_function("document.querySelector('#elig').shadowRoot.getElementById('y').checked", timeout=20000)
+        tab.wait_for_function("document.querySelector('#own') && document.querySelector('#own').shadowRoot.getElementById('y').checked", timeout=20000)
         tab.click("#go")
 
     row, job = _run(stack, users, tmp_path, "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/step-2",
                     "https://jobs.smartrecruiters.com/**", sr, [], mode="A", as_eran=eran)
     assert row["outcome"] == "sent", row
     got = sent[0]
-    assert got["city"] == "Tel Aviv, Israel" and got["years"] == "10+" and got["eligible"] is True and got["privacy"] is True, got
+    assert got["city"] == "Tel Aviv, Israel" and got["years"] == "10+" and got["eligible"] is True and got["privacy"] is True and got["own"] is True, got
