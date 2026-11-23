@@ -170,7 +170,7 @@
     async function answerRound() {
       const qs = await JHFill.questions();
       trace('questions', qs.map(q => ({label: q.label.slice(0, 80), type: q.type, options: q.options.length, required: q.required})));
-      if (!qs.length) return {n: 0, unsure: []};
+      if (!qs.length) return {n: 0, unsure: JHFill.unlabeled() ? [JHFill.unlabeled() + ' Yes/No question(s) I could not read'] : []};
       banner('Answering ' + qs.length + ' question' + (qs.length > 1 ? 's' : '') + '…');
       const r = await ask({type: 'answers', jobId: task.jobId, questions: qs,
                            page_text: (document.body.innerText || '').slice(0, 3000)});
@@ -179,7 +179,9 @@
       const n = r && r.answers ? await JHFill.applyAnswers(r.answers) : 0;
       trace('applied', {n});
       JHFill.markAsked();
+      const blind = JHFill.unlabeled();
       return {n, unsure: ((r && r.unsure) || (r && r.error ? ['(' + r.error + ')'] : []))
+                           .concat(blind ? [blind + ' Yes/No question' + (blind > 1 ? 's' : '') + ' I could not read'] : [])
                            .concat(((r && r.drafts) || []).map(l => 'check: ' + l))};
     }
     const q1 = await answerRound();

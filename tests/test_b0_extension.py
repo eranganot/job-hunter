@@ -122,7 +122,14 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
                     break
                 ctx.pages[0].wait_for_timeout(250)
             assert tab, "the extension opened no tab for %s; tabs %s" % (job_url, sw.evaluate("chrome.tabs.query({}).then(t => t.map(x => x.url + ' | ' + x.pendingUrl + ' | ' + x.status))"))
-            tab.goto(job_url)
+            try:
+                tab.goto(job_url)
+            except Exception as exc:
+                # The extension can move the tab on before this load finishes (Lever's
+                # job page -> its /apply form): that is the extension working, not a
+                # failure. CI, 2026-11-23: "interrupted by another navigation to .../apply".
+                if "interrupted by another navigation" not in str(exc):
+                    raise
             if not prepared and mode == "B" and not as_eran:
                 tab.click("button:has-text('Submit for me')", timeout=30000)
             if as_eran:
@@ -417,8 +424,10 @@ customElements.define('spl-radio-group', class extends HTMLElement {
   // <input>; options are <spl-radio role="radio" label="Yes">, the question is the
   // group's label attribute, a choice is taken only on a page-world click.
   connectedCallback() {
+    // The question is drawn in the shadow root only (no "label" attribute), as on
+    // ServiceNow, where the text above the first option was the pinned header.
     const r = this.attachShadow({mode: 'open'});
-    r.innerHTML = '<label>' + this.getAttribute('label') + '<span>*</span></label><fieldset role="radiogroup"><slot></slot></fieldset>';
+    r.innerHTML = '<label>' + this.dataset.q + '<span>*</span></label><fieldset role="radiogroup"><slot></slot></fieldset>';
     this.setAttribute('required', '');
     for (const v of ['Yes', 'No']) {
       const o = document.createElement('spl-radio');
@@ -442,13 +451,13 @@ function next() {
   document.getElementById('s1').remove();
   document.getElementById('s2').innerHTML = '<h2>Preliminary questions</h2>' +
     '<spl-dropdown id="years" label="How many years of experience do you have as a Product Manager in tech product companies?" options="0-2|3-5|6-9|10+"></spl-dropdown>' +
-    '<spl-radio-group id="elig" label="Are you eligible to work in Israel?"></spl-radio-group>' +
+    '<spl-radio-group id="elig" data-q="Are you eligible to work in Israel? ' + 'This question is long, like ServiceNow\\'s question B about U.S. Federal Government employment and the STOCK Act, which runs to some six hundred characters and so was skipped by the text-above fallback. '.repeat(3) + '"></spl-radio-group>' +
     '<div id="follow"></div>' +
     '<spl-checkbox id="priv" label="You declare that you have read and understand the privacy notice of Wix."></spl-checkbox>' +
     '<button type="button" id="go">Submit</button>';
   // A follow-up question shown only after an answer (ServiceNow: "If you selected Yes...").
   document.getElementById('years').addEventListener('picked', () => {
-    document.getElementById('follow').innerHTML = '<spl-radio-group id="own" label="If you selected 10+, would you consider relocating at your own expense?"></spl-radio-group>';
+    document.getElementById('follow').innerHTML = '<spl-radio-group id="own" data-q="If you selected 10+, would you consider relocating at your own expense?"></spl-radio-group>';
   });
   document.getElementById('go').onclick = () => {
     const sr = id => document.getElementById(id).shadowRoot;
@@ -460,6 +469,7 @@ function next() {
   };
 }
 </script>
+<div style="position:sticky;top:0;background:#fff">Hamerton House 18-20 Aharon Bart St., Petah Tikva, Israel</div>
 <div id="s1"><h2>Personal information</h2>
 <spl-input fid="first-name-input" label="First name"></spl-input>
 <spl-dropdown id="city" label="City" options="Tel Aviv, Israel|Tel Mond, Israel|Haifa, Israel"></spl-dropdown>
