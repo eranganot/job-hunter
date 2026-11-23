@@ -3630,8 +3630,13 @@ function NotificationChannels({ me }: { me: any }) {
      connection itself turns the channel on or off on the server. */
   const botOn = !!me.telegram_bot_available;
   const [tgConnected, setTgConnected] = useState<boolean>(!!me.telegram_connected && !me.telegram_own_bot);
+  /* An account still on its own bot (the legacy design; the owner keeps his
+     for himself, 2026-11-23) is connected - just not to Noa. It used to be
+     drawn as "not connected" with a Connect button that would replace it. */
+  const [tgOwnBot, setTgOwnBot] = useState<boolean>(!!me.telegram_connected && !!me.telegram_own_bot);
   const [tgWaiting, setTgWaiting] = useState(false);
   const connectTelegram = async () => {
+    if (tgOwnBot && !window.confirm("You're connected through your own Telegram bot. Switching to Noa replaces it: your alerts will come from Noa instead. Switch?")) return;
     setMsg("");
     // Opened before the request resolves would be blocked as a pop-up on iOS;
     // open a blank tab now and point it at the link once we have it.
@@ -3646,7 +3651,7 @@ function NotificationChannels({ me }: { me: any }) {
         try {
           const st = await api.telegramStatus();
           if (st.connected && !st.own_bot) {
-            setTgWaiting(false); setTgConnected(true);
+            setTgWaiting(false); setTgConnected(true); setTgOwnBot(false);
             setChannels((cur) => (cur.includes("telegram") ? cur : [...cur, "telegram"]));
             setMsg("\u2713 Telegram connected - Noa sent you a message there.");
             return;
@@ -3661,7 +3666,7 @@ function NotificationChannels({ me }: { me: any }) {
     setBusy(true); setMsg("");
     try {
       await api.telegramDisconnect();
-      setTgConnected(false);
+      setTgConnected(false); setTgOwnBot(false);
       setChannels((cur) => cur.filter((c) => c !== "telegram"));
       setMsg("Telegram disconnected.");
     } catch (e: any) { setMsg(e?.message || "Could not disconnect"); }
@@ -3725,11 +3730,14 @@ function NotificationChannels({ me }: { me: any }) {
               <p className="text-sm text-white font-medium">Telegram</p>
               <p className="text-xs text-gray-400">
                 {tgConnected ? "Connected \u00b7 Noa sends your alerts there"
+                  : tgOwnBot && !tgWaiting ? "Connected through your own bot \u00b7 your alerts go there"
                   : tgWaiting ? "Waiting for you to tap Start in Telegram\u2026"
                   : "Get your alerts from Noa in Telegram. Notifications only."}
               </p>
             </div>
-            {tgConnected
+            {tgOwnBot && !tgWaiting
+              ? <button onClick={connectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl border border-gray-600 text-gray-300 text-xs font-medium disabled:opacity-60">Switch to Noa</button>
+              : tgConnected
               ? <button onClick={disconnectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl border border-gray-600 text-gray-300 text-xs font-medium disabled:opacity-60">Disconnect</button>
               : <button onClick={connectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium disabled:opacity-60">{tgWaiting ? "Open again" : "Connect Telegram"}</button>}
           </div>
