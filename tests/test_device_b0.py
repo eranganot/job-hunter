@@ -230,3 +230,20 @@ def test_the_note_is_written_by_its_own_prompt_and_capped():
     note = ai_analysis.write_note(job, {"cv_summary": "Product leader."}, "k", cv_text="CV", name="Eran",
                                   llm=lambda p: seen.append(p) or ("I've spent ten years on personalization. " * 20))
     assert len(seen) == 1 and "personal note" in seen[0] and len(note) <= 450
+
+
+def test_the_job_list_carries_the_applicants_contact_details(stack, users):
+    """For the fields every form has, where nothing was prepared (jobs added by link)."""
+    db = stack["db"]
+    uid = _user_id(db, "admin@example.test")
+    conn = db.get_db()
+    if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (uid,)).fetchone():
+        conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (uid,))
+    conn.execute("UPDATE user_profiles SET phone='054-123-4567', linkedin_url='https://www.linkedin.com/in/x' WHERE user_id=?", (uid,))
+    conn.commit()
+    conn.close()
+    anon, auth = _pair(stack, users)
+    st, _h, body = anon.get("/api/device/jobs", auth)
+    a = json.loads(body)["applicant"]
+    assert a["email"] == "admin@example.test" and a["phone"].startswith("+972") and a["phone_local"].startswith("05"), a
+    assert a["linkedin_url"] == "https://www.linkedin.com/in/x" and a["first_name"], a

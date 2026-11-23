@@ -5976,7 +5976,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Not paired"}, 401)
                 return
             if path == "/api/device/jobs":
-                self.send_json({"jobs": _dev.jobs(_du["id"])})
+                self.send_json({"jobs": _dev.jobs(_du["id"]), "applicant": _dev.applicant(_du)})
                 return
             try:
                 _jid = int(qs.get("job", [""])[0])
