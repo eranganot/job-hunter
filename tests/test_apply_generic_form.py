@@ -298,3 +298,35 @@ def test_appsflyer_shaped_form_labels_file_box_and_pre_ticked_answers():
         ae._fill_file_name_box(p, "#resume", "cv.pdf")
         assert p.evaluate("() => document.querySelector('input[data-file-input=resume]').value") == "cv.pdf"
         b.close()
+
+
+# ── an employer's own careers page with an embedded Greenhouse form (2026-11-23, JOB-HUNTER-Y) ──
+
+def test_routing_counts_an_embedded_greenhouse_page_as_greenhouse():
+    """Routing now agrees with ats_name(), which already let these pages submit."""
+    assert ae._routes_to_greenhouse("https://www.payoneer.com/careers/position/8355118/?gh_jid=8355118")
+    assert ae._routes_to_greenhouse("https://job-boards.greenhouse.io/figma/jobs/1")
+    assert ae._routes_to_greenhouse("https://www.acme.example/jobs/pm",
+                                    ["https://job-boards.greenhouse.io/embed/job_app?for=acme&token=1"])
+    assert not ae._routes_to_greenhouse("https://www.acme.example/careers/pm", ["https://www.youtube.com/embed/x"])
+    assert ae.ats_name("https://www.payoneer.com/careers/position/8355118/?gh_jid=8355118") == "Greenhouse"
+
+
+@browser_only
+def test_a_gh_jid_careers_page_goes_to_the_greenhouse_handler_not_the_generic_model(site, monkeypatch):
+    """Payoneer, 2026-11-23: the generic path got the privacy-policy dropdown as
+    `kind: text`, the model answered "check", the required consent stayed empty
+    and Submit sent nothing. The Greenhouse handler is the one that picks it."""
+    seen = []
+    _model(monkeypatch, seen)
+    called = []
+
+    def gh(page, applicant, cv_path):
+        called.append(page.url)
+        return {"success": False, "status": "manual_required", "error": "stub"}
+    monkeypatch.setattr(ae, "_apply_greenhouse", gh)
+    res = ae.submit_application(site + "/careers/position/7/?gh_jid=7", "Senior PM", "Acme",
+                                {**APPLICANT, "_deadline_s": 60}, None, force=True)
+    assert called and "gh_jid=7" in called[0], res
+    assert seen == []            # the generic model never saw this form
+    assert POSTS == []
