@@ -47,11 +47,20 @@ def _parse(s):
 
 
 def people(conn, test_email):
-    """ids of real users: not admin, not the test account, not disabled by the admin."""
+    """ids of real users: not admin, not the test account or the probes, not disabled by the admin."""
     return {int(r["id"]) for r in conn.execute(
         "SELECT id, role, email, COALESCE(is_active, 1) AS on_ FROM users").fetchall()
-        if str(r["role"] or "") != "admin" and str(r["email"] or "").strip().lower() != test_email
+        if str(r["role"] or "") != "admin" and not _test(r["email"], test_email)
         and int(r["on_"] or 0) == 1}
+
+
+TEST_DOMAIN = "@job-hunter.test"      # = testaccount.TEST_DOMAIN; the reserved domain of every non-person account
+
+
+def _test(addr, test_email) -> bool:
+    """The test account, and any other address on the reserved .test domain (the probes, probes.py)."""
+    a = str(addr or "").strip().lower()
+    return a == str(test_email or "").strip().lower() or a.endswith(TEST_DOMAIN)
 
 
 def _decisions(conn, ids, start, end):

@@ -192,9 +192,32 @@ _BAD = re.compile(r"\berrors?\b|\berrored\b|\bfail(?:s|ed|ing|ure|ures)?\b|"
                   r"\btracebacks?\b|\bexceptions?\b")
 
 
+# An explicit tag the author wrote ("[pool] WARNING ...", "[pool] ERROR ...").
+# Uppercase only: that is this codebase's convention for a deliberate level,
+# while lowercase "warning:" stays with the word list below.
+_TAG_ERROR = re.compile(r"\bERROR\b")
+_TAG_WARNING = re.compile(r"\bWARNING\b")
+
+# A counter that reports zero of something bad ("failed 0", "failed=0",
+# "errors: 0", "0 failed") says nothing went wrong. It is blanked before the
+# word test, so "[lifecycle] sent 1, skipped 0, failed 0" stops being an ERROR
+# (JOB-HUNTER-V) while "failed 2" still is one.
+_ZERO_COUNT = re.compile(
+    r"\b(?:fail(?:s|ed|ures?)?|errors?)\s*[=:]?\s*0\b(?![.,]\d)|(?<![=:])(?<![=:] )\b0\s+(?:fail(?:s|ed|ures?)?|errors?)\b")
+
+
 def _level_for(msg: str) -> int:
-    """Grade a legacy print() by its text. See the module docstring."""
-    low = msg.lower()
+    """Grade a legacy print() by its text. See the module docstring.
+
+    An explicit uppercase tag wins over the inference (2026-11-22): the word
+    test ran first, so "[search] WARNING Workday: 13 of 16 tenants failed" was
+    filed as an ERROR and raised a Sentry alert the author had deliberately
+    marked as a warning (JOB-HUNTER-R, -7, -8, -9, -B)."""
+    if _TAG_ERROR.search(msg):
+        return logging.ERROR
+    if _TAG_WARNING.search(msg):
+        return logging.WARNING
+    low = _ZERO_COUNT.sub(" ", msg.lower())
     if _BAD.search(low):
         return logging.ERROR
     if re.search(r"\bwarn(?:ing|ings|ed)?\b", low) or _TROUBLE.search(low):

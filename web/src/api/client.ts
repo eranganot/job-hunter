@@ -337,6 +337,11 @@ export const api = {
     request<{ success: boolean; marketing_opt_in: boolean }>("/api/settings/marketing", "POST", { on }),
   saveNotifications: (body: Record<string, unknown>) =>
     request("/api/save-notifications", "POST", body),
+  // Job Hunter's own Telegram bot (telegrambot.py): a one-time t.me link, then
+  // poll until the user has tapped Start.
+  telegramConnect: () => request<{ url: string; expires_minutes: number }>("/api/telegram/connect", "POST", {}),
+  telegramStatus: () => request<{ connected: boolean; own_bot: boolean; available: boolean }>("/api/telegram/status"),
+  telegramDisconnect: () => request<{ ok: boolean }>("/api/telegram/disconnect", "POST", {}),
   adminQueueStats: () => request<{ new: number; approved: number; applied: number; rejected: number; manual_required: number; dead_links: number }>("/api/admin/queue-stats"),
   adminClearAttempted: () => request<{ cleared: number }>("/api/admin/clear-attempted", "POST", {}),
   adminClearApplied: () => request<{ deleted: number }>("/api/admin/clear-applied", "POST", {}),
@@ -356,6 +361,12 @@ export const api = {
     too_few: { key: string; count: number }[];
     skipped: Record<string, number>;
   }>(`/api/admin/noas-picks?days=${days}&shift=${shift}`),
+  adminSupply: (days = 14) => request<{
+    days: { day: string; families: Record<string, { found: number; postable: number }> }[];
+    families: { key: string; label: string }[];
+    probes: { key: string; family: string; email: string; titles: string[]; exists: boolean; active?: boolean; last_search?: string | null; jobs?: number }[];
+    until: string; search_hour: number; min_roles: number;
+  }>(`/api/admin/supply?days=${days}`),
   adminKpis: () => request<any>(`/api/admin/kpis`),
   adminSources: (days = 30) => request<any>(`/api/admin/sources?days=${days}`),
   adminRunningCost: (days = 30) => request<any>(`/api/admin/running-cost?days=${days}`),

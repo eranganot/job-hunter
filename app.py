@@ -32,6 +32,7 @@ import functools
 
 import auth
 import crypto
+import telegrambot
 import db as database
 import textclean
 import voice
@@ -248,8 +249,8 @@ def funnel_report(days: int = 30) -> dict:
         rows = c.execute(
             "SELECT f.step, COUNT(*) AS n FROM funnel_events f "
             "WHERE f.user_id IN (SELECT user_id FROM funnel_events WHERE step='signup' AND created_at >= ?) "
-            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email)=? OR COALESCE(is_active, 1)=0) "
-            "GROUP BY f.step", (since, testaccount.TEST_EMAIL)).fetchall()
+            "AND f.user_id NOT IN (SELECT id FROM users WHERE LOWER(email) LIKE ? OR COALESCE(is_active, 1)=0) "
+            "GROUP BY f.step", (since, "%" + testaccount.TEST_DOMAIN)).fetchall()
     finally:
         c.close()
     got = {r["step"]: r["n"] for r in rows}
@@ -998,6 +999,57 @@ def _is_admin_id(user_id) -> bool:
         return False
 
 
+# What each channel needs before anything can be sent on it. One table, read by
+# the sender and by /api/save-notifications, so the two cannot disagree.
+# WhatsApp is hidden from the app (owner, 2026-11-23). The per-user Twilio
+# design cannot serve public users - each user had to bring their own Twilio
+# account, and the sender was Twilio's sandbox number. A Job Hunter-owned
+# number on Meta's Cloud API is in BACKLOG.md. Until then: Settings does not
+# offer it, the save route refuses it, and a profile that already holds it is
+# skipped quietly rather than failing on every notification.
+WHATSAPP_AVAILABLE = False
+_WHATSAPP_OFF_TEXT = "WhatsApp is not available yet - use Telegram, email or push"
+
+_CHANNEL_NEEDS = {
+    "telegram": ("telegram_chat_id",),
+    "whatsapp": ("twilio_account_sid", "twilio_auth_token", "whatsapp_number"),
+    "email":    ("email_address",),
+}
+_CHANNEL_MISSING_TEXT = {
+    "telegram": "Telegram is selected but not connected - use Connect Telegram in Settings",
+    "whatsapp": "WhatsApp is selected but the Twilio account SID, auth token or WhatsApp number is missing",
+    "email":    "Email is selected but no address is set",
+}
+
+
+def _channel_missing(channel: str, values) -> str:
+    """'' when `channel` has what it needs in `values` (a dict or a DB row),
+    else the sentence saying what is missing."""
+    def _v(key):
+        try:
+            return str(values[key] or "").strip()
+        except (KeyError, IndexError):
+            return ""
+    for key in _CHANNEL_NEEDS.get(channel, ()):
+        if not _v(key):
+            return _CHANNEL_MISSING_TEXT[channel]
+    # A Telegram chat id is only reachable through the bot it belongs to: the
+    # user's own (legacy) bot, else Job Hunter's (telegrambot.py).
+    if channel == "telegram" and not (_v("telegram_token") or telegrambot.configured()):
+        return _CHANNEL_MISSING_TEXT[channel]
+    return ""
+
+
+def _telegram_token_for(p) -> str:
+    """The bot that owns this profile's chat: a legacy own-bot token, else ours."""
+    own = ""
+    try:
+        own = str(p["telegram_token"] or "").strip()
+    except (KeyError, IndexError):
+        pass
+    return own or telegrambot.token()
+
+
 def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_url=None,
                          subject: str = "", body: str = "", email: bool = True, from_noa: bool = True) -> dict:
     """Deliver to every channel the user has; return {channel: "sent" | "FAILED: ..." | ...}.
@@ -1046,21 +1098,27 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
     msg_with_link = repair_mojibake(body) if body else message + f"\n\n\U0001F4F1 Dashboard: {dashboard_url}"
     for channel in channels:
         try:
+            if channel == "email" and not email:
+                results[channel] = "skipped: another email covered this"
+                continue
+            if channel == "whatsapp" and not WHATSAPP_AVAILABLE:
+                results[channel] = "unavailable"
+                continue
+            missing = _channel_missing(channel, p)
+            if missing:
+                # The user's setup, not a server fault: a WARNING the user can
+                # fix in Settings, not an ERROR that pages anyone (JOB-HUNTER-M:
+                # 14 alerts for one profile saved before the save route checked).
+                results[channel] = "not set up: " + missing
+                _log_notification(user_id, channel, "NOT SET UP", missing)
+                print(f"[notify] WARNING {channel} not set up for user {user_id}: {missing}")
+                continue
             if channel == "telegram":
-                if not (p["telegram_token"] and p["telegram_chat_id"]):
-                    raise RuntimeError("Telegram is selected but the bot token or chat id is missing")
-                send_telegram(p["telegram_token"], p["telegram_chat_id"], msg_with_link)
+                send_telegram(_telegram_token_for(p), p["telegram_chat_id"], msg_with_link)
             elif channel == "whatsapp":
-                if not (p["twilio_account_sid"] and p["whatsapp_number"]):
-                    raise RuntimeError("WhatsApp is selected but the Twilio details are missing")
                 send_whatsapp(p["twilio_account_sid"], p["twilio_auth_token"],
                               p["whatsapp_number"], msg_with_link)
             elif channel == "email":
-                if not email:
-                    results[channel] = "skipped: another email covered this"
-                    continue
-                if not p["email_address"]:
-                    raise RuntimeError("Email is selected but no address is set")
                 send_email(to_addr=p["email_address"], subject=subject or "Job Hunter Notification",
                            body=msg_with_link, as_noa=True)
             else:
@@ -1743,6 +1801,22 @@ def _run_followups(now=None) -> dict | None:
         return None
 
 
+def _run_probes(now=None) -> dict | None:
+    """Keep the three daily-search probe accounts (probes.py, GTM row 17g): created and on
+    until JH_PROBES_UNTIL, switched off from it. Scheduler-lock holder only. Never raises."""
+    import probes
+    try:
+        if not schedlock.acquire(database.get_db, database.backend()):
+            return None
+        out = probes.ensure(database.get_db, auth.create_user, auth.mark_email_verified,
+                            israel_now(now).date())
+        if out["created"]:
+            print("[probes] created %s; searching daily: %s" % (", ".join(out["created"]), out["active"]))
+        return out
+    except Exception as exc:
+        print("[probes] ERROR %s" % exc)
+
+
 def _run_fit_survey(now=None) -> dict | None:
     """The product-fit question by email on day 14 and day 30 (fitsurvey.py), from
     Eran. Scheduler-lock holder only; off with the lifecycle emails. Never raises."""
@@ -1827,6 +1901,8 @@ def file_watcher():
             _run_followups()
         if _tick % 30 == 17:  # every ~30 minutes: the product-fit question on day 14 / 30 (fitsurvey.py)
             _run_fit_survey()
+        if _tick % 60 == 3:  # ~hourly: the daily-search probe accounts (probes.py)
+            _run_probes()
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -4847,6 +4923,10 @@ SECURITY_HEADERS = (
 
 
 
+# A client that hung up mid-reply. Not a server error - see Handler._client_gone.
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+
+
 class Handler(BaseHTTPRequestHandler):
 
     # BaseHTTPRequestHandler's own access line, superseded by the one log.end()
@@ -4925,6 +5005,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", MOBILE_URL)
         self.end_headers()
         self.wfile.write(body)
+
+    def _client_gone(self):
+        """The client closed the connection before the reply was written (an app
+        switched away, a phone lost signal). Nothing failed on the server and
+        there is nobody to answer. Before 2026-11-22 the catch-all treated this
+        as a crash: it reported it, wrote a 500 to the dead socket, and the
+        access line logged "-> 500" at ERROR - three Sentry issues
+        (JOB-HUNTER-W/X/E) for one closed tab. 499 is nginx's "client closed
+        request"; log.end() grades it WARNING, which Sentry keeps as a
+        breadcrumb, not an event."""
+        _log.set_status(499)
 
     def redirect(self, location: str):
         self.send_response(302)
@@ -5068,6 +5159,8 @@ class Handler(BaseHTTPRequestHandler):
         with _log.request("GET", self.path, self.client_ip()):
             try:
                 self._do_GET_inner()
+            except _CLIENT_GONE:
+                self._client_gone()
             except Exception as exc:
                 import traceback
                 print(f"[do_GET] Unhandled exception on {self.path}: {exc}\n"
@@ -5514,7 +5607,7 @@ class Handler(BaseHTTPRequestHandler):
                 days = 30
             _c = database.get_db()
             try:
-                _t = _c.execute("SELECT id FROM users WHERE LOWER(email)=?", (testaccount.TEST_EMAIL,)).fetchall()
+                _t = _c.execute("SELECT id FROM users WHERE LOWER(email) LIKE ?", ("%" + testaccount.TEST_DOMAIN,)).fetchall()
                 out = costreport.report(_c, days, test_user_ids=[r["id"] for r in _t],
                                         paid_sources=paidpool.status(_c))
             finally:
@@ -5673,6 +5766,9 @@ class Handler(BaseHTTPRequestHandler):
                 "db_pool": _pool_stats,
                 # Whether web push can send at all (keys + library), 2026-11-08.
                 "push": push_configured(),
+                # Job Hunter's Telegram bot (telegrambot.py): both variables set.
+                # No Bot API call here - health must not depend on Telegram.
+                "telegram": {"configured": telegrambot.configured()},
                 # Connections a code path borrowed and never closed, handed
                 # back at the end of the request/tick. Should stay 0; a rising
                 # count names a route that needs a try/finally.
@@ -5742,6 +5838,23 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
 
+        # Settings polls this after opening the t.me link, until the user has
+        # tapped Start (light: /api/me also releases picks and marks activity).
+        if path == "/api/telegram/status":
+            user = self.require_auth()
+            if not user:
+                return
+            _tc = database.get_db()
+            try:
+                _row = _tc.execute("SELECT telegram_chat_id, telegram_token FROM user_profiles WHERE user_id=?",
+                                   (user["id"],)).fetchone()
+            finally:
+                _tc.close()
+            self.send_json({"connected": bool(_row and str(_row[0] or "").strip()),
+                            "own_bot": bool(_row and str(_row[1] or "").strip()),
+                            "available": telegrambot.configured()})
+            return
+
         if path == "/api/me":
             user = self.require_auth()
             if not user:
@@ -5791,6 +5904,11 @@ class Handler(BaseHTTPRequestHandler):
             # Settings tells a user who switched auto-apply on whether anything
             # is being sent yet (the engine's own server-wide switch).
             out["auto_apply_live"] = _engine_on_for(user)
+            # Telegram (telegrambot.py): is Job Hunter's bot offered, and is this
+            # account connected - through it, or through a legacy own bot.
+            out["telegram_bot_available"] = telegrambot.configured()
+            out["telegram_connected"] = bool(str(user.get("telegram_chat_id") or "").strip())
+            out["telegram_own_bot"] = bool(str(user.get("telegram_token") or "").strip())
             out["email_verified"] = auth.is_email_verified(user["id"])
             try:
                 _mc = database.get_db()
@@ -5960,6 +6078,24 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     _shift = 0
                 self.send_json(noaspicks.report(conn, MOBILE_URL, days, shift=_shift))
+            finally:
+                conn.close()
+            return
+
+        # New roles a day per role family, and the probe accounts (probes.py, GTM row 17g).
+        if path == "/api/admin/supply":
+            user = self.require_auth()
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                days = max(1, min(30, int(qs.get("days", ["14"])[0])))
+            except ValueError:
+                days = 14
+            import probes
+            conn = database.get_db()
+            try:
+                self.send_json(probes.supply(conn, days))
             finally:
                 conn.close()
             return
@@ -6722,6 +6858,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST_guarded(self):
         try:
             self._do_POST_inner()
+        except _CLIENT_GONE:
+            self._client_gone()
         except Exception as exc:
             import traceback
             print(f"[do_POST] ❌ Unhandled exception on {self.path}: {exc}\n{traceback.format_exc()}")
@@ -6735,6 +6873,31 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST_inner(self):
         parsed = urlparse(self.path)
         path   = parsed.path
+
+        # Job Hunter's Telegram bot (telegrambot.py). Telegram calls this with
+        # the secret we registered in setWebhook; anything without it is refused.
+        # Always 200 to a genuine call, even when we ignore it: a non-200 makes
+        # Telegram retry the same update for hours.
+        if path == "/telegram/webhook":
+            if not telegrambot.configured() or not telegrambot.secret_ok(
+                    self.headers.get("X-Telegram-Bot-Api-Secret-Token")):
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            try:
+                _update = json.loads(self.read_body().decode("utf-8", "replace") or "{}")
+            except ValueError:
+                self.send_json({"ok": True})
+                return
+            _tc = database.get_db()
+            try:
+                _done = telegrambot.handle_update(_tc, _update, auth.update_profile)
+                print(f"[telegram] webhook: {_done}")
+            except Exception as _te:
+                print(f"[telegram] ERROR webhook update not handled: {_te}")
+            finally:
+                _tc.close()
+            self.send_json({"ok": True})
+            return
 
         # "Stop these emails" (lifecycle.py): the confirm button, and mail
         # providers' one-click unsubscribe (RFC 8058), which POSTs from their
@@ -7061,6 +7224,48 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Unauthorized"}, 401)
             return
         user_id = user["id"] if user else None
+
+        # Connect Telegram: a one-time code and the t.me link that carries it.
+        if path == "/api/telegram/connect":
+            if not telegrambot.configured():
+                self.send_json({"error": "Telegram isn't available yet"}, 503)
+                return
+            _tc = database.get_db()
+            try:
+                _code = telegrambot.new_connect_code(_tc, user_id)
+            finally:
+                _tc.close()
+            try:
+                self.send_json({"url": telegrambot.connect_url(_code),
+                                "expires_minutes": telegrambot.CODE_MINUTES})
+            except Exception as _te:
+                print(f"[telegram] ERROR connect link for user {user_id}: {_te}")
+                self.send_json({"error": "Telegram didn't answer - try again in a minute"}, 502)
+            return
+
+        if path == "/api/telegram/disconnect":
+            _tc = database.get_db()
+            try:
+                telegrambot.unlink(_tc, auth.update_profile, user_id)
+            finally:
+                _tc.close()
+            self.send_json({"ok": True})
+            return
+
+        # Point Telegram at /telegram/webhook and set the bot's menu (/stop only).
+        # Run once after TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET are set.
+        if path == "/api/admin/telegram/setup":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            if not telegrambot.configured():
+                self.send_json({"error": "Set TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET in Railway first"}, 400)
+                return
+            try:
+                self.send_json({"ok": True, **telegrambot.setup(MOBILE_URL)})
+            except Exception as _te:
+                self.send_json({"ok": False, "error": str(_te)[:300]}, 502)
+            return
 
         # A locked match (beyond the plan's per-search limit) cannot be acted on
         # by any per-job route - approve, restore, apply, cover letter, check -
@@ -7561,6 +7766,28 @@ class Handler(BaseHTTPRequestHandler):
                           "email_smtp_user", "email_smtp_pass"):
                 if field in data:
                     kwargs[field] = data[field]
+            # Refuse a channel that could never send: the field values are this
+            # request's, else what is stored. Before 2026-11-22 WhatsApp could be
+            # saved with no Twilio details and every notification after it failed.
+            if "notification_channel" in kwargs:
+                _cur = {}
+                _pc = database.get_db()
+                try:
+                    _row = _pc.execute("SELECT * FROM user_profiles WHERE user_id=?", (user_id,)).fetchone()
+                finally:
+                    _pc.close()
+                if _row:
+                    _cur = dict(crypto.decrypt_row(_row))
+                _merged = dict(_cur, **kwargs)
+                for _ch in [c.strip() for c in str(kwargs["notification_channel"] or "").split(",") if c.strip()]:
+                    if _ch == "whatsapp" and not WHATSAPP_AVAILABLE:
+                        self.send_json({"error": _WHATSAPP_OFF_TEXT}, 400)
+                        return
+                    _miss = _channel_missing(_ch, _merged)
+                    if _miss:
+                        self.send_json({"error": _miss + ("" if "Settings" in _miss
+                                                          else " - fill it in or turn the channel off.")}, 400)
+                        return
             if kwargs:
                 auth.update_profile(user_id, **kwargs)
             database.write_users_config(BASE_DIR)
@@ -7598,9 +7825,11 @@ class Handler(BaseHTTPRequestHandler):
                     data[_k] = _v or ""
             try:
                 if channel == "telegram":
-                    send_telegram(data.get("telegram_token",""), data.get("telegram_chat_id",""), msg)
+                    send_telegram(_telegram_token_for(data), data.get("telegram_chat_id",""), msg)
                     _log_notification(user_id, "telegram", "Test OK")
                 elif channel == "whatsapp":
+                    if not WHATSAPP_AVAILABLE:
+                        raise RuntimeError(_WHATSAPP_OFF_TEXT)
                     send_whatsapp(data.get("twilio_account_sid",""), data.get("twilio_auth_token",""),
                                   data.get("whatsapp_number",""), msg)
                     _log_notification(user_id, "whatsapp", "Test OK")
@@ -8618,6 +8847,21 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
         # ── Admin: clear applied jobs ─────────────────────────────────────────────
+        # A paid source's key, checked now (free for Apify), and optionally
+        # today's pull re-run - after a key is fixed there is no need to wait
+        # for tomorrow's daily run (2026-11-23).
+        if path == "/api/admin/paid-pool/check":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload = self.read_json()
+            _src = str(payload.get("source") or "").strip().lower()
+            _out = {"source": _src, "key": paidpool.check_key(_src)}
+            if payload.get("run") and _out["key"].get("ok") is not False:
+                _out["run"] = paidpool.rerun_today(database.get_db, _src)
+            self.send_json(_out)
+            return
+
         if path == "/api/admin/clear-attempted":
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)

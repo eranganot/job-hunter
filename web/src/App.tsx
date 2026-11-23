@@ -2925,6 +2925,59 @@ function postingPlan(families: any[]) {
   return rows;
 }
 
+/** New roles a day per role family (probes.py, GTM row 17g): how many Noa found, and how many
+ *  could go in a Noa's picks post (a company name and the employer's own page). Three probe
+ *  accounts search daily for QA, design and sales / customer success until Day 1. */
+function SupplyCard() {
+  const [res, setRes] = useState<any>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.adminSupply(14).then(setRes).catch((e: any) => setErr(e?.message || "Failed")); }, []);
+  if (err) return <p className="text-xs text-red-300">{err}</p>;
+  if (!res) return <p className="text-sm text-gray-400">Loading new roles per family…</p>;
+  const week = res.days.slice(0, 7);
+  const shown = week;
+  const total = (k: string, f: "found" | "postable") => week.reduce((n: number, d: any) => n + (d.families[k]?.[f] || 0), 0);
+  const short = (d: string) => new Date(d + "T12:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
+  const label: Record<string, string> = { qa: "QA", design: "design", customer: "sales and customer success" };
+  return (
+    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 md:col-span-2">
+      <h3 className="font-semibold text-white mb-1">New roles per family</h3>
+      <p className="text-xs text-gray-400 mb-3">Roles Noa found each day, every account. The big number can go in a Noa's picks post (company name, employer's own page); the small one is all she found. A family needs {res.min_roles} in a week for a post.</p>
+      <div className="overflow-x-auto">
+        <table className="text-xs w-full">
+          <thead><tr className="text-gray-400">
+            <th className="text-left font-medium py-1 pr-3">Family</th>
+            {shown.map((d: any) => <th key={d.day} className="text-right font-medium py-1 px-1.5 whitespace-nowrap">{short(d.day)}</th>)}
+            <th className="text-right font-medium py-1 pl-3">7 days</th>
+          </tr></thead>
+          <tbody>
+            {res.families.map((f: any) => {
+              const t = total(f.key, "postable");
+              return (
+                <tr key={f.key} className="border-t border-gray-700/60">
+                  <td className="py-1.5 pr-3 text-gray-200 whitespace-nowrap">{f.label}</td>
+                  {shown.map((d: any) => {
+                    const c = d.families[f.key] || { found: 0, postable: 0 };
+                    return <td key={d.day} className="py-1.5 px-1.5 text-right tabular-nums"><span className="text-white">{c.postable}</span><span className="text-gray-400"> /{c.found}</span></td>;
+                  })}
+                  <td className={`py-1.5 pl-3 text-right tabular-nums font-semibold ${t >= res.min_roles ? "text-green-400" : "text-amber-300"}`}>{t}<span className="text-gray-400 font-normal"> /{total(f.key, "found")}</span></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-3 text-xs text-gray-400 space-y-1">
+        {res.probes.map((p: any) => (
+          <p key={p.key}>Probe for {label[p.key] || p.key}: {!p.exists ? "not created yet (it is created within the hour)" : p.active
+            ? `searches daily at ${String(res.search_hour).padStart(2, "0")}:00 until ${res.until}; last search ${p.last_search ? String(p.last_search).replace("T", " ").slice(0, 16) : "not yet"}; ${p.jobs} roles kept`
+            : `off since ${res.until}; ${p.jobs} roles kept`}</p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** "Noa's picks" (noaspicks.py): this week's new roles per role family as post text and a
  *  post image. Two voices (the page speaks as Noa; your own profile speaks about her), Hebrew
  *  for Facebook and English for LinkedIn. Real openings only - found this week, with a company
@@ -3213,6 +3266,7 @@ function AdminPanel({ me, section, setSection }: { me: any; section: AdminSectio
 
       {section === "content" && (<>
           <h3 className="font-semibold text-white -mb-3">Posts</h3>
+          <SupplyCard />
           <NoasPicksCard />
           <h3 className="font-semibold text-white -mb-3">Emails</h3>
           <LifecycleEmailsCard />
@@ -3562,22 +3616,65 @@ function NotificationChannels({ me }: { me: any }) {
      making it look like one channel at a time. */
   const parseChannels = (v: any): string[] =>
     String(v || "none").split(",").map((c: string) => c.trim()).filter((c: string) => c && c !== "none");
-  const [channels, setChannels] = useState<string[]>(parseChannels(me.notification_channel));
+  const [channels, setChannels] = useState<string[]>(parseChannels(me.notification_channel).filter((c) => c !== "whatsapp"));
   const has = (id: string) => channels.includes(id);
   const toggle = (id: string) =>
     setChannels((cur) => (cur.includes(id) ? cur.filter((c) => c !== id) : [...cur, id]));
   const [tgToken, setTgToken] = useState(me.telegram_token || "");
   const [tgChat, setTgChat] = useState(me.telegram_chat_id || "");
-  const [waSid, setWaSid] = useState(me.twilio_account_sid || "");
-  const [waToken, setWaToken] = useState(me.twilio_auth_token || "");
-  const [waNumber, setWaNumber] = useState(me.whatsapp_number || "");
   const [mailTo, setMailTo] = useState(me.email_address || "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  /* Job Hunter's own Telegram bot (2026-11-23): when it is available, Telegram
+     is not a toggle with a token and a chat id but Connect / Disconnect - the
+     connection itself turns the channel on or off on the server. */
+  const botOn = !!me.telegram_bot_available;
+  const [tgConnected, setTgConnected] = useState<boolean>(!!me.telegram_connected && !me.telegram_own_bot);
+  const [tgWaiting, setTgWaiting] = useState(false);
+  const connectTelegram = async () => {
+    setMsg("");
+    // Opened before the request resolves would be blocked as a pop-up on iOS;
+    // open a blank tab now and point it at the link once we have it.
+    const tab = window.open("", "_blank");
+    try {
+      const r = await api.telegramConnect();
+      if (tab) tab.location.href = r.url; else window.location.href = r.url;
+      setTgWaiting(true);
+      const until = Date.now() + r.expires_minutes * 60000;
+      const poll = async () => {
+        if (Date.now() > until) { setTgWaiting(false); setMsg("The link expired - press Connect Telegram again."); return; }
+        try {
+          const st = await api.telegramStatus();
+          if (st.connected && !st.own_bot) {
+            setTgWaiting(false); setTgConnected(true);
+            setChannels((cur) => (cur.includes("telegram") ? cur : [...cur, "telegram"]));
+            setMsg("\u2713 Telegram connected - Noa sent you a message there.");
+            return;
+          }
+        } catch { /* keep polling */ }
+        setTimeout(poll, 3000);
+      };
+      setTimeout(poll, 3000);
+    } catch (e: any) { if (tab) tab.close(); setMsg(e?.message || "Could not connect Telegram"); }
+  };
+  const disconnectTelegram = async () => {
+    setBusy(true); setMsg("");
+    try {
+      await api.telegramDisconnect();
+      setTgConnected(false);
+      setChannels((cur) => cur.filter((c) => c !== "telegram"));
+      setMsg("Telegram disconnected.");
+    } catch (e: any) { setMsg(e?.message || "Could not disconnect"); }
+    finally { setBusy(false); }
+  };
 
-  const CHANNELS: [string, string][] = [
-    ["telegram", "Telegram"], ["whatsapp", "WhatsApp"], ["email", "Email"],
-  ];
+  /* WhatsApp is hidden (owner, 2026-11-23): the per-user Twilio design could
+     not serve public users. A Job Hunter-owned number is in BACKLOG.md. A
+     profile that already holds "whatsapp" drops it on the next save, since
+     the server now refuses it. */
+  const CHANNELS: [string, string][] = botOn
+    ? [["email", "Email"]]
+    : [["telegram", "Telegram"], ["email", "Email"]];
 
   const save = async () => {
     setBusy(true); setMsg("");
@@ -3587,9 +3684,8 @@ function NotificationChannels({ me }: { me: any }) {
         // empty is already "none", and a blank would read as one nameless
         // channel after the split.
         notification_channel: channels.length ? channels.join(",") : "none",
-        telegram_token: tgToken, telegram_chat_id: tgChat,
-        twilio_account_sid: waSid, twilio_auth_token: waToken,
-        whatsapp_number: waNumber, email_address: mailTo,
+        ...(botOn ? {} : { telegram_token: tgToken, telegram_chat_id: tgChat }),
+        email_address: mailTo,
       });
       setMsg("\u2713 Saved");
     } catch (e: any) { setMsg(e?.message || "Could not save"); }
@@ -3622,7 +3718,24 @@ function NotificationChannels({ me }: { me: any }) {
     <div>
       <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><Send className="w-5 h-5 text-sky-400" />Notification channels</h3>
       <p className="text-xs text-gray-400 mb-3">Pick any combination — alerts go to all of them.</p>
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      {botOn && (
+        <div className="mb-3 p-3 rounded-xl border border-gray-700 bg-gray-800/60">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm text-white font-medium">Telegram</p>
+              <p className="text-xs text-gray-400">
+                {tgConnected ? "Connected \u00b7 Noa sends your alerts there"
+                  : tgWaiting ? "Waiting for you to tap Start in Telegram\u2026"
+                  : "Get your alerts from Noa in Telegram. Notifications only."}
+              </p>
+            </div>
+            {tgConnected
+              ? <button onClick={disconnectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl border border-gray-600 text-gray-300 text-xs font-medium disabled:opacity-60">Disconnect</button>
+              : <button onClick={connectTelegram} disabled={busy} className="shrink-0 px-3 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium disabled:opacity-60">{tgWaiting ? "Open again" : "Connect Telegram"}</button>}
+          </div>
+        </div>
+      )}
+      <div className={`grid ${CHANNELS.length > 1 ? "grid-cols-2" : "grid-cols-1"} gap-2 mb-3`}>
         {CHANNELS.map(([id, label]) => (
           <button key={id} onClick={() => toggle(id)} aria-pressed={has(id)}
             className={`py-2.5 rounded-xl border text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${has(id) ? "bg-brand-yellow/10 border-brand-yellow text-brand-yellow" : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700"}`}>
@@ -3631,17 +3744,10 @@ function NotificationChannels({ me }: { me: any }) {
         ))}
       </div>
       {!channels.length && <p className="text-xs text-gray-400 mb-3">No channels selected — only in-app and push alerts.</p>}
-      {has("telegram") && (
+      {!botOn && has("telegram") && (
         <div className="space-y-2">
           <input value={tgToken} onChange={(e) => setTgToken(e.target.value)} placeholder="Bot token" className={input} />
           <input value={tgChat} onChange={(e) => setTgChat(e.target.value)} placeholder="Chat ID" className={input} />
-        </div>
-      )}
-      {has("whatsapp") && (
-        <div className="space-y-2">
-          <input value={waSid} onChange={(e) => setWaSid(e.target.value)} placeholder="Twilio account SID" className={input} />
-          <input value={waToken} onChange={(e) => setWaToken(e.target.value)} placeholder="Twilio auth token" className={input} />
-          <input value={waNumber} onChange={(e) => setWaNumber(e.target.value)} placeholder="WhatsApp number" className={input} />
         </div>
       )}
       {has("email") && (

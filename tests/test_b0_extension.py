@@ -18,11 +18,29 @@ import pytest
 
 from tests.test_routes import stack, users, _user_id, _new_job  # noqa: F401
 
-CHROME = "/usr/bin/google-chrome" if os.path.exists("/usr/bin/google-chrome") else None
+SYSTEM_CHROME = "/usr/bin/google-chrome" if os.path.exists("/usr/bin/google-chrome") else None
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:  # pragma: no cover
     sync_playwright = None
+
+
+def _bundled_chromium():
+    """Playwright's own Chromium, where `playwright install chromium` has run
+    (the Dockerfile, and CI since #174). Unlike branded Chrome 137+ it still
+    honours --load-extension, so with it these tests run in CI instead of
+    skipping (2026-11-22)."""
+    if not sync_playwright:
+        return None
+    try:
+        with sync_playwright() as pw:
+            path = pw.chromium.executable_path
+        return path if path and os.path.exists(path) else None
+    except Exception:  # noqa: BLE001 - no driver, no browser: fall back
+        return None
+
+
+CHROME = _bundled_chromium() or SYSTEM_CHROME
 pytestmark = pytest.mark.skipif(not (CHROME and sync_playwright), reason="needs Chrome + Playwright")
 
 EXT = os.path.join(os.path.dirname(__file__), "..", "tools", "b0-extension")
@@ -76,8 +94,8 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
             try:
                 sw = ctx.service_workers[0] if ctx.service_workers else ctx.wait_for_event("serviceworker", timeout=10000)
             except Exception:
-                # Branded Chrome 137+ ignores --load-extension (CI's google-chrome);
-                # Chrome for Testing and Chromium still load it.
+                # Branded Chrome 137+ ignores --load-extension (the fallback when
+                # Playwright's Chromium is not installed); Chromium still loads it.
                 pytest.skip("this Chrome does not load unpacked extensions")
             ext_id = sw.url.split("/")[2]
             popup = ctx.new_page()

@@ -1307,7 +1307,18 @@ def m0047_device_spike(conn):
     conn.commit()
 
 
-def m0048_cover_note(conn):
+def m0048_telegram_connect_codes(conn):
+    """Job Hunter's own Telegram bot (2026-11-23, telegrambot.py): one-time
+    connect codes behind t.me/<bot>?start=<code>. Only the hash is stored; a
+    code lives 15 minutes and is deleted when used. Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS telegram_connect_codes (
+        code_hash  TEXT PRIMARY KEY,
+        user_id    INTEGER NOT NULL,
+        expires_at TEXT NOT NULL)""", conn))
+    conn.commit()
+
+
+def m0049_cover_note(conn):
     """The short personal note for an application form's note box, written next
     to the cover letter (jobs.cover_note; the owner, 2026-11-23). Idempotent."""
     if not _has_column(conn, "jobs", "cover_note"):
@@ -1363,7 +1374,8 @@ MIGRATIONS = [
     (45, "application_outcome",         m0045_application_outcome),
     (46, "fit_survey",                  m0046_fit_survey),
     (47, "device_spike",                m0047_device_spike),
-    (48, "cover_note",                  m0048_cover_note),
+    (48, "telegram_connect_codes",      m0048_telegram_connect_codes),
+    (49, "cover_note",                  m0049_cover_note),
 ]
 
 
