@@ -342,7 +342,8 @@ def test_a_note_never_opens_with_the_role_even_when_the_model_insists():
     calls = []
     note = ai_analysis.write_note(job, {"cv_summary": ""}, "k", cv_text="DAZN retention 36%", name="Eran",
                                   llm=lambda p: calls.append(p) or bad)
-    assert len(calls) == 3 and note.startswith("At DAZN") and "role" not in note.lower(), note
+    # The owner, 2026-11-23: "if you can't write anything useful - keep it empty".
+    assert len(calls) == 3 and note == "", note
     assert "the hook uses" in calls[1] and "Write both sentences again" in calls[1]
 
 

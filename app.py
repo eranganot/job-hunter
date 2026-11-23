@@ -5966,7 +5966,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": _err or "No cover letter"}, 404)
                 return
             if qs.get("format", [""])[0] != "pdf":
-                self.send_json({"letter": _letter, "short": _note or _cp.short_note(_letter), "note": _note})
+                self.send_json({"letter": _letter, "short": _note, "note": _note})
                 return
             _cvt, _nm, _contact = _tailor_inputs(_du["id"], _du)
             try:

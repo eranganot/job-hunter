@@ -891,7 +891,11 @@ def write_note(job: dict, profile: dict, api_key: str = "", user_id=None,
             ". Write both sentences again without those problems."
     first = lambda t: re.split(r"(?<=[.!?])\s+", (t or "").strip(), 1)[0]   # one sentence each
     hook, proof = first(best["hook"]), first(best["proof"])
-    note = (hook + " " + proof).strip() if not _hook_problems(hook, job) else proof
+    # Nothing useful to say -> no note (the owner, 2026-11-23: "if you can't write
+    # anything useful - keep it empty"). Useful = a clean hook AND a clean proof.
+    if _hook_problems(hook, job) or _problems(hook + " " + proof, job, summary) or not proof:
+        return ""
+    note = (hook + " " + proof).strip()
     allowed = tailor._numbers(cv) | tailor._numbers(jd)
     if tailor._numbers(note) - allowed:      # a number not in the CV or the job: drop that sentence
         note = " ".join(x for x in re.split(r"(?<=[.!?])\s+", note) if not (tailor._numbers(x) - allowed))

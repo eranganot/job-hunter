@@ -322,22 +322,42 @@ def attempts(user_id: int) -> list:
 
 
 # ── B0 trace: what the extension did on a page, step by step (2026-11-23) ──
-# Kept in memory (the last 300 events per user): it is for reading a failing
-# run right after it happens, not a record. Admin-only both ways.
-import collections as _collections
-import time as _time
-_TRACES = {}
+# In the database (device_traces, m0050): the in-memory version was emptied by
+# every deploy, and Wix's run was lost that way. The newest 2000 rows are kept.
 
 
 def add_trace(user_id: int, data: dict) -> None:
-    buf = _TRACES.setdefault(user_id, _collections.deque(maxlen=300))
-    head = {"job_id": data.get("job_id"), "url": str(data.get("url") or "")[:200],
-            "top": bool(data.get("top")), "version": str(data.get("version") or "")[:12]}
-    for ev in (data.get("events") or [])[:100]:
-        if isinstance(ev, dict):
-            buf.append(dict(head, at=_time.strftime("%H:%M:%S"), step=str(ev.get("step") or "")[:40],
-                            data=json.loads(json.dumps(ev.get("data"), default=str)[:4000]) if ev.get("data") is not None else None))
+    head = (data.get("job_id"), str(data.get("url") or "")[:200], 1 if data.get("top") else 0,
+            str(data.get("version") or "")[:12])
+    conn = database.get_db()
+    try:
+        for ev in (data.get("events") or [])[:100]:
+            if isinstance(ev, dict):
+                conn.execute("INSERT INTO device_traces (user_id, job_id, url, top, version, step, data) VALUES (?,?,?,?,?,?,?)",
+                             (user_id,) + head + (str(ev.get("step") or "")[:40],
+                              json.dumps(ev.get("data"), default=str)[:4000] if ev.get("data") is not None else None))
+        conn.execute("DELETE FROM device_traces WHERE user_id=? AND id NOT IN "
+                     "(SELECT id FROM device_traces WHERE user_id=? ORDER BY id DESC LIMIT 2000)", (user_id, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
-def traces(user_id: int) -> list:
-    return list(_TRACES.get(user_id, []))[::-1]
+def traces(user_id: int, limit: int = 300) -> list:
+    conn = database.get_db()
+    try:
+        rows = conn.execute("SELECT job_id, url, top, version, step, data, created_at FROM device_traces "
+                            "WHERE user_id=? ORDER BY id DESC LIMIT ?", (user_id, limit)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["at"] = str(d.pop("created_at") or "")[11:19]
+        d["top"] = bool(d["top"])
+        try:
+            d["data"] = json.loads(d["data"]) if d["data"] else None
+        except (TypeError, ValueError):
+            pass
+        out.append(d)
+    return out

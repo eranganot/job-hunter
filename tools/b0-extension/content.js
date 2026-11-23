@@ -30,6 +30,7 @@
 
   async function report(outcome, siteStatus, detail, extra) {
     if (reported) return; reported = true;
+    if (outcome === 'nothing_sent') laterSend();
     await ask({type: 'report', attempt: Object.assign({job_id: task.jobId, outcome, site_status: String(siteStatus || ''),
       detail: (checkSeen ? '[' + checkSeen + ' shown] ' : '') + (detail || ''), pressed_by: pressedBy,
       device: 'chrome', url: location.href}, extra || {})});
@@ -87,6 +88,21 @@
       else report('unknown', d.status, 'Comeet answered ' + d.status);
     }
   });
+
+  // After "Nothing was sent": Eran may press Submit himself (ServiceNow, 2026-11-23).
+  // A thank-you page in the next 10 minutes is reported as his send.
+  async function laterSend() {
+    for (let i = 0; i < 600; i++) {
+      await wait(1000);
+      if (JHFill.confirmed() || /\/thanks/.test(location.pathname)) {
+        trace('later-send', {url: location.pathname});
+        await ask({type: 'report', attempt: {job_id: task.jobId, outcome: 'sent', site_status: 'page', pressed_by: 'user',
+          detail: 'Thank-you page after Eran pressed Submit himself', device: 'chrome', url: location.href, confirmed: true}});
+        banner('Reported: sent (you pressed Submit). You can close this tab.', 'done');
+        return;
+      }
+    }
+  }
 
   async function watchAfterSubmit() {
     for (let i = 0; i < 240 && !reported; i++) {         // up to 4 minutes: a puzzle takes a person time
@@ -169,7 +185,9 @@
           const f = await ask({type: 'coverpdf', jobId: task.jobId});
           if (f && f.b64) pdf = JHFill.attachCover(f.b64, f.name, f.mime);
         }
-        for (const n of notes) JHFill.setNote(n, pdf ? cl.short : cl.letter);
+        // The owner, 2026-11-23: "if you can't write anything useful - keep it empty".
+        // Next to the PDF the note box gets the note or nothing.
+        for (const n of notes) { const t = pdf ? (cl.note || '') : cl.letter; if (t) JHFill.setNote(n, t); }
         letter = pdf ? ' + cover letter PDF' + (notes.length ? ' and its opening in the note' : '') : (notes.length ? ' + cover letter in the note' : '');
       } else letter = ' (no cover letter: ' + ((cl && cl.error) || 'not written') + ')';
     }
@@ -227,6 +245,9 @@
       let seenBtn = btn;
       for (let i = 0; i < 600 && !submittedAt && !reported; i++) {
         await wait(2000);
+        // Sent without the press being seen (Wix, 2026-11-23: Eran sent it, nothing was recorded).
+        if (JHFill.confirmed()) { submittedAt = Date.now(); pressedBy = 'user'; trace('thanked-unseen', {url: location.pathname});
+          report('sent', 'page', 'The page thanked for the application', {confirmed: true}); return; }
         // fields() already keeps only what is on screen, hidden-input radios included
         // (a follow-up question that appears after an answer: ServiceNow's "relocating
         // at your own expense?" once "Yes" is chosen, 2026-11-23).
@@ -251,8 +272,21 @@
       if (!b) { banner(line + ' No Submit button found - press it yourself.', 'ready'); return; }
       submittedAt = Date.now(); pressedBy = 'extension';
       await ask({type: 'submitted', pressedBy: 'extension'});
-      b.click();
+      // Through the page world, like SmartRecruiters' options and Yes/No choices: on
+      // ServiceNow (0.7.2, 2026-11-23) the extension's own click on Submit did nothing
+      // and Eran pressed it himself. The isolated click stays as the fallback.
+      const r = b.getBoundingClientRect();
+      const how = await JHFill.clickInPage(b);
+      if (how === 'no-page-world') b.click();
+      trace('press', {how, tag: b.tagName.toLowerCase(), text: (b.innerText || b.value || '').trim().slice(0, 40),
+                      at: [Math.round(r.left), Math.round(r.top)], url: location.pathname});
       banner(line + ' Submitted by the extension, waiting for the site…');
+      setTimeout(() => {
+        if (reported) return;
+        const errs = JHFill.siteErrors();
+        trace('after-press', {url: location.pathname, errors: errs, thanked: JHFill.confirmed()});
+        if (errs.length) banner('The site did not take it: ' + errs.slice(0, 3).join('; ') + '. Fix that and press Submit yourself.');
+      }, 6000);
       watchAfterSubmit();
     };
     pressForMe = pressForMeImpl;
