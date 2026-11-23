@@ -25,14 +25,14 @@ async function show() {
     const info = document.createElement('div');
     const t = document.createElement('b'); t.textContent = `${j.company} · ${j.title}`;
     const m = document.createElement('span'); m.className = 'muted';
-    m.textContent = `${j.system} · ${j.prepared.length ? j.prepared.length + ' answers prepared' : 'no answers prepared: you fill the form, then "Submit for me"'}`;
+    m.textContent = `${j.system} · ${j.prepared.length ? j.prepared.length + ' answers prepared' : 'contact details + CV + cover letter; you answer the rest'}`;
     info.append(t, m);
     const inTest = B0_SYSTEMS.includes(j.system);
     if (!inTest) m.textContent = `${j.system} · not in this test: the extension can't fill it`;
     const b = document.createElement('button'); b.textContent = 'Open';
     if (!j.prepared.length || !inTest) b.className = 'quiet';
     if (!inTest) b.disabled = true;
-    b.onclick = async () => { await send({type: 'start', job: j}); window.close(); };
+    b.onclick = async () => { await send({type: 'start', job: j, applicant: d.applicant || {}}); window.close(); };
     row.append(info, b);
     $('jobs').appendChild(row);
   }

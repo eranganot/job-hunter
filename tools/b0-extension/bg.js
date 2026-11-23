@@ -48,6 +48,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       const tab = await chrome.tabs.create({url: msg.job.url, active: true});
       const t = await tasks();
       t[tab.id] = {jobId: msg.job.id, prepared: msg.job.prepared || [], system: msg.job.system,
+                   applicant: msg.applicant || {},
                    mode: c.mode, claimed: false, submittedAt: 0, reported: false};
       await saveTasks(t);
       return reply({ok: true});

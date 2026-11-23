@@ -111,16 +111,23 @@
       if (c && TOP) { checkSeen = c; banner(c + ' is showing before the form - solve it yourself, then the form gets filled.'); }
       await wait(1000);
     }
-    if (!JHFill.hasForm()) return;
+    if (!JHFill.hasForm()) {                             // never silent again (2026-11-23)
+      if (TOP) banner('No application form found on this page. Open the form yourself - the extension fills it when it appears.');
+      for (let i = 0; i < 120 && !JHFill.hasForm(); i++) await wait(1000);
+      if (!JHFill.hasForm()) return;
+    }
     if (await ask({type: 'claim'}) !== true) return;     // one frame per tab does the work
 
     banner('Filling ' + (task.prepared || []).length + ' prepared answers…');
     const res = JHFill.fill(task.prepared || []);
+    const basicsOpts = {localPhone: SYSTEM === 'SmartRecruiters'};
+    let basics = JHFill.fillBasics(task.applicant, basicsOpts);
     let cv = false;
     const file = await ask({type: 'cv', jobId: task.jobId});
     if (file && file.b64) cv = JHFill.attachFile(file.b64, file.name, file.mime);
     await wait(1500);
     JHFill.fill(task.prepared || []);                     // Comeet shows its questions once the CV is in
+    basics += JHFill.fillBasics(task.applicant, basicsOpts);  // and its contact fields
     // The cover letter (the owner, 2026-11-22): as a PDF where the form takes a file,
     // and in the note box - its opening paragraph next to the PDF, the whole letter without one.
     let letter = '';
@@ -138,7 +145,8 @@
         letter = pdf ? ' + cover letter PDF' + (notes.length ? ' and its opening in the note' : '') : (notes.length ? ' + cover letter in the note' : '');
       } else letter = ' (no cover letter: ' + ((cl && cl.error) || 'not written') + ')';
     }
-    const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' answers' + (cv ? ' + CV' : ', no CV attached') + letter +
+    const line = 'Filled ' + res.filled + ' of ' + (task.prepared || []).length + ' prepared answers' +
+                 (basics ? ', ' + basics + ' contact fields' : '') + (cv ? ' + CV' : ', no CV attached') + letter +
                  (res.missing.length ? '. Not found: ' + res.missing.slice(0, 4).join('; ') : '') + '.';
 
     let pressForMeImpl = null;
