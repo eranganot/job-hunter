@@ -239,7 +239,8 @@ def test_the_job_list_carries_the_applicants_contact_details(stack, users):
     conn = db.get_db()
     if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (uid,)).fetchone():
         conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (uid,))
-    conn.execute("UPDATE user_profiles SET phone='054-123-4567', linkedin_url='https://www.linkedin.com/in/x' WHERE user_id=?", (uid,))
+    conn.execute("UPDATE user_profiles SET phone='054-123-4567', linkedin_url='https://www.linkedin.com/in/x', "
+                 "locations='[\"Tel Aviv, Israel\", \"San Diego\"]' WHERE user_id=?", (uid,))
     conn.commit()
     conn.close()
     anon, auth = _pair(stack, users)
@@ -247,3 +248,25 @@ def test_the_job_list_carries_the_applicants_contact_details(stack, users):
     a = json.loads(body)["applicant"]
     assert a["email"] == "admin@example.test" and a["phone"].startswith("+972") and a["phone_local"].startswith("05"), a
     assert a["linkedin_url"] == "https://www.linkedin.com/in/x" and a["first_name"], a
+    assert a["city"] == "Tel Aviv", a        # from user_profiles.locations (JSON), not '["Tel Aviv' or empty
+
+
+def test_the_note_never_restates_the_cv_summary_or_labels_the_applicant():
+    """The owner, 2026-11-23, on Fullpath's note ("I'm an Executive Product Leader,
+    transforming platforms with AI..."): "a copy of my resume summary"."""
+    import ai_analysis
+    summ = ("An Executive Product Leader with over a decade of experience in AI-powered product "
+            "transformation across sports-tech, gaming, and enterprise SaaS.")
+    bad = ("I'm an Executive Product Leader, transforming platforms with AI. I'm drawn to how you're using AI "
+           "to disrupt the automotive industry. At DAZN, I boosted engagement +22%.")
+    good = ("Getting a dealer's sales team to actually use the data in front of them is the part I'd want to dig into. "
+            "At DAZN we rebuilt the experience around personalization and retention went up 36%.")
+    seen = []
+    note = ai_analysis.write_note({"title": "Head of Product", "company": "Fullpath", "description": "CRM for dealers"},
+                                  {"cv_summary": summ}, "k", cv_text="DAZN retention 36% engagement 22%", name="Eran",
+                                  llm=lambda p: seen.append(p) or (bad if len(seen) == 1 else good))
+    assert note == good and len(seen) == 2
+    assert summ not in seen[0]                                  # the summary is not in the note's prompt
+    for x in ("I'm an Executive Product Leader", "I'm drawn to", "boosted", "+22%"):
+        assert x in seen[1], x
+    assert ai_analysis._copied_from(bad, summ) == "an executive product leader"

@@ -131,7 +131,7 @@ def applicant(user) -> dict:
     uid = user["id"]
     conn = database.get_db()
     try:
-        p = conn.execute("SELECT phone, linkedin_url FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
+        p = conn.execute("SELECT phone, linkedin_url, locations FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
         u = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     finally:
         conn.close()
@@ -141,10 +141,18 @@ def applicant(user) -> dict:
     phone = ((p["phone"] if p else "") or u.get("phone") or "").strip()
     intl = ae.intl_phone(phone, "Israel") if phone else ""
     local = re.sub(r"^\+972[\s-]*", "0", intl) if intl.startswith("+972") else phone
+    # user_profiles.locations is JSON text - '["Tel Aviv, Israel", "San Diego"]'.
+    # 0.5.0 read it from users (no such column: always empty) and split it on
+    # commas (the owner, 2026-11-23: "City is still missing"). The first place
+    # that isn't remote/hybrid, its city part.
     city = ""
-    for c in re.split(r"[,;/|]", u.get("locations") or ""):
-        c = c.strip()
-        if c and not re.search(r"remote|hybrid|anywhere|israel$", c, re.I):
+    try:
+        locs = json.loads((p["locations"] if p else "") or "[]")
+    except (TypeError, ValueError):
+        locs = re.split(r"[;|]", (p["locations"] if p else "") or "")
+    for c in (locs if isinstance(locs, list) else [str(locs)]):
+        c = str(c).split(",")[0].strip()
+        if c and not re.search(r"remote|hybrid|anywhere|^israel$", c, re.I):
             city = c
             break
     out = {"full_name": name, "first_name": parts[0] if parts else "",

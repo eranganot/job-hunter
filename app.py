@@ -781,6 +781,16 @@ def _ensure_cover_letter(user, job_id):
             return "", "", "Job not found"
         letter = (job["cover_letter"] or "").strip()
         note = (job["cover_note"] or "").strip()
+        _summ = conn.execute("SELECT cv_summary FROM user_profiles WHERE user_id=?", (uid,)).fetchone()
+        try:
+            import ai_analysis as _aic
+            # A note saved before 2026-11-23 that restates the CV summary or
+            # sounds machine-written is written again (Wix, Check Point,
+            # ServiceNow, Fullpath had one).
+            if note and (_aic.robot_phrases(note) or _aic._copied_from(note, (_summ["cv_summary"] if _summ else "") or "")):
+                note = ""
+        except Exception as _rc:  # noqa: BLE001 - keep the saved note
+            print("[cover-letter] note check for job %s: %s" % (job_id, _rc))
         if letter and note:
             return letter, note, ""
         if not letter:
@@ -7000,6 +7010,47 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _res = _dev.add_by_link(_du["id"], (self.read_json() or {}).get("url", ""))
             self.send_json(_res, 200 if _res.get("ok") else 400)
+            return
+        # The questions on a form the B0 extension sees in the applicant's own
+        # browser (SmartRecruiters' "Preliminary questions", Lever's custom
+        # questions on a job added by link), answered by the same rules as the
+        # apply engine (questions.decide): saved answers, profile links,
+        # standing instructions, then the model. (The owner, 2026-11-23: "the
+        # second page is completely empty".)
+        _mans = re.match(r"^/api/device/jobs/(\d+)/answers$", path)
+        if _mans:
+            import device as _dev
+            _du = _dev.user_for(self.headers)
+            if not _du:
+                self.send_json({"error": "Not paired"}, 401)
+                return
+            _body = self.read_json() or {}
+            _qs = [q for q in (_body.get("questions") or []) if isinstance(q, dict) and q.get("selector") and q.get("label")][:30]
+            _pc = database.get_db()
+            try:
+                _job = _pc.execute("SELECT id, title, company, url, description, full_description FROM jobs WHERE id=? AND user_id=?",
+                                   (int(_mans.group(1)), _du["id"])).fetchone()
+                _prof = _pc.execute("SELECT cv_path, cv_summary FROM user_profiles WHERE user_id=?", (_du["id"],)).fetchone()
+            finally:
+                _pc.close()
+            if not _job:
+                self.send_json({"error": "Job not found"}, 404)
+                return
+            try:
+                import questions as _q
+                import apply_engine as _aeq
+                _app_l = _applicant_for(_du["id"], _du.get("email", ""), _du.get("name", ""),
+                                        (_prof["cv_path"] if _prof else ""), (_prof["cv_summary"] if _prof else ""))
+                _jd = dict(_job)
+                _jd["description"] = ((_body.get("page_text") or "") or _jd.get("full_description") or _jd.get("description") or "")[:3000]
+                _jd.pop("full_description", None)
+                _llm = (lambda p: _aeq._claude_json(p, max_tokens=2048, timeout=_aeq._APPLY_LLM_TIMEOUT)) if GEMINI_KEY else None
+                _res = _q.answer_list(_qs, _app_l, _jd, _llm)
+            except Exception as exc:  # noqa: BLE001 - the extension leaves the questions to Eran
+                _log.get("device").warning("answers for job %s: %s", _mans.group(1), exc)
+                self.send_json({"error": "Could not answer: %s" % exc}, 502)
+                return
+            self.send_json({"answers": _res["answers"], "unsure": [u["label"] for u in _res["unsure"]]})
             return
         if path == "/api/device/attempt":
             import device as _dev

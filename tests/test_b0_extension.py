@@ -123,7 +123,7 @@ def _run(stack, users, tmp_path, job_url, pattern, handler, prepared, mode="B", 
                 ctx.pages[0].wait_for_timeout(250)
             assert tab, "the extension opened no tab for %s; tabs %s" % (job_url, sw.evaluate("chrome.tabs.query({}).then(t => t.map(x => x.url + ' | ' + x.pendingUrl + ' | ' + x.status))"))
             tab.goto(job_url)
-            if not prepared:
+            if not prepared and mode == "B" and not as_eran:
                 tab.click("button:has-text('Submit for me')", timeout=30000)
             if as_eran:
                 as_eran(tab)
@@ -384,3 +384,111 @@ def test_b0_smartrecruiters_shadow_form_gets_contact_details_cv_and_note(stack, 
     assert got["phone"] == "0541234567" or got["phone"].replace("-", "").replace(" ", "") == "0541234567", got
     assert got["resume"].endswith(" CV %d.pdf" % datetime.date.today().year) and got["easy"] == "", got
     assert got["note"].startswith("Dear Hiring Team"), got        # no cover-letter file field: the whole letter
+
+
+# SmartRecruiters in two steps, as the owner saw it on Wix and Check Point
+# (2026-11-23): City is a suggestion list; "Next" opens "Preliminary questions"
+# (a searchable dropdown, a Yes/No radio, the privacy declaration) without a page load.
+SR_STEPS = """<html><body>
+<script>
+customElements.define('spl-input', class extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({mode: 'open'}), id = this.getAttribute('fid'), lab = this.getAttribute('label');
+    r.innerHTML = '<label for="' + id + '">' + lab + '*</label><input id="' + id + '" type="' + (this.getAttribute('type') || 'text') + '">';
+  }
+});
+customElements.define('spl-dropdown', class extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({mode: 'open'}), opts = this.getAttribute('options').split('|');
+    r.innerHTML = '<label for="d">' + this.getAttribute('label') + ' *</label><input id="d" role="combobox"><div id="l"></div>';
+    const i = r.getElementById('d'), l = r.getElementById('l');
+    const show = () => { l.innerHTML = ''; for (const o of opts) if (o.toLowerCase().includes(i.value.toLowerCase())) {
+      const e = document.createElement('spl-select-option'); e.textContent = o; e.setAttribute('role', 'option');
+      e.onclick = () => { i.value = o; this.value = o; l.innerHTML = ''; }; l.appendChild(e); } };
+    i.addEventListener('input', show); i.addEventListener('focus', show);
+  }
+});
+customElements.define('spl-radio-group', class extends HTMLElement {
+  connectedCallback() {
+    this.attachShadow({mode: 'open'}).innerHTML = '<fieldset><legend>' + this.getAttribute('label') + ' *</legend>' +
+      '<input type="radio" name="e" id="y" required><label for="y">Yes</label><input type="radio" name="e" id="n"><label for="n">No</label></fieldset>';
+  }
+});
+customElements.define('spl-checkbox', class extends HTMLElement {
+  connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<input type="checkbox" id="c" required><label for="c">' + this.getAttribute('label') + '*</label>'; }
+});
+function next() {
+  const v = id => document.querySelector('[fid=' + id + ']').shadowRoot.querySelector('input').value;
+  window.step1 = {first: v('first-name-input'), city: document.querySelector('#city').value};
+  document.getElementById('s1').remove();
+  document.getElementById('s2').innerHTML = '<h2>Preliminary questions</h2>' +
+    '<spl-dropdown id="years" label="How many years of experience do you have as a Product Manager in tech product companies?" options="0-2|3-5|6-9|10+"></spl-dropdown>' +
+    '<spl-radio-group id="elig" label="Are you eligible to work in Israel?"></spl-radio-group>' +
+    '<spl-checkbox id="priv" label="You declare that you have read and understand the privacy notice of Wix."></spl-checkbox>' +
+    '<button type="button" id="go">Submit</button>';
+  document.getElementById('go').onclick = () => {
+    const sr = id => document.getElementById(id).shadowRoot;
+    fetch('/sr-submit', {method: 'POST', body: JSON.stringify(Object.assign({}, window.step1, {
+      years: sr('years').getElementById('d').value, eligible: sr('elig').getElementById('y').checked,
+      privacy: sr('priv').getElementById('c').checked}))})
+    .then(() => { document.body.innerHTML = '<h1>Thank you for applying</h1>'; });
+  };
+}
+</script>
+<div id="s1"><h2>Personal information</h2>
+<spl-input fid="first-name-input" label="First name"></spl-input>
+<spl-dropdown id="city" label="City" options="Tel Aviv, Israel|Tel Mond, Israel|Haifa, Israel"></spl-dropdown>
+<button type="submit" onclick="next()">Next</button></div>
+<div id="s2"></div>
+</body></html>"""
+
+
+def test_b0_smartrecruiters_second_step_is_answered_and_city_picked(stack, users, tmp_path, monkeypatch):
+    """The owner, 2026-11-23, run A and run B: "City is still missing", "the
+    second page is completely empty"."""
+    import app as _app
+    import apply_engine as _ae
+    import device as _dev
+    monkeypatch.setattr(_app, "GEMINI_KEY", "test")
+
+    def fake(prompt, **kw):
+        if "ON BEHALF of the applicant" not in prompt:
+            return {}
+        qs = json.loads(prompt.split("Questions (JSON array): ", 1)[1].split("\n\nReturn ONLY", 1)[0])
+        out = []
+        for q in qs:
+            if "years" in q["label"]:
+                out.append({"selector": q["selector"], "value": "10+", "confidence": "high"})
+            elif "eligible" in q["label"]:
+                out.append({"selector": q["selector"], "value": "Yes", "confidence": "high"})
+        return out
+    monkeypatch.setattr(_ae, "_claude_json", fake)
+    monkeypatch.setattr(_ae, "extract_applicant_data", lambda text, email, fallback_name="": {"email": email})
+    conn = stack["db"].get_db()
+    _uid = conn.execute("SELECT id FROM users WHERE email='admin@example.test'").fetchone()[0]
+    if not conn.execute("SELECT 1 FROM user_profiles WHERE user_id=?", (_uid,)).fetchone():
+        conn.execute("INSERT INTO user_profiles (user_id) VALUES (?)", (_uid,))
+    conn.execute("UPDATE user_profiles SET locations=? WHERE user_id=?", ('["Tel Aviv, Israel", "San Diego"]', _uid))
+    conn.commit()
+    conn.close()
+    sent = []
+
+    def sr(route, request):
+        if request.method == "POST" and "sr-submit" in request.url:
+            sent.append(json.loads(request.post_data or "{}"))
+            return route.fulfill(status=200, body="{}")
+        route.fulfill(status=200, content_type="text/html", body=SR_STEPS)
+
+    def eran(tab):                                     # run A: Eran presses Next, then Submit
+        tab.wait_for_function("document.querySelector('#city') && document.querySelector('#city').value === 'Tel Aviv, Israel'", timeout=30000)
+        tab.click("button:has-text('Next')")
+        tab.wait_for_function("""(() => { const p = document.querySelector('#priv'); return p && p.shadowRoot.getElementById('c').checked
+                                  && document.querySelector('#years').shadowRoot.getElementById('d').value === '10+'; })()""", timeout=40000)
+        tab.wait_for_function("document.querySelector('#elig').shadowRoot.getElementById('y').checked", timeout=20000)
+        tab.click("#go")
+
+    row, job = _run(stack, users, tmp_path, "https://jobs.smartrecruiters.com/oneclick-ui/company/Acme/publication/step-2",
+                    "https://jobs.smartrecruiters.com/**", sr, [], mode="A", as_eran=eran)
+    assert row["outcome"] == "sent", row
+    got = sent[0]
+    assert got["city"] == "Tel Aviv, Israel" and got["years"] == "10+" and got["eligible"] is True and got["privacy"] is True, got
