@@ -988,6 +988,15 @@ def _is_admin_id(user_id) -> bool:
 
 # What each channel needs before anything can be sent on it. One table, read by
 # the sender and by /api/save-notifications, so the two cannot disagree.
+# WhatsApp is hidden from the app (owner, 2026-11-23). The per-user Twilio
+# design cannot serve public users - each user had to bring their own Twilio
+# account, and the sender was Twilio's sandbox number. A Job Hunter-owned
+# number on Meta's Cloud API is in BACKLOG.md. Until then: Settings does not
+# offer it, the save route refuses it, and a profile that already holds it is
+# skipped quietly rather than failing on every notification.
+WHATSAPP_AVAILABLE = False
+_WHATSAPP_OFF_TEXT = "WhatsApp is not available yet - use Telegram, email or push"
+
 _CHANNEL_NEEDS = {
     "telegram": ("telegram_token", "telegram_chat_id"),
     "whatsapp": ("twilio_account_sid", "twilio_auth_token", "whatsapp_number"),
@@ -1063,6 +1072,9 @@ def deliver_notification(user_id: int, message: str, url_suffix: str = "", push_
         try:
             if channel == "email" and not email:
                 results[channel] = "skipped: another email covered this"
+                continue
+            if channel == "whatsapp" and not WHATSAPP_AVAILABLE:
+                results[channel] = "unavailable"
                 continue
             missing = _channel_missing(channel, p)
             if missing:
@@ -7648,6 +7660,9 @@ class Handler(BaseHTTPRequestHandler):
                     _cur = dict(crypto.decrypt_row(_row))
                 _merged = dict(_cur, **kwargs)
                 for _ch in [c.strip() for c in str(kwargs["notification_channel"] or "").split(",") if c.strip()]:
+                    if _ch == "whatsapp" and not WHATSAPP_AVAILABLE:
+                        self.send_json({"error": _WHATSAPP_OFF_TEXT}, 400)
+                        return
                     _miss = _channel_missing(_ch, _merged)
                     if _miss:
                         self.send_json({"error": _miss + " - fill it in or turn the channel off."}, 400)
@@ -7692,6 +7707,8 @@ class Handler(BaseHTTPRequestHandler):
                     send_telegram(data.get("telegram_token",""), data.get("telegram_chat_id",""), msg)
                     _log_notification(user_id, "telegram", "Test OK")
                 elif channel == "whatsapp":
+                    if not WHATSAPP_AVAILABLE:
+                        raise RuntimeError(_WHATSAPP_OFF_TEXT)
                     send_whatsapp(data.get("twilio_account_sid",""), data.get("twilio_auth_token",""),
                                   data.get("whatsapp_number",""), msg)
                     _log_notification(user_id, "whatsapp", "Test OK")

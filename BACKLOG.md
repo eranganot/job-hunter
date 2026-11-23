@@ -75,6 +75,19 @@ Not prioritised yet. **LinkedIn limits, checked 2026-11-15:** an outside app get
 | B | **People you know at each job's company** | Import `Connections.csv` (1st-degree: name, profile link, current company, title, connected-on). Match to every job's company: "You know 2 people at Finout". Show it on the job card, add it to the score, and offer a "Draft a referral message" button. For **2nd-degree**: a "Find people I know at <company>" button that opens LinkedIn's own search filtered to that company and the user's 1st and 2nd connections | 2nd-degree cannot be automated (not in the export, no permitted API). Company names need matching across spellings (the resolver's matching helps). The export goes stale. **Connections' details are third-party personal data**: kept private to the user, never shown to others, listed in the Privacy Policy, deleted with the account |
 | C | **Community: users help each other with referrals** (first idea, the owner is developing it) | Users opt in to being a referrer at their company. A job seeker sees "a Job Hunter member works at this company and refers" on matching jobs and can send a referral request through the app. Optional feed of open roles at members' companies, and of requests waiting for you | To define with the owner: what a referrer sees about a candidate and what the candidate shares (consent, both sides opt in); abuse and spam limits; whether referral bonuses matter; the cold start (works only with members at many companies, so it needs the user base first); Terms and Privacy updates (data shared between users) |
 
+## WhatsApp Business API: backlog (owner, 2026-11-23)
+
+**Not scheduled.** The owner chose Telegram first and hid WhatsApp from the app. The full plan, costs and risks are in the doc [Job Hunter: WhatsApp Business API + Telegram bot implementation plan](https://claude.ai/artifact/W5zPRbE7uH1NDQ9T8Vye9v) (2026-11-23).
+
+| What | Detail |
+|---|---|
+| Design | One Job Hunter-owned number on **Meta's Cloud API** (not Twilio: +$0.005 a message in and out), in the existing Meta business portfolio. A user connects by sending `CONNECT-<code>` from their own phone (`wa.me` link), which proves the number and records consent; STOP/PAUSE always work |
+| Build | Plan PRs 3-6: webhook with `X-Hub-Signature-256` check, templates, Connect button, admin broadcast with a cost preview, removal of the per-user Twilio fields and the sandbox sender `+14155238886` |
+| Owner steps first | A phone number not on WhatsApp; WhatsApp account + display name in Meta's WhatsApp Manager; 4 templates approved; business verification (optional below 250 users a day) |
+| Cost (Israel, Meta rates from 2026-10-01) | Marketing $0.0353, utility/service $0.0053 per delivered message. Meta treats saved-search style alerts as marketing, so daily picks are about $1.21 per connected user a month (weekly digest about $0.29) |
+| Main risks | Number restricted after user reports; daily picks billed as marketing and frequency-capped; general-purpose AI chat banned on WhatsApp since 2026-01-15 (notifications and fixed commands only); Israeli anti-spam consent rules |
+| State today | Hidden (2026-11-23): Settings no longer offers WhatsApp, `/api/save-notifications` refuses it, and profiles that already hold it are skipped quietly (`WHATSAPP_AVAILABLE = False` in `app.py`) |
+
 ## Parked
 
 | Item | Why parked |
