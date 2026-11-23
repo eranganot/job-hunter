@@ -1,5 +1,5 @@
 """
-Job Hunter's own Telegram bot (@jobhunter_bot, display name "Noa"): one bot for
+Job Hunter's own Telegram bot (@Noajobhunter_bot, display name "Noa"): one bot for
 every user, a notification channel only (owner, 2026-11-23).
 
 Before this, every user had to create their OWN bot in BotFather and paste its
@@ -215,7 +215,7 @@ def handle_update(conn, update: dict, update_profile, send=None) -> str:
     chat_id = chat["id"]
     text = (msg.get("text") or "").strip()
     cmd, _, arg = text.partition(" ")
-    cmd = cmd.split("@", 1)[0].lower()          # "/start@jobhunter_bot" in some clients
+    cmd = cmd.split("@", 1)[0].lower()          # "/start@Noajobhunter_bot" in some clients
 
     if cmd == "/start":
         arg = arg.strip()
