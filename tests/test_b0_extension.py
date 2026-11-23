@@ -399,12 +399,15 @@ customElements.define('spl-input', class extends HTMLElement {
 });
 customElements.define('spl-dropdown', class extends HTMLElement {
   connectedCallback() {
+    // As on the real form (2026-11-23 trace): the input's own label is only "*",
+    // the question is text printed above it; an option selects only on a click
+    // the page itself makes (window.__pageClick set by a page-world wrapper).
     const r = this.attachShadow({mode: 'open'}), opts = this.getAttribute('options').split('|');
-    r.innerHTML = '<label for="d">' + this.getAttribute('label') + ' *</label><input id="d" role="combobox"><div id="l"></div>';
+    r.innerHTML = '<div class="q">' + this.getAttribute('label') + '</div><label for="d">*</label><input id="d" role="combobox"><div id="l"></div>';
     const i = r.getElementById('d'), l = r.getElementById('l');
     const show = () => { l.innerHTML = ''; for (const o of opts) if (o.toLowerCase().includes(i.value.toLowerCase())) {
       const e = document.createElement('spl-select-option'); e.textContent = o; e.setAttribute('role', 'option');
-      e.onclick = () => { i.value = o; this.value = o; l.innerHTML = ''; }; l.appendChild(e); } };
+      e.onclick = () => { if (!window.__inPageClick) return; i.value = o; this.value = o; l.innerHTML = ''; }; l.appendChild(e); } };
     i.addEventListener('input', show); i.addEventListener('focus', show);
   }
 });
@@ -417,6 +420,9 @@ customElements.define('spl-radio-group', class extends HTMLElement {
 customElements.define('spl-checkbox', class extends HTMLElement {
   connectedCallback() { this.attachShadow({mode: 'open'}).innerHTML = '<input type="checkbox" id="c" required><label for="c">' + this.getAttribute('label') + '*</label>'; }
 });
+// Page-world clicks only: a click from the extension's world does not see this flag.
+const _origClick = HTMLElement.prototype.click;
+HTMLElement.prototype.click = function () { window.__inPageClick = true; try { return _origClick.call(this); } finally { window.__inPageClick = false; } };
 function next() {
   const v = id => document.querySelector('[fid=' + id + ']').shadowRoot.querySelector('input').value;
   window.step1 = {first: v('first-name-input'), city: document.querySelector('#city').value};
