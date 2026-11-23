@@ -44,6 +44,7 @@ import schedlock
 import paidpool
 import gemini
 import jobqueue
+import searchcache
 import links as _links_mod
 import ratelimit
 import worker
@@ -178,7 +179,7 @@ def _start_first_search(user_id) -> bool:
             titles = []
         if ran or not titles:
             return False
-        return bool(jobqueue.enqueue(user_id, "search"))
+        return bool(jobqueue.enqueue(user_id, "search", priority=jobqueue.PRIORITY_FIRST))
     except jobqueue.DailyCapReached as cap:
         print("[onboarding] first search for user %s not queued: %s" % (user_id, cap))
     except Exception as exc:
@@ -1761,7 +1762,7 @@ def _resume_search(user_id, how: str) -> bool:
         database.log_activity(user_id, "search_resumed", "Search resumed (%s)" % how)
         _track(user_id, "search_resumed", {"how": how})
         try:
-            jobqueue.enqueue(user_id, "search")
+            jobqueue.enqueue(user_id, "search", priority=jobqueue.PRIORITY_USER)
         except Exception as exc:              # a cap or a run already queued: the next scheduled one will do
             print("[inactive] search for returning user %s not queued: %s" % (user_id, exc))
         return True
@@ -1913,6 +1914,15 @@ def file_watcher():
             _run_fit_survey()
         if _tick % 60 == 3:  # ~hourly: the daily-search probe accounts (probes.py)
             _run_probes()
+        if _tick % 360 == 23:  # ~every 6 hours: forget "below the bar" scores past their window (searchcache.py)
+            try:
+                _pc = database.get_db()
+                try:
+                    searchcache.prune(_pc)
+                finally:
+                    _pc.close()
+            except Exception as _spe:
+                print(f"[search] WARNING score memory prune failed: {_spe}")
         if _tick % 60 == 0:  # ~hourly
             try:
                 _purged = auth.cleanup_expired_sessions()
@@ -2740,7 +2750,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         si = t.find("[")
                         if si < 0:
                             print(f"[search] ⚠️  AI response had no JSON array — skipping batch")
-                            return []
+                            return searchcache.Unreliable()
                         ei = t.rfind("]")
                         parsed = None
                         if ei > si:
@@ -2748,6 +2758,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 parsed = _js2.loads(t[si:ei+1])
                             except Exception:
                                 parsed = None
+                        _salvaged = parsed is None
                         if parsed is None:
                             # Robust salvage: read complete objects one-by-one with
                             # raw_decode. Handles truncation (output cut off), a missing
@@ -2770,7 +2781,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 print(f"[search] ⚠️  Recovered {len(parsed)} job(s) from a malformed/truncated AI response")
                             else:
                                 print(f"[search] ⚠️  AI response had no parseable JSON — skipping batch")
-                                return []
+                                return searchcache.Unreliable()
                         out = []
                         for j in parsed:
                             if isinstance(j, dict) and j.get("url") and j.get("candidate_score", 0) >= 30:
@@ -2778,7 +2789,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 j.setdefault("found_date", today)
                                 j.setdefault("source", "greenhouse/lever")
                                 out.append(j)
-                        return out
+                        return searchcache.Unreliable(out) if _salvaged else out
 
                     def _keep_source(scored_, batch_):
                         """The scorer returns the jobs it kept without their source,
@@ -2883,6 +2894,9 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 _g_text = _g_data['candidates'][0]['content']['parts'][0]['text']
                                 result_ = _parse_scored_response(_g_text)
                                 print(f"[search] Gemini scored {len(batch_)} -> {len(result_)} passed")
+                                if not isinstance(result_, searchcache.Unreliable):
+                                    # Only a clean AI answer says "below the bar" (searchcache).
+                                    _ai_answered.append((batch_, list(result_)))
                                 return result_
                             except Exception as _ge:
                                 print(f"[search] Gemini scoring error: {_ge} — trying Anthropic")
@@ -2954,21 +2968,59 @@ def run_job_search(user_id: int, by_user: bool = False):
                         print(f"[search] Heuristic: {len(batch_)} -> {len(out_)} passed")
                         return out_
 
-                    # Score all collected jobs in batches of 50
+                    # Search pile-up fix (2026-11-24, searchcache.py): score only what
+                    # the user has not seen. Jobs already in the user's list (any status -
+                    # the set the insert step dedups against) and jobs this same profile
+                    # scored below the bar recently are not sent to the AI again. Before
+                    # this, every board/Workday/LinkedIn/TechMap job was re-scored daily
+                    # (23 Nov: 778 scored, 232 passed, 5 new) and a search took 11-14 min.
+                    _t_score0 = time.time()
+                    _ai_answered = []
+                    try:
+                        _cv_size = os.path.getsize(_cv_path) if _cv_path and os.path.exists(_cv_path) else 0
+                    except OSError:
+                        _cv_size = 0
+                    _score_sig = searchcache.profile_signature(profile_text, _cv_size)
+                    _rejected = set()
+                    try:
+                        _sc_conn = database.get_db()
+                        try:
+                            _rejected = searchcache.recently_rejected(_sc_conn, user_id, _score_sig)
+                        finally:
+                            _sc_conn.close()
+                    except Exception as _sc_err:
+                        print(f"[search] WARNING score memory unreadable, scoring everything: {_sc_err}")
+                    _unscored, _n_known, _n_rej = searchcache.split_unscored(all_raw, existing_urls, _rejected)
+                    print(f"[search] Not scored again: {_n_known} already in the user's list, "
+                          f"{_n_rej} below the bar in the last {searchcache.reject_days()} days")
+
                     # Cap ATS jobs at 300 to avoid excessive API calls; supplemental sources are uncapped
                     _ats_sources = {'greenhouse', 'lever', 'smartrecruiters'}
-                    _ats_jobs = [j for j in all_raw if j.get('source','') in _ats_sources]
-                    _other_jobs = [j for j in all_raw if j.get('source','') not in _ats_sources]
+                    _ats_jobs = [j for j in _unscored if j.get('source','') in _ats_sources]
+                    _other_jobs = [j for j in _unscored if j.get('source','') not in _ats_sources]
                     ATS_CAP = 300
                     if len(_ats_jobs) > ATS_CAP:
                         print(f"[search] Capping ATS jobs {len(_ats_jobs)} -> {ATS_CAP} (keeping all {len(_other_jobs)} from other sources)")
                         _ats_jobs = _ats_jobs[:ATS_CAP]
                     _jobs_to_score = _ats_jobs + _other_jobs
-                    print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other)")
+                    print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other), "
+                          f"{searchcache.parallel_batches()} batch(es) at a time")
                     scored_jobs = []
-                    for batch_i in range(0, len(_jobs_to_score), 20):
-                        batch = _jobs_to_score[batch_i:batch_i+20]
-                        scored_jobs.extend(_keep_source(_score_batch(batch, profile_text), batch))
+                    for _kept in searchcache.run_batches(
+                            _jobs_to_score, lambda b: _keep_source(_score_batch(b, profile_text), b), size=20):
+                        scored_jobs.extend(_kept)
+                    _rej_urls = [u for _b, _k in _ai_answered for u in searchcache.rejected_in(_b, _k)]
+                    if _rej_urls:
+                        try:
+                            _sc_conn = database.get_db()
+                            try:
+                                searchcache.remember_rejected(_sc_conn, user_id, _score_sig, _rej_urls)
+                            finally:
+                                _sc_conn.close()
+                        except Exception as _sc_err:
+                            print(f"[search] WARNING score memory not written: {_sc_err}")
+                    print(f"[search] Scoring took {time.time() - _t_score0:.0f}s: {len(_ai_answered)} AI answer(s), "
+                          f"{len(scored_jobs)} passed, {len(_rej_urls)} remembered as below the bar")
 
                     # -- Supplemental: Gemini + Google Search (parallel, CV-aware, scored) --
                     import os as _os_ws
@@ -3053,6 +3105,10 @@ def run_job_search(user_id: int, by_user: bool = False):
                         print(f"[search] Web search: {len(_ws_queries)} queries → {len(_ws_raw)} raw results")
 
                         # Pass web search results through the same AI scorer (not just blindly add them)
+                        # - only those the user has not seen (searchcache, 2026-11-24).
+                        _ws_raw, _ws_known, _ws_rej = searchcache.split_unscored(_ws_raw, existing_urls, _rejected)
+                        if _ws_known or _ws_rej:
+                            print(f"[search] Web search: {_ws_known + _ws_rej} result(s) already seen, not scored again")
                         if _ws_raw:
                             # Normalise field names to match what _score_batch expects
                             for _wsj in _ws_raw:
@@ -3078,8 +3134,11 @@ def run_job_search(user_id: int, by_user: bool = False):
                         if _TB_GEMINI or _TB_ANTH:
                             # Collect jobs with meaningful descriptions that Track A didn't already return
                             _scored_urls = {j.get('url','') for j in scored_jobs}
+                            # From the jobs not seen before (searchcache, 2026-11-24): with known
+                            # jobs no longer re-scored, Track A returning < 5 is now the normal
+                            # quiet day, and a pool from all_raw would re-score the whole list.
                             _trackb_pool = [
-                                j for j in all_raw
+                                j for j in _unscored
                                 if len(j.get('full_description') or j.get('description','')) > 100
                                 and j.get('url','') not in _scored_urls
                             ]
@@ -8859,7 +8918,8 @@ class Handler(BaseHTTPRequestHandler):
             # A row, not a thread. Pressing the button twice while one is in
             # flight is now a no-op rather than a second Gemini-spending search.
             try:
-                _run_id = jobqueue.enqueue(uid, "search", payload={"by_user": True})
+                _run_id = jobqueue.enqueue(uid, "search", payload={"by_user": True},
+                                           priority=jobqueue.PRIORITY_USER)
                 database.log_activity(uid, "search_requested", "Search started by the user")
             except jobqueue.DailyCapReached as _cap:
                 # 429, not 403: this clears by itself at midnight UTC, and the

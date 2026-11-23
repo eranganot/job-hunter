@@ -194,4 +194,5 @@ def test_the_search_no_longer_sends_system_lines_to_users():
     tail = src[src.index("Job search failed"):]
     assert "deliver_notification" not in tail
     # and the button the user presses says so: that is what gives its search picks of its own
-    assert 'jobqueue.enqueue(uid, "search", payload={"by_user": True})' in inspect.getsource(app)
+    # (2026-11-24: the call also carries priority=PRIORITY_USER - test_search_pileup.py)
+    assert 'jobqueue.enqueue(uid, "search", payload={"by_user": True},' in inspect.getsource(app)
