@@ -8718,6 +8718,21 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Admin job inject — session-authenticated, admin only ────────────────
         # ── Admin: clear applied jobs ─────────────────────────────────────────────
+        # A paid source's key, checked now (free for Apify), and optionally
+        # today's pull re-run - after a key is fixed there is no need to wait
+        # for tomorrow's daily run (2026-11-23).
+        if path == "/api/admin/paid-pool/check":
+            if not user or user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            payload = self.read_json()
+            _src = str(payload.get("source") or "").strip().lower()
+            _out = {"source": _src, "key": paidpool.check_key(_src)}
+            if payload.get("run") and _out["key"].get("ok") is not False:
+                _out["run"] = paidpool.rerun_today(database.get_db, _src)
+            self.send_json(_out)
+            return
+
         if path == "/api/admin/clear-attempted":
             if not user or user.get("role") != "admin":
                 self.send_json({"error": "Forbidden"}, 403)

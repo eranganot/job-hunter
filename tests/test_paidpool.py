@@ -339,3 +339,53 @@ def test_the_run_reports_title_counts_not_titles(conn, monkeypatch):
     res = paidpool.run_source(conn, "theirstack", NOW, {"theirstack": _fake(_jobs(1))})
     assert "titles asked 2 of 2 (2 after folding, 2 senior)" in res["detail"]
     assert "Head of Product" not in res["detail"]
+
+
+# ── the admin key check and re-run (2026-11-23) ─────────────────────────────
+
+def test_check_key_asks_apify_who_am_i_and_spends_nothing(conn, monkeypatch):
+    monkeypatch.setenv(paidpool.SOURCES["apify"]["keys"][0], "apify_api_new")
+    seen = []
+
+    def fake_http(method, url, headers=None, body=None, timeout=None):
+        seen.append((method, url, headers))
+        return {"data": {"username": "eran", "plan": {"id": "FREE"}}}
+    monkeypatch.setattr(paidpool, "_http", fake_http)
+    out = paidpool.check_key("apify")
+    assert out["ok"] is True and "eran" in out["detail"]
+    assert seen == [("GET", "https://api.apify.com/v2/users/me", {"Authorization": "Bearer apify_api_new"})]
+    assert paidpool.spent(conn, "apify", NOW) == 0
+
+
+def test_check_key_reports_a_refused_token(conn, monkeypatch):
+    monkeypatch.setenv(paidpool.SOURCES["apify"]["keys"][0], "apify_api_old")
+
+    def refused(*a, **k):
+        raise paidpool.SourceError("HTTP 401 user-or-token-not-found", code=401)
+    monkeypatch.setattr(paidpool, "_http", refused)
+    out = paidpool.check_key("apify")
+    assert out["ok"] is False and "401" in out["detail"]
+
+
+def test_check_key_without_a_key_or_for_an_unknown_source(conn):
+    assert paidpool.check_key("apify") == {"ok": False, "detail": "no API key set"}
+    assert paidpool.check_key("nope")["ok"] is False
+
+
+def test_rerun_today_replaces_a_failed_run(conn, monkeypatch):
+    monkeypatch.setenv(paidpool.SOURCES["apify"]["keys"][0], "apify_api_new")
+    day = paidpool._day(NOW)
+    paidpool._record_run(conn, "apify", day, "error", 0, "HTTP 401")
+    out = paidpool.rerun_today(lambda: _NoClose(conn), "apify", NOW, {"apify": _fake(_jobs(3))})
+    assert out["status"] == "ok" and out["fetched"] == 3
+    row = conn.execute("SELECT status, fetched FROM paid_pool_runs WHERE provider='apify' AND day=?",
+                       (day,)).fetchone()
+    assert (row[0], row[1]) == ("ok", 3)
+
+
+def test_rerun_today_never_runs_a_source_that_is_switched_off(conn, monkeypatch):
+    monkeypatch.setenv("JH_PAID_POOL_SOURCES", "hirebase")
+    monkeypatch.setenv(paidpool.SOURCES["apify"]["keys"][0], "k")
+    calls = []
+    out = paidpool.rerun_today(lambda: _NoClose(conn), "apify", NOW, {"apify": _fake(_jobs(1), seen=calls)})
+    assert out["status"] == "off" and calls == []
