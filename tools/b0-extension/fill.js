@@ -128,7 +128,7 @@
       const t = (el.type || '').toLowerCase();
       if (!['text', 'email', 'tel', 'url', ''].includes(t) || el.tagName !== 'INPUT') continue;
       if (clean(el.value) || el.readOnly || el.disabled) continue;
-      const label = norm(labelOf(el));
+      const label = norm(questionLabel(el));
       for (const [re, key] of BASICS) {
         if (!re.test(label) && !(key === 'phone' && t === 'tel')) continue;
         let v = a[key] || '';
@@ -151,6 +151,17 @@
   const optionEls = () => deepAll('[role="option"], spl-select-option, li[role="option"]').filter(vis);
   window.JHTrace = window.JHTrace || [];
   const jt = (step, data) => window.JHTrace.push({t: Date.now(), step, data});
+  // Click through the page's own world (page.js); false when page.js did not answer.
+  let clickSeq = 0;
+  const clickInPage = el => new Promise(res => {
+    const id = 'c' + (++clickSeq) + '-' + Date.now();
+    el.dataset.jhClick = id;
+    const done = e => { if (e.source === window && e.data && e.data.__jh === 'clicked' && e.data.id === id) {
+      window.removeEventListener('message', done); res(e.data.ok ? 'page' : 'page-failed'); } };
+    window.addEventListener('message', done);
+    window.postMessage({__jh: 'click', id}, '*');
+    setTimeout(() => { window.removeEventListener('message', done); res('no-page-world'); }, 1500);
+  });
   async function pickOption(el, value) {
     const want = norm(String(value));
     setValue(el, String(value).split(',')[0]);
@@ -162,9 +173,10 @@
       const o = opts.find(x => norm(x.textContent) === want) || opts.find(x => norm(x.textContent).startsWith(want)) ||
                 opts.find(x => norm(x.textContent).includes(want)) || opts.find(x => want.includes(norm(x.textContent)) && norm(x.textContent));
       if (o) {
-        o.click();
+        const how = await clickInPage(o);
         await new Promise(r => setTimeout(r, 300));
-        jt('pick', {label: labelOf(el).slice(0, 60), want, clicked: clean(o.textContent).slice(0, 60), after: el.value, rounds: i, seen: seen.slice(-3)});
+        if (norm(el.value) !== norm(o.textContent)) { o.click(); await new Promise(r => setTimeout(r, 300)); }
+        jt('pick', {label: labelOf(el).slice(0, 60), want, clicked: clean(o.textContent).slice(0, 60), how, after: el.value, rounds: i, seen: seen.slice(-3)});
         return true;
       }
     }
@@ -183,8 +195,37 @@
 
   // ── The questions nothing else answered: read them for the server to answer ──
   const BASIC_LABEL = /first name|last name|surname|full name|^name$|e-?mail|phone|mobile|linkedin|github|^city$|facebook|twitter|website|portfolio/i;
+  // The question as Eran sees it: the nearest text printed just above the field,
+  // in the same column. SmartRecruiters' "Preliminary questions" components give
+  // the extension no label it can read (2026-11-23 trace: 3 questions, every
+  // label ""), whatever element holds the text.
+  const textAbove = el => {
+    const r = el.getBoundingClientRect();
+    if (!r.width) return '';
+    let best = '', bestGap = 1e9;
+    const walk = root => {
+      const it = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = it.nextNode(); n; n = it.nextNode()) {
+        const t = clean(n.textContent);
+        if (t.length < 3 || t.length > 400 || /^this field is required/i.test(t)) continue;
+        const p = n.parentElement;
+        if (!p || /^(SCRIPT|STYLE|OPTION)$/.test(p.tagName)) continue;
+        const rng = document.createRange(); rng.selectNodeContents(n);
+        const b = rng.getBoundingClientRect();
+        if (!b.width || b.bottom > r.top + 2 || b.right < r.left - 40 || b.left > r.right) continue;
+        const gap = r.top - b.bottom;
+        if (gap < bestGap && gap < 90) { bestGap = gap; best = t; }
+      }
+      for (const h of root.querySelectorAll('*')) if (h.shadowRoot) walk(h.shadowRoot);
+    };
+    walk(document);
+    return best;
+  };
   const questionLabel = el => {
     let t = labelOf(el);
+    // A label that is only the required star (SmartRecruiters prints "*" in its
+    // own label - the 2026-11-23 trace's "" labels) is no label.
+    if (!t || !t.replace(/[\s*✱:]/g, '') || /^choose a file|^search by|^search$/i.test(t)) { const a = textAbove(el); if (a) t = a; }
     if (!t || /^choose a file|^search by/i.test(t)) {
       for (const n of upward(el).slice(1, 6)) {
         const l = n.getAttribute && n.getAttribute('label');
@@ -203,7 +244,7 @@
     const lg = fs && fs.querySelector('legend');
     if (lg && clean(lg.textContent)) return clean(lg.textContent);
     for (const n of upward(el).slice(1, 7)) { const l = n.getAttribute && n.getAttribute('label'); if (l) return clean(l); }
-    return groupLabel(el);
+    return groupLabel(el) || textAbove(el);
   };
   let qSeq = 0;
   async function questions() {
@@ -230,6 +271,8 @@
       let options = type === 'select' ? [...el.options].map(optionText).filter(o => o && !/^select|^choose|^--/i.test(o))
                   : type === 'checkbox' ? ['Yes'] : type === 'combobox' ? await comboOptions(el) : [];
       out.push({selector: id, label: label.replace(/\s*[*✱]\s*$/, ''), type, options, required});
+      if (!label) jt('no-label', upward(el).slice(0, 8).map(n => (n.tagName || '').toLowerCase() + '[' +
+        [...(n.attributes || [])].map(a => a.name + '=' + String(a.value).slice(0, 30)).join(',') + ']'));
     }
     for (const [g, r] of radios) {
       if (r.els.some(e => e.checked)) continue;

@@ -20,4 +20,21 @@
     if (x.__jh && x.__jh[0] !== 'GET') x.addEventListener('loadend', () => tell(x.__jh[0], x.__jh[1], x.status));
     return os.apply(this, arguments);
   };
+  // A click the page itself makes. SmartRecruiters' option lists ignore a click
+  // from the extension's own world: on Eran's run (2026-11-23 trace) the City
+  // option "Tel Aviv, Israel" was clicked from there and the field stayed
+  // "Tel Aviv"; the same click from the page world selects it.
+  const deep = (sel, root = document, out = []) => {
+    out.push(...root.querySelectorAll(sel));
+    for (const e of root.querySelectorAll('*')) if (e.shadowRoot) deep(sel, e.shadowRoot, out);
+    return out;
+  };
+  window.addEventListener('message', e => {
+    const d = e.data;
+    if (e.source !== window || !d || d.__jh !== 'click' || !d.id) return;
+    const el = deep('[data-jh-click="' + d.id + '"]')[0];
+    let ok = false;
+    if (el) { try { el.click(); ok = true; } catch (err) { /* reported as not clicked */ } }
+    window.postMessage({__jh: 'clicked', id: d.id, ok}, '*');
+  });
 })();
