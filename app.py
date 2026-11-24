@@ -479,6 +479,20 @@ SHORT_LINKS = {
     "/li": "/?utm_source=linkedin&utm_medium=page&utm_campaign=page_about",
 }
 
+def _signups_health():
+    """Sign-up brake state for the full health view (C5)."""
+    mode, cap = auth.signup_settings()
+    try:
+        conn = database.get_db()
+        try:
+            return {"mode": mode, "daily_cap": cap, "today": auth.signups_today(conn),
+                    "waitlist": auth.waitlist_count(conn)}
+        finally:
+            conn.close()
+    except Exception as e:
+        return {"mode": mode, "daily_cap": cap, "error": str(e)[:120]}
+
+
 # ── DB + Auth init ────────────────────────────────────────────────────────────
 
 database.set_db_path(DB_FILE)
@@ -5872,6 +5886,7 @@ class Handler(BaseHTTPRequestHandler):
                 # TODAY, so until this existed the real peak was invisible from
                 # outside the box and the ceiling stayed at its placeholder.
                 "llm_history": gemini.history(14),
+                "signups": _signups_health(),
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),
                 "paid_pool": _paid_pool_health(),

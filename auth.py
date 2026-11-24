@@ -88,6 +88,59 @@ def _fire_user_created(user_id, email, name, provider):
             print("[admin-notify] ERROR new-user hook failed for user %s: %s" % (user_id, e))
 
 
+# ── Sign-up brake (2026-11-24, launch item C5) ──────────────────────────────────
+# JH_SIGNUPS=paused stops new accounts; JH_SIGNUP_DAILY_CAP=N (0 = no cap) stops
+# them once N accounts were made today (UTC). Existing users always sign in, the
+# admin email always gets in, and a turned-away person lands on the waitlist.
+SIGNUP_WAITLIST_MESSAGE = ("Noa is at capacity right now, so new sign-ups are paused for a short while. "
+                           "We saved your email and will write to you as soon as a place opens.")
+
+
+def signup_settings():
+    mode = (os.environ.get("JH_SIGNUPS", "open") or "open").strip().lower()
+    try:
+        cap = max(0, int(os.environ.get("JH_SIGNUP_DAILY_CAP", "0") or 0))
+    except ValueError:
+        cap = 0
+    return ("paused" if mode == "paused" else "open"), cap
+
+
+def signups_today(conn) -> int:
+    day = datetime.now().date().isoformat()
+    row = conn.execute("SELECT COUNT(*) FROM users WHERE role != 'admin' AND created_date >= ?", (day,)).fetchone()
+    return int(row[0] or 0)
+
+
+def _signup_blocked(conn, email):
+    """The reason a new account may not be made now ('paused' / 'cap'), else None."""
+    if _admin_email and email == _admin_email:
+        return None
+    mode, cap = signup_settings()
+    if mode == "paused":
+        return "paused"
+    if cap and signups_today(conn) >= cap:
+        return "cap"
+    return None
+
+
+def _to_waitlist(conn, email, name, provider, reason):
+    try:
+        conn.execute("INSERT OR IGNORE INTO signup_waitlist (email, name, provider, reason, created_at) "
+                     "VALUES (?,?,?,?,?)", (email, (name or "").strip(), provider, reason, _stamp(_utc_now())))
+        conn.commit()
+    except Exception as e:   # the waitlist is a courtesy; never turn it into a crash
+        print("[signup-brake] ERROR could not save %s to the waitlist: %s" % (email, e))
+    print("[signup-brake] new account refused (%s); %s added to the waitlist" % (reason, email))
+
+
+def waitlist_count(conn) -> int:
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM signup_waitlist").fetchone()[0] or 0)
+    except Exception as e:
+        print("[signup-brake] ERROR could not count the waitlist: %s" % e)
+        return 0
+
+
 # ── Password ──────────────────────────────────────────────────────────────────
 
 def hash_password(password: str, salt: str = None):
@@ -126,6 +179,12 @@ def create_user(name: str, email: str, password: str):
 
     conn = _get_db()
     try:
+        _blocked = _signup_blocked(conn, normalized_email)
+        if _blocked:
+            if conn.execute("SELECT 1 FROM users WHERE email=?", (normalized_email,)).fetchone():
+                return None, "An account with that email already exists."
+            _to_waitlist(conn, normalized_email, name, "password", _blocked)
+            return None, SIGNUP_WAITLIST_MESSAGE
         pw_hash, salt = hash_password(password)
         conn.execute(
             "INSERT INTO users (name, email, password_hash, salt, created_date, role) VALUES (?,?,?,?,?,?)",
@@ -534,6 +593,10 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
             return dict(updated), False, None
 
         # 3. Brand-new user. Admin email (from config) gets the admin role.
+        _blocked = _signup_blocked(conn, normalized_email)
+        if _blocked:
+            _to_waitlist(conn, normalized_email, name, "google", _blocked)
+            return None, False, SIGNUP_WAITLIST_MESSAGE
         role              = "admin" if (_admin_email and normalized_email == _admin_email) else "user"
         default_frequency = "daily" if role == "admin" else "weekly"
         # Google users have no password; store a random unusable hash so the
