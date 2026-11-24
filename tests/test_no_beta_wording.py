@@ -11,9 +11,10 @@ def _bundle():
     return "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(ROOT, "web_bundle", "assets", "*.js")))
 
 
-def test_the_plan_tab_says_premium_free_for_a_limited_time():
+def test_the_plan_tab_says_free():
+    # Product review 2026-11-24 (#2): "Premium, free for a limited time" replaced by "Free".
     js = _bundle()
-    assert "Everything in Premium, free for a limited time" in js
+    assert "Everything Noa does, free." in js and "Everything in Premium, free for a limited time" not in js
     assert "free while Job Hunter is in beta" not in js and "one of our beta users" not in js
 
 

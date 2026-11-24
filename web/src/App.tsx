@@ -4390,7 +4390,7 @@ function FirstSearchSteps({ stage }: { stage?: string | null }) {
       </div>
       <ul className="space-y-2.5">
         {FIRST_SEARCH_STEPS.map(([k, label], i) => (
-          <li key={k} className={`flex items-center gap-2.5 text-sm ${i < at ? "text-gray-300" : i === at ? "text-white font-medium" : "text-gray-500"}`}>
+          <li key={k} className={`flex items-center gap-2.5 text-sm ${i < at ? "text-gray-300" : i === at ? "text-white font-medium" : "text-gray-400"}`}>
             {i < at ? <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
               : i === at ? <Loader2 className="w-4 h-4 animate-spin text-brand-yellow shrink-0" />
               : <span className="w-4 h-4 rounded-full border border-gray-600 shrink-0" />}
