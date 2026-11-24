@@ -34,10 +34,10 @@ export function InstallPrompt() {
           <Download className="w-4 h-4 text-white" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white leading-tight">Install Job Hunter</p>
-          <p className="text-xs text-gray-400 leading-tight">Add to your home screen</p>
+          <p className="text-sm font-semibold text-white leading-tight">Add Job Hunter to your home screen</p>
+          <p className="text-xs text-gray-400 leading-tight">Opens like an app, with Noa's alerts. Free, no app store.</p>
         </div>
-        <button onClick={install} className="px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium rounded-xl shrink-0">Install</button>
+        <button onClick={install} className="px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium rounded-xl shrink-0">Add</button>
         <button onClick={() => setHidden(true)} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
       </div>
     </div>

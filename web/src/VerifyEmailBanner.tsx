@@ -74,7 +74,7 @@ export function VerifyEmailBanner() {
             <p className="font-medium text-white">Email confirmed. Thanks!</p>
           ) : (<>
             <p className="font-medium text-white">Confirm your email</p>
-            <p className="text-gray-400 mt-0.5">We sent a link to <span className="text-gray-200 break-all">{email}</span>. Confirm it so we know Noa's picks and account emails reach you.</p>
+            <p className="text-gray-400 mt-0.5">We sent a link to <span className="text-gray-200 break-all">{email}</span>. Tap the link in it: it shows the address is really yours, so Noa's picks reach your inbox and only you can reset your password.</p>
             <button onClick={resend} disabled={busy} className="mt-2 text-indigo-300 hover:text-indigo-200 font-medium disabled:opacity-50">{busy ? "Sending…" : "Send it again"}</button>
             {msg && <p className="text-gray-400 mt-1">{msg}</p>}
           </>)}

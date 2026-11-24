@@ -2078,6 +2078,27 @@ def file_watcher():
 
 
 _search_running: set = set()
+# Where each running search is (feedback round P5/P6, 2026-11-24): the first-search
+# screen shows real steps instead of a spinner, and the log gets each stage's
+# seconds ("[search-timing]") so the ~2 minutes to the first picks can be measured
+# per stage before anything is changed. In-process, like _search_running.
+_SEARCH_STAGE: dict = {}
+SEARCH_STAGES = ("collect", "score", "check", "save")
+
+
+def _search_stage(user_id, stage: str | None) -> None:
+    now = time.time()
+    cur = _SEARCH_STAGE.get(user_id)
+    if cur:
+        print("[search-timing] user %s %s %.1fs" % (user_id, cur["stage"], now - cur["since"]))
+    if stage is None:
+        if cur:
+            print("[search-timing] user %s total %.1fs" % (user_id, now - cur["t0"]))
+        _SEARCH_STAGE.pop(user_id, None)
+        return
+    _SEARCH_STAGE[user_id] = {"stage": stage, "since": now, "t0": cur["t0"] if cur else now}
+
+
 
 
 def _attribute_gemini_to(fn):
@@ -2218,6 +2239,7 @@ def run_job_search(user_id: int, by_user: bool = False):
     if user_id in _search_running:
         return
     _search_running.add(user_id)
+    _search_stage(user_id, "collect")
     try:
         conn = database.get_db()
         try:
@@ -3143,6 +3165,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         print(f"[search] Capping ATS jobs {len(_ats_jobs)} -> {ATS_CAP} (keeping all {len(_other_jobs)} from other sources)")
                         _ats_jobs = _ats_jobs[:ATS_CAP]
                     _jobs_to_score = _ats_jobs + _other_jobs
+                    _search_stage(user_id, "score")
                     print(f"[search] Scoring {len(_jobs_to_score)} jobs ({len(_ats_jobs)} ATS + {len(_other_jobs)} other), "
                           f"{searchcache.parallel_batches()} batch(es) at a time")
                     scored_jobs = []
@@ -3159,6 +3182,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 _sc_conn.close()
                         except Exception as _sc_err:
                             print(f"[search] WARNING score memory not written: {_sc_err}")
+                    _search_stage(user_id, "check")
                     print(f"[search] Scoring took {time.time() - _t_score0:.0f}s: {len(_ai_answered)} AI answer(s), "
                           f"{len(scored_jobs)} passed, {len(_rej_urls)} remembered as below the bar")
 
@@ -3522,6 +3546,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                     conn.close()
                     from ai_analysis import compute_feedback_penalty as _compute_fb_penalty
 
+                    _search_stage(user_id, "save")
                     # ── Insert new jobs (skip rejected patterns) ─────────────────────
                     conn = database.get_db()
                     try:
@@ -3789,6 +3814,7 @@ def run_job_search(user_id: int, by_user: bool = False):
         database.log_activity(user_id, "jobs_searched", f"Job search failed — {err_summary}")
     finally:
         _search_running.discard(user_id)
+        _search_stage(user_id, None)
         # Step 1b: give the new (and still-open) jobs the company's own link.
         # Its own queued run, so a slow ATS never lengthens the search itself.
         try:
@@ -4577,7 +4603,7 @@ _AUTH_HEAD = """
     .forgot { display:block; text-align:right; font-size:.8rem; color:#ffd766; text-decoration:none; margin:-.4rem 0 .6rem; }
     .forgot:hover { text-decoration:underline; }
     .muted { font-size:.88rem; color:#c4d4c6; line-height:1.5; margin:0 0 1rem; }
-    .optin { display:flex; gap:.6rem; align-items:flex-start; font-size:.84rem; color:#c4d4c6; line-height:1.45; margin:0 0 1rem; cursor:pointer; }
+    .optin { display:flex; gap:.6rem; align-items:flex-start; font-size:.84rem; color:#c4d4c6; line-height:1.45; margin:1rem 0 .25rem; cursor:pointer; }
     .optin input { margin-top:.15rem; width:1rem; height:1rem; flex:none; accent-color:#ffd766; padding:0; }
   </style>
   <script>
@@ -4658,7 +4684,6 @@ REGISTER_HTML = """<!DOCTYPE html>
   <div class="card">
     <h2>Create your account</h2>
     {error_block}
-    <label class="optin"><input type="checkbox" name="marketing" value="1" form="regform" id="mkt" onchange="mktLink(this)"/><span>{marketing_wording}</span></label>
     <a class="google" href="/auth/google/start">""" + _GOOGLE_SVG + """Continue with Google</a>
     <div class="or"><i></i><span>or</span><i></i></div>
     <form method="POST" action="/register" id="regform">
@@ -4686,6 +4711,7 @@ REGISTER_HTML = """<!DOCTYPE html>
       </div>
       <button type="submit" class="primary">Create account</button>
     </form>
+    <label class="optin"><input type="checkbox" name="marketing" value="1" form="regform" id="mkt" onchange="mktLink(this)"/><span>{marketing_wording}</span></label>
     <p class="legal">By creating an account you agree to the <a href="/terms">Terms of Service</a> and the <a href="/privacy">Privacy Policy</a>. You must be 18 or older.</p>
     <p class="alt">Already have an account? <a href="/login">Sign in</a></p>
   </div>
@@ -6229,6 +6255,8 @@ class Handler(BaseHTTPRequestHandler):
                 finally:
                     _fc.close()
                 out["first_search_running"] = bool(_running) and not _done
+                _st = _SEARCH_STAGE.get(user["id"]) if out["first_search_running"] else None
+                out["first_search_stage"] = _st["stage"] if _st else ("queued" if out["first_search_running"] else None)
             except Exception as _fe:
                 print("[me] first-search state unknown for user %s: %s" % (user["id"], _fe))
                 out["first_search_running"] = False
