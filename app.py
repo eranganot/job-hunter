@@ -470,6 +470,15 @@ def _railway_forward(host: str, path: str):
         return None
     return _public_url + (p if p.startswith("/") else "/" + p)
 
+# 2026-11-24 (launch item S3): short links for profile bios and page buttons.
+# An Instagram bio shows the whole URL, and a long ?utm_ one looks broken, so the
+# bio carries job-hunter.work/ig and this adds the tracking on the way in.
+SHORT_LINKS = {
+    "/ig": "/?utm_source=instagram&utm_medium=bio",
+    "/fb": "/?utm_source=facebook&utm_medium=page&utm_campaign=page_button",
+    "/li": "/?utm_source=linkedin&utm_medium=page&utm_campaign=page_about",
+}
+
 # ── DB + Auth init ────────────────────────────────────────────────────────────
 
 database.set_db_path(DB_FILE)
@@ -5295,6 +5304,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path   = parsed.path
         qs     = parse_qs(parsed.query)
+        _short = SHORT_LINKS.get(path.rstrip("/").lower() if path != "/" else "")
+        if _short:
+            self.send_response(302)
+            self.send_header("Location", _short)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
 
         # -- Mobile PWA SPA (served under /app). Strictly additive: legacy
         #    routes (/dashboard, /login, /api/*) are untouched. The built
