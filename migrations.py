@@ -1359,6 +1359,19 @@ def m0051_search_speed(conn):
     conn.commit()
 
 
+def m0052_signup_waitlist(conn):
+    """Sign-up brake (2026-11-24, launch item C5): who tried to join while
+    sign-ups were paused or the day's cap was reached, so they can be invited
+    when a place opens. Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS signup_waitlist (
+        email      TEXT NOT NULL UNIQUE,
+        name       TEXT,
+        provider   TEXT,
+        reason     TEXT,
+        created_at TEXT NOT NULL)""", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1411,6 +1424,7 @@ MIGRATIONS = [
     (49, "cover_note",                  m0049_cover_note),
     (50, "device_traces",               m0050_device_traces),
     (51, "search_speed",                m0051_search_speed),
+    (52, "signup_waitlist",             m0052_signup_waitlist),
 ]
 
 
