@@ -525,11 +525,19 @@ def generate(body, *, purpose: str, user_id: int | None = None,
     Retries 429/500/503 with exponential backoff, honouring Retry-After. This
     was app._gemini_generate, which only three of the ten call sites used.
     """
+    if user_id is None:
+        user_id = current_user()
+    # Staging tests (C12): answer locally, still metered by the ceilings.
+    import fakeai
+    if fakeai.enabled():
+        check(user_id=user_id)
+        result = fakeai.respond(purpose, body)
+        p, o, t = _usage_from(result)
+        _record(user_id, purpose, model + "-fake", p, o, t, ok=True)
+        return result
     k = api_key(key)
     if not k:
         raise ValueError("GEMINI_API_KEY not configured.")
-    if user_id is None:
-        user_id = current_user()
     with _LOCK:
         _until = _BILLING["paused_until"]
         if time.time() < _until:

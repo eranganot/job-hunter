@@ -46,6 +46,7 @@ import gemini
 import jobqueue
 import searchcache
 import opsalerts
+import fakeai
 import links as _links_mod
 import ratelimit
 import worker
@@ -6047,6 +6048,7 @@ class Handler(BaseHTTPRequestHandler):
                 "llm_history": gemini.history(14),
                 "signups": _signups_health(),
                 "disk": _disk_status(),
+                "fake_ai": fakeai.enabled(),
                 "csp_reports": dict(sorted(_CSP_REPORTS.items(), key=lambda kv: -kv[1])[:20]),
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),
