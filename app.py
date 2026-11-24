@@ -448,6 +448,28 @@ def _base_for(host: str) -> str:
     ok = h in _SERVED_HOSTS or h.endswith(".up.railway.app")
     return f"https://{h}" if h and ok else MOBILE_URL.rstrip("/")
 
+# 2026-11-24 (launch item C9): pages asked for on the Railway address move to
+# the public one, so people, Google's brand review and search engines see one
+# site. /api/ stays on both (the B0 extension, health checks, an app shell a
+# service worker cached there) and so does the Google callback, so a sign-in
+# already started there can finish. Off with JH_FORWARD_RAILWAY_HOST=0.
+_FORWARD_KEEP = ("/api/", "/auth/google/callback")
+
+
+def _railway_forward(host: str, path: str):
+    """The public URL to send this GET/HEAD to, or None to serve it here."""
+    h = (host or "").strip().lower().split(":")[0]
+    if not (_public_url and h.endswith(".up.railway.app")):
+        return None
+    if os.environ.get("JH_FORWARD_RAILWAY_HOST", "1").strip() == "0":
+        return None
+    p = path or "/"
+    if p.startswith(_FORWARD_KEEP):
+        return None
+    if urllib.parse.urlparse(_public_url).netloc.lower() == h:
+        return None
+    return _public_url + (p if p.startswith("/") else "/" + p)
+
 # ── DB + Auth init ────────────────────────────────────────────────────────────
 
 database.set_db_path(DB_FILE)
@@ -5262,6 +5284,14 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
     def _do_GET_inner(self):
+        _fwd = _railway_forward(self.headers.get("Host", "") if self.headers else "", self.path)
+        if _fwd:
+            self.send_response(301)
+            self.send_header("Location", _fwd)
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         parsed = urlparse(self.path)
         path   = parsed.path
         qs     = parse_qs(parsed.query)

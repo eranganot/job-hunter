@@ -40,7 +40,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_INDEX = REPO_ROOT / "web_bundle" / "index.html"
 LOCAL_SW = REPO_ROOT / "web_bundle" / "sw.js"
 CONTRACT = REPO_ROOT / "scripts" / "ui_contract.json"
-PROD_URL = "https://web-production-192b7.up.railway.app"
+# 2026-11-24 (C9): the Railway address now forwards pages here.
+PROD_URL = "https://job-hunter.work"
 
 _tty = sys.stdout.isatty()
 
