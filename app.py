@@ -3511,7 +3511,8 @@ def run_job_search(user_id: int, by_user: bool = False):
                     ).fetchall()
                     _rej_set = {(r["c"], r["t"]) for r in _rej_patterns}
                     _rej_companies = {r["c"] for r in _rej_patterns if r["c"]}
-                    _block_set = {(c or "").strip().lower() for c in database.get_blocklist(conn, user_id)}
+                    _block_set = {database.company_key(c) for c in database.get_blocklist(conn, user_id)}
+                    _block_set.discard("")
                     # ── Feedback learning signals (for pre-scoring new jobs) ─────────
                     _fb_signals = database.get_feedback_signals(conn, user_id)
                     _fb_prof_row = conn.execute(
@@ -3534,7 +3535,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                             if (_jc, _jt) in _rej_set:
                                 skipped_rej += 1
                                 continue
-                            if _jc in _block_set:
+                            if _block_set and database.company_key(_jc) in _block_set:
                                 skipped_rej += 1
                                 continue
                             if j.get("match_score", 0) <= 0:
@@ -8026,6 +8027,18 @@ class Handler(BaseHTTPRequestHandler):
                         auth.update_user(user_id, name=_nm)
                         _filled.append("name")
                     data["profile_filled"] = _filled
+                    # Never recommend a job at the company the user works at now
+                    # (product review, 2026-11-24, #4 - current employer only). It goes
+                    # on the user's own blocklist, so they see it under Passed and can
+                    # take it off.
+                    _emp = str(data.get("current_employer") or "").strip()[:120]
+                    if _emp and database.company_key(_emp):
+                        _bc = database.get_db()
+                        try:
+                            database.add_to_blocklist(_bc, user_id, _emp, "Your current employer (from your CV)")
+                        finally:
+                            _bc.close()
+                    data["current_employer"] = _emp
                     database.write_users_config(BASE_DIR)
                     database.log_activity(user_id, "cv_analyzed",
                         f"AI extracted {len(data.get('job_titles',[]))} job titles, "
