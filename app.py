@@ -45,6 +45,7 @@ import paidpool
 import gemini
 import jobqueue
 import searchcache
+import opsalerts
 import links as _links_mod
 import ratelimit
 import worker
@@ -479,6 +480,26 @@ SHORT_LINKS = {
     "/li": "/?utm_source=linkedin&utm_medium=page&utm_campaign=page_about",
 }
 
+def _run_ops_alerts():
+    """opsalerts.py, from the scheduler. Sends to the admin's channels."""
+    try:
+        admin_id, how = admin_alert_target()
+        if admin_id is None:
+            print(f"[ops-alerts] ERROR no admin to alert: {how}")
+            return
+        conn = database.get_db()
+        try:
+            sent = opsalerts.run(conn, gemini.usage(),
+                                 lambda m: deliver_notification(admin_id, "\u26a0\ufe0f " + m,
+                                                                url_suffix=home_url(), from_noa=False))
+        finally:
+            conn.close()
+        if sent:
+            print(f"[ops-alerts] sent: {sent}")
+    except Exception as e:
+        print(f"[ops-alerts] ERROR check failed: {e}")
+
+
 def _signups_health():
     """Sign-up brake state for the full health view (C5)."""
     mode, cap = auth.signup_settings()
@@ -486,7 +507,8 @@ def _signups_health():
         conn = database.get_db()
         try:
             return {"mode": mode, "daily_cap": cap, "today": auth.signups_today(conn),
-                    "waitlist": auth.waitlist_count(conn)}
+                    "waitlist": auth.waitlist_count(conn), "users": opsalerts.real_users(conn),
+                    "emails_today": opsalerts.emails_today(conn)}
         finally:
             conn.close()
     except Exception as e:
@@ -688,6 +710,14 @@ def send_email(to_addr: str, subject: str, body: str, reply_to: str = "", as_noa
     result = resend.Emails.send(msg)
     if result.get("id"):
         print(f"[email/resend] ✅ Sent to {actual_to} — {result['id']}")
+        try:
+            _ec = database.get_db()
+            try:
+                opsalerts.count_email(_ec)
+            finally:
+                _ec.close()
+        except Exception as _ece:
+            print(f"[ops-alerts] WARNING email count not saved: {_ece}")
     else:
         print(f"[email/resend] ⚠️  {result}")
 
@@ -1959,6 +1989,8 @@ def file_watcher():
             _run_fit_survey()
         if _tick % 60 == 3:  # ~hourly: the daily-search probe accounts (probes.py)
             _run_probes()
+        if _tick % 10 == 7:  # ~every 10 minutes: owner alerts (AI use, 50 users, email volume, sign-up brake)
+            _run_ops_alerts()
         if _tick % 360 == 23:  # ~every 6 hours: forget "below the bar" scores past their window (searchcache.py)
             try:
                 _pc = database.get_db()

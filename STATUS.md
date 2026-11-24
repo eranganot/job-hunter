@@ -1,6 +1,6 @@
 # Job Hunter — Status
 
-_Last updated: 2026-11-24 by Claude (sign-up brake; short links /ig /fb /li; Railway address forwards to job-hunter.work; Privacy/Terms restyled; rate limits keyed on the real client address; Fantastic.jobs off - trial used up, reconsider Dec 8; search pile-up fix)._
+_Last updated: 2026-11-24 by Claude (owner alerts; sign-up brake; short links /ig /fb /li; Railway address forwards to job-hunter.work; Privacy/Terms restyled; rate limits keyed on the real client address; Fantastic.jobs off - trial used up, reconsider Dec 8; search pile-up fix)._
 _Seeded from git history + prior transcripts._
 
 ## Now (live on Railway, branch main)
@@ -81,6 +81,7 @@ Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\User
 ⚠️ Edit-tool writes to this mount can truncate files >~250 lines — prefer bash `cp`/Python + line-count verification (see `safe-windows-edits`).
 
 ## Changelog (newest first)
+- 2026-11-24 — **Owner alerts** (`opsalerts.py`, launch items C4 + C7). The scheduler checks every ~10 minutes and alerts the admin once: AI calls today at 50% and 80% of `JH_LLM_GLOBAL_CALLS` (with a floor cost estimate; the hard stop already alerted in gemini.py); real users reaching 50 (move Resend off the free plan); 80 emails sent today (Resend free = 100 a day); the sign-up brake turning someone away today. Dedup in `app_flags`; marked only after the send succeeds. Emails are now counted per day (`emails_sent:<day>` in app_flags) after Resend accepts each one. Health `signups` also shows `users` and `emails_today`. Tests: `tests/test_opsalerts.py`.
 - 2026-11-24 — **Sign-up brake** (launch item C5). `JH_SIGNUPS=paused` refuses new accounts; `JH_SIGNUP_DAILY_CAP=N` (0 = no cap) refuses them once N non-admin accounts were made today (UTC). Both email and Google sign-up check it (`auth._signup_blocked`); existing users and the admin email always get in. A refused person sees a polite "Noa is at capacity" message and is saved to `signup_waitlist` (migration 52). Full health shows `signups` (mode, cap, today, waitlist). Defaults: open, no cap. Tests: `tests/test_signup_brake.py`.
 - 2026-11-24 — **Short links `/ig`, `/fb`, `/li`** (launch item S3). A 302 to the landing page with the channel's tracking tags (`SHORT_LINKS` in `app.py`), so the Instagram bio shows `job-hunter.work/ig` instead of a long `?utm_` URL. Tests: `tests/test_short_links.py`.
 - 2026-11-24 — **The Railway address now forwards pages to job-hunter.work** (launch item C9). GET requests on `*.up.railway.app` get a 301 to `JH_PUBLIC_URL` with the same path and query; `/api/` (B0 extension, health checks, cached app shells) and `/auth/google/callback` (sign-ins already in progress) are still served there. `JH_FORWARD_RAILWAY_HOST=0` turns it off. Needed so Google brand verification (E8) and search engines see one site, and so the Railway callback URI can come out of the Google client. `scripts/smoke.py` now defaults to `https://job-hunter.work` (full smoke 79/79 there before the change). Tests: `tests/test_railway_forward.py`.
