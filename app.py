@@ -5067,13 +5067,65 @@ def public_health(payload: dict) -> dict:
 
 # Sent on every response (JH-1). No script-src CSP yet: the pages carry inline
 # scripts; frame-ancestors alone stops clickjacking without touching them.
+# 2026-11-24 (launch item C9): the full policy runs REPORT-ONLY first. Browsers
+# report what it would block to /api/csp-report and block nothing, so a missed
+# source cannot break sign-in, the Meta pixel or PostHog a week before launch.
+# The enforced header stays frame-ancestors only until the test week's reports
+# (health "csp_reports") come back clean; then this string moves to the
+# enforced header. Inline scripts are allowed: the pixel, PostHog and the
+# landing's A/B snippet are inline today.
+CSP_REPORT_ONLY = "; ".join((
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://*.posthog.com",
+    "connect-src 'self' https://*.posthog.com https://*.facebook.com https://*.facebook.net",
+    "img-src 'self' data: blob: https:",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    "frame-src https://www.facebook.com",
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self' https://accounts.google.com",
+    "frame-ancestors 'none'",
+    "report-uri /api/csp-report",
+))
+
 SECURITY_HEADERS = (
     ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
     ("X-Frame-Options", "DENY"),
     ("Content-Security-Policy", "frame-ancestors 'none'"),
+    ("Content-Security-Policy-Report-Only", CSP_REPORT_ONLY),
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
+    ("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()"),
 )
+
+# What the report-only policy would have blocked since the process started:
+# {"<directive> <blocked origin>": count}, capped so a flood cannot grow it.
+_CSP_REPORTS = {}
+_CSP_REPORTS_MAX = 50
+
+
+def _csp_record(report: dict):
+    """Fold one browser CSP report into _CSP_REPORTS; log each new kind once."""
+    r = report.get("csp-report", report) if isinstance(report, dict) else {}
+    if not isinstance(r, dict):
+        return
+    directive = str(r.get("effective-directive") or r.get("violated-directive") or "?").split(" ")[0][:40]
+    blocked = str(r.get("blocked-uri") or "?")
+    try:
+        p = urllib.parse.urlparse(blocked)
+        blocked = (p.scheme + "://" + p.netloc) if p.netloc else blocked[:40]
+    except ValueError:
+        blocked = blocked[:40]
+    key = "%s %s" % (directive, blocked)
+    if key in _CSP_REPORTS:
+        _CSP_REPORTS[key] += 1
+    elif len(_CSP_REPORTS) < _CSP_REPORTS_MAX:
+        _CSP_REPORTS[key] = 1
+        print("[csp] WARNING report-only policy would block %s (page %s)"
+              % (key, str(r.get("document-uri") or "?")[:80]))
 
 
 
@@ -5724,9 +5776,22 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(_img)
             return
 
+        if path == "/sitemap.xml":
+            _base = (_public_url or MOBILE_URL).rstrip("/")
+            _urls = "".join("<url><loc>%s%s</loc></url>" % (_base, u) for u in ("/", "/privacy", "/terms"))
+            body = ('<?xml version="1.0" encoding="UTF-8"?>'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">%s</urlset>' % _urls).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if path == "/robots.txt":
             body = ("User-agent: *\nAllow: /$\nDisallow: /app\nDisallow: /api/\n"
-                    "Disallow: /reset-password\nDisallow: /verify-email\n").encode()
+                    "Disallow: /reset-password\nDisallow: /verify-email\n"
+                    "Sitemap: %s/sitemap.xml\n" % (_public_url or MOBILE_URL).rstrip("/")).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -5919,6 +5984,7 @@ class Handler(BaseHTTPRequestHandler):
                 # outside the box and the ceiling stayed at its placeholder.
                 "llm_history": gemini.history(14),
                 "signups": _signups_health(),
+                "csp_reports": dict(sorted(_CSP_REPORTS.items(), key=lambda kv: -kv[1])[:20]),
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),
                 "paid_pool": _paid_pool_health(),
@@ -7071,6 +7137,22 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST_inner(self):
         parsed = urlparse(self.path)
         path   = parsed.path
+
+        # CSP violation reports from browsers (report-only policy, C9). Anonymous
+        # by nature; small, never stored beyond a capped in-memory count.
+        if path == "/api/csp-report":
+            try:
+                n = min(int(self.headers.get("Content-Length", "0") or 0), 16384)
+                raw = self.rfile.read(n) if n else b""
+                data = json.loads(raw.decode("utf-8", "replace") or "{}")
+                for item in (data if isinstance(data, list) else [data]):
+                    _csp_record(item.get("body", item) if isinstance(item, dict) else {})
+            except ValueError as _cspe:
+                print(f"[csp] WARNING unreadable report: {_cspe}")
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
 
         # Job Hunter's Telegram bot (telegrambot.py). Telegram calls this with
         # the secret we registered in setWebhook; anything without it is refused.
