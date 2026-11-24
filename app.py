@@ -5159,22 +5159,34 @@ class Handler(BaseHTTPRequestHandler):
         return user
     def client_ip(self) -> str:
         """
-        The caller's address as well as it can be known.
+        The caller's public address.
 
-        Railway terminates TLS and appends X-Forwarded-For, so the socket peer
-        is the proxy and would put every user in one bucket - a global lockout
-        the first time anyone typo'd a password.
-
-        JH-3 (2026-11-05): the LAST entry, not the first. The first entry is
-        whatever the client typed - sending a fresh X-Forwarded-For per request
-        put every signup in a new register-limiter bucket. The proxy appends the
-        address it actually saw, so the last entry is the one the client cannot
-        choose (and with no client header, first and last are the same).
-        Anything that matters is still limited on a second key as well (login
-        on the email, run-search on the user id).
+        2026-11-24 (launch finding F6), observed on production through the
+        `request_ip` block of the full /api/health:
+          * Railway's edge overwrites X-Forwarded-For and X-Real-IP; forged copies
+            (X-Real-IP 9.9.9.9, X-Forwarded-For 7.7.7.7) never arrived.
+          * X-Forwarded-For arrives as "<connecting address>, <Railway front
+            address>". Its LAST entry (JH-3's choice) is Railway's own
+            152.233.x, the same for everyone on that edge node; its FIRST is
+            Cloudflare's node when the request came through job-hunter.work.
+          * X-Real-IP held the real client both ways: the owner's ISP address
+            through Cloudflare, the caller's own address on the Railway host.
+          * CF-Connecting-IP is NOT safe: a forged one arrived untouched on the
+            Railway host.
+        So: X-Real-IP; the last X-Forwarded-For entry only where there is no
+        edge (local runs, tests); the socket peer last.
         """
-        fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[-1].strip()
+        real = (self.headers.get("X-Real-IP", "") or "").strip() if self.headers else ""
+        if real:
+            return real
+        fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[-1].strip() if self.headers else ""
         return fwd or (self.client_address[0] if self.client_address else "?")
+
+    def limit_ip(self) -> str:
+        """client_ip() as a rate-limit key: an IPv6 address counts by its /64,
+        the block one home or phone gets, so a caller cannot rotate around a
+        limit inside its own block."""
+        return ratelimit.ip_key(self.client_ip())
 
     def reject_cross_site(self) -> bool:
         """
@@ -7072,7 +7084,7 @@ class Handler(BaseHTTPRequestHandler):
         # Plan B, test B0 (device.py): a device token in the Authorization header,
         # never the cookie, so it sits before the cross-site lock.
         if path == "/api/device/pair":
-            _w = ratelimit.check_and_record("device_pair", "ip:" + self.client_ip())
+            _w = ratelimit.check_and_record("device_pair", "ip:" + self.limit_ip())
             if _w:
                 self.send_json({"error": "Too many tries. Wait a few minutes."}, 429)
                 return
@@ -7174,8 +7186,9 @@ class Handler(BaseHTTPRequestHandler):
             body = urllib.parse.parse_qs(self.read_body().decode())
             email    = body.get("email", [""])[0]
             password = body.get("password", [""])[0]
-            _ip = (self.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip() or (self.client_address[0] if self.client_address else "?")
-            _ipk = "ip:" + _ip
+            # F6 (2026-11-24): was the FIRST X-Forwarded-For entry - Cloudflare's
+            # node, shared by everyone behind it - see client_ip().
+            _ipk = "ip:" + self.limit_ip()
             _emk = "em:" + email.strip().lower()
             _wait = _login_check(_ipk) or _login_check(_emk)
             if _wait:
@@ -7203,7 +7216,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/forgot-password":
             body = urllib.parse.parse_qs(self.read_body().decode())
             email = (body.get("email", [""])[0] or "").strip().lower()
-            _w = ratelimit.check_and_record("reset", "ip:" + self.client_ip()) or \
+            _w = ratelimit.check_and_record("reset", "ip:" + self.limit_ip()) or \
                  (email and ratelimit.check_and_record("reset", "em:" + email))
             if _w:
                 self.send_html(FORGOT_HTML.replace("{error_block}", error_block(
@@ -7317,7 +7330,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/register":
             # Nothing stopped a script creating accounts in a loop. Attempt-based,
             # because here the call IS the abuse - there is no "failure" to count.
-            _rwait = ratelimit.check_and_record("register", self.client_ip())
+            _rwait = ratelimit.check_and_record("register", self.limit_ip())
             if _rwait:
                 _mins = max(1, _rwait // 60)
                 self.send_html(REGISTER_HTML.replace("{error_block}", error_block(

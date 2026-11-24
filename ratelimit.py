@@ -121,3 +121,15 @@ def snapshot():
     """Bucket sizes, for /api/health and for proving the sweep works."""
     with _LOCK:
         return {"tracked_keys": len(_HITS)}
+
+
+def ip_key(ip: str) -> str:
+    """An address as a limiter key: IPv4 as is, IPv6 by its /64 (2026-11-24, F6)."""
+    import ipaddress
+    try:
+        a = ipaddress.ip_address((ip or "").strip())
+    except ValueError:
+        return ip or "?"
+    if a.version == 6:
+        return str(ipaddress.ip_network(str(a) + "/64", strict=False))
+    return str(a)
