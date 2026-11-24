@@ -1,0 +1,158 @@
+[
+  {
+    "key": "product",
+    "name": "Maya Levinson",
+    "title": "Senior Product Manager",
+    "years": 7,
+    "city": "Tel Aviv",
+    "family": "Product",
+    "expect_titles": [
+      "Product Manager",
+      "Senior Product Manager",
+      "Group Product Manager"
+    ],
+    "must_not_see": [
+      "Software Engineer",
+      "QA Engineer",
+      "Account Executive"
+    ],
+    "email": "maya.levinson@job-hunter.test",
+    "cv": "product.pdf"
+  },
+  {
+    "key": "design",
+    "name": "Noam Shapira",
+    "title": "Senior Product Designer",
+    "years": 6,
+    "city": "Tel Aviv",
+    "family": "Design",
+    "expect_titles": [
+      "Product Designer",
+      "UX Designer",
+      "UI/UX Designer"
+    ],
+    "must_not_see": [
+      "Graphic Designer (print)",
+      "Product Manager",
+      "Frontend Developer"
+    ],
+    "email": "noam.shapira@job-hunter.test",
+    "cv": "design.pdf"
+  },
+  {
+    "key": "marketing",
+    "name": "Tamar Ben-David",
+    "title": "Growth Marketing Manager",
+    "years": 5,
+    "city": "Herzliya",
+    "family": "Marketing",
+    "expect_titles": [
+      "Growth Marketing Manager",
+      "Performance Marketing Manager",
+      "Digital Marketing Manager"
+    ],
+    "must_not_see": [
+      "Sales Development Representative",
+      "Product Manager"
+    ],
+    "email": "tamar.bendavid@job-hunter.test",
+    "cv": "marketing.pdf"
+  },
+  {
+    "key": "data",
+    "name": "Daniel Katz",
+    "title": "Data Scientist",
+    "years": 5,
+    "city": "Tel Aviv",
+    "family": "Data",
+    "expect_titles": [
+      "Data Scientist",
+      "Senior Data Scientist",
+      "Machine Learning Engineer"
+    ],
+    "must_not_see": [
+      "Data Entry",
+      "Product Manager",
+      "QA Engineer"
+    ],
+    "email": "daniel.katz@job-hunter.test",
+    "cv": "data.pdf"
+  },
+  {
+    "key": "qa",
+    "name": "Ronit Azulay",
+    "title": "QA Automation Engineer",
+    "years": 6,
+    "city": "Petah Tikva",
+    "family": "QA",
+    "expect_titles": [
+      "QA Automation Engineer",
+      "Automation Engineer",
+      "SDET"
+    ],
+    "must_not_see": [
+      "Software Engineer (backend only)",
+      "Product Manager"
+    ],
+    "email": "ronit.azulay@job-hunter.test",
+    "cv": "qa.pdf"
+  },
+  {
+    "key": "software",
+    "name": "Yoav Mizrahi",
+    "title": "Senior Backend Engineer",
+    "years": 8,
+    "city": "Tel Aviv",
+    "family": "Software",
+    "expect_titles": [
+      "Backend Engineer",
+      "Senior Software Engineer",
+      "Backend Developer"
+    ],
+    "must_not_see": [
+      "QA Engineer",
+      "Product Manager",
+      "Frontend Developer (only)"
+    ],
+    "email": "yoav.mizrahi@job-hunter.test",
+    "cv": "software.pdf"
+  },
+  {
+    "key": "devops",
+    "name": "Gal Peretz",
+    "title": "DevOps Engineer",
+    "years": 5,
+    "city": "Ra'anana",
+    "family": "DevOps",
+    "expect_titles": [
+      "DevOps Engineer",
+      "Platform Engineer",
+      "Site Reliability Engineer"
+    ],
+    "must_not_see": [
+      "IT Helpdesk",
+      "Software Engineer (frontend)"
+    ],
+    "email": "gal.peretz@job-hunter.test",
+    "cv": "devops.pdf"
+  },
+  {
+    "key": "sales_cs",
+    "name": "Shira Cohen",
+    "title": "Customer Success Manager",
+    "years": 4,
+    "city": "Tel Aviv",
+    "family": "Sales and customer success",
+    "expect_titles": [
+      "Customer Success Manager",
+      "Account Manager",
+      "Senior CSM"
+    ],
+    "must_not_see": [
+      "Customer Support Agent (entry)",
+      "Software Engineer"
+    ],
+    "email": "shira.cohen@job-hunter.test",
+    "cv": "sales_cs.pdf"
+  }
+]
