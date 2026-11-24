@@ -489,6 +489,12 @@ def _run_ops_alerts():
             return
         conn = database.get_db()
         try:
+            for _k, _m in opsalerts.disk_due(conn, _disk_status()):
+                try:
+                    deliver_notification(admin_id, "\u26a0\ufe0f " + _m, url_suffix=home_url(), from_noa=False)
+                    opsalerts._mark(conn, _k)
+                except Exception as _de:
+                    print(f"[ops-alerts] ERROR disk alert not sent: {_de}")
             sent = opsalerts.run(conn, gemini.usage(),
                                  lambda m: deliver_notification(admin_id, "\u26a0\ufe0f " + m,
                                                                 url_suffix=home_url(), from_noa=False))
@@ -498,6 +504,61 @@ def _run_ops_alerts():
             print(f"[ops-alerts] sent: {sent}")
     except Exception as e:
         print(f"[ops-alerts] ERROR check failed: {e}")
+
+
+def _disk_status():
+    """{"postgres": {...}, "volume": {...}}: used / cap MB and pct (C6)."""
+    out = {}
+    try:
+        if database.backend() == "postgres":
+            conn = database.get_db()
+            try:
+                used = int(conn.execute("SELECT pg_database_size(current_database())").fetchone()[0])
+            finally:
+                conn.close()
+            cap = float(os.environ.get("JH_PG_VOLUME_GB", "5") or 5) * 1024
+            out["postgres"] = {"used_mb": round(used / 1048576), "cap_mb": round(cap),
+                               "pct": round(100 * used / 1048576 / cap) if cap else None}
+    except Exception as e:
+        print(f"[disk] WARNING postgres size unavailable: {e}")
+    try:
+        import shutil
+        du = shutil.disk_usage(UPLOADS_DIR)
+        out["volume"] = {"used_mb": round(du.used / 1048576), "cap_mb": round(du.total / 1048576),
+                         "pct": round(100 * du.used / du.total) if du.total else None}
+    except OSError as e:
+        print(f"[disk] WARNING volume usage unavailable: {e}")
+    return out
+
+
+def _run_evening_report():
+    """21:00 Israel, once a day: the owner's summary (opsalerts.evening_report)."""
+    if os.environ.get("JH_EVENING_REPORT", "1").strip() == "0":
+        return
+    try:
+        admin_id, how = admin_alert_target()
+        if admin_id is None:
+            return
+        conn = database.get_db()
+        try:
+            due, key = opsalerts.evening_due(conn, israel_now().hour)
+            if not due:
+                return
+            try:
+                import kpis
+                import testaccount
+                kpi = kpis.today(conn, testaccount.TEST_EMAIL)
+            except Exception as ke:
+                print(f"[evening] WARNING KPIs unavailable: {ke}")
+                kpi = None
+            msg = opsalerts.evening_report(conn, gemini.usage(), kpi, _disk_status())
+            deliver_notification(admin_id, msg, url_suffix=home_url(), from_noa=False)
+            opsalerts._mark(conn, key)
+            print("[evening] report sent")
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[evening] ERROR report failed: {e}")
 
 
 def _signups_health():
@@ -1991,6 +2052,7 @@ def file_watcher():
             _run_probes()
         if _tick % 10 == 7:  # ~every 10 minutes: owner alerts (AI use, 50 users, email volume, sign-up brake)
             _run_ops_alerts()
+            _run_evening_report()
         if _tick % 360 == 23:  # ~every 6 hours: forget "below the bar" scores past their window (searchcache.py)
             try:
                 _pc = database.get_db()
@@ -5984,6 +6046,7 @@ class Handler(BaseHTTPRequestHandler):
                 # outside the box and the ceiling stayed at its placeholder.
                 "llm_history": gemini.history(14),
                 "signups": _signups_health(),
+                "disk": _disk_status(),
                 "csp_reports": dict(sorted(_CSP_REPORTS.items(), key=lambda kv: -kv[1])[:20]),
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),

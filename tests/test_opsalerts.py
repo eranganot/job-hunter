@@ -77,3 +77,40 @@ def test_waitlist_alert(stack, monkeypatch):
         assert [m for k, m in opsalerts.due(conn, {}) if k.startswith("waitlist:")]
     finally:
         conn.close()
+
+
+def test_disk_alert_once_a_day(stack):
+    conn = _conn(stack)
+    try:
+        conn.execute("DELETE FROM app_flags WHERE key LIKE 'disk_%'"); conn.commit()
+        disk = {"postgres": {"used_mb": 3800, "cap_mb": 5120, "pct": 74}, "volume": {"used_mb": 10, "cap_mb": 5120, "pct": 0}}
+        due = opsalerts.disk_due(conn, disk)
+        assert [k.split(":")[0] for k, _ in due] == ["disk_postgres"] and "74%" in due[0][1]
+        opsalerts._mark(conn, due[0][0])
+        assert opsalerts.disk_due(conn, disk) == []
+    finally:
+        conn.close()
+
+
+def test_evening_report(stack):
+    conn = _conn(stack)
+    try:
+        conn.execute("DELETE FROM app_flags WHERE key LIKE 'evening:%'"); conn.commit()
+        assert opsalerts.evening_due(conn, 20)[0] is False
+        due, key = opsalerts.evening_due(conn, 21)
+        assert due
+        kpi = {"kpis": {"activation_48h": {"value": 40, "n": 2, "of": 5},
+                        "weekly_active_swipers": {"value": 7}, "first_applications": {"value": 3}}}
+        msg = opsalerts.evening_report(conn, _usage(1200, 15000, 12_000_000), kpi,
+                                       {"postgres": {"pct": 12}})
+        for part in ("New sign-ups", "1,200 of 15,000", "Emails sent", "activation 40%", "Disk postgres: 12%"):
+            assert part in msg, part
+        opsalerts._mark(conn, key)
+        assert opsalerts.evening_due(conn, 22)[0] is False
+    finally:
+        conn.close()
+
+
+def test_disk_status_shape(stack):
+    d = stack["app"]._disk_status()
+    assert "volume" in d and d["volume"]["cap_mb"] > 0

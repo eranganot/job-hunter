@@ -109,3 +109,56 @@ def run(conn, ai_usage, send):
         _mark(conn, key)
         sent.append(key)
     return sent
+
+
+# ── Disk (C6) ─────────────────────────────────────────────────────────────────
+DISK_WARN_PCT = 70
+
+
+def disk_due(conn, disk):
+    """Alerts for any disk at or above DISK_WARN_PCT, once a day per disk."""
+    out, day = [], _today()
+    for name, d in (disk or {}).items():
+        pct = (d or {}).get("pct")
+        if pct is not None and pct >= DISK_WARN_PCT and not _seen(conn, "disk_%s:%s" % (name, day)):
+            out.append(("disk_%s:%s" % (name, day),
+                        "Disk '%s' is %d%% full (%s of %s MB). Railway -> the service -> Settings -> "
+                        "Volume -> grow it before it fills." % (name, pct, d.get("used_mb"), d.get("cap_mb"))))
+    return out
+
+
+# ── Evening report (C6) ───────────────────────────────────────────────────────
+
+def _signed_up_today(conn):
+    row = conn.execute("SELECT COUNT(*) FROM users WHERE role != 'admin' AND lower(email) NOT LIKE ? "
+                       "AND created_date >= ?", ("%" + TEST_DOMAIN, _today())).fetchone()
+    return int(row[0] or 0)
+
+
+def evening_report(conn, ai_usage, kpi=None, disk=None):
+    """One plain-text summary of the day for the owner."""
+    g = (ai_usage or {}).get("global") or {}
+    cap = ((ai_usage or {}).get("limits") or {}).get("global_calls") or 0
+    calls, tokens = int(g.get("calls") or 0), int(g.get("tokens") or 0)
+    lines = ["Job Hunter today (%s UTC day):" % _today(),
+             "- New sign-ups: %d (total real users %d); turned away by the cap: %d"
+             % (_signed_up_today(conn), real_users(conn), waitlisted_today(conn)),
+             "- AI calls: %s%s, about $%.0f or more" % (f"{calls:,}", (" of %s" % f"{cap:,}") if cap else "",
+                                                        tokens * USD_PER_M_TOKENS / 1e6),
+             "- Emails sent: %d of Resend's 100 a day" % emails_today(conn)]
+    k = (kpi or {}).get("kpis") or {}
+    if k:
+        a = k.get("activation_48h") or {}
+        lines.append("- Last 7 days: activation %s%% (%s of %s), active swipers %s, first applications %s"
+                     % (a.get("value", "-"), a.get("n", 0), a.get("of", 0),
+                        (k.get("weekly_active_swipers") or {}).get("value", "-"),
+                        (k.get("first_applications") or {}).get("value", "-")))
+    for name, d in (disk or {}).items():
+        if d and d.get("pct") is not None:
+            lines.append("- Disk %s: %d%% full" % (name, d["pct"]))
+    return "\n".join(lines)
+
+
+def evening_due(conn, hour_il, at_hour=21):
+    key = "evening:" + _today()
+    return hour_il >= at_hour and not _seen(conn, key), key
