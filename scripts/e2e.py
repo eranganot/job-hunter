@@ -45,6 +45,7 @@ def run_persona(browser, base, key, p, out, search_minutes, run_id):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)[:200]))
     email = "e2e-%s-%s@job-hunter.test" % (run_id, p["key"])
+    print("  user %s" % email, flush=True)
 
     def step(name, fn):
         s = time.time()
@@ -60,7 +61,7 @@ def run_persona(browser, base, key, p, out, search_minutes, run_id):
             err = (err or "") + " (screenshot failed: %s)" % e
         steps.append({"step": name, "ok": ok, "seconds": round(time.time() - s, 1),
                       "error": err, "screenshot": shot.name})
-        print("  %-4s %-28s %6.1fs %s" % ("ok" if ok else "FAIL", name, time.time() - s, err or ""))
+        print("  %-4s %-28s %6.1fs %s" % ("ok" if ok else "FAIL", name, time.time() - s, err or ""), flush=True)
         if not ok:
             raise StepFailed(name)
 
@@ -116,9 +117,14 @@ def run_persona(browser, base, key, p, out, search_minutes, run_id):
         def picks():
             deadline = time.time() + search_minutes * 60
             while time.time() < deadline:
-                if page.get_by_role("button", name="Approve").count():
+                # Look for the button for up to 20 s: right after a reload the app shows
+                # "Loading your jobs..." for a moment, and a check made at that instant
+                # always saw no button (staging, 2026-11-24: a persona with jobs failed).
+                try:
+                    page.get_by_role("button", name="Approve").first.wait_for(timeout=20000)
                     return
-                page.wait_for_timeout(20000)
+                except Exception:
+                    pass
                 page.reload(wait_until="domcontentloaded")
             raise AssertionError("no picks after %s minutes" % search_minutes)
         step("picks arrive", picks)
