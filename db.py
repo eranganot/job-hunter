@@ -3,6 +3,7 @@ db.py — Multi-user database layer for Job Hunter
 """
 import sqlite3
 import json
+import re
 import os
 import dbdriver
 import textclean
@@ -569,6 +570,23 @@ def write_users_config(base_dir: str):
         conn.close()
 
 # ── Pass-reason feedback loop (improvement #2) ──────────────────────────────
+
+_CO_SUFFIXES = {"ltd", "inc", "llc", "corp", "corporation", "co", "company", "gmbh", "plc", "limited",
+                "technologies", "technology", "group", "israel", "il", "com"}
+
+
+def company_key(name: str) -> str:
+    """A company name reduced for matching: "Wix.com Ltd." and "Wix" give the same key.
+
+    Lowercase, punctuation to spaces, legal and generic suffix words dropped from
+    the END only (so "Group" inside a name is kept). Used by the blocklist check,
+    which used to compare the exact lowercased name - a current employer taken
+    from a CV ("Monday.com Ltd") would not have matched its postings ("monday.com")."""
+    words = re.sub(r"[^0-9a-z\u0590-\u05ff]+", " ", (name or "").lower()).split()
+    while len(words) > 1 and words[-1] in _CO_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
 
 def add_to_blocklist(conn: sqlite3.Connection, user_id: int, company_name: str, reason: str = "") -> None:
     """Add a company to the user's blocklist (idempotent — ignores duplicates)."""

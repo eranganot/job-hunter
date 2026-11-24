@@ -59,12 +59,13 @@ def analyze_cv(pdf_path: str, api_key: str = "", user_id: int | None = None) -> 
         '  "linkedin_url": "<LinkedIn profile URL found in CV, or empty string if not present>",\n'
         '  "phone": "<phone number found in CV, or empty string if not present>",\n'
         '  "full_name": "<the person\'s full name as written in the CV, or empty string>",\n'
-        '  "email": "<email address found in CV, or empty string if not present>"\n'
+        '  "email": "<email address found in CV, or empty string if not present>",\n'
+        '  "current_employer": "<the company of the role the person holds NOW (ends in present/current/today, or has no end date), or empty string if the latest role has ended or it is unclear>"\n'
         "}\n\n"
         "Score guidance: 0-40 weak, 41-60 average, 61-75 good, 76-90 strong, 91-100 excellent. "
         "Score based on: clarity, relevance of experience, skills depth, career progression, "
         "and searchability for the Israeli/global tech market. "
-        "For linkedin_url, phone, full_name and email: extract exactly as written in the CV, never invent them. "
+        "For linkedin_url, phone, full_name, email and current_employer: extract exactly as written in the CV, never invent them. "
         "Be specific with job titles — use real market titles. "
         "Return ONLY the JSON object."
     )
