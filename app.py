@@ -5850,6 +5850,19 @@ class Handler(BaseHTTPRequestHandler):
                 # back at the end of the request/tick. Should stay 0; a rising
                 # count names a route that needs a try/finally.
                 "db_leaks_reclaimed": dbdriver.reclaimed_stats(),
+                # The caller's own address headers as this request arrived
+                # (2026-11-24, launch finding F6): client_ip() logged a Railway
+                # edge address (152.233.x) for a user whose address is 147.235.x,
+                # so the limiter keys must be re-chosen from observed headers.
+                # Full view only; it shows nobody but the caller.
+                "request_ip": {
+                    "client_ip": self.client_ip(),
+                    "socket_peer": self.client_address[0] if self.client_address else None,
+                    **{h: self.headers.get(h) for h in (
+                        "X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "CF-Ray",
+                        "True-Client-IP", "Fastly-Client-IP", "X-Envoy-External-Address",
+                        "X-Railway-Edge", "Forwarded", "CDN-Loop")},
+                },
             }
             self.send_json(_health if self._health_detail_allowed() else public_health(_health))
             return
