@@ -5374,6 +5374,18 @@ class Handler(BaseHTTPRequestHandler):
         fwd = (self.headers.get("X-Forwarded-For", "") or "").split(",")[-1].strip() if self.headers else ""
         return fwd or (self.client_address[0] if self.client_address else "?")
 
+    def _loadtest_ok(self) -> bool:
+        """C12 (2026-11-24): staging load tests sign up hundreds of users from one
+        machine. With JH_LOADTEST_KEY set (never in production - refused there)
+        and a matching X-Loadtest-Key header, sign-up skips its per-IP limit.
+        Nothing else is bypassed."""
+        want = (os.environ.get("JH_LOADTEST_KEY", "") or "").strip()
+        if not want or not self.headers:
+            return False
+        if (os.environ.get("RAILWAY_ENVIRONMENT_NAME", "") or "").strip().lower() == "production":
+            return False
+        return hmac.compare_digest(want, (self.headers.get("X-Loadtest-Key", "") or "").strip())
+
     def limit_ip(self) -> str:
         """client_ip() as a rate-limit key: an IPv6 address counts by its /64,
         the block one home or phone gets, so a caller cannot rotate around a
@@ -7571,7 +7583,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/register":
             # Nothing stopped a script creating accounts in a loop. Attempt-based,
             # because here the call IS the abuse - there is no "failure" to count.
-            _rwait = ratelimit.check_and_record("register", self.limit_ip())
+            _rwait = 0 if self._loadtest_ok() else ratelimit.check_and_record("register", self.limit_ip())
             if _rwait:
                 _mins = max(1, _rwait // 60)
                 self.send_html(REGISTER_HTML.replace("{error_block}", error_block(
