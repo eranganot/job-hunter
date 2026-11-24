@@ -23,40 +23,48 @@ OPERATOR_PLACE = "Ramat Gan, Israel"
 CONTACT = "support@job-hunter.work"
 EFFECTIVE = "17 November 2026"
 
-_MARK_SVG = ('<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" '
-             'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-             '<rect x="2" y="7" width="20" height="14" rx="2"/>'
-             '<path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>')
-
+# 2026-11-24 (launch finding F16): the landing's look - deep forest green, butter
+# yellow, Fraunces headings, Inter text, the green-and-yellow logo - instead of
+# the old indigo. Same palette variables as landing.py so the two stay in step.
 _CSS = """
+@font-face{font-family:Fraunces;font-style:normal;font-weight:100 900;font-display:swap;
+  src:url(/landing-assets/fraunces-latin-wght.woff2) format('woff2')}
+@font-face{font-family:Inter;font-style:normal;font-weight:100 900;font-display:swap;
+  src:url(/landing-assets/inter-latin-wght.woff2) format('woff2')}
 *,*::before,*::after{box-sizing:border-box}
-body{margin:0;color:#e5e7eb;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.65}
-a{color:#a5b4fc}
-.shell{max-width:46rem;margin:0 auto;padding:0 1rem 3rem}
+:root{color-scheme:dark;--bg:#0c1f17;--bg2:#0f251c;--panel:#12291f;--line:#2c4a3c;--text:#c4d4c6;--muted:#8ba593;
+      --strong:#fbf6e6;--accent:#ffd766;
+      --display:Fraunces,Georgia,'Times New Roman',serif;
+      --body:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+body{margin:0;color:var(--text);background:var(--bg);font-family:var(--body);font-size:1.0625rem;line-height:1.65}
+a{color:var(--accent)}
+a:focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:.4rem}
+.shell{max-width:46rem;margin:0 auto;padding:0 1.15rem 3rem}
 @media(min-width:40rem){.shell{padding:0 1.5rem 4rem}}
-nav{display:flex;align-items:center;justify-content:space-between;padding:1.1rem 0;margin-bottom:1rem}
-.brand{display:flex;align-items:center;gap:.6rem;color:#fff;text-decoration:none;font-weight:700}
-.mark{width:2rem;height:2rem;border-radius:.6rem;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6366f1,#4338ca)}
-.mark svg{width:1rem;height:1rem}
-.navlinks a{color:#cbd5e1;text-decoration:none;font-size:.9rem;margin-left:1rem}
-.navlinks a:hover{color:#fff}
-h1{color:#fff;font-size:clamp(1.7rem,4.5vw,2.2rem);line-height:1.2;margin:.5rem 0 .25rem}
-.meta{color:#9ca3af;font-size:.9rem;margin:0 0 1.5rem}
-.summary{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.35);border-radius:1rem;padding:1rem 1.2rem;margin:0 0 2rem}
+nav{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.1rem 0;margin-bottom:1rem}
+.brand{display:flex;align-items:center;gap:.65rem;color:var(--strong);text-decoration:none;font-weight:700;font-size:1.12rem;white-space:nowrap}
+.brand img{width:2.2rem;height:2.2rem;border-radius:.6rem}
+.navlinks a{color:var(--muted);text-decoration:none;font-size:.92rem;margin-left:1rem}
+.navlinks a:hover{color:var(--strong)}
+h1,h2,h3{font-family:var(--display);color:var(--strong);font-weight:600}
+h1{font-size:clamp(1.9rem,4.5vw,2.5rem);line-height:1.15;margin:.5rem 0 .3rem}
+.meta{color:var(--muted);font-size:.9rem;margin:0 0 1.5rem}
+.summary{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:1rem;padding:1rem 1.2rem;margin:0 0 2rem}
 .summary p{margin:.2rem 0}
 .summary ul{margin:.4rem 0 0;padding-left:1.2rem}
-h2{color:#fff;font-size:1.2rem;margin:2.2rem 0 .5rem;padding-top:1.2rem;border-top:1px solid #1f2937}
-h3{color:#e5e7eb;font-size:1rem;margin:1.2rem 0 .3rem}
-p,li{color:#cbd5e1}
+h2{font-size:1.35rem;margin:2.2rem 0 .5rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+h3{font-size:1.08rem;margin:1.2rem 0 .3rem}
+p,li{color:var(--text)}
 ul{padding-left:1.2rem}
 li{margin:.25rem 0}
 .tbl{width:100%;overflow-x:auto}
-table{border-collapse:collapse;width:100%;font-size:.9rem;margin:.6rem 0}
-th,td{text-align:left;vertical-align:top;padding:.55rem .6rem;border-bottom:1px solid #1f2937}
-th{color:#fff;font-weight:600;background:#111827}
-td{color:#cbd5e1}
-footer{border-top:1px solid #1f2937;margin-top:3rem;padding-top:1.25rem;color:#9ca3af;font-size:.85rem;display:flex;flex-wrap:wrap;gap:.5rem 1.25rem;justify-content:space-between}
-footer a{color:#9ca3af}
+table{border-collapse:collapse;width:100%;font-size:.92rem;margin:.6rem 0}
+th,td{text-align:left;vertical-align:top;padding:.55rem .6rem;border-bottom:1px solid var(--line)}
+th{color:var(--strong);font-weight:600;background:var(--bg2)}
+td{color:var(--text)}
+footer{border-top:1px solid var(--line);margin-top:3rem;padding-top:1.25rem;color:var(--muted);font-size:.85rem;display:flex;flex-wrap:wrap;gap:.5rem 1.25rem;justify-content:space-between}
+footer a{color:var(--muted)}
+@media(max-width:26rem){.navlinks a{margin-left:.7rem;font-size:.85rem}.brand{font-size:1rem}.brand img{width:1.9rem;height:1.9rem}}
 """
 
 
@@ -71,7 +79,9 @@ def _page(title: str, description: str, body: str, public_url: str = "", path: s
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <meta name="theme-color" content="#0f172a"/>
+  <meta name="theme-color" content="#0c1f17"/>
+  <link rel="icon" type="image/png" href="/app/icon-192.png?v=forest"/>
+  <link rel="preload" href="/landing-assets/fraunces-latin-wght.woff2" as="font" type="font/woff2" crossorigin/>
   <title>{t}</title>
   <meta name="description" content="{d}"/>
   {canon}
@@ -80,7 +90,7 @@ def _page(title: str, description: str, body: str, public_url: str = "", path: s
 <body>
 <div class="shell">
   <nav>
-    <a class="brand" href="/"><span class="mark">{_MARK_SVG}</span>Job Hunter</a>
+    <a class="brand" href="/"><img src="/app/icon-192.png?v=forest" alt="" width="36" height="36"/>Job Hunter</a>
     <span class="navlinks"><a href="/terms">Terms</a><a href="/privacy">Privacy</a><a href="/login">Sign in</a></span>
   </nav>
   {body}
