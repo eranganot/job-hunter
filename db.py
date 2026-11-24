@@ -300,15 +300,21 @@ def _expire_old_jobs_disabled(conn, user_id):
 def _jobs_has_column(conn, column: str) -> bool:
     """True if jobs.<column> exists. Asked once per stats call and cheap; the
     point is that a missing column degrades the answer rather than raising."""
+    # 2026-11-24 (C15): ask each engine its own question. This used to try
+    # PRAGMA first everywhere, so on Postgres every stats call logged a failed
+    # "PRAGMA table_info(jobs)" (90 in 6 days in the Postgres log) before the
+    # fallback answered - harmless only because the pool runs in autocommit.
     try:
+        if dbdriver.dialect_of(conn) == dbdriver.POSTGRES:
+            row = conn.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema=current_schema() AND table_name='jobs' AND column_name=?",
+                (column,)).fetchone()
+            return row is not None
         return any(r[1] == column for r in conn.execute("PRAGMA table_info(jobs)"))
-    except Exception:
-        # Postgres, or any driver without PRAGMA: ask the column directly.
-        try:
-            conn.execute("SELECT %s FROM jobs LIMIT 1" % column).fetchone()
-            return True
-        except Exception:
-            return False
+    except Exception as e:
+        print(f"[db] WARNING column check for jobs.{column} failed: {e}")
+        return False
 
 
 def get_stats(conn: sqlite3.Connection, user_id: int) -> dict:
