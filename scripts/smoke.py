@@ -651,6 +651,18 @@ def run(args):
         return True
     s.check("health reports today's Gemini spend", _llm)
 
+    def _fake_ai():
+        # C12 (2026-11-24): the staging fake AI must never answer real users.
+        # The app ignores the flag in production; this proves it on the box.
+        h = H()
+        if h is None or "fake_ai" not in h:
+            note("(this build has no fake_ai flag in health)")
+            return True
+        if h["fake_ai"] and args.expect_enforced:
+            return "fake_ai is ON on a box that must use real Gemini"
+        return True
+    s.check("the fake AI is off where real users are served", _fake_ai)
+
     def _enforce():
         if not args.expect_enforced:
             note("(local box - ceilings come from Railway variables, not checked here)")
