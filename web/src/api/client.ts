@@ -105,6 +105,7 @@ export type Me = {
   email: string;
   // Setup ended and the first search has not finished (app.py /api/me).
   first_search_running?: boolean;
+  first_search_stage?: "queued" | "collect" | "score" | "check" | "save" | null;
   daily_picks?: { cap: number; today: number } | null;
   role?: string;
   is_admin?: boolean;

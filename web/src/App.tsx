@@ -48,7 +48,8 @@ const STAGES: [string, string, string][] = [
 const REJECT_REASONS: Record<string, string> = {
   fit: "Not a good fit",
   seniority: "Wrong seniority level",
-  salary: "Salary too low",
+  // "salary" (Salary too low) removed from the choices, product review 2026-11-24 (#14):
+  // the card shows no salary, so the reason could not be judged. Old answers keep their key.
   company: "Bad company",
   location: "Wrong location",
   applied: "Already applied elsewhere",
@@ -175,11 +176,13 @@ export function SwipeFlow() {
         if (nw.length > 0 || !m?.first_search_running) {
           setMe(m); setNewJobs(nw.map(toUiJob)); setCurrentIndex(0);
           if (nw.length > 0) setView("swipe");
+        } else if (m?.first_search_stage !== me?.first_search_stage) {
+          setMe(m);   // the waiting screen's steps follow the search (P5)
         }
       } catch { /* the next tick tries again */ }
-    }, 10000);
+    }, 5000);
     return () => clearInterval(t);
-  }, [me?.first_search_running]);
+  }, [me?.first_search_running, me?.first_search_stage]);
 
   /* The lists were loaded once, at launch. A phone keeps the app open for
      hours, so the queue kept showing jobs as they were then - Figma and Forter
@@ -565,8 +568,16 @@ function NotifyNudge() {
 function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
   const onDragEnd = (_: any, info: PanInfo) => { if (info.offset.x > 110) onApprove(); else if (info.offset.x < -110) onPass(); };
   const [showScoreInfo, setShowScoreInfo] = useState(false);
+  // Product review 2026-11-24 (#15): there was no way to read the whole job before
+  // deciding - "About the role" stopped at 6 lines. A tap on the card (not a drag,
+  // not a button or link inside it) opens the full description; another tap closes it.
+  const [fullDesc, setFullDesc] = useState(false);
+  const onCardTap = (e: any) => {
+    if (e?.target?.closest && e.target.closest("button, a, input, select, textarea")) return;
+    if (job.description) setFullDesc((v: boolean) => !v);
+  };
   return (
-    <motion.div initial={{ scale: 0.85, opacity: 0 }}
+    <motion.div onTap={onCardTap} initial={{ scale: 0.85, opacity: 0 }}
       animate={{ scale: 1, opacity: 1, rotateZ: direction === "left" ? -22 : direction === "right" ? 22 : 0, x: direction === "left" ? -900 : direction === "right" ? 900 : 0 }}
       exit={{ scale: 0.85, opacity: 0 }} transition={{ duration: 0.24 }}
       drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={0.7} onDragEnd={onDragEnd} whileDrag={{ cursor: "grabbing" }} className="relative">
@@ -610,7 +621,7 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
           </div>
           {job.whyFits && (<div className="order-2 lg:order-3 lg:col-span-2 bg-brand-yellow/5 rounded-2xl p-4 border-2 border-brand-yellow/55"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-brand-yellow text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
           <div className="space-y-5 order-3 lg:order-2">
-          {job.description && (<div><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className="text-gray-400 text-sm leading-relaxed line-clamp-6">{job.description}</p></div>)}
+          {job.description && (<div className="cursor-pointer" aria-expanded={fullDesc}><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className={`text-gray-400 text-sm leading-relaxed ${fullDesc ? "whitespace-pre-line" : "line-clamp-6"}`}>{job.description}</p><p className="text-xs text-brand-yellow mt-1.5 font-medium">{fullDesc ? "Tap to show less" : "Tap to read the full description"}</p></div>)}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${job.verified ? "bg-green-950/50 text-green-400 border border-green-800" : "bg-orange-950/50 text-orange-400 border border-orange-800"}`}>
             {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">{job.linkPenalty > 0 && linkSiteName(job.url) ? `Posting is live on ${linkSiteName(job.url)}` : "URL verified — ready to apply"}</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
           </div>
@@ -2019,7 +2030,7 @@ function TailoredCv({ job, me, isAdmin }: { job: UiJob; me?: any; isAdmin?: bool
   return (
     <div className="bg-gray-800 rounded-xl p-4 border border-gray-700">
       <h4 className="font-semibold text-white text-sm mb-1">Tailored CV</h4>
-      <p className="text-xs text-gray-400 mb-2">Your CV, re-ordered and re-worded for this job. Nothing is added: any line with a fact that isn't in your CV is removed and listed below. Review it, edit anything, then choose which CV goes with this application.
+      <p className="text-xs text-gray-400 mb-2">Your CV, re-ordered and re-worded for this job. Nothing is added: any line with a fact that isn't in your CV is removed and listed below. Review it, edit anything, then choose which CV goes with this application. It comes in a clean, simple layout that application systems read well, not your original design.
         {use && use.limit !== null && <> {Math.max(0, use.limit - use.used)} of {use.limit} left this month.</>}</p>
       {!draft && (
         <div className="flex gap-2 flex-wrap">
@@ -3911,13 +3922,15 @@ function PlanPanel({ me }: { me: any }) {
   return (<>
     <div className="bg-gradient-to-br from-indigo-600/20 to-gray-800 rounded-2xl border border-indigo-500/30 p-5">
       <p className="text-xs uppercase tracking-wide text-indigo-300">Your plan</p>
-      {/* Beta is an internal plan name (Premium's limits, no end date). Users
-          see Premium, free for a limited time - never "beta" (2026-11-11). */}
-      <p className="text-2xl font-bold text-white mt-1">{info.tier === "beta" ? "Premium" : info.label}</p>
+      {/* Beta is an internal plan name (Premium's limits, no end date). Users see
+          "Free" - never "beta" (2026-11-11), and no longer "Premium, free for a
+          limited time" (product review 2026-11-24, #2: a plan name with nothing to
+          compare it to only confused; a plans page comes when there is a price). */}
+      <p className="text-2xl font-bold text-white mt-1">{info.tier === "beta" ? "Free" : info.label}</p>
       {promo && <p className="text-sm text-gray-300 mt-2">Free Premium until <b>{fmtPlanDate(info.plan_until)}</b>
         {info.days_left != null && <> ({info.days_left} day{info.days_left === 1 ? "" : "s"} left)</>}.
         After that you move to the {String(info.plan_after || "free").replace(/^./, (c: string) => c.toUpperCase())} plan.</p>}
-      {info.tier === "beta" && <p className="text-sm text-gray-300 mt-2">Everything in Premium, free for a limited time. You'll be told well in advance before anything changes.</p>}
+      {info.tier === "beta" && <p className="text-sm text-gray-300 mt-2">Everything Noa does, free. If that ever changes, you'll hear about it well in advance and choose for yourself.</p>}
       {info.tier !== "admin" && info.tier !== "beta" && <p className="text-xs text-gray-400 mt-3">Upgrade options open soon.</p>}
     </div>
     <div>
@@ -4356,6 +4369,39 @@ function DayPicker({ label, value, onChange }: { label: string; value: number; o
 function Field({ label, sub, children }: any) { return (<div className="flex items-center justify-between gap-3 p-3.5 bg-gray-800 rounded-xl border border-gray-700"><div className="min-w-0"><p className="font-medium text-white text-sm">{label}</p><p className="text-xs text-gray-400">{sub}</p></div>{children}</div>); }
 function Select({ value, onChange, options, fmt }: { value: string; onChange: (v: string) => void; options: number[]; fmt: (n: number) => string }) { return (<select value={value} onChange={(e) => onChange(e.target.value)} className="px-3 py-2 border border-gray-500 rounded-lg bg-gray-700 text-white text-sm shrink-0">{options.map((o) => <option key={o} value={o}>{fmt(o)}</option>)}</select>); }
 
+/* The first search's real steps instead of a spinner (product review 2026-11-24,
+   #12). The stage comes from the server (/api/me first_search_stage), so a tick
+   means that step really finished; the bar only shows which step is running. */
+const FIRST_SEARCH_STEPS: [string, string][] = [
+  ["cv", "Reading your CV"],
+  ["collect", "Searching today's openings"],
+  ["score", "Scoring each one against your CV"],
+  ["check", "Checking for anything I missed"],
+  ["save", "Writing why each one fits you"],
+];
+function FirstSearchSteps({ stage }: { stage?: string | null }) {
+  const order = FIRST_SEARCH_STEPS.map(([k]) => k);
+  const at = Math.max(1, order.indexOf(stage === "queued" || !stage ? "collect" : stage));
+  const pct = Math.round(((at + 0.5) / order.length) * 100);
+  return (
+    <div className="text-left bg-gray-800/70 border border-gray-700 rounded-2xl p-4 mb-4" role="status" aria-live="polite">
+      <div className="h-2 bg-gray-700 rounded-full overflow-hidden mb-4">
+        <motion.div className="h-full bg-brand-yellow" initial={false} animate={{ width: `${pct}%` }} transition={{ duration: 0.6 }} />
+      </div>
+      <ul className="space-y-2.5">
+        {FIRST_SEARCH_STEPS.map(([k, label], i) => (
+          <li key={k} className={`flex items-center gap-2.5 text-sm ${i < at ? "text-gray-300" : i === at ? "text-white font-medium" : "text-gray-500"}`}>
+            {i < at ? <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
+              : i === at ? <Loader2 className="w-4 h-4 animate-spin text-brand-yellow shrink-0" />
+              : <span className="w-4 h-4 rounded-full border border-gray-600 shrink-0" />}
+            {label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDashboard, onStartNew, empty, locked, me }: any) {
   const [searchMsg, setSearchMsg] = useState("");
   // Daily picks (2026-11-12): today's cap reached -> "That's today's picks". Since
@@ -4374,8 +4420,8 @@ function AllDoneScreen({ approvedCount, rejectedCount, deferredCount, onViewDash
           : <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.15, type: "spring" }} className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl mx-auto mb-5 flex items-center justify-center shadow-lg shadow-indigo-500/20"><Briefcase className="w-10 h-10 text-white" /></motion.div>}
         {waiting ? (<>
           <h2 className="text-2xl font-bold text-white mb-2">Noa is finding your first matches</h2>
-          <p className="text-gray-400 mb-3">I'm reading today's openings against your CV. This usually takes a few minutes.</p>
-          <Loader2 className="w-6 h-6 animate-spin text-indigo-300 mx-auto mb-3" aria-hidden="true" />
+          <p className="text-gray-400 mb-4">I'm reading today's openings against your CV. This usually takes about two minutes.</p>
+          <FirstSearchSteps stage={me?.first_search_stage} />
           <p className="text-gray-400 mb-5">They'll appear here on their own. You can also close the app; I'll email you when they're ready.</p>
           {perm !== "unsupported" && perm !== "granted" && (
             <button onClick={async () => { const r = await enablePush(); setPerm(pushState()); setPushMsg(r.ok ? "" : (r.reason || "Couldn't turn them on. You can do it later in Settings.")); }}
