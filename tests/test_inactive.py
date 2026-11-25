@@ -18,6 +18,7 @@ def _db():
               " created_date TEXT, delete_after TEXT, lifecycle_opt_out INTEGER DEFAULT 0, search_paused_at TEXT)")
     c.execute("CREATE TABLE user_profiles (user_id INTEGER, onboarding_complete INTEGER)")
     c.execute("CREATE TABLE activity_log (user_id INTEGER, event_type TEXT, created_date TEXT)")
+    c.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT, applied_via TEXT, applied_date TEXT)")
     c.execute("CREATE TABLE lifecycle_emails (user_id INTEGER, step TEXT, variant TEXT, sent_at TEXT, UNIQUE(user_id, step))")
     rows = [(1, "Owner", "owner@x", "admin", t(200)), (2, "Dana Levi", "dana@x", "user", t(40)),
             (3, "Active", "act@x", "user", t(40)), (4, "Test", TEST, "user", t(40)),
