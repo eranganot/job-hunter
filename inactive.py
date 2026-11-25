@@ -128,7 +128,11 @@ def preview(conn, at: datetime | None = None, is_test=lambda e: False) -> dict:
         emailed = conn.execute("SELECT 1 FROM lifecycle_emails WHERE user_id=? AND step=?",
                                (int(u[0]), STEP)).fetchone()
         first = (u[1] or "").strip().split()[0] if (u[1] or "").strip() else ""
+        apps = conn.execute("SELECT COALESCE(applied_via,'') , COUNT(*), MAX(applied_date) FROM jobs "
+                            "WHERE user_id=? AND status='applied' GROUP BY COALESCE(applied_via,'')",
+                            (int(u[0]),)).fetchall()
         rows.append({"id": int(u[0]), "first_name": first, "last_active": last.strftime("%Y-%m-%d"),
+                     "applied": {(a[0] or "unknown"): {"n": a[1], "last": str(a[2] or "")[:10]} for a in apps},
                      "days_inactive": (at - last).days,
                      "email": "already sent" if emailed else ("opted out" if u[4] else "will send")})
     rows.sort(key=lambda r: -r["days_inactive"])
