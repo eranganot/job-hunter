@@ -2078,6 +2078,8 @@ def file_watcher():
 
 
 _search_running: set = set()
+LINK_CHECK_WORKERS = 24      # links checked at once at insert (was 8)
+LINK_CHECK_PER_HOST = 6      # never more than this many at once on one site
 # Where each running search is (feedback round P5/P6, 2026-11-24): the first-search
 # screen shows real steps instead of a spinner, and the log gets each stage's
 # seconds ("[search-timing]") so the ~2 minutes to the first picks can be measured
@@ -3541,10 +3543,21 @@ def run_job_search(user_id: int, by_user: bool = False):
                 _url_final = {}
                 import linkcheck as _lc
 
+                # P6 (2026-11-25): measured on staging, this check was 35 of the first
+                # search's 137 s - every new link, 8 at a time, up to 12 s each. Now 24 at
+                # a time, but never more than 6 on one host (fewer than the 8 one host
+                # could get before), so no site sees more of us at once than it did.
+                _host_slots = {}
+                _host_lock = threading.Lock()
+
                 def _insert_check(u_):
-                    v_, why_, fin_ = _lc.classify(u_, 12)
+                    _h = (urlparse(u_).hostname or "").lower()
+                    with _host_lock:
+                        _sem = _host_slots.setdefault(_h, threading.BoundedSemaphore(LINK_CHECK_PER_HOST))
+                    with _sem:
+                        v_, why_, fin_ = _lc.classify(u_, 12)
                     return v_, why_, fin_
-                with _TPE(max_workers=8) as _ex:
+                with _TPE(max_workers=LINK_CHECK_WORKERS) as _ex:
                     _futs = {_ex.submit(_insert_check, u): u for u in _new_urls}
                     for _f, _u in _futs.items():
                         try:
