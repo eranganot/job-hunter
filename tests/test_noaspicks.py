@@ -70,8 +70,11 @@ def test_each_family_gets_four_posts_two_voices_two_languages():
     assert [(p["voice"], p["lang"]) for p in f["posts"]] == [("page", "he"), ("page", "en"),
                                                            ("personal", "he"), ("personal", "en")]
     he, en = _post(f, "page", "he")["text"], _post(f, "page", "en")["text"]
-    assert "\u2022 Senior Product Manager | Lumen Health\nhttps://boards.greenhouse.io/lumen/jobs/1" in he
-    assert "\u2022 Senior Product Manager, Lumen Health\nhttps://boards.greenhouse.io/lumen/jobs/1" in en
+    # S3 (2026-11-25): each role links through job-hunter.work/r/<id>
+    rid_he = noaspicks.link_id("https://boards.greenhouse.io/lumen/jobs/1", "product", "facebook", "page")
+    assert "\u2022 Senior Product Manager | Lumen Health\nhttps://job-hunter.work/r/%s" % rid_he in he
+    assert "\u2022 Senior Product Manager, Lumen Health\nhttps://job-hunter.work/r/" in en
+    assert "boards.greenhouse.io" not in he
     # each place has its own source tags, so the funnel can tell the page from the owner's profile
     assert he.endswith("?utm_source=facebook&utm_medium=page&utm_campaign=noas_picks&utm_content=product")
     assert en.endswith("?utm_source=linkedin&utm_medium=page&utm_campaign=noas_picks&utm_content=product")

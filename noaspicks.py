@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
 from urllib.parse import urlencode, urlsplit
 
 import links
@@ -236,16 +238,31 @@ _PLACES = {("page", "he"): ("facebook", "page"), ("page", "en"): ("linkedin", "p
            ("personal", "he"): ("facebook", "group"), ("personal", "en"): ("linkedin", "post")}
 
 
+def link_id(url: str, family: str, source: str, medium: str) -> str:
+    """Stable 8-character id for one role's link in one place (launch item S3, row 17h):
+    the same role posted in the same place keeps its id, so rebuilding a post does not
+    split its clicks."""
+    raw = hashlib.sha1(("%s|%s|%s|%s" % (url, family, source, medium)).encode("utf-8")).digest()
+    return base64.b32encode(raw)[:8].decode("ascii").lower()
+
+
 def write_post(voice: str, lang: str, version: dict, label: str, label_he: str, roles: list,
-               base: str, family: str) -> str:
+               base: str, family: str, links_out: list | None = None) -> str:
     """One post: the version's opening, the roles, its closing, the sign-up link.
-    The number in the text is the number of roles LISTED (at most LIST_MAX)."""
+    The number in the text is the number of roles LISTED (at most LIST_MAX).
+    Each role links through job-hunter.work/r/<id> (S3): the click is counted per role,
+    family and place, then the reader goes straight on to the employer's page. The ids
+    and their targets are added to `links_out` for the caller to store."""
     fill = {"n": len(roles), "family": label, "family_he": label_he}
     sep = " | " if lang == "he" else ", "
+    source, medium = _PLACES[(voice, lang)]
     lines = [version[lang + "_open"].format(**fill), ""]
     for r in roles:
-        lines += ["\u2022 %s%s%s" % (r["title"], sep, r["company"]), r["url"], ""]
-    source, medium = _PLACES[(voice, lang)]
+        rid = link_id(r["url"], family, source, medium)
+        if links_out is not None:
+            links_out.append({"id": rid, "url": r["url"], "title": r["title"], "company": r["company"],
+                              "family": family, "source": source, "medium": medium})
+        lines += ["\u2022 %s%s%s" % (r["title"], sep, r["company"]), base.rstrip("/") + "/r/" + rid, ""]
     lines += [version[lang + "_close"].format(**fill), _link(base, source, medium, family)]
     return "\n".join(lines)
 
@@ -303,16 +320,16 @@ def instagram_caption(version: dict, label: str, label_he: str, roles: list) -> 
 
 def _family_out(i: int, key: str, en: str, he: str, roles: list, found: int, base_url: str,
                 week: int, shift: int) -> dict:
-    posts = []
+    posts, links_out = [], []
     for voice in ("page", "personal"):
         v = _turn(voice, i, week, shift)
         for lang in ("he", "en"):
             posts.append({"voice": voice, "lang": lang, "version": v["key"],
-                          "text": write_post(voice, lang, v, en, he, roles, base_url, key)})
+                          "text": write_post(voice, lang, v, en, he, roles, base_url, key, links_out)})
     page = _turn("page", i, week, shift)
     return {"key": key, "label": en, "label_he": he, "found": found, "listed": len(roles), "roles": roles,
             "headline_en": headline("en", len(roles), en, he), "headline_he": headline("he", len(roles), en, he),
-            "posts": posts, "instagram": instagram_caption(page, en, he, roles)}
+            "posts": posts, "instagram": instagram_caption(page, en, he, roles), "links": links_out}
 
 
 def build(rows, base_url: str, days: int = 7, week: int = 0, shift: int = 0) -> dict:
@@ -347,4 +364,49 @@ def report(conn, base_url: str, days: int = 7, now=None, shift: int = 0) -> dict
         "ORDER BY found_date DESC LIMIT 5000", (since,)).fetchall()]
     out = build(rows, base_url, days, week=(now or datetime.now(timezone.utc)).isocalendar()[1], shift=shift)
     out["since"] = since
+    save_links(conn, [l for f in out["families"] for l in f.pop("links", [])])
+    out["clicks"] = clicks(conn)
     return out
+
+
+def save_links(conn, links: list) -> None:
+    """Store each /r/<id> target once (the first time a post with it is built)."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    for l in links:
+        if conn.execute("SELECT 1 FROM pick_links WHERE id=?", (l["id"],)).fetchone():
+            continue
+        conn.execute("INSERT INTO pick_links (id, url, title, company, family, source, medium, created_at, clicks) "
+                     "VALUES (?,?,?,?,?,?,?,?,0)", (l["id"], l["url"], l["title"][:200], l["company"][:200],
+                                                    l["family"], l["source"], l["medium"], now))
+    conn.commit()
+
+
+def follow(conn, rid: str):
+    """The employer URL for /r/<id>, counting the click; None for an unknown id."""
+    rid = (rid or "").strip().lower()
+    if not rid or len(rid) > 16 or not rid.isalnum():
+        return None
+    row = conn.execute("SELECT url FROM pick_links WHERE id=?", (rid,)).fetchone()
+    if not row:
+        return None
+    conn.execute("UPDATE pick_links SET clicks = clicks + 1, last_click_at = ? WHERE id=?",
+                 (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), rid))
+    conn.commit()
+    return row["url"] if hasattr(row, "keys") else row[0]
+
+
+def clicks(conn, days: int = 30) -> dict:
+    """Clicks on Noa's picks links: per family and place, and the top roles."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute("SELECT family, source, medium, title, company, clicks FROM pick_links "
+                        "WHERE created_at >= ?", (since,)).fetchall()
+    by_family, by_place = {}, {}
+    for r in rows:
+        by_family[r["family"]] = by_family.get(r["family"], 0) + r["clicks"]
+        place = "%s/%s" % (r["source"], r["medium"])
+        by_place[place] = by_place.get(place, 0) + r["clicks"]
+    top = sorted(({"title": r["title"], "company": r["company"], "family": r["family"],
+                   "place": "%s/%s" % (r["source"], r["medium"]), "clicks": r["clicks"]}
+                  for r in rows if r["clicks"]), key=lambda x: -x["clicks"])[:20]
+    return {"days": days, "total": sum(by_family.values()), "by_family": by_family,
+            "by_place": by_place, "top_roles": top, "links": len(rows)}

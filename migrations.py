@@ -1372,6 +1372,24 @@ def m0052_signup_waitlist(conn):
     conn.commit()
 
 
+def m0053_pick_links(conn):
+    """Noa's picks tracked links (2026-11-25, launch item S3, row 17h): each role in a
+    post links through /r/<id>, which counts the click and sends the reader on to the
+    employer's page. Idempotent."""
+    conn.execute(ddl_for("""CREATE TABLE IF NOT EXISTS pick_links (
+        id            TEXT PRIMARY KEY,
+        url           TEXT NOT NULL,
+        title         TEXT,
+        company       TEXT,
+        family        TEXT,
+        source        TEXT,
+        medium        TEXT,
+        created_at    TEXT NOT NULL,
+        clicks        INTEGER NOT NULL DEFAULT 0,
+        last_click_at TEXT)""", conn))
+    conn.commit()
+
+
 MIGRATIONS = [
     (1, "baseline_schema",              m0001_baseline),
     (2, "column_additions",             m0002_column_additions),
@@ -1425,6 +1443,7 @@ MIGRATIONS = [
     (50, "device_traces",               m0050_device_traces),
     (51, "search_speed",                m0051_search_speed),
     (52, "signup_waitlist",             m0052_signup_waitlist),
+    (53, "pick_links",                  m0053_pick_links),
 ]
 
 

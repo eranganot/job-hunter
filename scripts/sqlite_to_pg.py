@@ -96,7 +96,7 @@ TABLE_ORDER = [
     # m0048 (2026-11-23): Telegram connect codes (telegrambot.py). No foreign keys.
     "telegram_connect_codes",
     # m0051 (2026-11-24): jobs scored below the bar, per profile (searchcache.py). No foreign keys.
-    "score_skips", "signup_waitlist",
+    "score_skips", "signup_waitlist", "pick_links",
 ]
 
 BATCH = 500

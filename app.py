@@ -5584,6 +5584,26 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path   = parsed.path
         qs     = parse_qs(parsed.query)
+        # Noa's picks role links (S3): count the click, then on to the employer's page.
+        # Only to a URL this app stored for that id - never an address from the request.
+        if path.startswith("/r/") and path.count("/") == 2:
+            _target = None
+            try:
+                import noaspicks
+                _pc = database.get_db()
+                try:
+                    _target = noaspicks.follow(_pc, path[3:])
+                finally:
+                    _pc.close()
+            except Exception as _pe:
+                _log.get("picks").warning("[picks] /r/ lookup failed: %s", _pe)
+            self.send_response(302)
+            self.send_header("Location", _target or (_public_url or "/"))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         _short = SHORT_LINKS.get(path.rstrip("/").lower() if path != "/" else "")
         if _short:
             self.send_response(302)
