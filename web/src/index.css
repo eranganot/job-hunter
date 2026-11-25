@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; }
+/* Pinch-zoom is allowed (accessibility, 2026-11-25). iOS zooms into a focused field
+   under 16px; 16px on phones keeps that from happening. */
+@media (max-width: 640px) { input, select, textarea { font-size: 16px; } }
 body {
   margin: 0;
   -webkit-tap-highlight-color: transparent;
