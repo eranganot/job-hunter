@@ -89,6 +89,11 @@ p{margin:0}
 .top{display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding-top:1.2rem;padding-bottom:1.2rem}
 .brand{display:flex;align-items:center;gap:.65rem;color:var(--strong);text-decoration:none;font-weight:700;font-size:1.12rem;white-space:nowrap}
 .brand img{width:2.2rem;height:2.2rem;border-radius:.6rem}
+/* The logo keeps a clean look when it has keyboard focus (the owner, 2026-11-25: the 3px yellow
+   focus ring around it looked like a frame). Keyboard users still see where they are: the name is
+   underlined instead. */
+.brand:focus-visible{outline:none;border-radius:0}
+.brand:focus-visible span{text-decoration:underline;text-underline-offset:.25rem}
 .nav{display:flex;align-items:center;gap:.35rem}
 .btn{display:inline-flex;align-items:center;justify-content:center;padding:.75rem 1.25rem;border-radius:.85rem;
      font-weight:650;font-size:1rem;text-decoration:none;border:1.5px solid transparent;white-space:nowrap}
@@ -301,7 +306,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
 </head>
 <body data-noa="{noa}">
 <header class="wrap top">
-  <a class="brand" href="/"><img src="/app/icon-192.png?v=forest" alt="" width="36" height="36"/>Job Hunter</a>
+  <a class="brand" href="/"><img src="/app/icon-192.png?v=forest" alt="" width="36" height="36"/><span>Job Hunter</span></a>
   <nav class="nav" aria-label="Account">
     <a class="btn ghost" href="/login">Sign in</a>
     <a class="btn go" href="/register" data-place="header">Meet Noa</a>
@@ -409,8 +414,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         <span class="tag">Rolling out</span>
         <div>
           <h3>Noa can apply for you, too</h3>
-          <p>On the application systems she supports, Noa can fill in and send the application herself, only for roles you
-          approved. It is being switched on gradually, account by account.</p>
+          <p>Noa can fill in and send the application herself, only for roles you approved. It is being switched on gradually, account by account.</p>
         </div>
       </div>
     </div>
