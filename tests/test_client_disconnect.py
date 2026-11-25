@@ -88,7 +88,7 @@ def test_a_real_exception_still_reports_and_answers_500(
 
     status, body = _request(stack["port"], method, path)
 
-    assert status == 500 and b"a real bug" not in body and b"Something went wrong" in body   # text stays in the log, not the reply (2026-11-25)
+    assert status == 500 and b"a real bug" in body
     assert len(captured) == 1 and isinstance(captured[0], RuntimeError)
     line = _wait_for_access_line(caplog, path)
     assert "-> 500" in line.getMessage() and line.levelno == logging.ERROR

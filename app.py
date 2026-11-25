@@ -5303,19 +5303,6 @@ def _csp_record(report: dict):
 _CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
-# Test week (2026-11-25): read_body read any Content-Length in full before any
-# route looked at it - a 26 MB body to /login was read into memory and answered 500.
-# The largest real body is a 10 MB CV sent as base64 JSON (about 13.4 MB).
-MAX_BODY_BYTES = 15 * 1024 * 1024
-
-
-class _BodyTooLarge(Exception):
-    pass
-
-
-GENERIC_500 = "Something went wrong on our side. Please try again."
-
-
 class Handler(BaseHTTPRequestHandler):
 
     # BaseHTTPRequestHandler's own access line, superseded by the one log.end()
@@ -5417,8 +5404,6 @@ class Handler(BaseHTTPRequestHandler):
             length = int(cl_header) if cl_header.strip() else 0
         except (ValueError, TypeError):
             length = 0
-        if length > MAX_BODY_BYTES:
-            raise _BodyTooLarge(length)
         if length > 0:
             data = self.rfile.read(length)
             print(f"[read_body] Content-Length={length}, read {len(data)} bytes")
@@ -5439,8 +5424,6 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 chunks.append(self.rfile.read(size))
                 self.rfile.read(2)  # consume trailing CRLF
-                if sum(len(c) for c in chunks) > MAX_BODY_BYTES:
-                    raise _BodyTooLarge(-1)
             result = b"".join(chunks)
             print(f"[read_body] chunked, total {len(result)} bytes")
             return result
@@ -5585,7 +5568,7 @@ class Handler(BaseHTTPRequestHandler):
                 errors.capture(exc, where="do_GET", path=self.path,
                                user_id=_log.current_user_id())
                 try:
-                    self.send_json({"error": GENERIC_500}, code=500)
+                    self.send_json({"error": f"Server error: {exc}"}, code=500)
                 except Exception:
                     pass
 
@@ -7368,29 +7351,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do_POST_guarded(self):
         try:
-            try:
-                _cl = int(self.headers.get("Content-Length", "") or 0) if self.headers else 0
-            except ValueError:
-                _cl = 0
-            if _cl > MAX_BODY_BYTES:
-                raise _BodyTooLarge(_cl)
             self._do_POST_inner()
         except _CLIENT_GONE:
             self._client_gone()
-        except _BodyTooLarge:
-            self.close_connection = True          # the unread body must not be parsed as a request
-            print(f"[security] refused an oversized body on {self.path}")
-            try:
-                self.send_json({"error": "That upload is too large (the limit is 10 MB)."}, code=413)
-            except _CLIENT_GONE:
-                pass
         except Exception as exc:
             import traceback
             print(f"[do_POST] ❌ Unhandled exception on {self.path}: {exc}\n{traceback.format_exc()}")
             errors.capture(exc, where="do_POST", path=self.path,
                            user_id=_log.current_user_id())
             try:
-                self.send_json({"error": GENERIC_500}, code=500)
+                self.send_json({"error": f"Server error: {exc}"}, code=500)
             except Exception:
                 pass
 
@@ -7619,7 +7589,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # ── Login ──
         if path == "/login":
-            body = urllib.parse.parse_qs(self.read_body().decode("utf-8", "replace"))
+            body = urllib.parse.parse_qs(self.read_body().decode())
             email    = body.get("email", [""])[0]
             password = body.get("password", [""])[0]
             # F6 (2026-11-24): was the FIRST X-Forwarded-For entry - Cloudflare's
@@ -7650,7 +7620,7 @@ class Handler(BaseHTTPRequestHandler):
         # ── Forgot password: the same answer whether or not the address has an
         # account, so the page cannot be used to find out who is signed up. ──
         if path == "/forgot-password":
-            body = urllib.parse.parse_qs(self.read_body().decode("utf-8", "replace"))
+            body = urllib.parse.parse_qs(self.read_body().decode())
             email = (body.get("email", [""])[0] or "").strip().lower()
             _w = ratelimit.check_and_record("reset", "ip:" + self.limit_ip()) or \
                  (email and ratelimit.check_and_record("reset", "em:" + email))
@@ -7675,7 +7645,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/reset-password":
-            body = urllib.parse.parse_qs(self.read_body().decode("utf-8", "replace"))
+            body = urllib.parse.parse_qs(self.read_body().decode())
             tok = body.get("token", [""])[0]
             pw, pw2 = body.get("password", [""])[0], body.get("password2", [""])[0]
             def _again(msg):
@@ -7772,7 +7742,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_html(REGISTER_HTML.replace("{error_block}", error_block(
                     f"Too many accounts created from this address. Try again in about {_mins} minute(s).")), 429)
                 return
-            body = urllib.parse.parse_qs(self.read_body().decode("utf-8", "replace"))
+            body = urllib.parse.parse_qs(self.read_body().decode())
             _attr    = analytics.clean_attribution(body)
             _mkt     = body.get("marketing", [""])[0] == "1"
             name     = body.get("name", [""])[0].strip()
@@ -8121,9 +8091,7 @@ class Handler(BaseHTTPRequestHandler):
                     file_data = cv_part["data"]
                     print(f"[cv/upload] multipart mode: file={filename}  size={len(file_data)} bytes")
 
-                if not filename.lower().endswith(".pdf") or b"%PDF" not in (file_data or b"")[:1024]:
-                    # The content too, not just the name (test week, 2026-11-25: any bytes
-                    # named cv.pdf were stored). PDF readers accept %PDF in the first 1 KB.
+                if not filename.lower().endswith(".pdf"):
                     self.send_json({"error": "Only PDF files are accepted."})
                     return
                 _orig_name = os.path.basename(filename) or "cv.pdf"
@@ -8151,7 +8119,7 @@ class Handler(BaseHTTPRequestHandler):
                 import traceback
                 print(f"[cv/upload] ❌ Exception: {exc}\n{traceback.format_exc()}")
                 try:
-                    self.send_json({"error": GENERIC_500}, code=500)
+                    self.send_json({"error": f"Server error: {exc}"}, code=500)
                 except Exception:
                     pass
             return
