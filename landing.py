@@ -112,9 +112,6 @@ p{margin:0}
 .ctas{display:flex;flex-wrap:wrap;gap:.75rem}
 .under-cta{margin-top:1rem;font-size:.95rem;color:var(--text)}
 .offer-line{margin-top:.6rem;font-size:.95rem;color:var(--muted)}
-/* Product review 2026-11-24 (#1): how Noa works, in four lines, right under the buttons. */
-.quicksteps{margin:1.1rem 0 0;padding-left:1.3rem;display:grid;gap:.35rem;font-size:.98rem;color:var(--text);max-width:36rem}
-.quicksteps li::marker{color:var(--strong);font-weight:700}
 .offer-line b{color:var(--strong)}
 
 .chat{display:grid;gap:.9rem}
@@ -127,7 +124,7 @@ p{margin:0}
 .chat .shot{margin-left:3.65rem}
 @media(max-width:30rem){.chat .shot{margin-left:0}}
 /* One column (phones, small tablets): Noa's morning message and the top of the job card sit straight
-   under the main button, so the first screen shows her and the product; "How Noa works", the four steps and the
+   under the main button, so the first screen shows her and the product; "See how she works" and the
    small print follow. The two columns' children are laid out as one list and ordered here. */
 @media(max-width:61.99rem){
   .hero{display:flex;flex-direction:column;gap:0}
@@ -138,9 +135,8 @@ p{margin:0}
   .hero .m2{order:4;margin-top:1.4rem}
   .hero .shot{order:5;margin-top:.9rem}
   .hero .btn.line{order:6;align-self:flex-start;margin-top:1.2rem}
-  .hero .quicksteps{order:7}
-  .hero .under-cta{order:8}
-  .hero .offer-line{order:9}
+  .hero .under-cta{order:7}
+  .hero .offer-line{order:8}
   .hero .m1{display:none}
 }
 
@@ -161,7 +157,8 @@ p{margin:0}
 .vs .us li{color:var(--strong)}
 
 .steps{list-style:none;margin:0;padding:0;display:grid;gap:2rem;counter-reset:s}
-@media(min-width:56rem){.steps{grid-template-columns:repeat(3,1fr);gap:2.4rem}}
+@media(min-width:40rem){.steps{grid-template-columns:repeat(2,1fr);gap:2.4rem}}
+@media(min-width:64rem){.steps{grid-template-columns:repeat(4,1fr);gap:2rem}}
 .steps li{counter-increment:s}
 .steps li::before{content:counter(s);font-family:var(--display);font-weight:600;font-size:2.8rem;line-height:1;color:var(--accent);
                   display:block;margin-bottom:.6rem}
@@ -321,14 +318,8 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
       companies' own career pages, brings you only the ones that fit your CV, and gets your application ready.</p>
       <div class="ctas">
         <a class="btn go big" href="/register" data-place="hero">Meet Noa</a>
-        <a class="btn line big" href="#how">How Noa works &darr;</a>
+        <a class="btn line big" href="#how">See how she works</a>
       </div>
-      <ol class="quicksteps">
-        <li>Upload your CV.</li>
-        <li>Every morning Noa reads about 11,000 openings and keeps only the ones that fit you, with the reason for each.</li>
-        <li>You approve only what is relevant for you.</li>
-        <li>She prepares a tailored CV and cover letter.</li>
-      </ol>
       <p class="under-cta">2-minute setup &middot; first picks today<br/>Private. No employer sees your CV until you apply.</p>
       <p class="offer-line"><b>Free right now, for a short time.</b> Sign up with Google or email. No card.</p>
     </div>
@@ -358,6 +349,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
             <li>No way to tell which roles are worth an application</li>
             <li>One CV sent everywhere</li>
             <li>The same form typed again for every company</li>
+            <li>Or an AI chatbot you set up yourself: prompts and scripts to write and keep fixing, and the CV and cover letter are still yours to rewrite</li>
           </ul>
         </div>
         <div class="us">
@@ -367,6 +359,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
             <li>Every role is scored against your CV, and Noa tells you why it fits</li>
             <li>Noa writes a CV and cover letter for each role you approve</li>
             <li>You answer the usual form questions once. Noa remembers them</li>
+            <li>Nothing to set up or maintain: Noa searches, picks and writes the tailored CV and cover letter for you</li>
           </ul>
         </div>
       </div>
@@ -378,12 +371,14 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
       <h2>How Noa works</h2>
       <p class="intro">Setup takes about two minutes. After that Noa runs on her own, and nothing goes out without your approval.</p>
       <ol class="steps">
-        <li><h3>Tell Noa who you are</h3>
-            <p>Upload your CV and Noa fills in the titles, skills and locations to look for. Change anything you like.</p></li>
-        <li><h3>Noa searches every day</h3>
-            <p>Company career pages and job boards, on a schedule you choose. Dead links and duplicates never reach you.</p></li>
-        <li><h3>You approve, Noa prepares</h3>
-            <p>Swipe through your shortlist and teach Noa why you passed. Tomorrow's list gets closer to you.</p></li>
+        <li><h3>Upload your CV</h3>
+            <p>Noa fills in the titles, skills and locations to look for. Change anything you like.</p></li>
+        <li><h3>Noa searches every morning</h3>
+            <p>She reads about 11,000 openings and keeps only the ones that fit you, with the reason for each.</p></li>
+        <li><h3>You approve what's relevant</h3>
+            <p>Swipe through your shortlist and tell Noa why you passed. Tomorrow's list gets closer to you.</p></li>
+        <li><h3>Noa prepares the application</h3>
+            <p>A tailored CV and cover letter for every role you approve.</p></li>
       </ol>
     </div>
   </section>
