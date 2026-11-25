@@ -38,7 +38,7 @@ export function InstallPrompt() {
           <p className="text-xs text-gray-400 leading-tight">Opens like an app, with Noa's alerts. Free, no app store.</p>
         </div>
         <button onClick={install} className="px-3 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium rounded-xl shrink-0">Add</button>
-        <button onClick={() => setHidden(true)} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
+        <button onClick={() => setHidden(true)} aria-label="Not now" className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
       </div>
     </div>
   );
