@@ -427,9 +427,9 @@ export function SwipeFlow() {
             <div><h1 className="text-xl font-bold text-white">Job Hunter</h1><p className="text-xs text-gray-400">Swipe to find your next role</p></div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => loadAll()} className="p-2.5 bg-gray-700 rounded-xl border border-gray-600 active:bg-gray-600" title="Refresh"><RefreshCw className="w-5 h-5 text-gray-300" /></button>
-            <button onClick={() => setView("dashboard")} className="p-2.5 bg-gray-700 rounded-xl border border-gray-600 active:bg-gray-600"><LayoutGrid className="w-5 h-5 text-gray-300" /></button>
-            <button onClick={() => setShowSettings(true)} className="p-2.5 bg-gray-700 rounded-xl border border-gray-600 active:bg-gray-600"><Settings className="w-5 h-5 text-gray-300" /></button>
+            <button onClick={() => loadAll()} aria-label="Refresh" className="p-2.5 bg-gray-700 rounded-xl border border-gray-600 active:bg-gray-600" title="Refresh"><RefreshCw className="w-5 h-5 text-gray-300" /></button>
+            <button onClick={() => setView("dashboard")} aria-label="All jobs" title="All jobs" className="p-2.5 bg-gray-700 rounded-xl border border-gray-600 active:bg-gray-600"><LayoutGrid className="w-5 h-5 text-gray-300" /></button>
+            <button onClick={() => setShowSettings(true)} aria-label="Settings" title="Settings" className="p-2.5 bg-gray-700 rounded-xl border border-gray-600 active:bg-gray-600"><Settings className="w-5 h-5 text-gray-300" /></button>
           </div>
         </div>
       </header>
@@ -586,7 +586,7 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
           <div className="absolute inset-0 bg-black/20" />
           <div className="absolute bottom-4 left-5 right-5 flex items-center gap-3">
             <div className="w-14 h-14 bg-white rounded-2xl shadow-lg flex items-center justify-center shrink-0"><Building2 className="w-7 h-7 text-gray-700" /></div>
-            <div className="min-w-0"><h3 className="text-xl font-bold text-white truncate">{job.company}</h3><div className="flex items-center gap-2 text-white/90 text-sm mt-0.5"><MapPin className="w-4 h-4" /><span className="truncate">{(job.location || "").split(",")[0]}</span></div></div>
+            <div className="min-w-0"><h2 className="text-xl font-bold text-white truncate">{job.company}</h2><div className="flex items-center gap-2 text-white/90 text-sm mt-0.5"><MapPin className="w-4 h-4" /><span className="truncate">{(job.location || "").split(",")[0]}</span></div></div>
           </div>
         </div>
         {/* Phone: title, scores, Noa's reason, the role. Desktop: title and scores beside
@@ -619,9 +619,9 @@ function SwipeCard({ job, direction, onApprove, onPass, onDefer }: any) {
             )}
           </div>
           </div>
-          {job.whyFits && (<div className="order-2 lg:order-3 lg:col-span-2 bg-brand-yellow/5 rounded-2xl p-4 border-2 border-brand-yellow/55"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h4 className="font-bold text-brand-yellow text-sm">Why Noa picked this</h4></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
+          {job.whyFits && (<div className="order-2 lg:order-3 lg:col-span-2 bg-brand-yellow/5 rounded-2xl p-4 border-2 border-brand-yellow/55"><div className="flex items-center gap-2 mb-2"><NoaAvatar size={28} /><h3 className="font-bold text-brand-yellow text-sm">Why Noa picked this</h3></div><p className="text-gray-300 text-sm leading-relaxed">{job.whyFits}</p></div>)}
           <div className="space-y-5 order-3 lg:order-2">
-          {job.description && (<div className="cursor-pointer" aria-expanded={fullDesc}><h4 className="font-semibold text-white mb-1.5 text-sm">About the role</h4><p className={`text-gray-400 text-sm leading-relaxed ${fullDesc ? "whitespace-pre-line" : "line-clamp-6"}`}>{job.description}</p><p className="text-xs text-brand-yellow mt-1.5 font-medium">{fullDesc ? "Tap to show less" : "Tap to read the full description"}</p></div>)}
+          {job.description && (<div className="cursor-pointer"><h3 className="font-semibold text-white mb-1.5 text-sm">About the role</h3><p className={`text-gray-400 text-sm leading-relaxed ${fullDesc ? "whitespace-pre-line" : "line-clamp-6"}`}>{job.description}</p><button type="button" aria-expanded={fullDesc} onClick={() => setFullDesc((v: boolean) => !v)} className="text-xs text-brand-yellow mt-1.5 font-medium">{fullDesc ? "Tap to show less" : "Tap to read the full description"}</button></div>)}
           <div className={`flex items-center gap-2 px-4 py-2 rounded-xl ${job.verified ? "bg-green-950/50 text-green-400 border border-green-800" : "bg-orange-950/50 text-orange-400 border border-orange-800"}`}>
             {job.verified ? <><CheckCircle className="w-4 h-4" /><span className="text-sm font-medium">{job.linkPenalty > 0 && linkSiteName(job.url) ? `Posting is live on ${linkSiteName(job.url)}` : "URL verified — ready to apply"}</span></> : <><AlertCircle className="w-4 h-4" /><span className="text-sm font-medium">URL not verified yet</span></>}
           </div>
