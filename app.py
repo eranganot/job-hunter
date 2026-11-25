@@ -7379,9 +7379,10 @@ class Handler(BaseHTTPRequestHandler):
             self._client_gone()
         except _BodyTooLarge:
             self.close_connection = True          # the unread body must not be parsed as a request
+            print(f"[security] refused an oversized body on {self.path}")
             try:
                 self.send_json({"error": "That upload is too large (the limit is 10 MB)."}, code=413)
-            except Exception:
+            except _CLIENT_GONE:
                 pass
         except Exception as exc:
             import traceback
