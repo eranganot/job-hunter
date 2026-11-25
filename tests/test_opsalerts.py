@@ -114,3 +114,16 @@ def test_evening_report(stack):
 def test_disk_status_shape(stack):
     d = stack["app"]._disk_status()
     assert "volume" in d and d["volume"]["cap_mb"] > 0
+
+
+def test_evening_report_with_no_sign_ups_old_enough(stack):
+    """24 Nov report read "activation None% (0 of 0)": activation counts only
+    sign-ups at least 48 hours old, and there were none yet."""
+    conn = _conn(stack)
+    try:
+        kpi = {"kpis": {"activation_48h": {"value": None, "n": 0, "of": 0},
+                        "weekly_active_swipers": {"value": 2}, "first_applications": {"value": 0}}}
+        msg = opsalerts.evening_report(conn, _usage(985, 15000, 1_000_000), kpi, {})
+        assert "None%" not in msg and "no sign-ups 2+ days old yet" in msg
+    finally:
+        conn.close()
