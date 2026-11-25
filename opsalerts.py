@@ -149,9 +149,14 @@ def evening_report(conn, ai_usage, kpi=None, disk=None):
     k = (kpi or {}).get("kpis") or {}
     if k:
         a = k.get("activation_48h") or {}
-        lines.append("- Last 7 days: activation %s%% (%s of %s), active swipers %s, first applications %s"
-                     % (a.get("value", "-"), a.get("n", 0), a.get("of", 0),
-                        (k.get("weekly_active_swipers") or {}).get("value", "-"),
+        # Activation counts only sign-ups at least 48 hours old. With none yet the report
+        # said "activation None% (0 of 0)" (owner's screenshot, 24 Nov evening report).
+        if a.get("of"):
+            act = "activation %s%% (%s of %s signed up 2+ days ago)" % (a.get("value"), a.get("n", 0), a.get("of"))
+        else:
+            act = "activation - (no sign-ups 2+ days old yet)"
+        lines.append("- Last 7 days: %s, active swipers %s, first applications %s"
+                     % (act, (k.get("weekly_active_swipers") or {}).get("value", "-"),
                         (k.get("first_applications") or {}).get("value", "-")))
     for name, d in (disk or {}).items():
         if d and d.get("pct") is not None:
