@@ -9304,7 +9304,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Forbidden"}, 403)
                 return
             target_id = int(m.group(1))
-            import accountdata
+            import accountdata as _accountdata   # not "accountdata": a local of that name breaks /api/account/delete
             conn = database.get_db()
             try:
                 row = conn.execute("SELECT id, role, is_active FROM users WHERE id=?", (target_id,)).fetchone()
@@ -9317,7 +9317,7 @@ class Handler(BaseHTTPRequestHandler):
                 if row["is_active"]:
                     self.send_json({"error": "Disable the account first, then delete it."}, 400)
                     return
-                removed = accountdata.purge_user(conn, target_id)
+                removed = _accountdata.purge_user(conn, target_id)
             finally:
                 conn.close()
             database.log_activity(user["id"], "admin_user_purge", f"Deleted user {target_id}")
