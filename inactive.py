@@ -91,6 +91,45 @@ def compose(first: str, link: str):
             % (hi, link, lifecycle.ERAN_SIG))
 
 
+def due(conn, now: datetime, is_test=lambda e: False):
+    """[(user row, last active)] for everyone the sweep would pause at `now`:
+    finished setup, not admin, not deleting, not already paused, not the test
+    account, and no activity for INACTIVE_DAYS. Row = (id, name, email,
+    created_date, lifecycle_opt_out). Shared by run() and preview()."""
+    cutoff = now - timedelta(days=INACTIVE_DAYS)
+    users = conn.execute(
+        "SELECT u.id, u.name, u.email, u.created_date, COALESCE(u.lifecycle_opt_out, 0) "
+        "FROM users u JOIN user_profiles p ON p.user_id = u.id "
+        "WHERE COALESCE(u.is_active, 1)=1 AND LOWER(COALESCE(u.role,'user'))!='admin' "
+        "AND u.delete_after IS NULL AND u.search_paused_at IS NULL "
+        "AND COALESCE(p.onboarding_complete, 0)=1").fetchall()
+    out = []
+    for u in users:
+        if is_test(u[2] or ""):
+            continue
+        last = last_active(conn, int(u[0]), u[3])
+        if last and last <= cutoff:
+            out.append((u, last))
+    return out
+
+
+def preview(conn, at: datetime | None = None, is_test=lambda e: False) -> dict:
+    """Who the first sweep on/after `at` (default START) would pause, with no
+    change to anything. No email addresses: the owner reads those in Admin -> Users.
+    Someone who acts before `at` drops off the list by itself."""
+    at = at or start()
+    rows = []
+    for u, last in due(conn, at, is_test):
+        emailed = conn.execute("SELECT 1 FROM lifecycle_emails WHERE user_id=? AND step=?",
+                               (int(u[0]), STEP)).fetchone()
+        first = (u[1] or "").strip().split()[0] if (u[1] or "").strip() else ""
+        rows.append({"id": int(u[0]), "first_name": first, "last_active": last.strftime("%Y-%m-%d"),
+                     "days_inactive": (at - last).days,
+                     "email": "already sent" if emailed else ("opted out" if u[4] else "will send")})
+    rows.sort(key=lambda r: -r["days_inactive"])
+    return {"at": at.strftime("%Y-%m-%d"), "count": len(rows), "users": rows}
+
+
 def run(get_db, send, base_url: str, now: datetime | None = None, is_test=lambda e: False,
         can_email: bool = True, track=None) -> dict:
     """Pause who is due, and email them once. `send(to, subject, body, sender, unsub_url)`."""
@@ -98,22 +137,10 @@ def run(get_db, send, base_url: str, now: datetime | None = None, is_test=lambda
     out = {"paused": 0, "emailed": 0, "failed": 0}
     if now < start():
         return out
-    cutoff = now - timedelta(days=INACTIVE_DAYS)
     conn = get_db()
     try:
-        users = conn.execute(
-            "SELECT u.id, u.name, u.email, u.created_date, COALESCE(u.lifecycle_opt_out, 0) "
-            "FROM users u JOIN user_profiles p ON p.user_id = u.id "
-            "WHERE COALESCE(u.is_active, 1)=1 AND LOWER(COALESCE(u.role,'user'))!='admin' "
-            "AND u.delete_after IS NULL AND u.search_paused_at IS NULL "
-            "AND COALESCE(p.onboarding_complete, 0)=1").fetchall()
-        for u in users:
+        for u, last in due(conn, now, is_test):
             uid, email = int(u[0]), u[2] or ""
-            if is_test(email):
-                continue
-            last = last_active(conn, uid, u[3])
-            if not last or last > cutoff:
-                continue
             conn.execute("UPDATE users SET search_paused_at=? WHERE id=?", (now.strftime(FMT), uid))
             conn.commit()
             out["paused"] += 1

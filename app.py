@@ -7238,6 +7238,29 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
 
+        if path == "/api/admin/inactive-preview":
+            # Launch item E10: who the first inactivity sweep (inactive.py, from
+            # JH_INACTIVE_FROM) would pause, read-only. Same gate as the full health
+            # (admin session or X-Health-Key); first names and ids only, no emails.
+            if not self._health_detail_allowed():
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            import inactive, testaccount
+            _at = None
+            _raw = (qs.get("at", [""])[0] or "").strip()
+            if _raw:
+                try:
+                    _at = datetime.strptime(_raw[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                except ValueError:
+                    self.send_json({"error": "at must be YYYY-MM-DD"}, 400)
+                    return
+            conn = database.get_db()
+            try:
+                self.send_json(inactive.preview(conn, _at, testaccount.is_test_address))
+            finally:
+                conn.close()
+            return
+
         if path == "/api/admin/users":
             user = self.require_auth()
             if not user or user.get("role") != "admin":
