@@ -200,9 +200,14 @@ def create_user(name: str, email: str, password: str):
         _fire_user_created(user_id, normalized_email, name.strip(), "password")
         return user_id, None
     except Exception as e:
-        if "UNIQUE" in str(e):
+        # Never show the database's text: on Postgres a duplicate email read
+        # 'duplicate key value violates unique constraint "users_email_key"
+        # DETAIL: Key (email)=(...)' on the sign-up page (test week, 2026-11-25) -
+        # the check matched SQLite's "UNIQUE" only.
+        if "unique" in str(e).lower() or "duplicate key" in str(e).lower():
             return None, "An account with that email already exists."
-        return None, str(e)
+        print("[auth] ERROR sign-up failed: %s" % e)
+        return None, "Something went wrong creating your account. Please try again."
     finally:
         conn.close()
 
@@ -620,7 +625,7 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
         _fire_user_created(user_id, normalized_email, display_name, "google")
         return dict(created), True, None
     except Exception as e:
-        if "UNIQUE" in str(e):
+        if "unique" in str(e).lower() or "duplicate key" in str(e).lower():
             # Race: concurrent link/create. Re-fetch by sub or email.
             row = conn.execute(
                 "SELECT * FROM users WHERE google_sub=? OR email=?",
@@ -628,6 +633,7 @@ def find_or_create_google_user(google_sub: str, email: str, name: str = "", avat
             ).fetchone()
             if row:
                 return dict(row), False, None
-        return None, False, str(e)
+        print("[auth] ERROR Google sign-up failed: %s" % e)
+        return None, False, "Something went wrong signing you in with Google. Please try again."
     finally:
         conn.close()
