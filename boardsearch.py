@@ -119,8 +119,26 @@ def postings(ats: str, ref: str, get=None) -> list:
     if answered:
         if len(_CACHE) > 2000:
             _CACHE.clear()
-        _CACHE[key] = (time.monotonic(), out)
+        _now = time.monotonic()
+        _CACHE[key] = (_now, out)
+        if len(_LISTED_AT) > 50000:
+            _LISTED_AT.clear()
+        for p in out:
+            _LISTED_AT[p["url"]] = _now
     return list(out)
+
+
+# When each posting URL was last seen open on its board's own listing (P6,
+# 2026-11-25). The search's link check skips a posting its board listed in the
+# last FRESH_LISTING_S: it was open moments ago, and checking ~250 of them made
+# up most of the 30 s the first picks waited on. Older ones are checked as before.
+_LISTED_AT: dict = {}
+FRESH_LISTING_S = 30 * 60
+
+
+def listed_recently(url: str, within_s: float = FRESH_LISTING_S) -> bool:
+    t = _LISTED_AT.get(url)
+    return t is not None and time.monotonic() - t < within_s
 
 
 def _israel(location: str) -> bool:

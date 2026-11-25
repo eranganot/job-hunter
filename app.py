@@ -3541,6 +3541,21 @@ def run_job_search(user_id: int, by_user: bool = False):
                 _new_urls = {j.get("url","").strip() for j in all_jobs_data if j.get("url")}
                 _url_ok   = {}
                 _url_final = {}
+                # P6 (2026-11-25): a posting fetched from its company's own job board in
+                # this search (Greenhouse, Lever, SmartRecruiters API), or listed on a
+                # board in the last 30 minutes, was open moments ago - no need to fetch
+                # it again. Measured on staging: 413 links checked, 249 of them on
+                # Greenhouse, 32 s before the first picks could show. Everything else
+                # (LinkedIn, Comeet pages, Workday, web search, older listings) is still
+                # checked, and the later sweeps re-check every link as before.
+                import boardsearch as _bsl
+                _live_src = {"greenhouse", "lever", "smartrecruiters"}
+                _fresh_urls = {j.get("url","").strip() for j in all_jobs_data
+                               if j.get("url") and ((j.get("source") or "") in _live_src
+                                                    or _bsl.listed_recently(j.get("url","").strip()))}
+                for _u in _fresh_urls:
+                    _url_ok[_u] = 1
+                _new_urls -= _fresh_urls
                 import linkcheck as _lc
 
                 # P6 (2026-11-25): measured on staging, this check was 35 of the first
@@ -3609,8 +3624,8 @@ def run_job_search(user_id: int, by_user: bool = False):
                     for _x in _lc_times:
                         _lc_hosts[_x[2]] = _lc_hosts.get(_x[2], 0) + 1
                     _lc_slow = sorted(_lc_times, reverse=True)[:5]
-                    _search_mark(user_id, "link-check n=%d hosts=%s slowest=%s" % (
-                        len(_lc_times), sorted(_lc_hosts.items(), key=lambda x: -x[1])[:4], _lc_slow))
+                    _search_mark(user_id, "link-check n=%d skipped-fresh=%d hosts=%s slowest=%s" % (
+                        len(_lc_times), len(_fresh_urls), sorted(_lc_hosts.items(), key=lambda x: -x[1])[:4], _lc_slow))
                     _search_stage(user_id, "save")
                     # ── Insert new jobs (skip rejected patterns) ─────────────────────
                     conn = database.get_db()
