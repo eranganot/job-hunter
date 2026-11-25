@@ -2083,20 +2083,38 @@ _search_running: set = set()
 # seconds ("[search-timing]") so the ~2 minutes to the first picks can be measured
 # per stage before anything is changed. In-process, like _search_running.
 _SEARCH_STAGE: dict = {}
+_SEARCH_TIMINGS: list = []   # the last 10 finished searches' per-step seconds (keyed health)
 SEARCH_STAGES = ("collect", "score", "check", "save")
+
+
+def _search_mark(user_id, label: str) -> None:
+    """Seconds since the last mark inside the collect stage, per source (P6, 2026-11-25):
+    the sources run one after another, so this shows which one the first picks wait on."""
+    cur = _SEARCH_STAGE.get(user_id)
+    if not cur:
+        return
+    now = time.time()
+    last = cur.get("mark", cur["since"])
+    cur["mark"] = now
+    print("[search-timing] user %s collect/%s %.1fs" % (user_id, label, now - last))
+    cur.setdefault("steps", []).append(["collect/" + label, round(now - last, 1)])
 
 
 def _search_stage(user_id, stage: str | None) -> None:
     now = time.time()
     cur = _SEARCH_STAGE.get(user_id)
+    steps = cur.get("steps", []) if cur else []
     if cur:
         print("[search-timing] user %s %s %.1fs" % (user_id, cur["stage"], now - cur["since"]))
+        steps.append([cur["stage"], round(now - cur["since"], 1)])
     if stage is None:
         if cur:
             print("[search-timing] user %s total %.1fs" % (user_id, now - cur["t0"]))
+            _SEARCH_TIMINGS.append({"user": user_id, "at": int(now), "total": round(now - cur["t0"], 1), "steps": steps})
+            del _SEARCH_TIMINGS[:-10]
         _SEARCH_STAGE.pop(user_id, None)
         return
-    _SEARCH_STAGE[user_id] = {"stage": stage, "since": now, "t0": cur["t0"] if cur else now}
+    _SEARCH_STAGE[user_id] = {"stage": stage, "since": now, "t0": cur["t0"] if cur else now, "steps": steps}
 
 
 
@@ -2631,6 +2649,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                                 "location": loc, "url": jurl,
                                                 "description": t, "full_description": t,
                                                 "source": "smartrecruiters"})
+                    _search_mark(user_id, "setup+discovery")
                     # -- Run all API queries in parallel --
                     print(f"[search] Querying {len(_GH_COMPANIES)} Greenhouse + {len(_LV_COMPANIES)} Lever + {len(_SR_COMPANIES)} SmartRecruiters boards...")
                     threads = []
@@ -2671,6 +2690,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                     except Exception as _bse:
                         print(f"[search] ERROR board-first search failed: {_bse}")
 
+                    _search_mark(user_id, "ats-boards")
                     # -- TechMap CSV(s) (reuse prefetched rows from discovery step) --
                     try:
                         import csv as _csv, io as _io
@@ -2701,6 +2721,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                     except Exception as _tme:
                         print(f"[search] TechMap CSV error: {_tme}")
 
+                    _search_mark(user_id, "techmap-csv")
                     # -- Comeet by company name: REMOVED 2026-11-05 (Step 7). All five slugs
                     #    (monday, ironsource, gong, yotpo2, lightricks2) answered 404 to the
                     #    exact request, every run, behind `except Exception: pass`. Comeet's
@@ -2737,6 +2758,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         print(f"[search] WARNING could not record Workday health: {_wd_hexc}")
                     print(f"[search] Workday: {_workday_count} jobs matched")
 
+                    _search_mark(user_id, "workday")
                     # -- LinkedIn public guest endpoint --
                     _linkedin_count = 0
                     _li_tally = _SourceTally("linkedin")
@@ -2774,6 +2796,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                     _li_tally.done()
                     print(f"[search] LinkedIn guest: {_linkedin_count} jobs matched")
 
+                    _search_mark(user_id, "linkedin")
                     # -- Indeed HTML scrape: REMOVED 2026-11-07. il.indeed.com answers 403
                     #    from Cloudflare's bot wall (401 earlier) on every request, so it never
                     #    returned a job; Indeed reaches us through JobSpy when that is installed.
@@ -2867,6 +2890,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 _deduped.append(_r)
                         print(f"[search] Dedup: {len(all_raw)} -> {len(_deduped)} after normalized fingerprint")
                         all_raw = _deduped
+                    _search_mark(user_id, "external+dedup")
                     print(f"[search] Pre-filter: {len(all_raw)} jobs from {len(_GH_COMPANIES)+len(_LV_COMPANIES)} ATS boards + external sources")
 
                     if not all_raw:
@@ -6088,6 +6112,7 @@ class Handler(BaseHTTPRequestHandler):
                 "signups": _signups_health(),
                 "disk": _disk_status(),
                 "fake_ai": fakeai.enabled(),
+                "search_timings": list(_SEARCH_TIMINGS),
                 "csp_reports": dict(sorted(_CSP_REPORTS.items(), key=lambda kv: -kv[1])[:20]),
                 # Last outcome per job source since this process started (Step 3).
                 "sources": _source_health(),

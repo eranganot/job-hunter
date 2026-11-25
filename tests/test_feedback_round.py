@@ -57,3 +57,34 @@ def test_offers_checkbox_is_below_the_form(stack):
     page = Client(stack["port"]).get("/register")[2]
     page = page.decode() if isinstance(page, bytes) else page
     assert page.index('name="marketing"') > page.index("</form>")
+
+
+def test_search_mark_logs_seconds_per_source(stack, monkeypatch):
+    app = stack["app"]
+    lines = []
+    monkeypatch.setattr(app, "print", lambda *a, **k: lines.append(" ".join(map(str, a))), raising=False)
+    app._search_mark(55555, "nothing-running")          # no search: silent
+    app._search_stage(55555, "collect")
+    app._search_mark(55555, "ats-boards")
+    app._search_mark(55555, "linkedin")
+    app._search_stage(55555, None)
+    out = "\n".join(lines)
+    assert "collect/nothing-running" not in out
+    assert "user 55555 collect/ats-boards" in out and "user 55555 collect/linkedin" in out
+    src = open("app.py", encoding="utf-8").read()
+    for label in ("setup+discovery", "ats-boards", "techmap-csv", "workday", "linkedin", "external+dedup"):
+        assert '_search_mark(user_id, "%s")' % label in src
+
+
+def test_finished_searches_keep_their_step_timings(stack):
+    app = stack["app"]
+    app._SEARCH_TIMINGS.clear()
+    app._search_stage(4242, "collect")
+    app._search_mark(4242, "linkedin")
+    app._search_stage(4242, "score")
+    app._search_stage(4242, None)
+    t = app._SEARCH_TIMINGS[-1]
+    assert t["user"] == 4242 and [s[0] for s in t["steps"]] == ["collect/linkedin", "collect", "score"]
+    for i in range(12):
+        app._search_stage(i, "collect"); app._search_stage(i, None)
+    assert len(app._SEARCH_TIMINGS) == 10
