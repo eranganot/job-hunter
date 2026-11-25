@@ -3549,13 +3549,18 @@ def run_job_search(user_id: int, by_user: bool = False):
                 # could get before), so no site sees more of us at once than it did.
                 _host_slots = {}
                 _host_lock = threading.Lock()
+                _lc_times = []   # (seconds checking, seconds waiting for a host slot, host, verdict)
 
                 def _insert_check(u_):
                     _h = (urlparse(u_).hostname or "").lower()
                     with _host_lock:
                         _sem = _host_slots.setdefault(_h, threading.BoundedSemaphore(LINK_CHECK_PER_HOST))
+                    _t_w = time.time()
                     with _sem:
+                        _t_c = time.time()
                         v_, why_, fin_ = _lc.classify(u_, 12)
+                    with _host_lock:
+                        _lc_times.append((round(time.time() - _t_c, 1), round(_t_c - _t_w, 1), _h, v_))
                     return v_, why_, fin_
                 with _TPE(max_workers=LINK_CHECK_WORKERS) as _ex:
                     _futs = {_ex.submit(_insert_check, u): u for u in _new_urls}
@@ -3600,7 +3605,12 @@ def run_job_search(user_id: int, by_user: bool = False):
                     conn.close()
                     from ai_analysis import compute_feedback_penalty as _compute_fb_penalty
 
-                    _search_mark(user_id, "link-check")
+                    _lc_hosts = {}
+                    for _x in _lc_times:
+                        _lc_hosts[_x[2]] = _lc_hosts.get(_x[2], 0) + 1
+                    _lc_slow = sorted(_lc_times, reverse=True)[:5]
+                    _search_mark(user_id, "link-check n=%d hosts=%s slowest=%s" % (
+                        len(_lc_times), sorted(_lc_hosts.items(), key=lambda x: -x[1])[:4], _lc_slow))
                     _search_stage(user_id, "save")
                     # ── Insert new jobs (skip rejected patterns) ─────────────────────
                     conn = database.get_db()
