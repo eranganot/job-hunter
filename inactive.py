@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 import lifecycle
 
 INACTIVE_DAYS = 14
+EMAIL_WINDOW_DAYS = 3
 STEP = "inactive14"
 ACTIVE_EVENTS = ("job_approved", "job_rejected", "bulk_approve", "bulk_reject", "job_applied",
                  "job_marked_applied", "search_requested", "search_resumed")
@@ -141,26 +142,45 @@ def preview(conn, at: datetime | None = None, is_test=lambda e: False) -> dict:
 
 def run(get_db, send, base_url: str, now: datetime | None = None, is_test=lambda e: False,
         can_email: bool = True, track=None) -> dict:
-    """Pause who is due, and email them once. `send(to, subject, body, sender, unsub_url)`."""
+    """Pause who is due, and email them once. `send(to, subject, body, sender, unsub_url)`.
+
+    The pause happens on the first sweep that finds the user due; the email waits for
+    11:30 Israel time like the other emails (the owner, 2026-11-25: not at 02:00 on
+    Day 1). Someone who comes back before then is no longer paused and gets no email."""
     now = now or datetime.now(timezone.utc)
     out = {"paused": 0, "emailed": 0, "failed": 0}
     if now < start():
         return out
+    stamp = now.strftime(FMT)
     conn = get_db()
     try:
         for u, last in due(conn, now, is_test):
-            uid, email = int(u[0]), u[2] or ""
-            conn.execute("UPDATE users SET search_paused_at=? WHERE id=?", (now.strftime(FMT), uid))
+            uid = int(u[0])
+            conn.execute("UPDATE users SET search_paused_at=? WHERE id=?", (stamp, uid))
             conn.commit()
             out["paused"] += 1
             if track:
                 track(uid, "search_paused", {"days_inactive": (now - last).days})
-            already = conn.execute("SELECT 1 FROM lifecycle_emails WHERE user_id=? AND step=?", (uid, STEP)).fetchone()
-            if already or not email:
+
+        local = now.astimezone(lifecycle._tz())
+        if (local.hour, local.minute) < lifecycle.SEND_AT:
+            return out
+        # Paused within the last EMAIL_WINDOW_DAYS and never written to: a pause that
+        # could not be mailed in time is not mailed weeks later.
+        since = (now - timedelta(days=EMAIL_WINDOW_DAYS)).strftime(FMT)
+        waiting = conn.execute(
+            "SELECT u.id, u.name, u.email, COALESCE(u.lifecycle_opt_out, 0) FROM users u "
+            "WHERE u.search_paused_at IS NOT NULL AND u.search_paused_at >= ? "
+            "AND COALESCE(u.is_active, 1)=1 AND LOWER(COALESCE(u.role,'user'))!='admin' "
+            "AND u.delete_after IS NULL AND NOT EXISTS "
+            "(SELECT 1 FROM lifecycle_emails l WHERE l.user_id=u.id AND l.step=?)", (since, STEP)).fetchall()
+        for u in waiting:
+            uid, email = int(u[0]), u[2] or ""
+            if not email or is_test(email):
                 continue
             variant = "sent"
-            if u[4] or not can_email:
-                variant = "opted_out" if u[4] else "no_sender"
+            if u[3] or not can_email:
+                variant = "opted_out" if u[3] else "no_sender"
             else:
                 first = (u[1] or "").strip().split()[0] if (u[1] or "").strip() else ""
                 subject, body = compose(first, resume_url(base_url, uid))
@@ -173,7 +193,7 @@ def run(get_db, send, base_url: str, now: datetime | None = None, is_test=lambda
                     variant = "failed"
                     out["failed"] += 1
             conn.execute("INSERT INTO lifecycle_emails (user_id, step, variant, sent_at) VALUES (?,?,?,?)",
-                         (uid, STEP, variant, now.strftime(FMT)))
+                         (uid, STEP, variant, stamp))
             conn.commit()
     finally:
         conn.close()
