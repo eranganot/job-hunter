@@ -15,13 +15,31 @@ Priority: **P0** security/correctness · **P1** reliability or launch-blocking �
 | 3 | 17 | **LinkedIn-only jobs that cannot be resolved:** keep in the queue as today (badge + 5-point penalty) | P1 | High | S | **Decided 2026-11-15: keep as now** |
 | 4 | 15 | Lever hCaptcha: does it block real submits? | P2 | Med | S-M | After #1 (The owner's order, 2026-11-08) |
 
-## Waiting on the owner
+## Waiting on the owner (updated 2026-11-25)
 
-| Step | Item | Unblocks |
+| Item | Unblocks |
+|---|---|
+| Facebook group list with each group's rules (S7) | The groups tracker and the final group list per job family |
+| Partner names for messages A-D (S8), by Sat 28 | Partner messages on Day 1-2 |
+| Meta payment method + publish the campaign (S6), Fri 27 | Ads from Thu 3 Dec |
+| Go/no-go, Mon 30 at 20:00 (E12) | Day 1 |
+| Lawyer on referral terms 5, 6, 10 and the marketing opt-in (E16) | Referral programme (week 2) |
+| Paddle account approval | Payments (sandbox first); not before product-market fit |
+
+_Done since the last update: `APPLY_ENGINE_ENABLED=1` (admin only, 2026-11-09); the domain job-hunter.work bought and verified in Resend (2026-11-09)._
+
+## After launch: from the product review of 24 Nov (owner's decisions 24-25 Nov)
+
+| Item | Pri | When |
 |---|---|---|
-| 8 | Set `APPLY_ENGINE_ENABLED=1` on Railway (`web`) | Real auto-apply; per-system success rates (Admin → Apply results by system) |
-| 5, 10 | **Buy the domain**, add it to Resend | Email verification + password reset (`/forgot-password` 404), landing page + funnel, email notifications to anyone but the owner |
-| 11 | Paddle account approval | Payments (sandbox first) |
+| **P8** Locations as areas (Tel Aviv area, Sharon, Center, Haifa and North, Jerusalem, South, Remote) instead of cities: onboarding, profile, search and saved locations | P2 | Week 1 |
+| **B** Fetch the company job boards once for everyone (shared, refreshed every ~30 min); each search filters by title. Measured: 24-87 s of the first search | P2 | Week 1-2 |
+| Passed tab lists the passed jobs with their description and "Back to my picks" (#16) | P3 | Backlog |
+| A web address per screen in /app (#13); care with the back button in the installed app | P3 | Backlog |
+| Suggested job titles at setup, beyond the ones read from the CV (#9) | P3 | Week 2-3 |
+| Tailored CV in the user's own design, not Noa's clean layout (#5) | P3 | Backlog |
+| Enforce the CSP (report-only since #212); decide on Cloudflare Insights first | P2 | After test week |
+| "Add job by link" and the link checker: refuse internal addresses (SSRF hardening; no user-driven path found in C13) | P2 | Week 2 |
 
 ## Steps — status
 

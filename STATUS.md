@@ -62,17 +62,13 @@ _Dates are when the item was FIRST flagged, and are carried forward, never reset
 | 2026-09-21 | **CLOSED 2026-09-28 — it landed** | ✅ `tests/test_migration_table_order.py` and `scripts/cutover_migrate.ps1` are both in `.git/index` (tracked). The date-the-diff test worked a second time. _Original row:_ ⚠️ **Uncommitted work in the tree, mid-cutover.** `RAILWAY_RUNBOOK.md`, `scripts/pg_create_db.py`, `scripts/sqlite_to_pg.py`, `STATUS.md`; untracked `scripts/cutover_migrate.ps1` and `tests/test_migration_table_order.py`. This is today's cutover work — the `TABLE_ORDER` fix and the test that pins it, the runbook 2.1–2.4 replacement — so it is **fresh and coherent, not rot**, same as last week's was. ⚠️ But `test_migration_table_order.py` is the test that moves a cutover-day failure to commit time, and **it is not committed**, so it is not running in CI and does not protect the next table anyone adds. Flagged only so next week can tell whether it landed. **If it is still here on 2026-09-28, it has become the old problem.** |
 | 2026-09-14 | **CLOSED 2026-09-28** | ✅ The four locks the 09-21 run left (in four other repositories) are all gone as of 09-28 — The owner cleared them. _History:_ The `.git/index.lock` incident of 09-14 (other repositories; the owner cleared all three). **The 2026-09-21 run used `git --no-optional-locks status` / `diff` across all five repos and left no lock anywhere.** Rule confirmed permanent. |
 
-## Next (confirm priority)
-0. **Decide what's next** — Phases 2d/3/4 are done (see Now). Candidates: Phase 4 step 5 (delete legacy HTML), Phase 5 (plans/quotas — entitlements partly exist: `entitlements.py`), Phase 6 needs the Paddle-vs-Stripe call, set `JH_SENTRY_DSN`, or un-park Phase 1 (run apply-selftest first).
-1. ✅ ~~**Finish the Postgres cutover**~~ — **2c DONE 2026-09-21, production is on Postgres. 2d DONE (`57a6a4c`).** _(original note:)_ (`EXECUTION_PLAN_PUBLIC_LAUNCH.md` Phase 2c→2d) — **staging is flipped and has soaked on Postgres for a week (see 09-14 changelog)**; what remains is 2d (CV/`uploads` storage, currently on the volume) and then production, which needs all three (`DB_BACKEND`, `DATABASE_URL`→`jobhunter_prod`, `JH_PG_DATABASE=jobhunter_prod`) **after** its data is migrated. This is where the momentum is. ← next up
-2. ~~Commit the in-flight `/api/health` `commit` field + smoke build-assertion~~ — **DONE `ae13611`.** Replaced by: commit `tests/test_migration_table_order.py` + `scripts/cutover_migrate.ps1` (see Ops table) so the cutover-day guard actually runs in CI.
-3. Everything below is pre-Phase-2 and may be stale — re-confirm before acting.
-
-- **Run `GET /api/admin/apply-selftest` on prod** (logged in as admin) and paste the JSON back — it will pinpoint why the apply engine submits nothing (browser launch error vs missing GEMINI key vs missing CV vs empty queue). Do this BEFORE any more apply-engine code changes.
-- ~~Remove the `QUEUE_CLEANUP` env var~~ — gone (2026-10-07).
-- Verify direct-ATS sourcing + the new ingestion pipeline actually fill the Approved queue with auto-submittable jobs (open question; may be stale now that the relevance gate + Big-Tech sources landed — confirm with a live run).
-- Optionally enable `APPLY_RESOLVE_CAREER_PAGE=1` and measure rescue rate on LinkedIn listings.
-- Live-validate the Big-Tech endpoints that were failing: Google v3 (404) / Apple (301→pagenotfound) / Microsoft — Amazon works.
+## Next (updated 2026-11-25: launch on Tue 1 Dec)
+The live plan is the Claude doc "Job Hunter - Launch readiness and test week" (tabs: Readiness and plan, Eran's steps, Test week, Day 1 runbook). In short:
+1. **Code freeze Thu 26 Nov, 23:00.** After it, only fixes for test-week findings, each a PR with both smoke tests.
+2. **Test week Fri 27 - Mon 30:** six tracks (end-to-end, QA, 8 personas on production with @job-hunter.test accounts, security, load on staging with `JH_FAKE_AI=1`, launch drills: backup restore, rollback, kill switches, timers). Report every evening at 21:00; go/no-go Mon 30 at 20:00.
+3. **Day 1, Tue 1 Dec:** the runbook tab, hour by hour.
+4. **Week 1-2, agreed with the owner:** P8 locations as areas instead of cities; B - fetch the company job boards once for everyone (the first search spends 24-87 s on them); then the backlog items from the 24 Nov product review (BACKLOG.md, "After launch").
+5. Older open items (apply-engine self-test, `APPLY_RESOLVE_CAREER_PAGE`, Big-Tech endpoints) stay in BACKLOG.md; auto-apply is owner-only.
 
 ## Known sharp edges
 Two-folder drift **RETIRED** — `C:\dev\job-hunter` is the only clone; `C:\Users\<user>\job-hunter` is now an empty directory. ⚠️ **The weekly-review scheduled task still names the old path** and therefore reported this repo as missing on 2026-09-21 until the new path was found — update the task definition to `C:\dev\job-hunter`. Sandbox can't push; Playwright browser binaries must be present in the Railway image for real submits.
