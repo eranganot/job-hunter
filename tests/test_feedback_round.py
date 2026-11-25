@@ -70,7 +70,7 @@ def test_search_mark_logs_seconds_per_source(stack, monkeypatch):
     app._search_stage(55555, None)
     out = "\n".join(lines)
     assert "collect/nothing-running" not in out
-    assert "user 55555 collect/ats-boards" in out and "user 55555 collect/linkedin" in out
+    assert "user 55555 collect/ats-boards" in out and "collect/linkedin" in out and "user 55555 collect/linkedin" in out
     src = open("app.py", encoding="utf-8").read()
     for label in ("setup+discovery", "ats-boards", "techmap-csv", "workday", "linkedin", "external+dedup"):
         assert '_search_mark(user_id, "%s")' % label in src
