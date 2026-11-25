@@ -536,7 +536,7 @@ export function FinishApplying() {
         {sent && !showing.length && (
           <div className="bg-gray-900 border border-green-500/40 rounded-2xl p-3 shadow-2xl flex items-center justify-between gap-3">
             <p className="text-sm text-green-300">Code sent - finishing your application. Its status updates in your queue.</p>
-            <button onClick={() => setMsg({})} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
+            <button onClick={() => setMsg({})} aria-label="Close" className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
           </div>
         )}
       </div>
@@ -559,7 +559,7 @@ function NotifyNudge() {
         <Bell className="w-5 h-5 text-indigo-300 shrink-0" />
         <div className="flex-1 min-w-0"><p className="text-sm font-medium text-white leading-tight">Get notified about new jobs</p>{msg && <p className="text-xs text-gray-400">{msg}</p>}</div>
         <button onClick={enable} className="px-3 py-1.5 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink text-sm font-medium rounded-xl shrink-0">Enable</button>
-        <button onClick={dismiss} className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
+        <button onClick={dismiss} aria-label="Dismiss" className="p-1.5 text-gray-400 active:text-white shrink-0"><X className="w-4 h-4" /></button>
       </div>
     </div>
   );
@@ -928,7 +928,7 @@ function DashboardView(p: any) {
           <div className="flex items-center gap-3"><img src={LOGO} alt="" width={40} height={40} className="w-10 h-10 rounded-xl ring-1 ring-brand-yellow/40 lg:hidden" /><div><h1 className="text-lg font-bold text-white lg:text-2xl">Dashboard</h1><p className="text-xs text-gray-400 lg:hidden">{me?.name ? `Hi ${me.name.split(" ")[0]}` : "Manage applications"}</p></div></div>
           {/* The rail carries these above lg; two copies on screen at once would
               be the thing a user notices before they notice the extra width. */}
-          <div className="flex items-center gap-2 lg:hidden"><button onClick={onBackToSwipe} className="px-3.5 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium flex items-center gap-2"><Briefcase className="w-4 h-4" />Swipe</button><button onClick={onOpenSettings} className="p-2.5 bg-gray-800 rounded-xl border border-gray-700 active:bg-gray-700"><Settings className="w-5 h-5 text-gray-300" /></button></div>
+          <div className="flex items-center gap-2 lg:hidden"><button onClick={onBackToSwipe} className="px-3.5 py-2 bg-brand-yellow hover:bg-brand-yellow-hover active:bg-brand-yellow-press text-ink rounded-xl text-sm font-medium flex items-center gap-2"><Briefcase className="w-4 h-4" />Swipe</button><button onClick={onOpenSettings} aria-label="Settings" className="p-2.5 bg-gray-800 rounded-xl border border-gray-700 active:bg-gray-700"><Settings className="w-5 h-5 text-gray-300" /></button></div>
         </div>
       </header>
       <div className={`${SHELL} px-5 lg:px-8 py-5`}>
