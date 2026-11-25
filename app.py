@@ -9294,6 +9294,36 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "resumed": _resume_search(int(m.group(1)), "by the admin")})
             return
 
+        m = re.match(r"^/api/admin/users/(\d+)/purge$", path)
+        if m:
+            # Delete an account now, with everything it holds (accountdata.purge_user,
+            # the same as a user's own deletion after its grace period). Only a
+            # DISABLED, non-admin account, and never yourself: disabling first is
+            # the confirmation step. Added 2026-11-25 for an account made by mistake.
+            if user.get("role") != "admin":
+                self.send_json({"error": "Forbidden"}, 403)
+                return
+            target_id = int(m.group(1))
+            import accountdata
+            conn = database.get_db()
+            try:
+                row = conn.execute("SELECT id, role, is_active FROM users WHERE id=?", (target_id,)).fetchone()
+                if row is None:
+                    self.send_json({"error": "No such user"}, 404)
+                    return
+                if target_id == user["id"] or str(row["role"] or "") == "admin":
+                    self.send_json({"error": "Admin accounts cannot be deleted here."}, 400)
+                    return
+                if row["is_active"]:
+                    self.send_json({"error": "Disable the account first, then delete it."}, 400)
+                    return
+                removed = accountdata.purge_user(conn, target_id)
+            finally:
+                conn.close()
+            database.log_activity(user["id"], "admin_user_purge", f"Deleted user {target_id}")
+            self.send_json({"success": True, "removed": removed})
+            return
+
         m = re.match(r"^/api/admin/users/(\d+)/toggle$", path)
         if m:
             if user.get("role") != "admin":
