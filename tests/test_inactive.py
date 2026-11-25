@@ -101,7 +101,7 @@ def test_preview_lists_exactly_who_the_sweep_would_pause_and_changes_nothing():
     assert p["at"] == "2026-12-20" and p["count"] == 3
     assert {u["id"] for u in p["users"]} == {2, 6, 7}
     dana = [u for u in p["users"] if u["id"] == 2][0]
-    assert dana == {"id": 2, "first_name": "Dana", "last_active": t(20)[:10], "days_inactive": 20, "email": "will send"}
+    assert dana == {"id": 2, "first_name": "Dana", "last_active": t(20)[:10], "days_inactive": 20, "email": "will send", "applied": {}}
     assert [u for u in p["users"] if u["id"] == 6][0]["email"] == "opted out"
     assert all("@" not in str(v) for u in p["users"] for v in u.values())          # no addresses
     assert c.execute("SELECT COUNT(*) FROM users WHERE search_paused_at IS NOT NULL").fetchone()[0] == 0
