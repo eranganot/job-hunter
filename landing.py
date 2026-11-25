@@ -60,7 +60,7 @@ DESCRIPTION = ("Noa is your personal AI headhunter agent for tech roles in Israe
                "each application ready.")
 
 SHARE_ALT = ("Meet Noa, your personal AI headhunter agent. She works for you, not for the companies. "
-             "Premium is free for a limited time.")
+             "Free right now, for a short time.")
 
 _CSS = """
 @font-face{font-family:Fraunces;font-style:normal;font-weight:100 900;font-display:swap;
@@ -107,6 +107,9 @@ p{margin:0}
 .ctas{display:flex;flex-wrap:wrap;gap:.75rem}
 .under-cta{margin-top:1rem;font-size:.95rem;color:var(--text)}
 .offer-line{margin-top:.6rem;font-size:.95rem;color:var(--muted)}
+/* Product review 2026-11-24 (#1): how Noa works, in four lines, right under the buttons. */
+.quicksteps{margin:1.1rem 0 0;padding-left:1.3rem;display:grid;gap:.35rem;font-size:.98rem;color:var(--text);max-width:36rem}
+.quicksteps li::marker{color:var(--strong);font-weight:700}
 .offer-line b{color:var(--strong)}
 
 .chat{display:grid;gap:.9rem}
@@ -119,7 +122,7 @@ p{margin:0}
 .chat .shot{margin-left:3.65rem}
 @media(max-width:30rem){.chat .shot{margin-left:0}}
 /* One column (phones, small tablets): Noa's morning message and the top of the job card sit straight
-   under the main button, so the first screen shows her and the product; "See how she works" and the
+   under the main button, so the first screen shows her and the product; "How Noa works", the four steps and the
    small print follow. The two columns' children are laid out as one list and ordered here. */
 @media(max-width:61.99rem){
   .hero{display:flex;flex-direction:column;gap:0}
@@ -130,8 +133,9 @@ p{margin:0}
   .hero .m2{order:4;margin-top:1.4rem}
   .hero .shot{order:5;margin-top:.9rem}
   .hero .btn.line{order:6;align-self:flex-start;margin-top:1.2rem}
-  .hero .under-cta{order:7}
-  .hero .offer-line{order:8}
+  .hero .quicksteps{order:7}
+  .hero .under-cta{order:8}
+  .hero .offer-line{order:9}
   .hero .m1{display:none}
 }
 
@@ -312,10 +316,16 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
       companies' own career pages, brings you only the ones that fit your CV, and gets your application ready.</p>
       <div class="ctas">
         <a class="btn go big" href="/register" data-place="hero">Meet Noa</a>
-        <a class="btn line big" href="#how">See how she works</a>
+        <a class="btn line big" href="#how">How Noa works &darr;</a>
       </div>
+      <ol class="quicksteps">
+        <li>Upload your CV.</li>
+        <li>Every morning Noa reads about 11,000 openings and keeps only the ones that fit you, with the reason for each.</li>
+        <li>You approve only what is relevant for you.</li>
+        <li>She prepares a tailored CV and cover letter.</li>
+      </ol>
       <p class="under-cta">2-minute setup &middot; first picks today<br/>Private. No employer sees your CV until you apply.</p>
-      <p class="offer-line"><b>Premium is free for a limited time.</b> Sign up with Google or email. No card.</p>
+      <p class="offer-line"><b>Free right now, for a short time.</b> Sign up with Google or email. No card.</p>
     </div>
 
     <div class="chat" aria-label="Noa introduces herself">
@@ -426,12 +436,12 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
     <div class="wrap">
       <div class="offer">
         <div>
-          <h2>Premium is free for a limited time</h2>
+          <h2>Free right now, for a short time</h2>
           <ul>
             <li>A new search every day</li>
             <li>Your best matches from each search</li>
             <li>Tailored CVs and cover letters every month</li>
-            <li>Alerts by push, email, Telegram or WhatsApp</li>
+            <li>Alerts by push, email or Telegram</li>
           </ul>
           <small>No card needed. You can export or delete your data whenever you want.</small>
         </div>
@@ -455,6 +465,14 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
         <details><summary>What happens to my CV?</summary>
           <p>Noa uses it to score jobs against your experience and to write your tailored CV and cover letters. An employer
           sees it only when you apply. You can export or delete everything from Settings.</p></details>
+        <details><summary>Is my data safe?</summary>
+          <p>Everything travels over encrypted connections, and your data is stored in a private database in the EU.
+          Every provider we use, and what it gets, is listed in the <a href="/privacy">Privacy Policy</a>.</p></details>
+        <details><summary>Do you sell or share my data?</summary>
+          <p>No. We never sell it, and employers or recruiters see nothing until you apply.</p></details>
+        <details><summary>How do I delete my data?</summary>
+          <p>Settings &rarr; Profile &rarr; Your data &rarr; Delete my account. You can download everything first. Your
+          data is removed after 14 days, and signing in during that time cancels the deletion.</p></details>
         <details><summary>Will my employer know I'm looking?</summary>
           <p>No. Your account is private: there is no public profile, employers can't search Job Hunter for people, and Noa
           never contacts a company about you. A company sees your details only when you apply to it yourself, or tell Noa
@@ -473,7 +491,7 @@ def _landing_html(public_url: str = "", postings_checked=None, noa: str = "a") -
           <p>No. Noa works in your browser on phone and computer. You can add Job Hunter to your home screen and turn on
           notifications.</p></details>
         <details><summary>What does it cost?</summary>
-          <p>Premium is free for a limited time and needs no card. If that changes, you'll be told in advance.</p></details>
+          <p>Nothing right now: it's free for a short time, with no card. If that changes, you'll be told in advance.</p></details>
       </div>
     </div>
   </section>

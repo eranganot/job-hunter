@@ -74,12 +74,13 @@ def test_notification_links_point_at_the_home_ui(stack, monkeypatch):
 
 
 def test_the_landing_page_never_says_beta_and_states_the_offer():
-    """2026-11-11: the public offer is "Premium is free for a limited time";
-    accounts are on the Beta plan internally, and the page does not say so."""
+    """The public offer is "Free right now, for a short time" (product review 2026-11-24,
+    replacing "Premium is free for a limited time"); accounts are on the Beta plan
+    internally, and the page does not say so."""
     import landing
     page = landing.landing_html("https://x.test")
     assert "beta" not in page.lower()
-    assert "Premium is free for a limited time" in page
+    assert "Free right now, for a short time" in page and "Premium is free" not in page
     assert "tech openings in Israel" in page       # who it is for, said up front
 
 
@@ -259,7 +260,7 @@ def test_mobile_hero_shows_noa_and_the_job_card_under_the_main_button():
     css = page[page.index("<style>"):page.index("</style>")]
     block = css[css.index("@media(max-width:61.99rem)"):]
     order = {sel: int(n) for sel, n in re.findall(r"\.hero ([.\w ]+?)\{order:(\d+)", block)}
-    assert order[".btn.go"] < order[".m2"] < order[".shot"] < order[".btn.line"]
+    assert order[".btn.go"] < order[".m2"] < order[".shot"] < order[".btn.line"] < order[".quicksteps"]
     assert ".hero .pitch,.hero .chat,.hero .ctas{display:contents}" in block
     assert 'class="pitch"' in page and 'class="msg m1"' in page and 'class="msg m2"' in page
 
@@ -283,3 +284,15 @@ def test_phones_get_phone_pictures_and_the_footer_has_no_account_links():
     footer = page[page.index("<footer>"):page.index("</footer>")]
     assert "/login" not in footer and "/register" not in footer
     assert '<a class="btn ghost" href="/login">Sign in</a>' in page          # the header keeps it
+
+
+def test_landing_feedback_round_p3():
+    """Product review 2026-11-24 (#1, #3, #6): how Noa works under the buttons, a clear
+    button label, and short security and privacy answers in the FAQ."""
+    import landing
+    page = landing.landing_html("https://x.test")
+    assert "How Noa works &darr;" in page and "See how she works" not in page
+    assert page.count("<li>", page.index('class="quicksteps"'), page.index("</ol>", page.index('class="quicksteps"'))) == 4
+    for q in ("Is my data safe?", "Do you sell or share my data?", "How do I delete my data?"):
+        assert "<summary>%s</summary>" % q in page
+    assert "WhatsApp" not in page   # hidden in the app since 2026-11-23
