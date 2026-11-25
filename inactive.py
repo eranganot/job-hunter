@@ -34,7 +34,7 @@ import lifecycle
 INACTIVE_DAYS = 14
 STEP = "inactive14"
 ACTIVE_EVENTS = ("job_approved", "job_rejected", "bulk_approve", "bulk_reject", "job_applied",
-                 "search_requested", "search_resumed")
+                 "job_marked_applied", "search_requested", "search_resumed")
 FMT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -75,7 +75,12 @@ def last_active(conn, user_id: int, created):
     marks = ",".join("?" for _ in ACTIVE_EVENTS)
     row = conn.execute("SELECT MAX(created_date) FROM activity_log WHERE user_id=? AND event_type IN (%s)" % marks,
                        (user_id, *ACTIVE_EVENTS)).fetchone()
-    seen = [d for d in (_parse(row[0] if row else None), _parse(created)) if d]
+    # A real application counts even without its event: marking a job applied by
+    # hand logged nothing before 2026-11-25. A bulk "mark applied" does not count.
+    app_row = conn.execute("SELECT MAX(applied_date) FROM jobs WHERE user_id=? AND status='applied' "
+                           "AND applied_via IN ('manual','engine')", (user_id,)).fetchone()
+    seen = [d for d in (_parse(row[0] if row else None), _parse(app_row[0] if app_row else None),
+                        _parse(created)) if d]
     return max(seen) if seen else None
 
 

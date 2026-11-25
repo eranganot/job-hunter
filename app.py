@@ -8692,6 +8692,13 @@ class Handler(BaseHTTPRequestHandler):
                         (new_status, datetime.now().isoformat(), reason,
                          "submitted" if action == "applied" else "failed",
                          "manual" if action == "applied" else None, job_id))
+                    if action == "applied":
+                        # Activity for the inactivity sweep (inactive.py). Missing until
+                        # 2026-11-25: a user applying by hand looked quiet for 14 days.
+                        # Its own name: 'job_applied' means the engine ran (scheduler's
+                        # already-ran check, health's last apply).
+                        database.log_activity(user_id, "job_marked_applied",
+                                              f"Marked applied: {job['title']} at {job['company']}")
                 else:
                     # rejected_by separates the user's own passes from the system
                     # auto-rejecting dead, expired and already-attempted jobs. The
