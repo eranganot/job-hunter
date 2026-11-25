@@ -4930,7 +4930,7 @@ def _send_reset(user_id: int, email: str) -> None:
 def error_block(msg: str) -> str:
     if not msg:
         return ""
-    return f"""<div class="err">{msg}</div>"""
+    return f"""<div class="err">{html_lib.escape(str(msg))}</div>"""
 
 # ── Onboarding ────────────────────────────────────────────────────────────────
 
