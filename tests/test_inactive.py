@@ -91,3 +91,19 @@ def test_the_resume_link_is_signed():
     assert not inactive.resume_ok(3, inactive.resume_token(2)) and not inactive.resume_ok("x", "y")
     import lifecycle
     assert inactive.resume_token(2) != lifecycle.unsubscribe_token(2)   # a stop link cannot resume, or the reverse
+
+
+def test_preview_lists_exactly_who_the_sweep_would_pause_and_changes_nothing():
+    """Launch item E10: the owner reads the Day-1 list before it happens."""
+    c = _db()
+    p = inactive.preview(c, NOW, is_test=lambda e: e == TEST)
+    assert p["at"] == "2026-12-20" and p["count"] == 3
+    assert {u["id"] for u in p["users"]} == {2, 6, 7}
+    dana = [u for u in p["users"] if u["id"] == 2][0]
+    assert dana == {"id": 2, "first_name": "Dana", "last_active": t(20)[:10], "days_inactive": 20, "email": "will send"}
+    assert [u for u in p["users"] if u["id"] == 6][0]["email"] == "opted out"
+    assert all("@" not in str(v) for u in p["users"] for v in u.values())          # no addresses
+    assert c.execute("SELECT COUNT(*) FROM users WHERE search_paused_at IS NOT NULL").fetchone()[0] == 0
+    # The sweep then pauses the same people.
+    _run(c)
+    assert {r[0] for r in c.execute("SELECT id FROM users WHERE search_paused_at IS NOT NULL")} == {2, 6, 7}
