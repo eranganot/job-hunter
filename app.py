@@ -2088,16 +2088,16 @@ SEARCH_STAGES = ("collect", "score", "check", "save")
 
 
 def _search_mark(user_id, label: str) -> None:
-    """Seconds since the last mark inside the collect stage, per source (P6, 2026-11-25):
-    the sources run one after another, so this shows which one the first picks wait on."""
+    """Seconds since the last mark inside the current stage (P6, 2026-11-25): per source
+    in "collect", per part in "check" - shows what the first picks wait on."""
     cur = _SEARCH_STAGE.get(user_id)
     if not cur:
         return
     now = time.time()
     last = cur.get("mark", cur["since"])
     cur["mark"] = now
-    print("[search-timing] user %s collect/%s %.1fs" % (user_id, label, now - last))
-    cur.setdefault("steps", []).append(["collect/" + label, round(now - last, 1)])
+    print("[search-timing] user %s %s/%s %.1fs" % (user_id, cur["stage"], label, now - last))
+    cur.setdefault("steps", []).append([cur["stage"] + "/" + label, round(now - last, 1)])
 
 
 def _search_stage(user_id, stage: str | None) -> None:
@@ -2114,7 +2114,7 @@ def _search_stage(user_id, stage: str | None) -> None:
             del _SEARCH_TIMINGS[:-10]
         _SEARCH_STAGE.pop(user_id, None)
         return
-    _SEARCH_STAGE[user_id] = {"stage": stage, "since": now, "t0": cur["t0"] if cur else now, "steps": steps}
+    _SEARCH_STAGE[user_id] = {"stage": stage, "since": now, "mark": now, "t0": cur["t0"] if cur else now, "steps": steps}
 
 
 
@@ -3328,6 +3328,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         print("[search] Gemini web search skipped — no GEMINI_API_KEY")
 
 
+                    _search_mark(user_id, "web-search")
                     # ── Track B: Description-first scoring (activates when Track A < 5 results) ──
                     if len(scored_jobs) < 5:
                         print(f"[search] Track A returned {len(scored_jobs)} results — activating Track B (description matching)")
@@ -3505,6 +3506,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         else:
                             print("[search] Track B: no AI keys — skipping")
 
+                    _search_mark(user_id, "track-b")
                     print(f"[search] Final: {len(scored_jobs)} scored jobs (from {len(all_raw)} pre-filtered)")
                     return scored_jobs
 
@@ -3585,6 +3587,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                     conn.close()
                     from ai_analysis import compute_feedback_penalty as _compute_fb_penalty
 
+                    _search_mark(user_id, "link-check")
                     _search_stage(user_id, "save")
                     # ── Insert new jobs (skip rejected patterns) ─────────────────────
                     conn = database.get_db()
