@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import inactive
 
-NOW = datetime(2026, 12, 20, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 12, 20, 10, 0, tzinfo=timezone.utc)          # 12:00 Israel
 TEST = "test-user@job-hunter.test"
 
 
@@ -108,3 +108,30 @@ def test_preview_lists_exactly_who_the_sweep_would_pause_and_changes_nothing():
     # The sweep then pauses the same people.
     _run(c)
     assert {r[0] for r in c.execute("SELECT id FROM users WHERE search_paused_at IS NOT NULL")} == {2, 6, 7}
+
+
+def test_paused_at_night_emailed_at_1130_and_not_if_they_came_back():
+    """The owner, 2026-11-25: Day 1's email must not go out at 02:00."""
+    c = _db()
+    night = datetime(2026, 12, 20, 0, 5, tzinfo=timezone.utc)          # 02:05 Israel
+    out, mails = _run(c, now=night)
+    assert out["paused"] == 3 and mails == []
+    assert c.execute("SELECT COUNT(*) FROM lifecycle_emails").fetchone()[0] == 0
+    # Dana opens the app in the morning: the pause is cleared before 11:30.
+    c.execute("UPDATE users SET search_paused_at=NULL WHERE id=2")
+    c.execute("INSERT INTO activity_log VALUES (2,'search_resumed',?)", ("2026-12-20 06:00:00",))   # as _resume_search logs
+    c.commit()
+    out, mails = _run(c, now=datetime(2026, 12, 20, 9, 29, tzinfo=timezone.utc))    # 11:29
+    assert mails == []
+    out, mails = _run(c, now=datetime(2026, 12, 20, 9, 30, tzinfo=timezone.utc))    # 11:30
+    assert [m[0] for m in mails] == ["open@x"]
+    out, mails = _run(c, now=datetime(2026, 12, 20, 10, 30, tzinfo=timezone.utc))
+    assert mails == []                                                  # once
+
+
+def test_a_pause_never_mailed_in_time_is_not_mailed_weeks_later():
+    c = _db()
+    c.execute("UPDATE users SET search_paused_at=? WHERE id=7", (t(10),))
+    c.commit()
+    out, mails = _run(c)
+    assert "open@x" not in [m[0] for m in mails]
