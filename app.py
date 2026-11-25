@@ -2918,11 +2918,19 @@ def run_job_search(user_id: int, by_user: bool = False):
                         _cv_text = ""
                         _cv_path = ""
 
+                    # The user's own seniority (read from the CV, editable in the profile).
+                    # Until 2026-11-25 this line was fixed to "Senior / Director / VP /
+                    # Head-of" for every user, so a mid-level QA engineer was scored for
+                    # seniority (20 of the 100 points) against director-level roles (P7).
+                    try:
+                        _user_sen = str(profile["seniority"] or "").strip()
+                    except (KeyError, IndexError, TypeError):
+                        _user_sen = ""
                     profile_text = (
                         f"Target roles: {', '.join(titles_[:4])}\n"
                         f"Key skills: {', '.join(kws_[:10])}\n"
                         f"Locations: {', '.join(locs_)} or Remote\n"
-                        f"Seniority: Senior / Director / VP / Head-of"
+                        f"Seniority: {_user_sen or 'not stated - judge it from the CV'}"
                     )
                     if _cv_text:
                         profile_text += f"\n\nCV Summary:\n{_cv_text[:4000]}"
@@ -3215,9 +3223,16 @@ def run_job_search(user_id: int, by_user: bool = False):
                     _GEMINI_KEY_WS = _os_ws.environ.get('GEMINI_API_KEY', '')
                     if _GEMINI_KEY_WS:
                         # Build a rich candidate context for the search prompt
-                        _seniority_hint = "VP / Director / Head-of / Senior" if any(
+                        try:
+                            _sen_ws = str(profile["seniority"] or "").strip()
+                        except (KeyError, IndexError, TypeError):
+                            _sen_ws = ""
+                        # The user's seniority first; without it, only titles that say a
+                        # level imply one (it used to fall back to "Senior / Lead" for
+                        # everyone else - P7, 2026-11-25).
+                        _seniority_hint = _sen_ws or ("VP / Director / Head-of / Senior" if any(
                             w in " ".join(titles_).lower() for w in ("vp", "director", "head", "senior", "lead", "principal")
-                        ) else "Senior / Lead"
+                        ) else "")
                         _cv_snippet = _cv_text[:600].replace('\n', ' ') if _cv_text else ""
                         _locs_str = ", ".join(locs_[:2]) or "Israel"
 
@@ -3233,7 +3248,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                                 f'Every url MUST be the page of that ONE posting, copied exactly from a search result - never a '
                                 f'careers home page (e.g. company.com/careers), a job-board index, or a URL you composed yourself. '
                                 f'If you cannot find the posting\'s own URL, leave that job out. '
-                                f'Candidate context — seniority: {_seniority_hint}; location: {_locs_str}. '
+                                f'Candidate context — seniority: {_seniority_hint or "as in the CV"}; location: {_locs_str}. '
                                 + (f'Background: {_cv_snippet} ' if _cv_snippet else '')
                                 + 'Return ONLY a JSON array of up to 8 results. '
                                 'Each item: {"job_title":"...","company":"...","location":"...","url":"...","description":"2-3 sentences about the role"}'
@@ -3274,7 +3289,7 @@ def run_job_search(user_id: int, by_user: bool = False):
                         _clean_titles = [t for t in _clean_titles if t.strip()]
                         if _clean_titles:
                             _ws_queries.append(
-                                f'{_seniority_hint} {" OR ".join(_clean_titles)} '
+                                f'{(_seniority_hint + " ") if _seniority_hint else ""}{" OR ".join(_clean_titles)} '
                                 f'startup Israel site:greenhouse.io OR site:lever.co OR site:comeet.com OR site:myworkdayjobs.com'
                             )
 
