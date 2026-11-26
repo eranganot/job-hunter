@@ -111,7 +111,7 @@ def test_routes_refuse_an_undue_answer_and_save_a_signed_email_answer(stack, use
     anon = Client(stack["port"])
     url = "/email/fit?u=%d&r=d14&a=very&t=%s" % (uid, fitsurvey.token(uid, "d14", "very"))
     st, _l, page = anon.get(url)
-    assert st == 200 and b"Very disappointed" in page and b"textarea" in page
+    assert st == 200 and "I'd really miss it".encode() in page.replace(b"&#x27;", b"'") and b"textarea" in page
     conn = database.get_db()
     try:
         assert conn.execute("SELECT COUNT(*) FROM fit_survey WHERE user_id=?", (uid,)).fetchone()[0] == 0

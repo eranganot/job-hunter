@@ -7,8 +7,8 @@ import { api } from "./api/client";
    banner, so it shows over whichever screen is up. "Not now" is an answer too
    (stored as skipped), so the card does not come back that round. */
 const ANSWERS: [string, string][] = [
-  ["very", "Very disappointed"], ["somewhat", "Somewhat disappointed"],
-  ["not", "Not disappointed"], ["no_longer", "I don't use it anymore"],
+  ["very", "I'd really miss it"], ["somewhat", "I'd miss it a bit"],
+  ["not", "I wouldn't miss it"], ["no_longer", "I've stopped using it"],
 ];
 
 export function FitSurvey() {
@@ -42,7 +42,7 @@ export function FitSurvey() {
       {done ? <p className="text-white">Thank you. It comes straight to me. Eran</p> : (
         <>
           <div className="flex items-start justify-between gap-3">
-            <p className="font-medium text-white">How would you feel if you could no longer use Job Hunter?</p>
+            <p className="font-medium text-white">If Job Hunter disappeared tomorrow, how would you feel?</p>
             <button onClick={() => send("skipped")} disabled={busy} aria-label="Not now" className="text-gray-400 hover:text-gray-200 shrink-0"><X className="w-4 h-4" /></button>
           </div>
           <div className="grid gap-1.5 mt-3">

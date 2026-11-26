@@ -25,12 +25,14 @@ from datetime import datetime, timedelta, timezone
 import lifecycle
 
 ROUNDS = {"d14": (14, 30), "d30": (30, 45)}          # round -> [first day, last day + 1)
-ANSWERS = {"very": "Very disappointed", "somewhat": "Somewhat disappointed",
-           "not": "Not disappointed", "no_longer": "I don't use it anymore"}
+# Worded positively (the owner, 26 Nov 2026); the keys - and so the measure - are
+# Sean Ellis's: "very" is "very disappointed", the answer that counts toward fit.
+ANSWERS = {"very": "I'd really miss it", "somewhat": "I'd miss it a bit",
+           "not": "I wouldn't miss it", "no_longer": "I've stopped using it"}
 SKIPPED = "skipped"
 TARGET = 40
 SOURCES = ("app", "email")
-QUESTION = "How would you feel if you could no longer use Job Hunter?"
+QUESTION = "If Job Hunter disappeared tomorrow, how would you feel?"
 FMT = "%Y-%m-%d %H:%M:%S"
 
 
