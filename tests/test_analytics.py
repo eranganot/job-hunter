@@ -148,3 +148,13 @@ def test_google_signup_keeps_the_source_through_state(stack, sent, monkeypatch):
     import analytics
     assert analytics.decode_attribution(base64.urlsafe_b64decode(enc + "=" * (-len(enc) % 4)).decode()) == \
         {"utm_source": "partner", "ref": "coach1"}
+
+
+def test_the_landing_snippet_records_clicks_scroll_sections_and_faq(monkeypatch):
+    """The owner, 26 Nov: analytics for specific events (button clicked, scroll)."""
+    import analytics
+    monkeypatch.setattr(analytics, "KEY", "phc_test")
+    js = analytics.browser_snippet("landing")
+    assert 'autocapture:{dom_event_allowlist:["click"]' in js and "capture_pageleave:true" in js
+    assert '"section_viewed"' in js and '"faq_opened"' in js and '"cta_clicked"' in js
+    assert "input" not in js.split("element_allowlist:")[1].split("]")[0]     # never fields
