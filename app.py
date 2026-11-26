@@ -5246,8 +5246,10 @@ def public_health(payload: dict) -> dict:
 # landing's A/B snippet are inline today.
 CSP_REPORT_ONLY = "; ".join((
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://*.posthog.com",
-    "connect-src 'self' https://*.posthog.com https://*.facebook.com https://*.facebook.net",
+    # Cloudflare Web Analytics: Cloudflare injects its beacon into our pages; without
+    # these two it is blocked once the CSP is enforced (test week, 2026-11-25).
+    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://*.posthog.com https://static.cloudflareinsights.com",
+    "connect-src 'self' https://*.posthog.com https://*.facebook.com https://*.facebook.net https://cloudflareinsights.com",
     "img-src 'self' data: blob: https:",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
@@ -6002,6 +6004,19 @@ class Handler(BaseHTTPRequestHandler):
                     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">%s</urlset>' % _urls).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if path == "/favicon.ico":
+            # Browsers ask for it on every server-rendered page (login, register):
+            # it was a 404 in the console (test week, 2026-11-25). The app icon.
+            with open(os.path.join(BASE_DIR, "web_bundle", "icon-192.png"), "rb") as _f:
+                body = _f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "public, max-age=604800")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
