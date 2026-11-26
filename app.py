@@ -1649,11 +1649,19 @@ def _israel_day_start_utc(today: str) -> str:
         return today
 
 
-def _scheduler_already_ran(user_id: int, event_type, today: str) -> bool:
+def _scheduler_already_ran(user_id: int, event_type, today: str, conn=None) -> bool:
     """Check activity_log to see if this scheduled job already fired today
     (Israel day). event_type may be a tuple of types. DB-backed so it survives
-    server restarts (unlike an in-memory dict)."""
+    server restarts (unlike an in-memory dict). `conn`: a caller's open
+    connection, used and left open (see _scheduled_search_pending)."""
     types = (event_type,) if isinstance(event_type, str) else tuple(event_type)
+    if conn is not None:
+        row = conn.execute(
+            "SELECT 1 FROM activity_log "
+            "WHERE user_id=? AND event_type IN (%s) AND created_date >= ? LIMIT 1"
+            % ",".join("?" for _ in types),
+            (user_id, *types, _israel_day_start_utc(today))).fetchone()
+        return row is not None
     try:
         conn = database.get_db()
         try:
@@ -1709,7 +1717,7 @@ def _search_runs_today(freq, s_dow, weekdays_only, paused, cur_dow) -> bool:
     return True
 
 
-def _scheduled_search_pending(user_id, now_utc=None) -> bool:
+def _scheduled_search_pending(user_id, now_utc=None, conn=None) -> bool:
     """True while this user's scheduled search is still to come today (Israel
     time): it runs today, its hour has not passed, and no search has been
     logged yet today.
@@ -1719,16 +1727,25 @@ def _scheduled_search_pending(user_id, now_utc=None) -> bool:
     later found the day's picks already out, released 0 and - by design - sent
     nothing. The owner opens the app most mornings and so got no notification
     for a week. While the search is pending, the app open leaves the reserve
-    alone and the search releases the picks and announces them."""
+    alone and the search releases the picks and announces them.
+
+    `conn`: the caller's open connection, used and left open. /api/me and the job
+    list call this while holding one; taking a second from the pool there made
+    each request hold two, and under load (test week, 26 Nov: 60 users) every
+    pooled connection was an outer one waiting for an inner one - PoolTimeout
+    after 20 s, 500s on /api/me and /api/jobs."""
     now = israel_now(now_utc)
-    conn = database.get_db()
-    try:
-        r = conn.execute(
-            "SELECT p.search_hour, p.schedule_frequency, p.search_day_of_week, p.weekdays_only, "
-            "u.role, u.plan, u.plan_until, u.plan_after, u.search_paused_at, u.is_active "
-            "FROM users u JOIN user_profiles p ON p.user_id = u.id WHERE u.id=?", (user_id,)).fetchone()
-    finally:
-        conn.close()
+    sql = ("SELECT p.search_hour, p.schedule_frequency, p.search_day_of_week, p.weekdays_only, "
+           "u.role, u.plan, u.plan_until, u.plan_after, u.search_paused_at, u.is_active "
+           "FROM users u JOIN user_profiles p ON p.user_id = u.id WHERE u.id=?")
+    if conn is not None:
+        r = conn.execute(sql, (user_id,)).fetchone()
+    else:
+        c = database.get_db()
+        try:
+            r = c.execute(sql, (user_id,)).fetchone()
+        finally:
+            c.close()
     if not r or r["search_hour"] is None or not r["is_active"]:
         return False
     freq, s_dow = _plan_search_schedule(r["schedule_frequency"] or 'daily', r["search_day_of_week"],
@@ -1738,7 +1755,7 @@ def _scheduled_search_pending(user_id, now_utc=None) -> bool:
         return False
     if now.hour > int(r["search_hour"]):
         return False                             # its hour has passed: it ran, failed or was skipped
-    return not _scheduler_already_ran(user_id, 'jobs_searched', now.strftime('%Y-%m-%d'))
+    return not _scheduler_already_ran(user_id, 'jobs_searched', now.strftime('%Y-%m-%d'), conn=conn)
 
 
 def scheduler_enabled() -> bool:
@@ -4863,7 +4880,7 @@ def _release_daily_picks(conn, user) -> int:
     releases them itself and notifies (_scheduled_search_pending). Never
     raises: a failure leaves the reserve for the next call."""
     try:
-        if _scheduled_search_pending(user["id"]):
+        if _scheduled_search_pending(user["id"], conn=conn):
             return 0       # today's search releases them, and tells the user (2026-11-22)
     except Exception as exc:
         print("[daily-picks] ERROR could not read the search schedule of user %s, releasing now: %s"
