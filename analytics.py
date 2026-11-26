@@ -224,7 +224,12 @@ def browser_snippet(page: str, extra: dict | None = None) -> str:
     ph = """
 !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing has_opted_in_capturing get_explicit_consent_status reset get_distinct_id".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
 posthog.init(%(key)s,{api_host:%(host)s,cookieless_mode:"on_reject",person_profiles:"identified_only",
-  disable_session_recording:true,disable_surveys:true,autocapture:false,capture_pageview:false,
+  disable_session_recording:true,disable_surveys:true,capture_pageview:false,
+  // Clicks on links and buttons ($autocapture, with their text; never what is typed
+  // in a field) and the deepest scroll on leaving ($pageleave carries
+  // $prev_pageview_max_scroll_percentage). The owner, 26 Nov: "button clicked, scroll".
+  autocapture:{dom_event_allowlist:["click"],element_allowlist:["a","button","summary"]},
+  capture_pageleave:true,
   loaded:function(ph){ph.register(%(props)s);ph.capture("$pageview");
     jhAsk()}});
 // The banner must not depend on PostHog loading: ad and tracker blockers stop its
@@ -238,6 +243,15 @@ setTimeout(jhAsk,2500);
 function jhConsent(yes){if(yes){posthog.opt_in_capturing()}else{posthog.opt_out_capturing()}
   if(window.jhMeta){jhMeta(yes)}document.getElementById("cc").classList.remove("on")}
 function jhCookieSettings(){document.getElementById("cc").classList.add("on");return false}
+// Which sections were seen (once each, half on screen) and which FAQ answers were opened.
+(function(){try{var secs=document.querySelectorAll("main section");if(!secs.length||!window.IntersectionObserver)return;
+  var seen={};var io=new IntersectionObserver(function(es){es.forEach(function(en){if(!en.isIntersecting)return;
+    var el=en.target,i=Array.prototype.indexOf.call(secs,el);if(seen[i])return;seen[i]=1;
+    var h=el.querySelector("h1,h2");posthog.capture("section_viewed",{section:el.id||(h?h.textContent.trim().slice(0,60):"section "+i),index:i});
+    io.unobserve(el)})},{threshold:0.5});
+  secs.forEach(function(el){io.observe(el)})}catch(e){}})();
+document.addEventListener("toggle",function(e){var d=e.target;if(d&&d.tagName==="DETAILS"&&d.open){var s=d.querySelector("summary");
+  posthog.capture("faq_opened",{question:s?s.textContent.trim().slice(0,80):""})}},true);
 document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest('a[href^="/register"]');
   if(a){posthog.capture("cta_clicked",{label:a.textContent.trim(),place:a.getAttribute("data-place")||""})}});
 """ % {"key": json.dumps(KEY), "host": json.dumps(HOST), "props": props}
