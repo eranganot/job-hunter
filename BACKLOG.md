@@ -3,6 +3,8 @@
 _Rewritten 2026-10-25; re-validated 2026-11-05; **re-prioritised 2026-11-08 (board-first search next)** (`/api/health` on commit `7c2c4eb` + live route probes).
 The order, detail and "done when" of every open item live in **`EXECUTION_PLAN_NEXT.md`** — this file is the index._
 
+**Live tracker since 2026-11-26: the Claude doc [Job Hunter — Backlog](https://claude.ai/artifact/De2bA2iHaZmuBTou4zxyoz)** (status, owner and priority per item, by horizon: before Day 1, week 1, weeks 2-4, product, ideas, ops, parked). Change status there; this file keeps the detail behind each item.
+
 Effort: **S** <½ day · **M** ~1–2 days · **L** multi-day.
 Priority: **P0** security/correctness · **P1** reliability or launch-blocking · **P2** maintainability/launch polish · **P3** features.
 
@@ -34,6 +36,7 @@ _Done since the last update: `APPLY_ENGINE_ENABLED=1` (admin only, 2026-11-09); 
 |---|---|---|
 | **P8** Locations as areas (Tel Aviv area, Sharon, Center, Haifa and North, Jerusalem, South, Remote) instead of cities: onboarding, profile, search and saved locations | P2 | Week 1 |
 | **B** Fetch the company job boards once for everyone (shared, refreshed every ~30 min); each search filters by title. Measured: 24-87 s of the first search | P2 | Week 1-2 |
+| **Application funnel management** (owner, 2026-11-25): the user moves each job through the process after applying, every step from application to contract signed (Applied → Heard back → Screening → Interviews by round → Offer → Negotiation → Contract signed; Rejected / Withdrawn / No reply at any stage), with dates and notes per stage and a funnel view. Ties to "Did they get back to you?" and row 27 ("I got the job"). Stages to agree with the owner before building | P2 | Backlog |
 | Passed tab lists the passed jobs with their description and "Back to my picks" (#16) | P3 | Backlog |
 | A web address per screen in /app (#13); care with the back button in the installed app | P3 | Backlog |
 | Suggested job titles at setup, beyond the ones read from the CV (#9) | P3 | Week 2-3 |
