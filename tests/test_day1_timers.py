@@ -29,6 +29,7 @@ def world(stack, monkeypatch):  # noqa: F811
     import db as database
     import schedlock
     monkeypatch.setenv("LIFECYCLE_EMAILS", "1")
+    monkeypatch.setenv("JH_FOLLOWUP_EMAILS", "1")       # off by default since 26 Nov; tested on here
     for k in ("JH_INACTIVE_FROM", "JH_FOLLOWUP_FROM", "JH_FIT_FROM", "JH_PROBES_UNTIL"):
         monkeypatch.delenv(k, raising=False)                # the defaults ship: 2026-12-01
     monkeypatch.setattr(app, "_sender", lambda who="noa": ("Eran <eran@job-hunter.work>", ""))
@@ -137,3 +138,11 @@ def test_probe_accounts_search_until_the_eve_and_switch_off_on_day1(world):
     finally:
         c.close()
     assert (on, off, total) == (3, 0, 3)
+
+
+def test_followup_is_off_unless_switched_on(world, monkeypatch):
+    """The owner, 26 Nov: no "Did they get back to you?" until the app has the screens."""
+    app, mails = world["app"], world["mails"]
+    monkeypatch.delenv("JH_FOLLOWUP_EMAILS")
+    app._run_followups(now=datetime(2026, 12, 1, 10, 0, tzinfo=UTC))
+    assert mails == []

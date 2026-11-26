@@ -1935,6 +1935,10 @@ def _run_followups(now=None) -> dict | None:
     import testaccount
     if not lifecycle.enabled():
         return None
+    # Off until the app has screens for the answers (the owner, 26 Nov 2026).
+    # JH_FOLLOWUP_EMAILS=1 (Railway variable) turns it on.
+    if os.environ.get("JH_FOLLOWUP_EMAILS", "").strip() != "1":
+        return None
     try:
         if not schedlock.acquire(database.get_db, database.backend()):
             return None
